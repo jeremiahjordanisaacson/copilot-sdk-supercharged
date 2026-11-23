@@ -79,6 +79,7 @@ end
 --   - description: string        Tool description
 --   - parameters: table|nil      JSON Schema for arguments
 --   - handler: function(args, invocation) -> any
+--   - idempotent: boolean|nil    true when repeating a call has no additional effect
 -- @return table Tool              A Tool table ready for use in SessionConfig
 local function define_tool(name, opts)
     opts = opts or {}
@@ -119,6 +120,7 @@ local function define_tool(name, opts)
         description = opts.description or "",
         parameters  = opts.parameters,
         handler     = wrapped_handler,
+        idempotent  = opts.idempotent,
     })
 end
 

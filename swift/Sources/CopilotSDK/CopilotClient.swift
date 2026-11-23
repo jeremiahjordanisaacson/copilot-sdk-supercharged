@@ -36,6 +36,8 @@ public actor CopilotClient {
     private var isExternalServer: Bool = false
     private var modelsCache: [ModelInfo]?
     private var lifecycleHandlers: [UUID: SessionLifecycleHandler] = [:]
+    /// GitHub token providers keyed by the registration ID sent with create/resume.
+    private var gitHubTokenProviders: [String: GitHubTokenProvider] = [:]
 
     // Resolved options
     private let resolvedCliPath: String
@@ -43,6 +45,7 @@ public actor CopilotClient {
     private let resolvedLogLevel: String
     private let resolvedAutoStart: Bool
     private let resolvedAutoRestart: Bool
+    private let resolvedMode: ClientMode
 
     // MARK: - Init
 
@@ -70,6 +73,8 @@ public actor CopilotClient {
         self.resolvedLogLevel = options.logLevel ?? "info"
         self.resolvedAutoStart = options.autoStart ?? true
         self.resolvedAutoRestart = options.autoRestart ?? true
+        // "copilot-cli" is a legacy alias of "coding-agent".
+        self.resolvedMode = options.mode == .empty ? .empty : .codingAgent
     }
 
     // MARK: - Connection State
@@ -86,6 +91,10 @@ public actor CopilotClient {
     /// If connecting to an external server (via cliUrl), only establishes the connection.
     /// Otherwise, spawns the CLI server process and then connects.
     /// This method is called automatically when creating a session if `autoStart` is true.
+    ///
+    /// The handshake declares `clientInfo` (`connect`, when configured), verifies that the
+    /// server speaks SDK protocol 4, and registers the network callbacks
+    /// (`network.setProvider`, when configured).
     public func start() async throws {
         if state == .connected {
             return
@@ -98,9 +107,13 @@ public actor CopilotClient {
                 try await startCLIServer()
             }
 
+            try await sendClientInfo()
             try await verifyProtocolVersion()
+            try await registerNetworkProvider()
             state = .connected
         } catch {
+            // Do not keep talking to a server that failed the handshake.
+            await forceStop()
             state = .error
             throw error
         }
@@ -126,6 +139,7 @@ public actor CopilotClient {
             }
         }
         sessions.removeAll()
+        gitHubTokenProviders.removeAll()
 
         // Stop RPC client
         if let rpc = rpcClient {
@@ -149,6 +163,7 @@ public actor CopilotClient {
     /// Forcefully stops the CLI server without graceful cleanup.
     public func forceStop() async {
         sessions.removeAll()
+        gitHubTokenProviders.removeAll()
 
         if let rpc = rpcClient {
             await rpc.stop()
@@ -169,11 +184,21 @@ public actor CopilotClient {
 
     /// Creates a new conversation session with the Copilot CLI.
     ///
+    /// The flat session options are grouped into the SDK protocol 4 payload right before
+    /// `session.create` is sent. A failure throws a `JsonRpcError`; its
+    /// `policyHelperFailure` exposes a managed-policy Policy Helper failure.
+    ///
     /// - Parameter config: Configuration for the session.
     /// - Returns: The created session.
     public func createSession(_ config: SessionConfig = SessionConfig()) async throws
         -> CopilotSession
     {
+        try validateSessionOptions(
+            gitHubToken: config.gitHubToken,
+            gitHubTokenProvider: config.gitHubTokenProvider,
+            availableTools: config.availableTools,
+            memory: config.memory
+        )
         try await ensureConnected()
 
         guard let rpc = rpcClient else {
@@ -183,6 +208,7 @@ public actor CopilotClient {
         var params: [String: Any] = [:]
         if let model = config.model { params["model"] = model }
         if let sid = config.sessionId { params["sessionId"] = sid }
+        if let name = config.name { params["name"] = name }
         if let re = config.reasoningEffort { params["reasoningEffort"] = re.rawValue }
         if let tools = config.tools { params["tools"] = tools.map { $0.toWireFormat() } }
         if let sm = config.systemMessage {
@@ -197,8 +223,14 @@ public actor CopilotClient {
         params["requestUserInput"] = config.onUserInputRequest != nil
         params["hooks"] = config.hooks?.hasAnyHandler ?? false
         params["requestExitPlanMode"] = config.onExitPlanMode != nil
+        if config.onShellAuthenticationRequest != nil {
+            params["requestShellAuthentication"] = true
+        }
         if let wd = config.workingDirectory { params["workingDirectory"] = wd }
         if let streaming = config.streaming { params["streaming"] = streaming }
+        if let subAgentEvents = config.includeSubAgentStreamingEvents {
+            params["includeSubAgentStreamingEvents"] = subAgentEvents
+        }
         if let mcp = config.mcpServers {
             params["mcpServers"] = mcp.mapValues { encodeToDictionary($0) ?? [:] }
         }
@@ -211,6 +243,14 @@ public actor CopilotClient {
         if let inf = config.infiniteSessions {
             params["infiniteSessions"] = encodeToDictionary(inf)
         }
+        if let capabilities = config.modelCapabilities {
+            params["modelCapabilities"] = capabilities.mapValues { $0.value }
+        }
+        if let discovery = config.enableConfigDiscovery {
+            params["enableConfigDiscovery"] = discovery
+        }
+        if let token = config.gitHubToken { params["gitHubToken"] = token }
+        if let dirs = config.instructionDirectories { params["instructionDirectories"] = dirs }
         if let enableCitations = config.enableCitations {
             params["enableCitations"] = enableCitations
         }
@@ -224,12 +264,10 @@ public actor CopilotClient {
         }
         if let memory = config.memory {
             params["memory"] = ["enabled": memory.enabled]
+            if memory.storeMemory != nil { params["hasMemoryStore"] = true }
         }
         if let otlp = config.otlpProtocol {
             params["otlpProtocol"] = otlp
-        }
-        if let ws = config.enableWebSocketResponses {
-            params["enableWebSocketResponses"] = ws
         }
         if let exp = config.expAssignments {
             params["expAssignments"] = exp.mapValues { $0.value }
@@ -259,26 +297,66 @@ public actor CopilotClient {
             params["toolSearch"] = toolSearch.mapValues { $0.value }
         }
         if let experimental = config.experimentalMode {
-            params["experimentalMode"] = experimental
+            params["enableExperimentalMode"] = experimental
         }
         if let exclusion = config.contentExclusion {
             params["contentExclusion"] = exclusion
         }
 
+        // --- v2.6.0 / v3.0.0 session options (SDK protocol 4) ---
+        if let variant = config.askUserVariant { params["askUserVariant"] = variant.rawValue }
+        if let sandbox = config.sandboxConfig {
+            params["sandboxConfig"] = encodeToDictionary(sandbox)
+        }
+        if let flags = config.featureFlags { params["featureFlags"] = flags }
+        if let allowed = config.allowedModels { params["allowedModels"] = allowed }
+        if let url = config.authClientIdMetadataUrl { params["authClientIdMetadataUrl"] = url }
+        if let dirs = config.agentDirectories { params["agentDirectories"] = dirs }
+        if let dirs = config.hookDirectories { params["hookDirectories"] = dirs }
+        if let trust = config.trustWorkingDirectory { params["trustWorkingDirectory"] = trust }
+        if let imageGeneration = config.imageGeneration {
+            params["imageGeneration"] = encodeToDictionary(imageGeneration)
+        }
+        if let autopilot = config.autopilot {
+            params["autopilot"] = encodeToDictionary(autopilot)
+        }
+        if let providers = config.providers {
+            params["providers"] = providers.map { encodeToDictionary($0) ?? [:] }
+        }
+        if let models = config.models {
+            params["models"] = models.map { encodeToDictionary($0) ?? [:] }
+        }
+        if let defaultProvider = config.defaultProvider {
+            params["defaultProvider"] = defaultProvider
+        }
+        if let capi = capiWireFormat(
+            config.capi, enableWebSocketResponses: config.enableWebSocketResponses)
+        {
+            params["capi"] = capi
+        }
+        let registrationId = config.gitHubTokenProvider == nil ? nil : UUID().uuidString
+        if let registrationId = registrationId {
+            params["gitHubTokenProviderRegistrationId"] = registrationId
+        }
+
         await injectTraceContext(&params)
 
-        let response = try await rpc.sendRequest(method: "session.create", params: params)
+        let payload = groupForMode(params, isResume: false)
+        let response = try await sendSessionRequest(
+            method: "session.create", payload: payload, rpc: rpc,
+            registrationId: registrationId, tokenProvider: config.gitHubTokenProvider)
 
         guard let sessionId = response["sessionId"] as? String else {
+            if let registrationId = registrationId {
+                gitHubTokenProviders.removeValue(forKey: registrationId)
+            }
             throw CopilotError.invalidResponse("Missing sessionId in session.create response")
         }
         let workspacePath = response["workspacePath"] as? String
 
-        let session = CopilotSession(
-            sessionId: sessionId,
-            rpcClient: rpc,
-            workspacePath: workspacePath
-        )
+        let session = await makeSession(
+            sessionId: sessionId, rpc: rpc, workspacePath: workspacePath,
+            registrationId: registrationId)
 
         if let tools = config.tools {
             await session.registerTools(tools)
@@ -295,6 +373,8 @@ public actor CopilotClient {
         if let handler = config.onExitPlanMode {
             await session.registerExitPlanModeHandler(handler)
         }
+        await session.registerShellAuthenticationHandler(config.onShellAuthenticationRequest)
+        await session.registerMemoryStore(config.memory?.storeMemory)
 
         sessions[sessionId] = session
         return session
@@ -304,11 +384,21 @@ public actor CopilotClient {
 
     /// Resumes an existing conversation session by its ID.
     ///
+    /// The flat options are grouped into the SDK protocol 4 payload right before
+    /// `session.resume` is sent. A failure throws a `JsonRpcError`; its
+    /// `policyHelperFailure` exposes a managed-policy Policy Helper failure.
+    ///
     /// - Parameters:
     ///   - sessionId: The ID of the session to resume.
     ///   - config: Optional configuration for the resumed session.
     /// - Returns: The resumed session.
     public func resumeSession(_ sessionId: String, config: ResumeSessionConfig = ResumeSessionConfig()) async throws -> CopilotSession {
+        try validateSessionOptions(
+            gitHubToken: config.gitHubToken,
+            gitHubTokenProvider: config.gitHubTokenProvider,
+            availableTools: config.availableTools,
+            memory: config.memory
+        )
         try await ensureConnected()
 
         guard let rpc = rpcClient else {
@@ -331,9 +421,15 @@ public actor CopilotClient {
         params["requestUserInput"] = config.onUserInputRequest != nil
         params["hooks"] = config.hooks?.hasAnyHandler ?? false
         params["requestExitPlanMode"] = config.onExitPlanMode != nil
+        if config.onShellAuthenticationRequest != nil {
+            params["requestShellAuthentication"] = true
+        }
         if let wd = config.workingDirectory { params["workingDirectory"] = wd }
         if let cd = config.configDir { params["configDir"] = cd }
         if let streaming = config.streaming { params["streaming"] = streaming }
+        if let subAgentEvents = config.includeSubAgentStreamingEvents {
+            params["includeSubAgentStreamingEvents"] = subAgentEvents
+        }
         if let mcp = config.mcpServers {
             params["mcpServers"] = mcp.mapValues { encodeToDictionary($0) ?? [:] }
         }
@@ -345,22 +441,78 @@ public actor CopilotClient {
         if let inf = config.infiniteSessions {
             params["infiniteSessions"] = encodeToDictionary(inf)
         }
-        if let dr = config.disableResume { params["disableResume"] = dr }
+        if let capabilities = config.modelCapabilities {
+            params["modelCapabilities"] = capabilities.mapValues { $0.value }
+        }
+        if let discovery = config.enableConfigDiscovery {
+            params["enableConfigDiscovery"] = discovery
+        }
+        if let token = config.gitHubToken { params["gitHubToken"] = token }
+        if let dirs = config.instructionDirectories { params["instructionDirectories"] = dirs }
+        if let suppress = config.suppressResumeEvent ?? config.disableResume {
+            params["suppressResumeEvent"] = suppress
+        }
+
+        // --- v2.6.0 / v3.0.0 resume options (SDK protocol 4) ---
+        if let memory = config.memory {
+            params["memory"] = ["enabled": memory.enabled]
+            if memory.storeMemory != nil { params["hasMemoryStore"] = true }
+        }
+        if let variant = config.askUserVariant { params["askUserVariant"] = variant.rawValue }
+        if let sandbox = config.sandboxConfig {
+            params["sandboxConfig"] = encodeToDictionary(sandbox)
+        }
+        if let flags = config.featureFlags { params["featureFlags"] = flags }
+        if let allowed = config.allowedModels { params["allowedModels"] = allowed }
+        if let url = config.authClientIdMetadataUrl { params["authClientIdMetadataUrl"] = url }
+        if let dirs = config.agentDirectories { params["agentDirectories"] = dirs }
+        if let dirs = config.hookDirectories { params["hookDirectories"] = dirs }
+        if let recovery = config.allowTranscriptRecovery {
+            params["allowTranscriptRecovery"] = recovery
+        }
+        if let imageGeneration = config.imageGeneration {
+            params["imageGeneration"] = encodeToDictionary(imageGeneration)
+        }
+        if let autopilot = config.autopilot {
+            params["autopilot"] = encodeToDictionary(autopilot)
+        }
+        if let providers = config.providers {
+            params["providers"] = providers.map { encodeToDictionary($0) ?? [:] }
+        }
+        if let models = config.models {
+            params["models"] = models.map { encodeToDictionary($0) ?? [:] }
+        }
+        if let defaultProvider = config.defaultProvider {
+            params["defaultProvider"] = defaultProvider
+        } else if config.clearDefaultProvider == true {
+            params["defaultProvider"] = NSNull()
+        }
+        if let capi = capiWireFormat(config.capi, enableWebSocketResponses: nil) {
+            params["capi"] = capi
+        }
+        let registrationId = config.gitHubTokenProvider == nil ? nil : UUID().uuidString
+        if let registrationId = registrationId {
+            params["gitHubTokenProviderRegistrationId"] = registrationId
+        }
 
         await injectTraceContext(&params)
 
-        let response = try await rpc.sendRequest(method: "session.resume", params: params)
+        let payload = groupForMode(params, isResume: true)
+        let response = try await sendSessionRequest(
+            method: "session.resume", payload: payload, rpc: rpc,
+            registrationId: registrationId, tokenProvider: config.gitHubTokenProvider)
 
         guard let resumedSessionId = response["sessionId"] as? String else {
+            if let registrationId = registrationId {
+                gitHubTokenProviders.removeValue(forKey: registrationId)
+            }
             throw CopilotError.invalidResponse("Missing sessionId in session.resume response")
         }
         let workspacePath = response["workspacePath"] as? String
 
-        let session = CopilotSession(
-            sessionId: resumedSessionId,
-            rpcClient: rpc,
-            workspacePath: workspacePath
-        )
+        let session = await makeSession(
+            sessionId: resumedSessionId, rpc: rpc, workspacePath: workspacePath,
+            registrationId: registrationId)
 
         if let tools = config.tools {
             await session.registerTools(tools)
@@ -377,6 +529,8 @@ public actor CopilotClient {
         if let handler = config.onExitPlanMode {
             await session.registerExitPlanModeHandler(handler)
         }
+        await session.registerShellAuthenticationHandler(config.onShellAuthenticationRequest)
+        await session.registerMemoryStore(config.memory?.storeMemory)
 
         sessions[resumedSessionId] = session
         return session
@@ -538,6 +692,17 @@ public actor CopilotClient {
         }
     }
 
+    // MARK: - Managed Settings
+
+    /// Clears the runtime's cached managed (enterprise) settings so they are fetched again
+    /// (`managedSettings.clearCache`).
+    public func clearManagedSettingsCache() async throws {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        _ = try await rpc.sendRequest(method: "managedSettings.clearCache", params: [:])
+    }
+
     // MARK: - Session Filesystem Provider
 
     /// Sets the session filesystem provider configuration.
@@ -583,7 +748,6 @@ public actor CopilotClient {
 
     private func startCLIServer() async throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolvedCliPath)
 
         var args = options.cliArgs ?? []
         args += ["--headless", "--no-auto-update", "--log-level", resolvedLogLevel]
@@ -608,7 +772,19 @@ public actor CopilotClient {
             args.append("--no-auto-login")
         }
 
-        process.arguments = args
+        if resolvedCliPath.hasSuffix(".js") {
+            // Node entry points (for example `@github/copilot/npm-loader.js`) run with node.
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["node", resolvedCliPath] + args
+        } else if resolvedCliPath.contains("/") {
+            // Native binaries and shims with a shebang (`node_modules/.bin/copilot`) run directly.
+            process.executableURL = URL(fileURLWithPath: resolvedCliPath)
+            process.arguments = args
+        } else {
+            // Bare command names (the default "copilot") are resolved on PATH.
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [resolvedCliPath] + args
+        }
 
         if let cwd = options.cwd {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
@@ -687,6 +863,35 @@ public actor CopilotClient {
             return try await self.handleExitPlanModeRequest(params)
         }
 
+        await rpc.setRequestHandler(method: "gitHubToken.getToken") { [weak self] params in
+            guard let self = self else {
+                throw JsonRpcError(code: -32000, message: "Client deallocated")
+            }
+            return try await self.handleGitHubTokenRequest(params)
+        }
+
+        await rpc.setRequestHandler(method: "shellAuthentication.request") { [weak self] params in
+            guard let self = self else {
+                return ShellAuthenticationResponse.cancel.toWireFormat()
+            }
+            return await self.handleShellAuthenticationRequest(params)
+        }
+
+        await rpc.setRequestHandler(method: "shellAuthentication.cancel") { [weak self] params in
+            await self?.handleShellAuthenticationCancel(params)
+            return [:]
+        }
+
+        await rpc.setRequestHandler(method: "memoryStore.store") { [weak self] params in
+            guard let self = self else {
+                throw JsonRpcError(code: -32000, message: "Client deallocated")
+            }
+            try await self.handleMemoryStore(params)
+            return nil
+        }
+
+        await registerNetworkHandlers(rpc)
+
         // sessionFs.* provider requests (serviced against the real filesystem)
         await rpc.setRequestHandler(method: "sessionFs.readFile") { [weak self] params in
             guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
@@ -739,7 +944,7 @@ public actor CopilotClient {
                 expected: expectedVersion,
                 actual: nil,
                 message:
-                    "SDK expects version \(expectedVersion), but server does not report a protocol version. "
+                    "SDK supports version \(expectedVersion), but server does not report a protocol version. "
                     + "Please update your server to ensure compatibility."
             )
         }
@@ -749,9 +954,168 @@ public actor CopilotClient {
                 expected: expectedVersion,
                 actual: serverVersion,
                 message:
-                    "SDK expects version \(expectedVersion), but server reports version \(serverVersion). "
+                    "SDK supports version \(expectedVersion), but server reports version \(serverVersion). "
                     + "Please update your SDK or server to ensure compatibility."
             )
+        }
+    }
+
+    /// Declares `CopilotClientOptions.clientInfo` on the `connect` handshake. Runtimes
+    /// without `connect` are tolerated (the ping-based version check still runs).
+    private func sendClientInfo() async throws {
+        guard let rpc = rpcClient, let clientInfo = options.clientInfo?.toWireFormat() else {
+            return
+        }
+        do {
+            _ = try await rpc.sendRequest(method: "connect", params: ["clientInfo": clientInfo])
+        } catch let error as JsonRpcError where error.isMethodNotFound {
+            // Legacy runtime without `connect`.
+        }
+    }
+
+    /// Calls `network.setProvider` when any network callback is configured, marking each
+    /// registered callback with an empty object.
+    private func registerNetworkProvider() async throws {
+        guard let rpc = rpcClient, let network = options.network, network.hasCallbacks else {
+            return
+        }
+        var params: [String: Any] = [:]
+        if let scope = network.scope { params["scope"] = scope.rawValue }
+        if network.resolveProxy != nil { params["resolveProxy"] = [String: Any]() }
+        if network.authenticateNegotiate != nil {
+            params["authenticateNegotiate"] = [String: Any]()
+        }
+        if network.authenticateBasic != nil { params["authenticateBasic"] = [String: Any]() }
+        _ = try await rpc.sendRequest(method: "network.setProvider", params: params)
+    }
+
+    /// Registers the `network.*` request handlers for the configured callbacks. Tokens and
+    /// passwords are never logged.
+    private func registerNetworkHandlers(_ rpc: JsonRpcClient) async {
+        guard let network = options.network else { return }
+        if let resolveProxy = network.resolveProxy {
+            await rpc.setRequestHandler(method: "network.resolveProxy") { params in
+                guard let proxy = try await resolveProxy(params["url"] as? String ?? ""),
+                    !proxy.isEmpty
+                else { return [:] }
+                return ["proxy": proxy]
+            }
+        }
+        if let authenticateNegotiate = network.authenticateNegotiate {
+            await rpc.setRequestHandler(method: "network.authenticateNegotiate") { params in
+                guard let token = try await authenticateNegotiate(params["spn"] as? String ?? ""),
+                    !token.isEmpty
+                else { return [:] }
+                return ["token": token]
+            }
+        }
+        if let authenticateBasic = network.authenticateBasic {
+            await rpc.setRequestHandler(method: "network.authenticateBasic") { params in
+                let request = NetworkAuthenticateBasicRequest(
+                    proxy: params["proxy"] as? String ?? "",
+                    realm: params["realm"] as? String,
+                    previousRejected: params["previousRejected"] as? Bool ?? false
+                )
+                guard let credentials = try await authenticateBasic(request) else { return [:] }
+                var result: [String: Any] = [:]
+                if let username = credentials.username { result["username"] = username }
+                if let password = credentials.password { result["password"] = password }
+                return result
+            }
+        }
+    }
+
+    // MARK: - Private: Session Options
+
+    /// Validates options shared by `createSession` and `resumeSession`.
+    private func validateSessionOptions(
+        gitHubToken: String?,
+        gitHubTokenProvider: GitHubTokenProvider?,
+        availableTools: [String]?,
+        memory: MemoryConfiguration?
+    ) throws {
+        if gitHubToken != nil && gitHubTokenProvider != nil {
+            throw CopilotError.operationFailed(
+                "gitHubToken and gitHubTokenProvider are mutually exclusive")
+        }
+        if resolvedMode == .empty && availableTools == nil {
+            throw CopilotError.operationFailed(
+                "CopilotClient is in mode 'empty' but the session config did not specify "
+                    + "'availableTools'. Empty mode requires every session to opt into the tools it wants."
+            )
+        }
+        if let memory = memory, memory.storeMemory != nil, !memory.enabled {
+            throw CopilotError.operationFailed(
+                "memory.storeMemory requires memory.enabled to be true.")
+        }
+    }
+
+    /// Groups the flat payload for SDK protocol 4 and applies the empty-mode defaults under
+    /// the caller's values.
+    private func groupForMode(_ params: [String: Any], isResume: Bool) -> [String: Any] {
+        var payload = groupSessionParams(params, isResume: isResume)
+        if resolvedMode == .empty {
+            applyEmptyModeSessionDefaults(&payload)
+        }
+        return payload
+    }
+
+    /// The `capi` options, folding in the legacy `enableWebSocketResponses` session option.
+    private func capiWireFormat(
+        _ capi: CapiSessionOptions?, enableWebSocketResponses: Bool?
+    ) -> [String: Any]? {
+        var wire = capi.flatMap { encodeToDictionary($0) } ?? [:]
+        if let webSocket = enableWebSocketResponses, wire["enableWebSocketResponses"] == nil {
+            wire["enableWebSocketResponses"] = webSocket
+        }
+        return wire.isEmpty ? nil : wire
+    }
+
+    /// Sends `session.create` / `session.resume` with the GitHub token provider registered,
+    /// since the runtime validates the provider while it creates or resumes the session.
+    private func sendSessionRequest(
+        method: String,
+        payload: [String: Any],
+        rpc: JsonRpcClient,
+        registrationId: String?,
+        tokenProvider: GitHubTokenProvider?
+    ) async throws -> [String: Any] {
+        if let registrationId = registrationId, let tokenProvider = tokenProvider {
+            gitHubTokenProviders[registrationId] = tokenProvider
+        }
+        do {
+            return try await rpc.sendRequest(method: method, params: payload)
+        } catch {
+            if let registrationId = registrationId {
+                gitHubTokenProviders.removeValue(forKey: registrationId)
+            }
+            throw error
+        }
+    }
+
+    /// Creates a session that unregisters itself (and its GitHub token provider) from this
+    /// client when it is detached or destroyed.
+    private func makeSession(
+        sessionId: String, rpc: JsonRpcClient, workspacePath: String?, registrationId: String?
+    ) async -> CopilotSession {
+        let session = CopilotSession(
+            sessionId: sessionId, rpcClient: rpc, workspacePath: workspacePath)
+        let identity = ObjectIdentifier(session)
+        await session.setOnClose { [weak self] in
+            await self?.releaseSession(
+                sessionId, identity: identity, registrationId: registrationId)
+        }
+        return session
+    }
+
+    private func releaseSession(
+        _ sessionId: String, identity: ObjectIdentifier, registrationId: String?
+    ) {
+        if let current = sessions[sessionId], ObjectIdentifier(current) == identity {
+            sessions.removeValue(forKey: sessionId)
+        }
+        if let registrationId = registrationId {
+            gitHubTokenProviders.removeValue(forKey: registrationId)
         }
     }
 
@@ -930,6 +1294,55 @@ public actor CopilotClient {
         } catch {
             return ["approved": true]
         }
+    }
+
+    /// Answers `gitHubToken.getToken` with the provider registered for the request's
+    /// `registrationId`: `{kind: "token", accessToken, tokenType?, expiresIn}` or
+    /// `{kind: "cancelled"}`.
+    private func handleGitHubTokenRequest(_ params: [String: Any]) async throws -> [String: Any]? {
+        let registrationId = params["registrationId"] as? String ?? ""
+        guard let provider = gitHubTokenProviders[registrationId] else {
+            throw JsonRpcError(
+                code: -32000,
+                message: "No GitHub token provider registered for \"\(registrationId)\"")
+        }
+        let result = try await provider(
+            GitHubTokenRequest(
+                host: params["host"] as? String ?? "",
+                sessionId: params["sessionId"] as? String,
+                reason: params["reason"] as? String ?? ""
+            ))
+        return result.toWireFormat()
+    }
+
+    /// Answers `shellAuthentication.request` with the session's handler, or
+    /// `{action: "cancel"}` when nobody can answer.
+    private func handleShellAuthenticationRequest(_ params: [String: Any]) async -> [String: Any]? {
+        let request = ShellAuthenticationRequest.from(params)
+        guard let session = sessions[request.sessionId] else {
+            return ShellAuthenticationResponse.cancel.toWireFormat()
+        }
+        let response = await session.handleShellAuthenticationRequest(request)
+        return response.toWireFormat()
+    }
+
+    /// Handles `shellAuthentication.cancel`: the pending request resolves to `cancel`.
+    private func handleShellAuthenticationCancel(_ params: [String: Any]) async {
+        guard let sessionId = params["sessionId"] as? String,
+            let requestId = params["requestId"] as? String,
+            let session = sessions[sessionId]
+        else { return }
+        await session.cancelShellAuthenticationRequest(requestId)
+    }
+
+    /// Stores a memory with the session's `MemoryConfiguration.storeMemory` handler
+    /// (`memoryStore.store`, replied to with null).
+    private func handleMemoryStore(_ params: [String: Any]) async throws {
+        let memory = StoredMemory.from(params)
+        guard let session = sessions[memory.sessionId] else {
+            throw JsonRpcError(code: -32000, message: "Memory store owner is unavailable")
+        }
+        try await session.handleMemoryStore(memory)
     }
 
     // MARK: - Private: SessionFs Provider Handlers

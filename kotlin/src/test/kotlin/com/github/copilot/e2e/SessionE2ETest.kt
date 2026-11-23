@@ -53,15 +53,25 @@ class SessionE2ETest {
         harness.configure(snapshotPath, workDir)
     }
 
+    /**
+     * Resolves the CLI for tests: COPILOT_CLI_PATH when it points to an existing file, then the
+     * CLI 1.0.113+ `npm-loader.js` entry point (run with node; it starts the native binary), then
+     * the legacy `index.js` entry points. Paths without a `.js` suffix are run directly.
+     */
     private fun getCliPath(): String {
         val envPath = System.getenv("COPILOT_CLI_PATH")
         if (!envPath.isNullOrBlank() && File(envPath).exists()) {
             return File(envPath).absolutePath
         }
 
-        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-        // package (e.g. @github/copilot-linux-x64); prefer it when present.
         val githubModules = repoRoot.resolve("nodejs/node_modules/@github")
+        val npmLoader = githubModules.resolve("copilot/npm-loader.js")
+        if (npmLoader.exists()) {
+            return npmLoader.absolutePath
+        }
+
+        // Legacy layouts: CLI 1.0.64-1 through 1.0.112 shipped a runnable index.js in a
+        // platform-specific package (e.g. @github/copilot-linux-x64); prefer it when present.
         val platformCli = githubModules.listFiles()
             ?.filter { it.isDirectory && it.name.startsWith("copilot-") && !it.name.contains("language-server") }
             ?.map { File(it, "index.js") }

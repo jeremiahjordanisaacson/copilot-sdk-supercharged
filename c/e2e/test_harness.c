@@ -11,6 +11,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dirent.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -310,4 +311,75 @@ int test_harness_snapshot_path(const test_harness_t *harness,
 #else
     return snprintf(out_path, (size_t)out_size, "%s/%s", harness->repo_root, relative_path);
 #endif
+}
+
+static int file_exists(const char *path) {
+#ifdef _WIN32
+    DWORD attrs = GetFileAttributesA(path);
+    return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    return access(path, F_OK) == 0;
+#endif
+}
+
+int test_harness_cli_path(const test_harness_t *harness,
+                          char *out_path,
+                          int out_size) {
+    /* 1. COPILOT_CLI_PATH (CI points it at nodejs/node_modules/.bin/copilot) */
+    const char *env_path = getenv("COPILOT_CLI_PATH");
+    if (env_path && env_path[0] != '\0' && file_exists(env_path)) {
+        snprintf(out_path, (size_t)out_size, "%s", env_path);
+        return 0;
+    }
+
+#ifdef _WIN32
+    const char sep = '\\';
+#else
+    const char sep = '/';
+#endif
+    char modules[1200];
+    snprintf(modules, sizeof(modules), "%s%cnodejs%cnode_modules%c@github",
+             harness->repo_root, sep, sep, sep);
+
+    /* 2. CLI >= 1.0.10x: npm-loader.js launches the native binary */
+    snprintf(out_path, (size_t)out_size, "%s%ccopilot%cnpm-loader.js", modules, sep, sep);
+    if (file_exists(out_path)) return 0;
+
+    /* 3. Legacy CLIs: @github/copilot-<platform>/index.js, then @github/copilot/index.js */
+#ifdef _WIN32
+    char pattern[1300];
+    snprintf(pattern, sizeof(pattern), "%s\\copilot-*", modules);
+    WIN32_FIND_DATAA data;
+    HANDLE find = FindFirstFileA(pattern, &data);
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            snprintf(out_path, (size_t)out_size, "%s\\%s\\index.js", modules, data.cFileName);
+            if (file_exists(out_path)) {
+                FindClose(find);
+                return 0;
+            }
+        } while (FindNextFileA(find, &data));
+        FindClose(find);
+    }
+#else
+    DIR *dir = opendir(modules);
+    if (dir) {
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strncmp(entry->d_name, "copilot-", 8) != 0) continue;
+            snprintf(out_path, (size_t)out_size, "%s/%s/index.js", modules, entry->d_name);
+            if (file_exists(out_path)) {
+                closedir(dir);
+                return 0;
+            }
+        }
+        closedir(dir);
+    }
+#endif
+
+    snprintf(out_path, (size_t)out_size, "%s%ccopilot%cindex.js", modules, sep, sep);
+    if (file_exists(out_path)) return 0;
+
+    out_path[0] = '\0';
+    return -1;
 }

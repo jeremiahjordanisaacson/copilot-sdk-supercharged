@@ -34,6 +34,7 @@ module Copilot.Types
   , SectionOverride (..)
   , SystemMessageConfig (..)
   , ProviderConfig (..)
+  , defaultProviderConfig
   , AzureProviderOptions (..)
   , MCPStdioServerConfig (..)
   , MCPHTTPServerConfig (..)
@@ -112,6 +113,31 @@ module Copilot.Types
   , modelCapabilitiesWithLimits
   , structuredResponseFormat
 
+    -- * v3.0.0 / SDK protocol 4 types & constants
+  , ClientMode (..)
+  , parseClientMode
+  , NamedProviderConfig (..)
+  , defaultNamedProviderConfig
+  , ProviderModelConfig (..)
+  , defaultProviderModelConfig
+  , CapiConfig (..)
+  , defaultCapiConfig
+  , ShellAuthenticationRequest (..)
+  , ShellAuthenticationResponse (..)
+  , ShellAuthenticationHandler
+  , StoredMemory (..)
+  , StoreMemoryHandler
+  , NetworkBasicAuthRequest (..)
+  , NetworkBasicCredentials (..)
+  , NetworkOptions (..)
+  , defaultNetworkOptions
+  , PolicyHelperFailure (..)
+  , policyHelperFailureFromErrorData
+  , permissionModeRefusalManagedPolicy
+  , PermissionModeResult (..)
+  , sessionEventToolShellOutput
+  , ShellOutputData (..)
+
     -- * Response format & image types
   , ResponseFormat (..)
   , ImageOptions (..)
@@ -121,6 +147,7 @@ module Copilot.Types
     -- * Message options
   , Attachment (..)
   , MessageOptions (..)
+  , defaultMessageOptions
 
     -- * Permission types
   , PermissionRequest (..)
@@ -199,6 +226,7 @@ import           Control.Applicative ((<|>))
 import           Data.Aeson         hiding (Success)
 import           Data.Aeson.Types   (Parser, toJSONKeyText, FromJSONKeyFunction (..))
 import qualified Data.Aeson         as Aeson
+import qualified Data.Aeson.KeyMap  as KM
 import qualified Data.Map.Strict    as Map
 import           Data.Maybe         (catMaybes)
 import           Data.Text          (Text)
@@ -341,6 +369,7 @@ data Tool = Tool
   , toolDescription :: !(Maybe Text)
   , toolParameters  :: !(Maybe Value)
   , toolHandler     :: !ToolHandler
+  , toolIdempotent  :: !(Maybe Bool)  -- ^ Safe to retry with the same arguments (wire: idempotent)
   }
 
 instance Show Tool where
@@ -526,13 +555,16 @@ data AzureProviderOptions = AzureProviderOptions
   } deriving (Show, Eq, Generic)
 
 instance ToJSON AzureProviderOptions where
-  toJSON AzureProviderOptions{..} = object [ "apiVersion" .= apoApiVersion ]
+  toJSON AzureProviderOptions{..} = object $ catMaybes [ ("apiVersion" .=) <$> apoApiVersion ]
 
 instance FromJSON AzureProviderOptions where
   parseJSON = withObject "AzureProviderOptions" $ \o ->
     AzureProviderOptions <$> o .:? "apiVersion"
 
--- | Custom provider configuration (BYOK).
+-- | Legacy single BYOK provider. On the protocol 4 wire it becomes the named
+-- @default@ provider (@inference.providers@) with Copilot models disabled;
+-- model-specific fields become an @inference.models@ entry for the session
+-- model (see 'Copilot.SessionParams.groupSessionParams').
 data ProviderConfig = ProviderConfig
   { pcType        :: !(Maybe Text)  -- ^ "openai", "azure", or "anthropic"
   , pcWireApi     :: !(Maybe Text)  -- ^ "completions" or "responses"
@@ -540,16 +572,44 @@ data ProviderConfig = ProviderConfig
   , pcApiKey      :: !(Maybe Text)
   , pcBearerToken :: !(Maybe Text)
   , pcAzure       :: !(Maybe AzureProviderOptions)
+  , pcApiKeyCommand          :: !(Maybe Text)  -- ^ Command run before each request for a fresh API key
+  , pcModelProvider          :: !(Maybe Text)  -- ^ Product serving the model, e.g. 'modelProviderOllama'
+  , pcTransport              :: !(Maybe Text)  -- ^ "http" or "websockets"
+  , pcHeaders                :: !(Maybe (Map.Map Text Text))
+  , pcModelId                :: !(Maybe Text)
+  , pcWireModel              :: !(Maybe Text)
+  , pcMaxPromptTokens        :: !(Maybe Int)
+  , pcMaxContextWindowTokens :: !(Maybe Int)
+  , pcMaxOutputTokens        :: !(Maybe Int)
   } deriving (Show, Eq, Generic)
 
+-- | A provider with the given base URL and nothing else set.
+defaultProviderConfig :: Text -> ProviderConfig
+defaultProviderConfig baseUrl = ProviderConfig
+  { pcType = Nothing, pcWireApi = Nothing, pcBaseUrl = baseUrl, pcApiKey = Nothing
+  , pcBearerToken = Nothing, pcAzure = Nothing, pcApiKeyCommand = Nothing
+  , pcModelProvider = Nothing, pcTransport = Nothing, pcHeaders = Nothing
+  , pcModelId = Nothing, pcWireModel = Nothing, pcMaxPromptTokens = Nothing
+  , pcMaxContextWindowTokens = Nothing, pcMaxOutputTokens = Nothing
+  }
+
 instance ToJSON ProviderConfig where
-  toJSON ProviderConfig{..} = object
-    [ "type"        .= pcType
-    , "wireApi"     .= pcWireApi
-    , "baseUrl"     .= pcBaseUrl
-    , "apiKey"      .= pcApiKey
-    , "bearerToken" .= pcBearerToken
-    , "azure"       .= pcAzure
+  toJSON ProviderConfig{..} = object $ catMaybes
+    [ ("type" .=) <$> pcType
+    , ("wireApi" .=) <$> pcWireApi
+    , Just ("baseUrl" .= pcBaseUrl)
+    , ("apiKey" .=) <$> pcApiKey
+    , ("bearerToken" .=) <$> pcBearerToken
+    , ("azure" .=) <$> pcAzure
+    , ("apiKeyCommand" .=) <$> pcApiKeyCommand
+    , ("modelProvider" .=) <$> pcModelProvider
+    , ("transport" .=) <$> pcTransport
+    , ("headers" .=) <$> pcHeaders
+    , ("modelId" .=) <$> pcModelId
+    , ("wireModel" .=) <$> pcWireModel
+    , ("maxPromptTokens" .=) <$> pcMaxPromptTokens
+    , ("maxContextWindowTokens" .=) <$> pcMaxContextWindowTokens
+    , ("maxOutputTokens" .=) <$> pcMaxOutputTokens
     ]
 
 instance FromJSON ProviderConfig where
@@ -561,6 +621,15 @@ instance FromJSON ProviderConfig where
       <*> o .:? "apiKey"
       <*> o .:? "bearerToken"
       <*> o .:? "azure"
+      <*> o .:? "apiKeyCommand"
+      <*> o .:? "modelProvider"
+      <*> o .:? "transport"
+      <*> o .:? "headers"
+      <*> o .:? "modelId"
+      <*> o .:? "wireModel"
+      <*> o .:? "maxPromptTokens"
+      <*> o .:? "maxContextWindowTokens"
+      <*> o .:? "maxOutputTokens"
 
 -- ============================================================================
 -- MCP Server Configuration
@@ -658,16 +727,16 @@ data CustomAgentConfig = CustomAgentConfig
   } deriving (Show, Eq, Generic)
 
 instance ToJSON CustomAgentConfig where
-  toJSON CustomAgentConfig{..} = object
-    [ "name"        .= cacName
-    , "displayName" .= cacDisplayName
-    , "description" .= cacDescription
-    , "tools"       .= cacTools
-    , "prompt"      .= cacPrompt
-    , "mcpServers"  .= cacMcpServers
-    , "infer"       .= cacInfer
-    , "skills"      .= cacSkills
-    , "argsSchema"  .= cacArgsSchema
+  toJSON CustomAgentConfig{..} = object $ catMaybes
+    [ Just ("name"   .= cacName)
+    , ("displayName" .=) <$> cacDisplayName
+    , ("description" .=) <$> cacDescription
+    , ("tools"       .=) <$> cacTools
+    , Just ("prompt" .= cacPrompt)
+    , ("mcpServers"  .=) <$> cacMcpServers
+    , ("infer"       .=) <$> cacInfer
+    , ("skills"      .=) <$> cacSkills
+    , ("argsSchema"  .=) <$> cacArgsSchema
     ]
 
 instance FromJSON CustomAgentConfig where
@@ -695,10 +764,10 @@ data InfiniteSessionConfig = InfiniteSessionConfig
   } deriving (Show, Eq, Generic)
 
 instance ToJSON InfiniteSessionConfig where
-  toJSON InfiniteSessionConfig{..} = object
-    [ "enabled"                        .= iscEnabled
-    , "backgroundCompactionThreshold"  .= iscBackgroundCompactionThreshold
-    , "bufferExhaustionThreshold"      .= iscBufferExhaustionThreshold
+  toJSON InfiniteSessionConfig{..} = object $ catMaybes
+    [ ("enabled"                       .=) <$> iscEnabled
+    , ("backgroundCompactionThreshold" .=) <$> iscBackgroundCompactionThreshold
+    , ("bufferExhaustionThreshold"     .=) <$> iscBufferExhaustionThreshold
     ]
 
 instance FromJSON InfiniteSessionConfig where
@@ -807,6 +876,24 @@ data SessionConfig = SessionConfig
   , scToolSearch                     :: !(Maybe Value)  -- ^ Tool search configuration
   , scExperimentalMode               :: !(Maybe Bool)  -- ^ Enable experimental mode
   , scContentExclusion               :: !(Maybe Bool)  -- ^ Enable content exclusion
+  -- --- v2.6.0 / v3.0.0 session options (SDK protocol 4) ---
+  , scAskUserVariant                 :: !(Maybe Text)  -- ^ 'askUserVariantLegacy' or 'askUserVariantElicitation'
+  , scGitHubTokenProvider            :: !(Maybe GitHubTokenProvider)  -- ^ Supplies GitHub tokens on demand; exclusive with 'scGitHubToken'
+  , scSandbox                        :: !(Maybe SandboxConfig)  -- ^ Sandbox configuration (permissions.sandbox)
+  , scFeatureFlags                   :: !(Maybe (Map.Map Text Bool))  -- ^ Runtime feature flag overrides (experiments.flags)
+  , scAllowedModels                  :: !(Maybe [Text])  -- ^ Model allowlist (policy.allowedModels)
+  , scAuthClientIdMetadataUrl        :: !(Maybe Text)  -- ^ OAuth client metadata URL for MCP authorization
+  , scAgentDirectories               :: !(Maybe [Text])  -- ^ Extra directories to load custom agents from
+  , scHookDirectories                :: !(Maybe [Text])  -- ^ Extra directories to load hooks from
+  , scTrustWorkingDirectory          :: !(Maybe Text)  -- ^ 'trustWorkingDirectorySession' or 'trustWorkingDirectoryUser' (create only)
+  , scImageGeneration                :: !(Maybe ImageGenerationConfig)  -- ^ Image generation (tools.imageGeneration)
+  , scAutopilot                      :: !(Maybe AutopilotConfig)  -- ^ Autopilot continuation (execution.autopilot)
+  , scProviders                      :: !(Maybe [NamedProviderConfig])  -- ^ Named BYOK providers (inference.providers)
+  , scModels                         :: !(Maybe [ProviderModelConfig])  -- ^ BYOK models (inference.models)
+  , scDefaultProvider                :: !(Maybe Text)  -- ^ Default named provider (inference.defaultProvider)
+  , scCapi                           :: !(Maybe CapiConfig)  -- ^ Copilot API options (github.capi)
+  , scOnShellAuthenticationRequest   :: !(Maybe ShellAuthenticationHandler)  -- ^ Answers sudo/ssh/git prompts
+  , scOnStoreMemory                  :: !(Maybe StoreMemoryHandler)  -- ^ Stores memories the agent asks to keep
   }
 
 -- | Default (empty) session configuration.
@@ -855,6 +942,23 @@ defaultSessionConfig = SessionConfig
   , scToolSearch                     = Nothing
   , scExperimentalMode               = Nothing
   , scContentExclusion               = Nothing
+  , scAskUserVariant                 = Nothing
+  , scGitHubTokenProvider            = Nothing
+  , scSandbox                        = Nothing
+  , scFeatureFlags                   = Nothing
+  , scAllowedModels                  = Nothing
+  , scAuthClientIdMetadataUrl        = Nothing
+  , scAgentDirectories               = Nothing
+  , scHookDirectories                = Nothing
+  , scTrustWorkingDirectory          = Nothing
+  , scImageGeneration                = Nothing
+  , scAutopilot                      = Nothing
+  , scProviders                      = Nothing
+  , scModels                         = Nothing
+  , scDefaultProvider                = Nothing
+  , scCapi                           = Nothing
+  , scOnShellAuthenticationRequest   = Nothing
+  , scOnStoreMemory                  = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -883,8 +987,27 @@ data ResumeSessionConfig = ResumeSessionConfig
   , rscGitHubToken                    :: !(Maybe Text)  -- ^ GitHub token for authentication. Overrides client-level token for this session only.
   , rscCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
   , rscOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
-  , rscDisableResume                  :: !(Maybe Bool)
+  , rscDisableResume                  :: !(Maybe Bool)  -- ^ Suppress the resume event (wire: suppressResumeEvent)
   , rscInstructionDirectories         :: !(Maybe [Text])  -- ^ Directories to search for instruction files
+  -- --- v2.6.0 / v3.0.0 resume options (SDK protocol 4) ---
+  , rscAllowTranscriptRecovery        :: !(Maybe Bool)  -- ^ Allow recovery from the transcript when state is missing
+  , rscAskUserVariant                 :: !(Maybe Text)
+  , rscGitHubTokenProvider            :: !(Maybe GitHubTokenProvider)
+  , rscSandbox                        :: !(Maybe SandboxConfig)
+  , rscFeatureFlags                   :: !(Maybe (Map.Map Text Bool))
+  , rscAllowedModels                  :: !(Maybe [Text])
+  , rscAuthClientIdMetadataUrl        :: !(Maybe Text)
+  , rscAgentDirectories               :: !(Maybe [Text])
+  , rscHookDirectories                :: !(Maybe [Text])
+  , rscImageGeneration                :: !(Maybe ImageGenerationConfig)
+  , rscAutopilot                      :: !(Maybe AutopilotConfig)
+  , rscProviders                      :: !(Maybe [NamedProviderConfig])
+  , rscModels                         :: !(Maybe [ProviderModelConfig])
+  , rscDefaultProvider                :: !(Maybe Text)
+  , rscClearDefaultProvider           :: !Bool  -- ^ Send an explicit null default provider to clear it
+  , rscCapi                           :: !(Maybe CapiConfig)
+  , rscOnShellAuthenticationRequest   :: !(Maybe ShellAuthenticationHandler)
+  , rscOnStoreMemory                  :: !(Maybe StoreMemoryHandler)
   }
 
 -- | Default (empty) resume session configuration.
@@ -916,6 +1039,24 @@ defaultResumeSessionConfig = ResumeSessionConfig
   , rscOnElicitationRequest           = Nothing
   , rscDisableResume                  = Nothing
   , rscInstructionDirectories         = Nothing
+  , rscAllowTranscriptRecovery        = Nothing
+  , rscAskUserVariant                 = Nothing
+  , rscGitHubTokenProvider            = Nothing
+  , rscSandbox                        = Nothing
+  , rscFeatureFlags                   = Nothing
+  , rscAllowedModels                  = Nothing
+  , rscAuthClientIdMetadataUrl        = Nothing
+  , rscAgentDirectories               = Nothing
+  , rscHookDirectories                = Nothing
+  , rscImageGeneration                = Nothing
+  , rscAutopilot                      = Nothing
+  , rscProviders                      = Nothing
+  , rscModels                         = Nothing
+  , rscDefaultProvider                = Nothing
+  , rscClearDefaultProvider           = False
+  , rscCapi                           = Nothing
+  , rscOnShellAuthenticationRequest   = Nothing
+  , rscOnStoreMemory                  = Nothing
   }
 
 -- ============================================================================
@@ -983,6 +1124,469 @@ attachmentGitHubTreeComparison = "GitHubTreeComparison"
 attachmentGitHubUrl            = "GitHubUrl"
 attachmentGitHubFile           = "GitHubFile"
 attachmentGitHubSnippet        = "GitHubSnippet"
+
+-- ============================================================================
+-- v2.6.0 Upstream-sync Feature Types & Constants
+-- ============================================================================
+
+-- | Identity of the application embedding the SDK, sent as @clientInfo@ on the
+-- @connect@ handshake. Empty fields are dropped; nothing is sent when every
+-- field is empty.
+data CopilotClientInfo = CopilotClientInfo
+  { cciEditorName       :: !(Maybe Text)
+  , cciEditorVersion    :: !(Maybe Text)
+  , cciExtensionName    :: !(Maybe Text)
+  , cciExtensionVersion :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+-- | Client info with every field unset.
+defaultClientInfo :: CopilotClientInfo
+defaultClientInfo = CopilotClientInfo Nothing Nothing Nothing Nothing
+
+-- | Wire shape of 'CopilotClientInfo', or 'Nothing' when every field is empty.
+clientInfoToWire :: CopilotClientInfo -> Maybe Value
+clientInfoToWire CopilotClientInfo{..} =
+  let nonEmpty (Just v) | not (T.null v) = Just v
+      nonEmpty _ = Nothing
+      fields = catMaybes
+        [ ("editorName" .=)       <$> nonEmpty cciEditorName
+        , ("editorVersion" .=)    <$> nonEmpty cciEditorVersion
+        , ("extensionName" .=)    <$> nonEmpty cciExtensionName
+        , ("extensionVersion" .=) <$> nonEmpty cciExtensionVersion
+        ]
+  in if null fields then Nothing else Just (object fields)
+
+-- | Auto routing tiers for 'Copilot.Session.switchAutoTier'.
+autoTierEfficiency, autoTierBalance, autoTierIntelligence, autoTierFast :: Text
+autoTierEfficiency   = "efficiency"
+autoTierBalance      = "balance"
+autoTierIntelligence = "intelligence"
+autoTierFast         = "fast"
+
+-- | Ask-user tool variants ('scAskUserVariant').
+askUserVariantLegacy, askUserVariantElicitation :: Text
+askUserVariantLegacy      = "legacy"
+askUserVariantElicitation = "elicitation"
+
+-- | Working directory trust scopes ('scTrustWorkingDirectory').
+trustWorkingDirectorySession, trustWorkingDirectoryUser :: Text
+trustWorkingDirectorySession = "session"
+trustWorkingDirectoryUser    = "user"
+
+-- | Origin of a sent message ('moSource'): user, system, or an agent.
+type MessageSource = Text
+
+-- | Message sources.
+messageSourceUser, messageSourceSystem :: MessageSource
+messageSourceUser   = "user"
+messageSourceSystem = "system"
+
+-- | Source for a message sent on behalf of the agent with the given ID.
+messageSourceAgent :: Text -> MessageSource
+messageSourceAgent agentId = "agent-" <> agentId
+
+-- | Products that can serve a BYOK provider's models ('pcModelProvider').
+modelProviderOpenAI, modelProviderAnthropic, modelProviderAzureOpenAI,
+  modelProviderOllama, modelProviderLmStudio, modelProviderFoundryLocal,
+  modelProviderLlamaCpp :: Text
+modelProviderOpenAI       = "openai"
+modelProviderAnthropic    = "anthropic"
+modelProviderAzureOpenAI  = "azure_openai"
+modelProviderOllama       = "ollama"
+modelProviderLmStudio     = "lm_studio"
+modelProviderFoundryLocal = "foundry_local"
+modelProviderLlamaCpp     = "llama_cpp"
+
+-- | Arguments of a @gitHubToken.getToken@ request.
+data GitHubTokenProviderArgs = GitHubTokenProviderArgs
+  { gtpaRegistrationId :: !Text
+  , gtpaHost           :: !Text
+  , gtpaSessionId      :: !(Maybe Text)
+  , gtpaReason         :: !Text
+  } deriving (Show, Eq, Generic)
+
+-- | A GitHub token granted by a 'GitHubTokenProvider'.
+data GitHubTokenGrant = GitHubTokenGrant
+  { gtgAccessToken :: !Text
+  , gtgTokenType   :: !(Maybe Text)  -- ^ Defaults to bearer when omitted
+  , gtgExpiresIn   :: !Int           -- ^ Remaining lifetime in seconds
+  } deriving (Show, Eq, Generic)
+
+-- | Answer of a 'GitHubTokenProvider'.
+data GitHubTokenProviderResult
+  = GitHubTokenGranted GitHubTokenGrant
+  | GitHubTokenCancelled
+  deriving (Show, Eq, Generic)
+
+instance ToJSON GitHubTokenProviderResult where
+  toJSON GitHubTokenCancelled = object [ "kind" .= ("cancelled" :: Text) ]
+  toJSON (GitHubTokenGranted GitHubTokenGrant{..}) = object $ catMaybes
+    [ Just ("kind" .= ("token" :: Text))
+    , Just ("accessToken" .= gtgAccessToken)
+    , Just ("expiresIn" .= gtgExpiresIn)
+    , ("tokenType" .=) <$> gtgTokenType
+    ]
+
+-- | Supplies GitHub tokens on demand (@gitHubToken.getToken@). Mutually
+-- exclusive with a static 'scGitHubToken'.
+type GitHubTokenProvider = GitHubTokenProviderArgs -> IO GitHubTokenProviderResult
+
+-- | Sandbox configuration (@permissions.sandbox@).
+data SandboxConfig = SandboxConfig
+  { sbcEnabled                    :: !Bool
+  , sbcAllowBypass                :: !(Maybe Bool)  -- ^ Let the agent ask to run a command outside the sandbox
+  , sbcAddCurrentWorkingDirectory :: !(Maybe Bool)
+  , sbcSandboxMcpServers          :: !(Maybe Bool)
+  , sbcUserPolicy                 :: !(Maybe Value)
+  } deriving (Show, Eq, Generic)
+
+-- | Sandbox disabled, nothing else set.
+defaultSandboxConfig :: SandboxConfig
+defaultSandboxConfig = SandboxConfig False Nothing Nothing Nothing Nothing
+
+instance ToJSON SandboxConfig where
+  toJSON SandboxConfig{..} = object $ catMaybes
+    [ Just ("enabled" .= sbcEnabled)
+    , ("allowBypass" .=) <$> sbcAllowBypass
+    , ("addCurrentWorkingDirectory" .=) <$> sbcAddCurrentWorkingDirectory
+    , ("sandboxMcpServers" .=) <$> sbcSandboxMcpServers
+    , ("userPolicy" .=) <$> sbcUserPolicy
+    ]
+
+-- | Image generation configuration (@tools.imageGeneration@).
+data ImageGenerationConfig = ImageGenerationConfig
+  { igcEnabled    :: !(Maybe Bool)
+  , igcWatermark  :: !(Maybe Bool)
+  , igcSaveToDisk :: !(Maybe Bool)
+  } deriving (Show, Eq, Generic)
+
+-- | Image generation configuration with every field unset.
+defaultImageGenerationConfig :: ImageGenerationConfig
+defaultImageGenerationConfig = ImageGenerationConfig Nothing Nothing Nothing
+
+instance ToJSON ImageGenerationConfig where
+  toJSON ImageGenerationConfig{..} = object $ catMaybes
+    [ ("enabled" .=) <$> igcEnabled
+    , ("watermark" .=) <$> igcWatermark
+    , ("saveToDisk" .=) <$> igcSaveToDisk
+    ]
+
+-- | Autopilot continuation options (@execution.autopilot@).
+data AutopilotConfig = AutopilotConfig
+  { apcContinuationEnabled :: !(Maybe Bool)
+  , apcMaxContinues        :: !(Maybe Int)
+  } deriving (Show, Eq, Generic)
+
+-- | Autopilot options with every field unset.
+defaultAutopilotConfig :: AutopilotConfig
+defaultAutopilotConfig = AutopilotConfig Nothing Nothing
+
+instance ToJSON AutopilotConfig where
+  toJSON AutopilotConfig{..} = object $ catMaybes
+    [ ("continuationEnabled" .=) <$> apcContinuationEnabled
+    , ("maxContinues" .=) <$> apcMaxContinues
+    ]
+
+-- | Token limits for a model capabilities override. Wire keys are snake_case
+-- (@limits.max_output_tokens@ and similar).
+data ModelLimitsOverride = ModelLimitsOverride
+  { mloMaxPromptTokens        :: !(Maybe Int)
+  , mloMaxContextWindowTokens :: !(Maybe Int)
+  , mloMaxOutputTokens        :: !(Maybe Int)
+  } deriving (Show, Eq, Generic)
+
+-- | Limits override with every field unset.
+defaultModelLimitsOverride :: ModelLimitsOverride
+defaultModelLimitsOverride = ModelLimitsOverride Nothing Nothing Nothing
+
+instance ToJSON ModelLimitsOverride where
+  toJSON ModelLimitsOverride{..} = object $ catMaybes
+    [ ("max_prompt_tokens" .=) <$> mloMaxPromptTokens
+    , ("max_context_window_tokens" .=) <$> mloMaxContextWindowTokens
+    , ("max_output_tokens" .=) <$> mloMaxOutputTokens
+    ]
+
+-- | A 'scModelCapabilities' override carrying the given limits.
+modelCapabilitiesWithLimits :: ModelLimitsOverride -> Map.Map Text Value
+modelCapabilitiesWithLimits limits = Map.singleton "limits" (toJSON limits)
+
+-- | The @session.send@ @responseFormat@ object requesting structured output
+-- that matches a JSON Schema (see 'moResponseSchema').
+structuredResponseFormat :: Value -> Value
+structuredResponseFormat schema = object
+  [ "type" .= ("json_schema" :: Text)
+  , "jsonSchema" .= object
+      [ "name"   .= ("response" :: Text)
+      , "strict" .= True
+      , "schema" .= schema
+      ]
+  ]
+
+-- ============================================================================
+-- v3.0.0 / SDK Protocol 4 Types & Constants
+-- ============================================================================
+
+-- | Client behavior profile ('ccoMode'). 'ClientModeCodingAgent' (the
+-- default, wire name @coding-agent@) keeps the coding-agent behavior;
+-- 'ClientModeEmpty' requires 'scAvailableTools' on every session and applies
+-- conservative defaults beneath the caller's options.
+data ClientMode = ClientModeCodingAgent | ClientModeEmpty
+  deriving (Show, Eq, Generic)
+
+-- | Parse a client mode name; @copilot-cli@ is an alias of @coding-agent@.
+parseClientMode :: Text -> Maybe ClientMode
+parseClientMode name = case name of
+  ""             -> Just ClientModeCodingAgent
+  "coding-agent" -> Just ClientModeCodingAgent
+  "copilot-cli"  -> Just ClientModeCodingAgent
+  "empty"        -> Just ClientModeEmpty
+  _              -> Nothing
+
+-- | A named BYOK provider connection (@inference.providers@).
+data NamedProviderConfig = NamedProviderConfig
+  { npcName          :: !Text
+  , npcType          :: !(Maybe Text)
+  , npcBaseUrl       :: !Text
+  , npcApiKey        :: !(Maybe Text)
+  , npcApiKeyCommand :: !(Maybe Text)  -- ^ Command run before each request for a fresh API key
+  , npcBearerToken   :: !(Maybe Text)
+  , npcWireApi       :: !(Maybe Text)
+  , npcTransport     :: !(Maybe Text)
+  , npcModelProvider :: !(Maybe Text)
+  , npcAzure         :: !(Maybe AzureProviderOptions)
+  , npcHeaders       :: !(Maybe (Map.Map Text Text))
+  } deriving (Show, Eq, Generic)
+
+-- | A provider with the given name and base URL and nothing else set.
+defaultNamedProviderConfig :: Text -> Text -> NamedProviderConfig
+defaultNamedProviderConfig name baseUrl =
+  NamedProviderConfig name Nothing baseUrl Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+
+instance ToJSON NamedProviderConfig where
+  toJSON NamedProviderConfig{..} = object $ catMaybes
+    [ Just ("name" .= npcName)
+    , ("type" .=) <$> npcType
+    , Just ("baseUrl" .= npcBaseUrl)
+    , ("apiKey" .=) <$> npcApiKey
+    , ("apiKeyCommand" .=) <$> npcApiKeyCommand
+    , ("bearerToken" .=) <$> npcBearerToken
+    , ("wireApi" .=) <$> npcWireApi
+    , ("transport" .=) <$> npcTransport
+    , ("modelProvider" .=) <$> npcModelProvider
+    , ("azure" .=) <$> npcAzure
+    , ("headers" .=) <$> npcHeaders
+    ]
+
+-- | A BYOK model served by a named provider (@inference.models@). Select it
+-- with the model ID @provider/id@.
+data ProviderModelConfig = ProviderModelConfig
+  { pmcProvider               :: !Text
+  , pmcId                     :: !Text
+  , pmcModelId                :: !(Maybe Text)
+  , pmcWireModel              :: !(Maybe Text)
+  , pmcName                   :: !(Maybe Text)
+  , pmcMaxPromptTokens        :: !(Maybe Int)
+  , pmcMaxContextWindowTokens :: !(Maybe Int)
+  , pmcMaxOutputTokens        :: !(Maybe Int)
+  , pmcCapabilities           :: !(Maybe Value)
+  } deriving (Show, Eq, Generic)
+
+-- | A model with the given provider and ID and nothing else set.
+defaultProviderModelConfig :: Text -> Text -> ProviderModelConfig
+defaultProviderModelConfig provider modelId =
+  ProviderModelConfig provider modelId Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+
+instance ToJSON ProviderModelConfig where
+  toJSON ProviderModelConfig{..} = object $ catMaybes
+    [ Just ("provider" .= pmcProvider)
+    , Just ("id" .= pmcId)
+    , ("modelId" .=) <$> pmcModelId
+    , ("wireModel" .=) <$> pmcWireModel
+    , ("name" .=) <$> pmcName
+    , ("maxPromptTokens" .=) <$> pmcMaxPromptTokens
+    , ("maxContextWindowTokens" .=) <$> pmcMaxContextWindowTokens
+    , ("maxOutputTokens" .=) <$> pmcMaxOutputTokens
+    , ("capabilities" .=) <$> pmcCapabilities
+    ]
+
+-- | Copilot API (CAPI) options (@github.capi@).
+data CapiConfig = CapiConfig
+  { capiEnabled                  :: !(Maybe Bool)  -- ^ Enable or disable Copilot models
+  , capiAutoTier                 :: !(Maybe Text)  -- ^ Auto routing preference (see 'autoTierBalance')
+  , capiEnableWebSocketResponses :: !(Maybe Bool)
+  } deriving (Show, Eq, Generic)
+
+-- | CAPI options with every field unset.
+defaultCapiConfig :: CapiConfig
+defaultCapiConfig = CapiConfig Nothing Nothing Nothing
+
+instance ToJSON CapiConfig where
+  toJSON CapiConfig{..} = object $ catMaybes
+    [ ("enabled" .=) <$> capiEnabled
+    , ("autoTier" .=) <$> capiAutoTier
+    , ("enableWebSocketResponses" .=) <$> capiEnableWebSocketResponses
+    ]
+
+-- | A password or other answer that a shell command run by the agent asks for
+-- (@shellAuthentication.request@). The answer is never shown to the model.
+data ShellAuthenticationRequest = ShellAuthenticationRequest
+  { sarSessionId :: !Text
+  , sarRequestId :: !Text
+  , sarProgram   :: !Text   -- ^ @sudo@, @ssh@, or @git@
+  , sarPrompt    :: !Text
+  , sarInputKind :: !Text   -- ^ @secret@, @text@, or @confirm@
+  , sarCommand   :: !Text
+  , sarCwd       :: !Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ShellAuthenticationRequest where
+  parseJSON = withObject "ShellAuthenticationRequest" $ \o ->
+    ShellAuthenticationRequest
+      <$> o .:? "sessionId" .!= ""
+      <*> o .:  "requestId"
+      <*> o .:? "program" .!= ""
+      <*> o .:? "prompt" .!= ""
+      <*> o .:? "inputKind" .!= ""
+      <*> o .:? "command" .!= ""
+      <*> o .:? "cwd" .!= ""
+
+-- | Answer to a 'ShellAuthenticationRequest'.
+data ShellAuthenticationResponse
+  = ShellAuthenticationAccept Text
+  | ShellAuthenticationCancel
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ShellAuthenticationResponse where
+  toJSON (ShellAuthenticationAccept v) = object [ "action" .= ("accept" :: Text), "value" .= v ]
+  toJSON ShellAuthenticationCancel     = object [ "action" .= ("cancel" :: Text) ]
+
+-- | Answers shell authentication requests for a session.
+type ShellAuthenticationHandler = ShellAuthenticationRequest -> IO ShellAuthenticationResponse
+
+-- | A memory the agent asked to store (@memoryStore.store@).
+data StoredMemory = StoredMemory
+  { stmSessionId :: !Text
+  , stmSubject   :: !Text  -- ^ Short topic the memory is about
+  , stmFact      :: !Text  -- ^ The fact to remember
+  , stmCitations :: !Text  -- ^ Sources supporting the fact
+  , stmReason    :: !Text  -- ^ Why the agent considers the fact worth remembering
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON StoredMemory where
+  parseJSON = withObject "StoredMemory" $ \o ->
+    StoredMemory
+      <$> o .:? "sessionId" .!= ""
+      <*> o .:? "subject" .!= ""
+      <*> o .:? "fact" .!= ""
+      <*> o .:? "citations" .!= ""
+      <*> o .:? "reason" .!= ""
+
+-- | Stores memories the agent asks to keep.
+type StoreMemoryHandler = StoredMemory -> IO ()
+
+-- | A proxy Basic authentication challenge (@network.authenticateBasic@).
+data NetworkBasicAuthRequest = NetworkBasicAuthRequest
+  { nbarProxy            :: !Text
+  , nbarRealm            :: !(Maybe Text)
+  , nbarPreviousRejected :: !Bool
+  } deriving (Show, Eq, Generic)
+
+-- | Proxy credentials. Never log them.
+data NetworkBasicCredentials = NetworkBasicCredentials
+  { nbcUsername :: !Text
+  , nbcPassword :: !Text
+  } deriving (Eq, Generic)
+
+-- | Network callbacks registered with @network.setProvider@ after connecting.
+data NetworkOptions = NetworkOptions
+  { noScope                 :: !(Maybe Text)  -- ^ @connection@ or @runtime@
+  , noResolveProxy          :: !(Maybe (Text -> IO (Maybe Text)))
+    -- ^ URL to a PAC-style proxy list, or 'Nothing' for default routing
+  , noAuthenticateNegotiate :: !(Maybe (Text -> IO (Maybe Text)))
+    -- ^ Service principal to a base64 SPNEGO token
+  , noAuthenticateBasic     :: !(Maybe (NetworkBasicAuthRequest -> IO (Maybe NetworkBasicCredentials)))
+  }
+
+-- | Network options with no callbacks.
+defaultNetworkOptions :: NetworkOptions
+defaultNetworkOptions = NetworkOptions Nothing Nothing Nothing Nothing
+
+-- | A structured Policy Helper failure carried in RPC error data
+-- (@error.data.policyHelperFailure@). Treat the text as untrusted.
+data PolicyHelperFailure = PolicyHelperFailure
+  { phfCategory               :: !Text
+  , phfFailureMode            :: !Text
+  , phfMessage                :: !Text
+  , phfPreviousPolicyRetained :: !Bool
+  , phfReason                 :: !Text
+  , phfAuthority              :: !(Maybe Text)
+  , phfCode                   :: !(Maybe Text)
+  , phfDetails                :: !(Maybe Value)
+  , phfDiagnostic             :: !(Maybe Text)
+  , phfHelpLink               :: !(Maybe Value)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PolicyHelperFailure where
+  parseJSON = withObject "PolicyHelperFailure" $ \o ->
+    PolicyHelperFailure
+      <$> o .:? "category" .!= ""
+      <*> o .:? "failureMode" .!= ""
+      <*> o .:? "message" .!= ""
+      <*> o .:? "previousPolicyRetained" .!= False
+      <*> o .:? "reason" .!= ""
+      <*> o .:? "authority"
+      <*> o .:? "code"
+      <*> o .:? "details"
+      <*> o .:? "diagnostic"
+      <*> o .:? "helpLink"
+
+-- | Extract the Policy Helper failure from JSON-RPC error data.
+policyHelperFailureFromErrorData :: Maybe Value -> Maybe PolicyHelperFailure
+policyHelperFailureFromErrorData (Just (Object o)) =
+  case KM.lookup "policyHelperFailure" o of
+    Just v  -> case fromJSON v of
+      Aeson.Success f -> Just f
+      Aeson.Error _   -> Nothing
+    Nothing -> Nothing
+policyHelperFailureFromErrorData _ = Nothing
+
+-- | Known refusal reason of a 'PermissionModeResult'.
+permissionModeRefusalManagedPolicy :: Text
+permissionModeRefusalManagedPolicy = "managed_policy"
+
+-- | Result of 'Copilot.Session.setPermissionMode'.
+data PermissionModeResult = PermissionModeResult
+  { pmrSuccess :: !Bool
+  , pmrMode    :: !Text
+  , pmrReason  :: !(Maybe Text)  -- ^ For example 'permissionModeRefusalManagedPolicy'
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PermissionModeResult where
+  parseJSON = withObject "PermissionModeResult" $ \o ->
+    PermissionModeResult
+      <$> o .:? "success" .!= False
+      <*> o .:? "mode" .!= ""
+      <*> o .:? "reason"
+
+-- | Event type of live shell output chunks.
+sessionEventToolShellOutput :: Text
+sessionEventToolShellOutput = "tool.shell_output"
+
+-- | Data of a @tool.shell_output@ event ('seData').
+data ShellOutputData = ShellOutputData
+  { sodToolCallId :: !Text
+  , sodText       :: !Text
+  , sodSequence   :: !Int
+  , sodStream     :: !(Maybe Text)  -- ^ @stdout@, @stderr@, or omitted
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ShellOutputData where
+  parseJSON = withObject "ShellOutputData" $ \o ->
+    ShellOutputData
+      <$> o .:? "toolCallId" .!= ""
+      <*> o .:? "text" .!= ""
+      <*> o .:? "sequence" .!= 0
+      <*> o .:? "stream"
 
 -- ============================================================================
 -- Response Format & Image Types
@@ -1110,12 +1714,31 @@ data MessageOptions = MessageOptions
   { moPrompt         :: !Text
   , moAttachments    :: !(Maybe [Attachment])
   , moMode           :: !(Maybe Text)  -- ^ "enqueue" or "immediate"
-  , moResponseFormat :: !(Maybe ResponseFormat)
+  , moResponseFormat :: !(Maybe ResponseFormat)  -- ^ Legacy format; no longer sent (use 'moResponseSchema')
   , moImageOptions   :: !(Maybe ImageOptions)
   , moRequestHeaders :: !(Maybe (Map.Map Text Text))  -- ^ Custom HTTP headers for outbound model requests
   , moAgentMode      :: !(Maybe Text)  -- ^ Agent mode override for this message
   , moDisplayPrompt  :: !(Maybe Text)  -- ^ Prompt text to display in transcripts (may differ from the model prompt)
+  , moSource         :: !(Maybe MessageSource)  -- ^ 'messageSourceUser', 'messageSourceSystem', or 'messageSourceAgent'
+  , moClientTurnId   :: !(Maybe Text)  -- ^ Opaque caller-chosen turn identifier
+  , moResponseSchema :: !(Maybe Value)  -- ^ JSON Schema for structured output (sent as responseFormat)
   } deriving (Show, Eq, Generic)
+
+-- | Message options with the given prompt and everything else unset.
+defaultMessageOptions :: Text -> MessageOptions
+defaultMessageOptions prompt = MessageOptions
+  { moPrompt         = prompt
+  , moAttachments    = Nothing
+  , moMode           = Nothing
+  , moResponseFormat = Nothing
+  , moImageOptions   = Nothing
+  , moRequestHeaders = Nothing
+  , moAgentMode      = Nothing
+  , moDisplayPrompt  = Nothing
+  , moSource         = Nothing
+  , moClientTurnId   = Nothing
+  , moResponseSchema = Nothing
+  }
 
 -- ============================================================================
 -- Permission Types
@@ -1472,6 +2095,84 @@ instance ToJSON ErrorOccurredHookOutput where
     , "userNotification" .= eohoUserNotification
     ]
 
+-- | Input for the hook fired before a sub-agent's first turn (@subagentStart@).
+-- Session metadata belongs to the parent session.
+data SubagentStartHookInput = SubagentStartHookInput
+  { ssaTimestamp        :: !(Maybe Value)
+  , ssaWorkingDirectory :: !Text
+  , ssaTranscriptPath   :: !Text
+  , ssaAgentName        :: !Text
+  , ssaAgentDisplayName :: !(Maybe Text)
+  , ssaAgentDescription :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SubagentStartHookInput where
+  parseJSON = withObject "SubagentStartHookInput" $ \o -> do
+    wd  <- o .:? "workingDirectory"
+    cwd <- o .:? "cwd"
+    SubagentStartHookInput
+      <$> o .:? "timestamp"
+      <*> pure (maybe (maybe "" id cwd) id wd)
+      <*> o .:? "transcriptPath" .!= ""
+      <*> o .:? "agentName" .!= ""
+      <*> o .:? "agentDisplayName"
+      <*> o .:? "agentDescription"
+
+-- | Output for the @subagentStart@ hook; @additionalContext@ is prepended to
+-- the sub-agent's initial prompt.
+newtype SubagentStartHookOutput = SubagentStartHookOutput
+  { ssaoAdditionalContext :: Maybe Text
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SubagentStartHookOutput where
+  toJSON SubagentStartHookOutput{..} = object $ catMaybes
+    [ ("additionalContext" .=) <$> ssaoAdditionalContext ]
+
+-- | Input for the hook fired after a sub-agent completes a turn (@subagentStop@).
+data SubagentStopHookInput = SubagentStopHookInput
+  { sstTimestamp        :: !(Maybe Value)
+  , sstWorkingDirectory :: !Text
+  , sstTranscriptPath   :: !Text
+  , sstAgentName        :: !Text
+  , sstAgentDisplayName :: !(Maybe Text)
+  , sstAgentDescription :: !(Maybe Text)
+  , sstAgentId          :: !(Maybe Text)
+  , sstAgentType        :: !Text
+  , sstStopReason       :: !Text
+  , sstResponse         :: !Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SubagentStopHookInput where
+  parseJSON = withObject "SubagentStopHookInput" $ \o -> do
+    wd  <- o .:? "workingDirectory"
+    cwd <- o .:? "cwd"
+    SubagentStopHookInput
+      <$> o .:? "timestamp"
+      <*> pure (maybe (maybe "" id cwd) id wd)
+      <*> o .:? "transcriptPath" .!= ""
+      <*> o .:? "agentName" .!= ""
+      <*> o .:? "agentDisplayName"
+      <*> o .:? "agentDescription"
+      <*> o .:? "agentId"
+      <*> o .:? "agentType" .!= ""
+      <*> o .:? "stopReason" .!= ""
+      <*> o .:? "response" .!= ""
+
+-- | Output for the @subagentStop@ hook: decision @block@ with a reason keeps
+-- the sub-agent going; @modifiedResponse@ replaces the reported response.
+data SubagentStopHookOutput = SubagentStopHookOutput
+  { sstoDecision         :: !(Maybe Text)
+  , sstoReason           :: !(Maybe Text)
+  , sstoModifiedResponse :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SubagentStopHookOutput where
+  toJSON SubagentStopHookOutput{..} = object $ catMaybes
+    [ ("decision" .=) <$> sstoDecision
+    , ("reason" .=) <$> sstoReason
+    , ("modifiedResponse" .=) <$> sstoModifiedResponse
+    ]
+
 -- | Session hooks configuration.
 data SessionHooks = SessionHooks
   { shOnPreToolUse          :: !(Maybe (PreToolUseHookInput -> HookInvocation -> IO (Maybe PreToolUseHookOutput)))
@@ -1482,11 +2183,13 @@ data SessionHooks = SessionHooks
   , shOnSessionEnd          :: !(Maybe (SessionEndHookInput -> HookInvocation -> IO (Maybe SessionEndHookOutput)))
   , shOnErrorOccurred       :: !(Maybe (ErrorOccurredHookInput -> HookInvocation -> IO (Maybe ErrorOccurredHookOutput)))
   , shOnUserPromptTransformed :: !(Maybe (UserPromptSubmittedHookInput -> HookInvocation -> IO (Maybe UserPromptSubmittedHookOutput)))  -- ^ Hook fired for userPromptTransformed events
+  , shOnSubagentStart       :: !(Maybe (SubagentStartHookInput -> HookInvocation -> IO (Maybe SubagentStartHookOutput)))  -- ^ Hook fired before a sub-agent's first turn
+  , shOnSubagentStop        :: !(Maybe (SubagentStopHookInput -> HookInvocation -> IO (Maybe SubagentStopHookOutput)))  -- ^ Hook fired after a sub-agent completes a turn
   }
 
 -- | Default (empty) session hooks.
 defaultSessionHooks :: SessionHooks
-defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- ============================================================================
 -- Session Events
@@ -1891,6 +2594,9 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoBuiltinPluginDirectories  :: !(Maybe [Text])  -- ^ Built-in plugin directories (builtinPluginDirectories)
   , ccoInProcess                 :: !(Maybe Bool)  -- ^ Use in-process FFI transport (inProcess)
   , ccoOnGetTraceContext         :: !(Maybe TraceContextProvider)  -- ^ Provider invoked to supply trace context (onGetTraceContext)
+  , ccoClientInfo                :: !(Maybe CopilotClientInfo)  -- ^ Application identity sent on the connect handshake
+  , ccoMode                      :: !ClientMode  -- ^ 'ClientModeCodingAgent' (default) or 'ClientModeEmpty'
+  , ccoNetwork                   :: !(Maybe NetworkOptions)  -- ^ Proxy and proxy-authentication callbacks
   }
 
 -- | Default client options.
@@ -1914,4 +2620,7 @@ defaultClientOptions = CopilotClientOptions
   , ccoBuiltinPluginDirectories  = Nothing
   , ccoInProcess                 = Nothing
   , ccoOnGetTraceContext         = Nothing
+  , ccoClientInfo                = Nothing
+  , ccoMode                      = ClientModeCodingAgent
+  , ccoNetwork                   = Nothing
   }

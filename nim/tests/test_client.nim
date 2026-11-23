@@ -8,6 +8,9 @@ import ../src/copilot_sdk/types
 import ../src/copilot_sdk/jsonrpc
 import ../src/copilot_sdk/tools
 import ../src/copilot_sdk/session
+import ../src/copilot_sdk/session_params
+import ../src/copilot_sdk/sdk_protocol_version
+import ../src/copilot_sdk/client
 
 # ===========================================================================
 # JSON-RPC tests
@@ -386,5 +389,73 @@ suite "CopilotClient construction":
     let cfg = newClientConfig(cliPath = "/my/copilot")
     let client = newCopilotClient(cfg)
     check client.config.cliPath == "/my/copilot"
+
+# ===========================================================================
+# SDK protocol 4
+# ===========================================================================
+
+suite "SDK protocol 4":
+  test "protocol version is 4 and only 4 is accepted":
+    check SdkProtocolVersion == 4
+    verifyProtocolVersion(%*{"protocolVersion": 4})
+    expect IOError:
+      verifyProtocolVersion(%*{"protocolVersion": 3})
+    try:
+      verifyProtocolVersion(%*{"message": "pong"})
+      check false
+    except IOError as e:
+      check "does not report a protocol version" in e.msg
+
+  test "groupSessionParams nests flat keys and renames resume keys":
+    let flat = %*{
+      "model": "m",
+      "streaming": true,
+      "requestPermission": true,
+      "tools": [{"name": "t", "idempotent": true}],
+      "hooks": true,
+      "disableResume": true,
+      "trustWorkingDirectory": "session",
+      "mcpServers": {"s": {"command": "x"}},
+      "futureKey": 1,
+    }
+    let grouped = groupSessionParams(flat, isResume = true)
+    check grouped["model"].getStr() == "m"
+    check grouped["events"]["streaming"].getBool()
+    check grouped["permissions"]["request"].getBool()
+    check grouped["tools"]["definitions"][0]["idempotent"].getBool()
+    check grouped["hooks"]["hasHandlers"].getBool()
+    check grouped["suppressResumeEvent"].getBool()
+    check grouped["mcp"]["envValueMode"].getStr() == "direct"
+    check grouped["futureKey"].getInt() == 1
+    check not grouped.hasKey("filesystem")
+    check not grouped.hasKey("streaming")
+
+  test "legacy provider becomes the named default provider":
+    let flat = %*{
+      "model": "gpt",
+      "provider": {"type": "openai", "baseUrl": "https://x", "apiKeyCommand": "k",
+                   "maxOutputTokens": 100},
+      "enableWebSocketResponses": true,
+    }
+    let grouped = groupSessionParams(flat, isResume = false)
+    let inference = grouped["inference"]
+    check inference["providers"][0]["name"].getStr() == "default"
+    check inference["providers"][0]["apiKeyCommand"].getStr() == "k"
+    check not inference["providers"][0].hasKey("maxOutputTokens")
+    check inference["defaultProvider"].getStr() == "default"
+    check inference["models"][0]["id"].getStr() == "gpt"
+    check inference["models"][0]["maxOutputTokens"].getInt() == 100
+    check not grouped["github"]["capi"]["enabled"].getBool()
+    check grouped["github"]["capi"]["enableWebSocketResponses"].getBool()
+    check not grouped.hasKey("provider")
+    check not grouped.hasKey("enableWebSocketResponses")
+
+  test "empty mode defaults never override user values":
+    let payload = %*{"state": {"memory": {"enabled": true}}}
+    applyEmptyModeDefaults(payload)
+    check payload["state"]["memory"]["enabled"].getBool()
+    check payload["state"]["skipEmbeddingRetrieval"].getBool()
+    check payload["mcp"]["oauthTokenStorage"].getStr() == "in-memory"
+    check parseClientMode("copilot-cli") == cmCodingAgent
 
 echo "\nAll tests passed."

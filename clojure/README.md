@@ -50,6 +50,141 @@ The SDK requires:
 (client/stop! my-client)
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected by `start!` with a protocol version mismatch error.
+
+Existing options keep working. You still pass the same kebab-case keys to `create-session!` and `resume-session!`; right before `session.create` / `session.resume` the SDK translates them into the grouped protocol 4 payload (`inference`, `tools`, `permissions`, `interaction`, `events`, `mcp`, `github`, `state`, and so on). A legacy single `:provider` is sent as the named `"default"` provider with Copilot API models disabled, which preserves the v1 BYOK behavior.
+
+### Client options and methods
+
+```clojure
+(require '[copilot.client :as client]
+         '[copilot.session :as session]
+         '[copilot.types :as types])
+
+(def my-client
+  (client/create-client
+    ;; Declared on the `connect` handshake (empty fields are dropped)
+    :client-info (types/client-info :editor-name "Emacs" :editor-version "29.4"
+                                    :extension-name "copilot.el" :extension-version "0.3.0")
+    ;; "coding-agent" (the default) or "empty"; "copilot-cli" is accepted as an alias
+    :mode "coding-agent"
+    ;; Network callbacks, registered with network.setProvider after connecting
+    :network {:scope "connection"
+              :resolve-proxy (fn [{:keys [url]}] "PROXY proxy.example:8080; DIRECT")
+              :authenticate-negotiate (fn [{:keys [spn]}] nil) ;; nil = no token
+              :authenticate-basic (fn [{:keys [proxy realm previous-rejected]}]
+                                    {:username "me" :password (System/getenv "PROXY_PASSWORD")})}))
+
+(client/clear-managed-settings-cache! my-client) ;; managedSettings.clearCache
+(client/get-mode my-client)                      ;; => "coding-agent"
+```
+
+In the `"empty"` mode every `create-session!` and `resume-session!` must pass `:available-tools` (otherwise an `ex-info` is thrown), and the SDK fills in conservative defaults under your own values: experimental mode, telemetry, the cross-session store, memory, on-demand instruction discovery, repository hooks, and host git operations are off, and MCP OAuth tokens and embeddings are kept in memory.
+
+### Session options
+
+```clojure
+(require '[copilot.define-tool :refer [define-tool]])
+
+(def sess
+  (client/create-session! my-client
+    :model "my-ollama/qwen3"
+    ;; Named BYOK providers and models; select a model with "<provider>/<id>"
+    :providers [(types/named-provider-config :name "my-ollama" :type :openai
+                                             :base-url "http://localhost:11434/v1"
+                                             :api-key-command "pass show ollama")]
+    :models [(types/provider-model-config :provider "my-ollama" :id "qwen3"
+                                          :max-output-tokens 8192)]
+    :default-provider "my-ollama"
+    :capi (types/capi-config :enabled false)  ;; BYOK-only model catalog
+    ;; Tools can be marked idempotent (safe to retry)
+    :tools [(define-tool "get_weather" "Get the weather" {:type "object"}
+              (fn [args _] "22C, sunny")
+              {:idempotent true})]
+    :ask-user-variant "elicitation"           ;; or "legacy"
+    :sandbox-config (types/sandbox-config :enabled true :allow-bypass true)
+    :feature-flags {"some_flag" true}
+    :allowed-models ["my-ollama/qwen3"]
+    :auth-client-id-metadata-url "https://example.com/oauth/client.json"
+    :agent-directories ["./agents"]
+    :hook-directories ["./hooks"]
+    :trust-working-directory "session"        ;; create only: "session" or "user"
+    :image-generation (types/image-generation-config :enabled true :save-to-disk true)
+    :autopilot (types/autopilot-options :continuation-enabled true :max-continues 5)
+    :model-capabilities (types/model-capabilities-override
+                          :limits (types/model-limits-override :max-output-tokens 8192))
+    ;; GitHub token provider (mutually exclusive with :github-token).
+    ;; Return a token string, {:access-token s :expires-in secs}, or :cancelled.
+    ;; The runtime needs more than one hour of remaining lifetime (default 8 hours).
+    :github-token-provider (fn [{:keys [host session-id reason]}]
+                             {:access-token (System/getenv "GH_TOKEN") :expires-in 28800})
+    ;; Shell commands that ask for a password: return the value, or nil to cancel
+    :on-shell-authentication-request (fn [{:keys [program prompt input-kind]}]
+                                       (when (= "git" program) (System/getenv "GIT_PASSWORD")))
+    ;; Memories the agent asks to store (after runtime validation and approval)
+    :store-memory (fn [{:keys [subject fact citations reason]}]
+                    (println "remember:" subject fact))))
+
+;; Resume-only options: transcript recovery, and an explicit nil clears the default provider
+(client/resume-session! my-client (session/session-id sess)
+  :allow-transcript-recovery true
+  :default-provider nil)
+```
+
+The legacy single provider also gained `:api-key-command`, `:model-provider`, `:transport`, and `:headers` in `types/provider-config`.
+
+### Session methods and message options
+
+```clojure
+;; Message provenance, opaque turn id, and structured output
+(session/send! sess {:prompt         "List three colors as JSON"
+                     :source         (types/message-source :user) ;; "user", "system", or (types/message-source :agent "id")
+                     :client-turn-id "turn-42"
+                     :response-schema {:type "object"
+                                       :properties {:colors {:type "array" :items {:type "string"}}}}})
+
+(session/switch-auto-tier! sess "efficiency")  ;; "fast" "efficiency" "balance" "intelligence", or nil
+(session/get-managed-settings! sess)           ;; session.managedSettings.get
+(session/recheck-policy-helper! sess)          ;; session.managedSettings.recheckPolicyHelper
+
+(let [{:keys [success reason]} (session/set-permission-mode! sess "allow-all")]
+  (when (and (not success) (= reason (:managed-policy types/permission-mode-refusals)))
+    (println "Blocked by managed policy")))
+
+(session/detach! sess) ;; session.detach: keep the session on the server for a later resume
+```
+
+### Hooks, events, and errors
+
+```clojure
+;; Subagent lifecycle hooks (delivered through hooks.invoke)
+(client/create-session! my-client
+  :hooks {:on-subagent-start (fn [input _] {:additionalContext (str "You are " (:agentName input))})
+          :on-subagent-stop  (fn [input _] nil)})
+
+;; Live shell output (ephemeral tool.shell_output events)
+(session/on-type! sess types/tool-shell-output-event
+  (fn [event]
+    (let [{:keys [tool-call-id text stream]} (types/tool-shell-output event)]
+      (print text))))
+
+;; A session refused by a managed-settings policy helper
+(try
+  (client/create-session! my-client)
+  (catch clojure.lang.ExceptionInfo e
+    (when-let [failure (:policy-helper-failure (ex-data e))]
+      (println "Policy helper failed:" (:category failure) (:message failure)))))
+```
+
+`session.abort`, `session.delete`, and `session.setForeground` failures arrive as JSON-RPC errors and are thrown as `ex-info`.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection. This SDK keeps spawning the CLI (stdio or TCP) or connecting to `:cli-url`.
+
 ## Custom Tools
 
 Define tools that the Copilot agent can call back into your process:
@@ -124,6 +259,9 @@ Create a new CopilotClient (returns an atom).
 | `:env` | nil | Environment variables map |
 | `:github-token` | nil | GitHub token for authentication |
 | `:use-logged-in-user` | `true` | Use logged-in user auth (false when `:github-token` set) |
+| `:client-info` | nil | Application identity sent on the `connect` handshake (`types/client-info`) |
+| `:mode` | `"coding-agent"` | `"coding-agent"` or `"empty"` (`"copilot-cli"` is an alias of `"coding-agent"`) |
+| `:network` | nil | Network callbacks: `:scope`, `:resolve-proxy`, `:authenticate-negotiate`, `:authenticate-basic` |
 
 #### `start!`
 
@@ -177,6 +315,18 @@ Create a new conversation session. Returns a session atom.
 | `:mcp-servers` | MCP server configurations |
 | `:custom-agents` | Custom agent configurations |
 | `:infinite-sessions` | Infinite session config |
+| `:providers` / `:models` / `:default-provider` / `:capi` | Named BYOK providers and models (`types/named-provider-config`, `types/provider-model-config`, `types/capi-config`) |
+| `:github-token-provider` | `(fn [request])` returning a token for `gitHubToken.getToken` |
+| `:on-shell-authentication-request` | `(fn [request])` returning the answer string, or nil to cancel |
+| `:store-memory` | `(fn [memory])` called for `memoryStore.store` |
+| `:ask-user-variant` | `"legacy"` or `"elicitation"` |
+| `:sandbox-config` | Sandbox settings, including `:allow-bypass` (`types/sandbox-config`) |
+| `:feature-flags` / `:allowed-models` | Feature flag overrides and a model allowlist |
+| `:auth-client-id-metadata-url` | MCP OAuth client ID metadata document URL |
+| `:agent-directories` / `:hook-directories` | Extra agent and hook directories |
+| `:trust-working-directory` | Create only: `"session"` or `"user"` |
+| `:allow-transcript-recovery` | Resume only: recover from the transcript |
+| `:image-generation` / `:autopilot` | `types/image-generation-config`, `types/autopilot-options` |
 
 #### `resume-session!`
 
@@ -189,7 +339,7 @@ Resume an existing session by ID.
 #### `ping!`
 
 ```clojure
-(client/ping! client-atom) ;; => {:message "..." :timestamp 123 :protocol-version 2}
+(client/ping! client-atom) ;; => {:message "..." :timestamp 123 :protocol-version 4}
 ```
 
 #### `list-models!`
@@ -254,6 +404,19 @@ Send a message. Returns immediately with the message ID.
 | `:prompt` | Message text (required) |
 | `:attachments` | Vector of attachment maps |
 | `:mode` | `"enqueue"` or `"immediate"` |
+| `:source` | `"user"`, `"system"`, or `"agent-<id>"` (`types/message-source`) |
+| `:client-turn-id` | Opaque caller-chosen turn identifier |
+| `:response-schema` | JSON Schema map for structured output |
+
+#### `detach!`, `switch-auto-tier!`, `set-permission-mode!`
+
+```clojure
+(session/detach! sess)                      ;; session.detach
+(session/switch-auto-tier! sess "balance")  ;; session.model.switchAutoTier
+(session/set-permission-mode! sess "manual") ;; => {:success true :mode "manual" :reason nil}
+(session/get-managed-settings! sess)        ;; session.managedSettings.get
+(session/recheck-policy-helper! sess)       ;; session.managedSettings.recheckPolicyHelper
+```
 
 #### `send-and-wait!`
 
@@ -329,6 +492,7 @@ Destroy the session and release resources.
 
 ```clojure
 (define-tool name description parameters handler-fn)
+(define-tool name description parameters handler-fn {:idempotent true})
 (define-tool name description handler-fn)  ;; no parameters
 ```
 
@@ -357,6 +521,7 @@ Sessions emit various events:
 | `assistant.reasoning_delta` | Streaming reasoning chunk |
 | `tool.execution_start` | Tool execution started |
 | `tool.execution_complete` | Tool execution completed |
+| `tool.shell_output` | Live shell output chunk (`types/tool-shell-output`) |
 | `session.idle` | Session finished processing |
 | `session.error` | Session error occurred |
 | `session.compaction_start` | Background compaction started |
@@ -587,9 +752,9 @@ The SDK communicates with the Copilot CLI server via JSON-RPC 2.0:
 
 - **Transport**: stdio (default) or TCP
 - **Framing**: Content-Length header (`Content-Length: N\r\n\r\n{json}`)
-- **Protocol version**: 2 (verified on connect via ping)
+- **Protocol version**: 4 (verified on connect via ping; Copilot CLI 1.0.113 or newer)
 - **Server notifications**: `session.event`, `session.lifecycle`
-- **Server requests**: `tool.call`, `permission.request`, `userInput.request`, `hooks.invoke`
+- **Server requests**: `tool.call`, `permission.request`, `userInput.request`, `hooks.invoke`, `gitHubToken.getToken`, `shellAuthentication.request`, `shellAuthentication.cancel`, `memoryStore.store`, `network.resolveProxy`, `network.authenticateNegotiate`, `network.authenticateBasic`
 
 ## Requirements
 

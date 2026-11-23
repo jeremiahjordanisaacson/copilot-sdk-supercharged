@@ -29,6 +29,11 @@
        01  WS-JSON-LEN              PIC 9(5)    VALUE 0.
        01  WS-PARAMS-BUFFER         PIC X(4096) VALUE SPACES.
        01  WS-PARAMS-PTR            PIC 9(5)    VALUE 1.
+       01  WS-EXPECTED-JSON         PIC X(1024) VALUE SPACES.
+
+      *    Session options and work fields of the protocol 4 payload
+      *    builder (COPILOT-PARAMS.cpy, copied at the end).
+       COPY "COPILOT-SESSION-OPTS.cpy".
 
        PROCEDURE DIVISION.
        RUN-ALL-TESTS.
@@ -44,13 +49,16 @@
            PERFORM TEST-SESSION-CONFIG-DEFAULTS
            PERFORM TEST-SEND-OPTIONS-DEFAULTS
            PERFORM TEST-SEND-RESULT-DEFAULTS
-           PERFORM TEST-RETURN-CODE-VALUES
+           PERFORM TEST-RETURN-CODE-VALUES THRU RC-TEST-DONE
            PERFORM TEST-JSON-BUILD-REQUEST
            PERFORM TEST-JSON-BUILD-NOTIFICATION
            PERFORM TEST-SESSION-ID-EMPTY
            PERFORM TEST-TOOL-DEF-INIT
            PERFORM TEST-EVENT-TYPE-INIT
            PERFORM TEST-FRAMING-DEFAULTS
+           PERFORM TEST-GROUPED-CREATE-PARAMS
+           PERFORM TEST-GROUPED-RESUME-PARAMS
+           PERFORM TEST-EMPTY-MODE-NEEDS-TOOLS
 
            DISPLAY " "
            DISPLAY "========================================"
@@ -61,10 +69,10 @@
 
            IF WS-FAIL-COUNT > 0
                DISPLAY "FAIL: Some tests failed!"
-               STOP RUN WITH STATUS 1
+               STOP RUN WITH ERROR STATUS 1
            ELSE
                DISPLAY "OK: All tests passed!"
-               STOP RUN WITH STATUS 0
+               STOP RUN WITH NORMAL STATUS 0
            END-IF
            .
 
@@ -80,13 +88,15 @@
            ADD 1 TO WS-TEST-COUNT
 
            EVALUATE TRUE
-               WHEN WS-PROTO-MAJOR = 3
+               WHEN WS-PROTO-MAJOR = 4
+                AND WS-PROTO-MIN = 4
+                AND WS-PROTO-MAX = 4
                 AND WS-SDK-NAME = "copilot-sdk-cobol"
                 AND WS-SDK-VERSION = "1.0.0"
-                AND WS-PROTO-STRING = "3"
+                AND WS-PROTO-STRING = "4"
                    PERFORM RECORD-PASS
                WHEN OTHER
-                   MOVE "3, copilot-sdk-cobol, 1.0.0"
+                   MOVE "4, copilot-sdk-cobol, 1.0.0"
                        TO WS-EXPECTED
                    STRING WS-PROTO-MAJOR ", "
                        FUNCTION TRIM(WS-SDK-NAME) ", "
@@ -396,9 +406,119 @@
            END-IF
            .
 
+      *----------------------------------------------------------------*
+      * TEST-GROUPED-CREATE-PARAMS: The protocol 4 translation layer   *
+      * groups flat options, keeps unknown keys at the root and        *
+      * escapes strings for session.create.                            *
+      *----------------------------------------------------------------*
+       TEST-GROUPED-CREATE-PARAMS.
+           MOVE "Grouped session.create params" TO WS-TEST-NAME
+           ADD 1 TO WS-TEST-COUNT
+
+           MOVE "claude-sonnet-4.5" TO WS-SESS-MODEL
+           MOVE "C:\repo" TO WS-SESS-WORKING-DIR
+           SET STREAMING-ON TO TRUE
+           SET REWIND-ON TO TRUE
+           MOVE "high" TO WS-REASONING-EFFORT
+           MOVE '["view","grep"]' TO WS-AVAILABLE-TOOLS
+           SET SANDBOX-BYPASS-ON TO TRUE
+           SET TRUST-WD-SESSION TO TRUE
+
+           SET PB-FOR-CREATE TO TRUE
+           PERFORM BUILD-SESSION-PARAMS
+
+           MOVE SPACES TO WS-EXPECTED-JSON
+           STRING
+               '{"model":"claude-sonnet-4.5",'
+               '"workingDirectory":"C:\\repo",'
+               '"rewindEnabled":true,'
+               '"inference":{"reasoningEffort":"high"},'
+               '"tools":{"availableTools":["view","grep"]},'
+               '"permissions":{"sandbox":{"allowBypass":true}},'
+               '"events":{"streaming":true},'
+               '"filesystem":{"trustWorkingDirectory":"session"}}'
+               DELIMITED SIZE INTO WS-EXPECTED-JSON
+           END-STRING
+           PERFORM CHECK-PARAMS-JSON
+           .
+
+      *----------------------------------------------------------------*
+      * TEST-GROUPED-RESUME-PARAMS: Resume adds sessionId and the      *
+      * resume-only root keys and drops create-only members.           *
+      *----------------------------------------------------------------*
+       TEST-GROUPED-RESUME-PARAMS.
+           MOVE "Grouped session.resume params" TO WS-TEST-NAME
+           ADD 1 TO WS-TEST-COUNT
+
+           MOVE "sess-1" TO WS-SESSION-ID
+           SET RESUME-EVENT-SUPPRESSED TO TRUE
+           SET PB-FOR-RESUME TO TRUE
+           PERFORM BUILD-SESSION-PARAMS
+
+      *    trustWorkingDirectory is create only, so the filesystem
+      *    group is not written at all.
+           MOVE SPACES TO WS-EXPECTED-JSON
+           STRING
+               '{"sessionId":"sess-1",'
+               '"model":"claude-sonnet-4.5",'
+               '"workingDirectory":"C:\\repo",'
+               '"suppressResumeEvent":true,'
+               '"rewindEnabled":true,'
+               '"inference":{"reasoningEffort":"high"},'
+               '"tools":{"availableTools":["view","grep"]},'
+               '"permissions":{"sandbox":{"allowBypass":true}},'
+               '"events":{"streaming":true}}'
+               DELIMITED SIZE INTO WS-EXPECTED-JSON
+           END-STRING
+           PERFORM CHECK-PARAMS-JSON
+           .
+
+      *----------------------------------------------------------------*
+      * TEST-EMPTY-MODE-NEEDS-TOOLS: Client mode "empty" rejects a     *
+      * session without availableTools.                                *
+      *----------------------------------------------------------------*
+       TEST-EMPTY-MODE-NEEDS-TOOLS.
+           MOVE "Empty client mode requires availableTools"
+               TO WS-TEST-NAME
+           ADD 1 TO WS-TEST-COUNT
+
+           SET CLIENT-MODE-EMPTY TO TRUE
+           MOVE SPACES TO WS-AVAILABLE-TOOLS
+           SET PB-FOR-CREATE TO TRUE
+           PERFORM BUILD-SESSION-PARAMS
+
+           IF PB-FAILED AND WS-RETURN-CODE = -1
+               PERFORM RECORD-PASS
+           ELSE
+               MOVE "PB-FAILED, return code -1" TO WS-EXPECTED
+               MOVE "params were built" TO WS-ACTUAL
+               PERFORM RECORD-FAIL
+           END-IF
+           SET CLIENT-MODE-CODING-AGENT TO TRUE
+           MOVE 0 TO WS-RETURN-CODE
+           .
+
       *================================================================*
       * TEST HELPER PARAGRAPHS                                         *
       *================================================================*
+
+      *----------------------------------------------------------------*
+      * CHECK-PARAMS-JSON: Compare WS-PARAMS-BUFFER with               *
+      * WS-EXPECTED-JSON.                                              *
+      *----------------------------------------------------------------*
+       CHECK-PARAMS-JSON.
+           IF PB-OK AND WS-PARAMS-BUFFER = WS-EXPECTED-JSON
+               PERFORM RECORD-PASS
+           ELSE
+               MOVE WS-EXPECTED-JSON TO WS-EXPECTED
+               MOVE WS-PARAMS-BUFFER TO WS-ACTUAL
+               PERFORM RECORD-FAIL
+               DISPLAY "    Expected JSON: "
+                   FUNCTION TRIM(WS-EXPECTED-JSON)
+               DISPLAY "    Actual JSON:   "
+                   FUNCTION TRIM(WS-PARAMS-BUFFER)
+           END-IF
+           .
 
       *----------------------------------------------------------------*
       * RECORD-PASS: Record a passing test.                            *
@@ -417,3 +537,8 @@
            DISPLAY "    Expected: " FUNCTION TRIM(WS-EXPECTED)
            DISPLAY "    Actual:   " FUNCTION TRIM(WS-ACTUAL)
            .
+
+      *----------------------------------------------------------------*
+      * Protocol 4 session payload builder under test.                 *
+      *----------------------------------------------------------------*
+       COPY "COPILOT-PARAMS.cpy".

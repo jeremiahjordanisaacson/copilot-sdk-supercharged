@@ -9,6 +9,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'types.dart';
+
 /// A single pending JSON-RPC request awaiting a response.
 class _PendingRequest {
   final Completer<dynamic> completer;
@@ -370,6 +372,23 @@ class JsonRpcError implements Exception {
     required this.message,
     this.data,
   });
+
+  /// True for "method not found" (-32601), which older runtimes return for
+  /// methods they do not implement.
+  bool get isMethodNotFound =>
+      code == -32601 || message.startsWith('Unhandled method');
+
+  /// The Policy Helper failure attached to the error data
+  /// (`error.data.policyHelperFailure`), for example when `session.create`
+  /// or `session.resume` fails because of managed policy.
+  PolicyHelperFailure? get policyHelperFailure {
+    final errorData = data;
+    if (errorData is! Map) return null;
+    final failure = errorData['policyHelperFailure'];
+    return failure is Map<String, dynamic>
+        ? PolicyHelperFailure.fromJson(failure)
+        : null;
+  }
 
   @override
   String toString() => 'JsonRpcError($code): $message';

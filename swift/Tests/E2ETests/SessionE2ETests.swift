@@ -70,6 +70,10 @@ final class SessionE2ETests: XCTestCase {
         try await Self.harness.configure(snapshotPath: snapshotPath, workDir: Self.workDir)
     }
 
+    /// Resolves the CLI the tests spawn: `COPILOT_CLI_PATH` (CI points it at the
+    /// `node_modules/.bin/copilot` shim, which runs directly), then
+    /// `@github/copilot/npm-loader.js` (CLI 1.0.113+, run with node), then the legacy
+    /// `index.js` entry points.
     private func getCliPath() -> String {
         if let envPath = ProcessInfo.processInfo.environment["COPILOT_CLI_PATH"],
            FileManager.default.fileExists(atPath: envPath) {
@@ -80,6 +84,14 @@ final class SessionE2ETests: XCTestCase {
             .appendingPathComponent("nodejs")
             .appendingPathComponent("node_modules")
             .appendingPathComponent("@github")
+
+        let npmLoaderPath = githubModules
+            .appendingPathComponent("copilot")
+            .appendingPathComponent("npm-loader.js")
+            .path
+        if FileManager.default.fileExists(atPath: npmLoaderPath) {
+            return npmLoaderPath
+        }
 
         // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
         // package (e.g. @github/copilot-linux-x64 or copilot-darwin-arm64);
@@ -116,7 +128,13 @@ final class SessionE2ETests: XCTestCase {
         // via `process.environment = options.env` (a full replace, not a merge),
         // so PATH/HOME and friends must be preserved or the CLI cannot launch.
         var env = ProcessInfo.processInfo.environment
+        // HMAC keys would make the CLI sign requests the replay proxy cannot verify.
+        env.removeValue(forKey: "COPILOT_HMAC_KEY")
+        env.removeValue(forKey: "CAPI_HMAC_KEY")
         env["COPILOT_API_URL"] = Self.proxyUrl
+        // Route GitHub API calls (including /copilot_internal/user) to the replay proxy,
+        // which answers them for the tokens registered by the harness.
+        env["COPILOT_DEBUG_GITHUB_API_URL"] = Self.proxyUrl
         env["COPILOT_HOME"] = Self.workDir
         env["GH_CONFIG_DIR"] = Self.workDir
         env["XDG_CONFIG_HOME"] = Self.workDir

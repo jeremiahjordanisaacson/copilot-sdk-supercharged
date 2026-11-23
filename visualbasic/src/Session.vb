@@ -21,9 +21,15 @@ Namespace GitHub.Copilot.SDK
         Private ReadOnly _eventHandlers As New List(Of Action(Of SessionEvent))
         Private ReadOnly _handlersLock As New Object()
         Private ReadOnly _toolHandlers As New Dictionary(Of String, Func(Of Object, Task(Of String)))
+        Private ReadOnly _pendingShellAuthentications As New System.Collections.Concurrent.ConcurrentDictionary(Of String, CancellationTokenSource)
         Private _permissionHandler As PermissionHandler
         Private _exitPlanModeHandler As ExitPlanModeHandler
         Private _traceContextProvider As TraceContextProvider
+        Private _subagentStartHandler As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput))
+        Private _subagentStopHandler As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
+        Private _shellAuthenticationHandler As ShellAuthenticationHandler
+        Private _storeMemoryHandler As Func(Of StoredMemory, Task)
+        Private _onDetached As Action
         Private _disposed As Boolean = False
 
         ''' <summary>Gets the unique identifier for this session.</summary>
@@ -67,11 +73,31 @@ Namespace GitHub.Copilot.SDK
                 .Mode = options.Mode,
                 .AgentMode = options.AgentMode,
                 .DisplayPrompt = options.DisplayPrompt,
-                .RequestHeaders = options.RequestHeaders
+                .RequestHeaders = options.RequestHeaders,
+                .Source = options.Source,
+                .ResponseFormat = BuildResponseFormat(options.ResponseSchema),
+                .ClientTurnId = options.ClientTurnId
             }
 
             Dim response = Await _rpc.InvokeAsync(Of SendMessageResponse)("session.send", request, cancellationToken)
             Return response.MessageId
+        End Function
+
+        ''' <summary>
+        ''' Builds the structured-output <c>responseFormat</c> for a JSON Schema
+        ''' (<c>{type:"json_schema", jsonSchema:{name:"response", strict:true, schema}}</c>).
+        ''' Returns Nothing when no schema is set.
+        ''' </summary>
+        Friend Shared Function BuildResponseFormat(schema As Object) As Dictionary(Of String, Object)
+            If schema Is Nothing Then Return Nothing
+            Return New Dictionary(Of String, Object) From {
+                {"type", "json_schema"},
+                {"jsonSchema", New Dictionary(Of String, Object) From {
+                    {"name", "response"},
+                    {"strict", True},
+                    {"schema", schema}
+                }}
+            }
         End Function
 
         ''' <summary>
@@ -229,11 +255,179 @@ Namespace GitHub.Copilot.SDK
         End Function
 
         ''' <summary>
-        ''' Disconnects from this session without deleting server-side data.
+        ''' Disconnects from this session without deleting server-side data. Sends
+        ''' <c>session.detach</c> (falling back to <c>session.destroy</c> on older CLIs) so the
+        ''' session can be resumed later.
         ''' </summary>
         Public Async Function DisconnectAsync(Optional cancellationToken As CancellationToken = Nothing) As Task
             ThrowIfDisposed()
-            Await _rpc.InvokeAsync(Of Object)("session.disconnect", New With {.sessionId = SessionId}, cancellationToken)
+            Dim request = New With {.sessionId = SessionId}
+            Dim fallback = False
+            Try
+                Await _rpc.InvokeAsync(Of Object)("session.detach", request, cancellationToken)
+            Catch ex As JsonRpcException When ex.Code = -32601
+                fallback = True
+            End Try
+            If fallback Then
+                Await _rpc.InvokeAsync(Of Object)("session.destroy", request, cancellationToken)
+            End If
+            CancelPendingShellAuthentications()
+            Dim onDetached = _onDetached
+            _onDetached = Nothing
+            onDetached?.Invoke()
+        End Function
+
+        ''' <summary>
+        ''' Changes the Auto routing preference without changing the selected model (experimental).
+        ''' Pass Nothing to return to the default Auto routing. Returns the runtime's acknowledgement.
+        ''' </summary>
+        Public Async Function SetAutoTierAsync(autoTier As String, Optional cancellationToken As CancellationToken = Nothing) As Task(Of JsonElement)
+            ThrowIfDisposed()
+            Dim request As New Dictionary(Of String, Object) From {
+                {"sessionId", SessionId},
+                {"autoTier", autoTier}
+            }
+            Return Await _rpc.InvokeAsync(Of JsonElement)("session.model.switchAutoTier", request, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Gets the managed (enterprise) settings in effect for this session.
+        ''' </summary>
+        Public Async Function GetManagedSettingsAsync(Optional cancellationToken As CancellationToken = Nothing) As Task(Of JsonElement)
+            ThrowIfDisposed()
+            Return Await _rpc.InvokeAsync(Of JsonElement)(
+                "session.managedSettings.get", New With {.sessionId = SessionId}, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Re-runs the managed-settings policy helper for this session and returns the resolved settings.
+        ''' </summary>
+        Public Async Function RecheckPolicyHelperAsync(Optional cancellationToken As CancellationToken = Nothing) As Task(Of JsonElement)
+            ThrowIfDisposed()
+            Return Await _rpc.InvokeAsync(Of JsonElement)(
+                "session.managedSettings.recheckPolicyHelper", New With {.sessionId = SessionId}, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Changes the session's permission mode (see <see cref="PermissionMode"/>). When the runtime
+        ''' refuses the change, <see cref="PermissionModeSetResult.Success"/> is False and
+        ''' <see cref="PermissionModeSetResult.Reason"/> may be <see cref="PermissionModeRefusalReason.ManagedPolicy"/>.
+        ''' </summary>
+        Public Async Function SetPermissionModeAsync(mode As String, Optional cancellationToken As CancellationToken = Nothing) As Task(Of PermissionModeSetResult)
+            ThrowIfDisposed()
+            Return Await _rpc.InvokeAsync(Of PermissionModeSetResult)(
+                "session.permissions.setMode", New With {.sessionId = SessionId, .mode = mode}, cancellationToken)
+        End Function
+
+        ' -----------------------------------------------------------------------
+        '  Host callbacks (hooks, shell authentication, memory store)
+        ' -----------------------------------------------------------------------
+
+        ''' <summary>Registers the sub-agent lifecycle hooks for this session.</summary>
+        Friend Sub SetSubagentHooks(onStart As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput)),
+                                    onStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput)))
+            _subagentStartHandler = onStart
+            _subagentStopHandler = onStop
+        End Sub
+
+        ''' <summary>Registers the shell authentication handler for this session.</summary>
+        Friend Sub SetShellAuthenticationHandler(handler As ShellAuthenticationHandler)
+            _shellAuthenticationHandler = handler
+        End Sub
+
+        ''' <summary>Registers the store-memory callback for this session.</summary>
+        Friend Sub SetMemoryStoreHandler(handler As Func(Of StoredMemory, Task))
+            _storeMemoryHandler = handler
+        End Sub
+
+        ''' <summary>Registers a callback run once after the session is detached.</summary>
+        Friend Sub SetDetachedCallback(callback As Action)
+            _onDetached = callback
+        End Sub
+
+        ''' <summary>
+        ''' Dispatches a <c>hooks.invoke</c> request. Returns the hook output wire payload, or
+        ''' Nothing when no hook handled the request.
+        ''' </summary>
+        Friend Async Function HandleHooksInvokeAsync(hookType As String, input As JsonElement) As Task(Of Object)
+            If input.ValueKind <> JsonValueKind.Object Then Return Nothing
+            Select Case hookType
+                Case "subagentStart"
+                    Dim handler = _subagentStartHandler
+                    If handler Is Nothing Then Return Nothing
+                    Dim payload = JsonSerializer.Deserialize(Of SubagentStartHookInput)(input.GetRawText())
+                    Dim output = Await handler(payload)
+                    Return output?.ToWire()
+                Case "subagentStop"
+                    Dim handler = _subagentStopHandler
+                    If handler Is Nothing Then Return Nothing
+                    Dim payload = JsonSerializer.Deserialize(Of SubagentStopHookInput)(input.GetRawText())
+                    Dim output = Await handler(payload)
+                    Return output?.ToWire()
+            End Select
+            Return Nothing
+        End Function
+
+        ''' <summary>
+        ''' Answers a <c>shellAuthentication.request</c>. Cancels when no handler is registered, the
+        ''' request id is already pending, the handler fails, or the request is cancelled first.
+        ''' </summary>
+        Friend Async Function HandleShellAuthenticationAsync(request As ShellAuthenticationRequest) As Task(Of ShellAuthenticationResponse)
+            Dim handler = _shellAuthenticationHandler
+            If handler Is Nothing Then Return ShellAuthenticationResponse.Cancel()
+            Dim cts As New CancellationTokenSource()
+            If Not _pendingShellAuthentications.TryAdd(request.RequestId, cts) Then
+                cts.Dispose()
+                Return ShellAuthenticationResponse.Cancel()
+            End If
+            Try
+                Dim answer = handler(request, cts.Token)
+                Dim cancelled = Task.Delay(Timeout.Infinite, cts.Token)
+                Dim winner = Await Task.WhenAny(answer, cancelled)
+                If cts.IsCancellationRequested OrElse winner IsNot answer OrElse answer.Status <> TaskStatus.RanToCompletion Then
+                    Return ShellAuthenticationResponse.Cancel()
+                End If
+                Return If(answer.Result, ShellAuthenticationResponse.Cancel())
+            Catch
+                Return ShellAuthenticationResponse.Cancel()
+            Finally
+                Dim removed As CancellationTokenSource = Nothing
+                _pendingShellAuthentications.TryRemove(request.RequestId, removed)
+                Try
+                    cts.Cancel()
+                Catch
+                End Try
+                cts.Dispose()
+            End Try
+        End Function
+
+        ''' <summary>Cancels a pending shell authentication prompt (<c>shellAuthentication.cancel</c>).</summary>
+        Friend Sub CancelShellAuthentication(requestId As String)
+            Dim cts As CancellationTokenSource = Nothing
+            If requestId IsNot Nothing AndAlso _pendingShellAuthentications.TryGetValue(requestId, cts) Then
+                Try
+                    cts.Cancel()
+                Catch
+                End Try
+            End If
+        End Sub
+
+        Private Sub CancelPendingShellAuthentications()
+            For Each pending In _pendingShellAuthentications.Values
+                Try
+                    pending.Cancel()
+                Catch
+                End Try
+            Next
+        End Sub
+
+        ''' <summary>Delivers a <c>memoryStore.store</c> request to the store-memory callback.</summary>
+        Friend Async Function HandleMemoryStoreAsync(memory As StoredMemory) As Task
+            Dim handler = _storeMemoryHandler
+            If handler Is Nothing Then
+                Throw New InvalidOperationException("No memory store is registered for this session")
+            End If
+            Await handler(memory)
         End Function
 
         ' -----------------------------------------------------------------------
@@ -297,6 +491,8 @@ Namespace GitHub.Copilot.SDK
                         Return JsonSerializer.Deserialize(Of SessionCompactionStartEvent)(raw)
                     Case "session.compaction_complete"
                         Return JsonSerializer.Deserialize(Of SessionCompactionCompleteEvent)(raw)
+                    Case "tool.shell_output"
+                        Return JsonSerializer.Deserialize(Of ToolShellOutputEvent)(raw)
                     Case Else
                         Return JsonSerializer.Deserialize(Of SessionEvent)(raw)
                 End Select
@@ -392,6 +588,7 @@ Namespace GitHub.Copilot.SDK
             If _disposed Then Return
             _disposed = True
 
+            CancelPendingShellAuthentications()
             SyncLock _handlersLock
                 _eventHandlers.Clear()
             End SyncLock

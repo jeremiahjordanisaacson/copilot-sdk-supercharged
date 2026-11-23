@@ -71,6 +71,7 @@ Base.@kwdef struct McpServerConfig
     url::Union{String, Nothing} = nothing
     env::Union{Dict{String, String}, Nothing} = nothing
     headers::Union{Dict{String, String}, Nothing} = nothing
+    tools::Vector{String} = ["*"]  # tools to expose from the server ("*" = all)
 end
 
 """Command definition for session commands."""
@@ -87,6 +88,200 @@ const IMAGE_RESPONSE_FORMAT_STRINGS = Dict{ImageResponseFormat, String}(
     FORMAT_IMAGE       => "image",
     FORMAT_JSON_OBJECT => "json_object",
 )
+
+# ------------------------------------------------------------------------------------
+#  v2.6.0 / v3.0.0 option types (SDK protocol 4)
+# ------------------------------------------------------------------------------------
+
+# Client modes: "coding-agent" (default, CLI-like coding tools and defaults) or "empty"
+# (every create/resume must pass available_tools, and restrictive defaults are applied
+# under explicit options). "copilot-cli" is accepted as an alias of "coding-agent".
+const CLIENT_MODE_CODING_AGENT = "coding-agent"
+const CLIENT_MODE_EMPTY = "empty"
+
+"""Identity of the integrating application, sent on the `connect` handshake."""
+Base.@kwdef struct ClientInfo
+    editor_name::Union{String, Nothing} = nothing
+    editor_version::Union{String, Nothing} = nothing
+    extension_name::Union{String, Nothing} = nothing
+    extension_version::Union{String, Nothing} = nothing
+end
+
+"""
+Network callbacks registered with `network.setProvider` after connecting.
+
+- `scope`: `"connection"` (default) or `"runtime"`.
+- `resolve_proxy(request::Dict)`: return a PAC-style proxy list such as
+  `"PROXY proxy.example:8080; DIRECT"`, or `nothing`.
+- `authenticate_negotiate(request::Dict)`: return a base64 SPNEGO token (without the
+  `Negotiate ` prefix), or `nothing`.
+- `authenticate_basic(request::Dict)`: return `(username=..., password=...)` (or a Dict
+  with those keys), or `nothing`.
+
+Never log tokens or passwords.
+"""
+Base.@kwdef struct NetworkConfig
+    scope::Union{String, Nothing} = nothing
+    resolve_proxy::Union{Function, Nothing} = nothing
+    authenticate_negotiate::Union{Function, Nothing} = nothing
+    authenticate_basic::Union{Function, Nothing} = nothing
+end
+
+"""Sandbox configuration (`allow_bypass` opts in to per-command sandbox bypass requests)."""
+Base.@kwdef struct SandboxConfig
+    enabled::Bool = true
+    allow_bypass::Union{Bool, Nothing} = nothing
+    user_policy::Union{Dict{String, Any}, Nothing} = nothing
+    add_current_working_directory::Union{Bool, Nothing} = nothing
+    sandbox_mcp_servers::Union{Bool, Nothing} = nothing
+    sandbox_lsp_servers::Union{Bool, Nothing} = nothing
+    sandbox_extensions::Union{Bool, Nothing} = nothing
+end
+
+"""Image generation opt-in (wire `imageGeneration`)."""
+Base.@kwdef struct ImageGenerationConfig
+    enabled::Union{Bool, Nothing} = nothing
+    watermark::Union{Bool, Nothing} = nothing
+    save_to_disk::Union{Bool, Nothing} = nothing
+end
+
+"""Autopilot continuation options (wire `autopilot`)."""
+Base.@kwdef struct AutopilotOptions
+    continuation_enabled::Union{Bool, Nothing} = nothing
+    max_continues::Union{Int, Nothing} = nothing
+end
+
+"""
+Legacy single BYOK provider. `api_key_command` runs before each request to obtain a fresh
+API key. On SDK protocol 4 it is sent as the named `"default"` connection with Copilot API
+models disabled; `model_id`, `wire_model`, and `max_*_tokens` become a model definition for
+the session model.
+"""
+Base.@kwdef struct ProviderConfig
+    type::Union{String, Nothing} = nothing
+    base_url::Union{String, Nothing} = nothing
+    api_key::Union{String, Nothing} = nothing
+    api_key_command::Union{String, Nothing} = nothing
+    bearer_token::Union{String, Nothing} = nothing
+    wire_api::Union{String, Nothing} = nothing
+    transport::Union{String, Nothing} = nothing
+    headers::Union{Dict{String, String}, Nothing} = nothing
+    azure_api_version::Union{String, Nothing} = nothing
+    model_provider::Union{String, Nothing} = nothing
+    model_id::Union{String, Nothing} = nothing
+    wire_model::Union{String, Nothing} = nothing
+    max_prompt_tokens::Union{Int, Nothing} = nothing
+    max_context_window_tokens::Union{Int, Nothing} = nothing
+    max_output_tokens::Union{Int, Nothing} = nothing
+end
+
+"""Named BYOK provider connection (wire `inference.providers[]`); select models as `"name/id"`."""
+Base.@kwdef struct NamedProviderConfig
+    name::String
+    base_url::String
+    type::Union{String, Nothing} = nothing
+    api_key::Union{String, Nothing} = nothing
+    api_key_command::Union{String, Nothing} = nothing
+    bearer_token::Union{String, Nothing} = nothing
+    wire_api::Union{String, Nothing} = nothing
+    transport::Union{String, Nothing} = nothing
+    headers::Union{Dict{String, String}, Nothing} = nothing
+    azure_api_version::Union{String, Nothing} = nothing
+    model_provider::Union{String, Nothing} = nothing
+end
+
+"""BYOK model definition (wire `inference.models[]`) served by a named provider."""
+Base.@kwdef struct ProviderModelConfig
+    provider::String
+    id::String
+    model_id::Union{String, Nothing} = nothing
+    wire_model::Union{String, Nothing} = nothing
+    name::Union{String, Nothing} = nothing
+    max_prompt_tokens::Union{Int, Nothing} = nothing
+    max_context_window_tokens::Union{Int, Nothing} = nothing
+    max_output_tokens::Union{Int, Nothing} = nothing
+    capabilities::Union{Dict{String, Any}, Nothing} = nothing
+end
+
+"""Arguments passed to a `github_token_provider` callback (`gitHubToken.getToken`)."""
+Base.@kwdef struct GitHubTokenProviderArgs
+    host::String = ""
+    session_id::Union{String, Nothing} = nothing
+    reason::String = ""
+end
+
+"""
+A password or other answer that a shell command run by the agent asks for (for example
+`sudo -A`, `ssh`, or `git` over HTTPS). Answer with `(action="accept", value="...")` or
+`(action="cancel")`; the answer goes only to the program and is never logged.
+"""
+Base.@kwdef struct ShellAuthenticationRequest
+    request_id::String = ""
+    program::String = ""
+    prompt::String = ""
+    input_kind::String = ""  # "secret", "text", or "confirm"
+    command::String = ""
+    cwd::String = ""
+end
+
+"""A memory the agent asked to store, passed to a session's `store_memory` callback."""
+Base.@kwdef struct StoredMemory
+    session_id::String = ""
+    subject::String = ""
+    fact::String = ""
+    citations::String = ""
+    reason::String = ""
+end
+
+# Session event types (unknown types are still delivered to listeners unchanged).
+const EVENT_TOOL_SHELL_OUTPUT = "tool.shell_output"
+# No longer emitted by protocol 4 runtimes; still tolerated when received.
+const EVENT_TOOL_EXECUTION_PARTIAL_RESULT = "tool.execution_partial_result"
+const EVENT_EXTERNAL_TOOL_REQUESTED = "external_tool.requested"
+
+"""Data of a `tool.shell_output` event (`stream` is "stdout", "stderr", or `nothing`)."""
+Base.@kwdef struct ShellOutputEventData
+    tool_call_id::String = ""
+    text::String = ""
+    sequence::Int = 0
+    stream::Union{String, Nothing} = nothing
+end
+
+# Known value of `PermissionModeSetResult.reason`.
+const PERMISSION_MODE_REFUSAL_MANAGED_POLICY = "managed_policy"
+
+"""Result of `set_permission_mode` (`reason` explains a refusal when known)."""
+Base.@kwdef struct PermissionModeSetResult
+    success::Bool = false
+    mode::String = ""
+    reason::Union{String, Nothing} = nothing
+end
+
+"""
+Structured Policy Helper failure, read from a failed create/resume `JsonRpcError`
+(`policy_helper_failure(err)`) or a managed settings snapshot. Helper-authored text is
+untrusted: render it as plain text.
+"""
+Base.@kwdef struct PolicyHelperFailure
+    category::String = ""
+    failure_mode::String = ""
+    message::String = ""
+    previous_policy_retained::Bool = false
+    reason::String = ""
+    severity::Union{String, Nothing} = nothing
+    authority::Union{String, Nothing} = nothing
+    code::Union{String, Nothing} = nothing
+    details::Any = nothing
+    diagnostic::Union{String, Nothing} = nothing
+    help_link::Any = nothing
+    remediation::Union{String, Nothing} = nothing
+end
+
+# Message sources for `MessageOptions.source`.
+const MESSAGE_SOURCE_USER = "user"
+const MESSAGE_SOURCE_SYSTEM = "system"
+"""Message source for an agent: `"agent-<id>"`."""
+message_source_agent(agent_id::AbstractString) = "agent-" * agent_id
 
 """Options for creating a CopilotClient."""
 Base.@kwdef mutable struct CopilotClientOptions
@@ -107,6 +302,12 @@ Base.@kwdef mutable struct CopilotClientOptions
     tcp_connection_token::Union{String, Nothing} = nothing
     builtin_plugin_directories::Vector{String} = String[]  # wire: builtinPluginDirectories
     in_process::Bool = false                               # wire: inProcess
+    remote::Bool = false                                   # spawns the CLI with --remote
+    # --- v2.6.0 / v3.0.0 (SDK protocol 4) ---
+    client_info::Union{ClientInfo, Nothing} = nothing      # sent on the connect handshake
+    mode::String = CLIENT_MODE_CODING_AGENT                # "coding-agent" or "empty"
+    network::Union{NetworkConfig, Nothing} = nothing       # network.setProvider callbacks
+    on_get_trace_context::Union{Function, Nothing} = nothing
 end
 
 """Per-session spending / credit limits."""
@@ -172,6 +373,41 @@ Base.@kwdef mutable struct SessionConfig
     experimental_mode::Bool = false                                     # wire: experimentalMode
     content_exclusion::Bool = false                                     # wire: contentExclusion
     on_user_prompt_transformed::Union{Function, Nothing} = nothing      # wire: userPromptTransformed
+    # --- Options read by create/resume ---
+    cloud::Any = nothing                                                 # wire: cloud (create only)
+    on_exit_plan_mode::Union{Function, Nothing} = nothing               # wire: requestExitPlanMode
+    enable_session_telemetry::Union{Bool, Nothing} = nothing            # wire: enableSessionTelemetry
+    # --- v2.6.0 upstream-sync session configuration ---
+    auto_tier::Union{String, Nothing} = nothing                         # wire: capi.autoTier
+    ask_user_variant::Union{String, Nothing} = nothing                  # wire: askUserVariant
+    github_token_provider::Union{Function, Nothing} = nothing           # answers gitHubToken.getToken
+    sandbox_config::Union{SandboxConfig, Nothing} = nothing             # wire: sandboxConfig
+    feature_flags::Union{Dict{String, Any}, Nothing} = nothing          # wire: featureFlags
+    allowed_models::Union{Vector{String}, Nothing} = nothing            # wire: allowedModels
+    auth_client_id_metadata_url::Union{String, Nothing} = nothing       # wire: authClientIdMetadataUrl
+    name::Union{String, Nothing} = nothing                              # wire: name (create only)
+    agent_directories::Union{Vector{String}, Nothing} = nothing         # wire: agentDirectories
+    hook_directories::Union{Vector{String}, Nothing} = nothing          # wire: hookDirectories
+    interactive_user::Union{Bool, Nothing} = nothing                    # wire: interactiveUser
+    excluded_managed_settings::Union{Vector{String}, Nothing} = nothing # wire: excludedManagedSettings
+    enforce_managed_model_defaults::Union{Bool, Nothing} = nothing      # wire: enforceManagedModelDefaults
+    trust_working_directory::Union{String, Nothing} = nothing           # "session"/"user" (create only)
+    refresh_custom_instructions::Union{Bool, Nothing} = nothing         # create only
+    allow_transcript_recovery::Union{Bool, Nothing} = nothing           # resume only
+    disable_resume::Bool = false                                        # resume only: suppressResumeEvent
+    image_generation::Union{ImageGenerationConfig, Nothing} = nothing   # wire: imageGeneration
+    autopilot::Union{AutopilotOptions, Nothing} = nothing               # wire: autopilot
+    on_subagent_start::Union{Function, Nothing} = nothing               # hooks.invoke subagentStart
+    on_subagent_stop::Union{Function, Nothing} = nothing                # hooks.invoke subagentStop
+    provider::Union{ProviderConfig, Nothing} = nothing                  # legacy single BYOK provider
+    available_tools::Union{Vector{String}, Nothing} = nothing           # wire: availableTools
+    # --- v3.0.0 (SDK protocol 4) ---
+    providers::Union{Vector{NamedProviderConfig}, Nothing} = nothing    # wire: inference.providers
+    models::Union{Vector{ProviderModelConfig}, Nothing} = nothing       # wire: inference.models
+    default_provider::Union{String, Nothing, Missing} = nothing         # `missing` clears the saved default
+    capi::Union{Dict{String, Any}, Nothing} = nothing                   # wire: github.capi
+    on_shell_authentication_request::Union{Function, Nothing} = nothing # answers shellAuthentication.request
+    store_memory::Union{Function, Nothing} = nothing                    # answers memoryStore.store
 end
 
 """Payload for sending a message to a session."""
@@ -182,6 +418,9 @@ Base.@kwdef struct MessageOptions
     agent_mode::Union{String, Nothing} = nothing
     display_prompt::Union{String, Nothing} = nothing
     request_headers::Union{Dict{String, String}, Nothing} = nothing
+    source::Union{String, Nothing} = nothing                  # "user", "system", or "agent-<id>"
+    client_turn_id::Union{String, Nothing} = nothing          # wire: clientTurnId
+    response_schema::Union{Dict{String, Any}, Nothing} = nothing  # structured output JSON Schema
 end
 
 """Result returned from a tool handler."""
@@ -250,12 +489,19 @@ Base.@kwdef struct SessionMetadata
     model::Union{String, Nothing} = nothing
 end
 
-"""Permission request sent by the server."""
+"""
+Permission request sent by the server. On SDK protocol 4 it comes from a
+`permission.requested` event: `kind` is the permission kind (such as "shell", "write",
+"read", "mcp", "url", or "custom-tool") and `details` holds the full request.
+"""
 Base.@kwdef struct PermissionRequest
     permission_id::String = ""
     tool_name::String = ""
     description::String = ""
     arguments::Dict{String, Any} = Dict{String, Any}()
+    kind::String = ""
+    tool_call_id::String = ""
+    details::Dict{String, Any} = Dict{String, Any}()
 end
 
 # Convenience constructors from Dict

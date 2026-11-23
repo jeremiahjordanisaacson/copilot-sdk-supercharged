@@ -56,11 +56,155 @@ set session [::copilot::client::create_session $client \
 # Send a message and wait for the response
 set response [::copilot::client::send_and_wait $session \
     [dict create message "What is 2+2?"]]
-puts "Response: $response"
+puts "Response: [dict get $response content]"
 
 # Clean up
 ::copilot::client::stop $client
 ```
+
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older
+CLIs are rejected by `::copilot::client::start` with a protocol version mismatch error. The
+client now performs the real handshake (`connect` with your `client_info`, then `ping`) and sends
+`session.send`, `session.detach`, and the other Copilot JSON-RPC methods with exactly-typed JSON.
+Every existing option keeps working: `create_session` and `resume_session` still take the same
+flat options, and the SDK translates them into the grouped v4 `session.create` /
+`session.resume` payload (for example `streaming` becomes `events.streaming` and
+`excluded_tools` becomes `tools.excludedTools`). A legacy single `provider` is sent as a named
+`"default"` connection with Copilot API models disabled, which preserves the v1 BYOK behavior.
+`resume_session` now accepts the same options as `create_session` and returns the resume result
+plus `handle`, the local session handle. `send_and_wait` returns a dict with `messageId`,
+`content` (the last assistant message), and `events`.
+
+New in this release:
+
+- **Named BYOK providers**: `providers`, `models`, `default_provider` (`null` clears a saved default on resume), and `capi`, with `make_named_provider_config` and `make_provider_model_config`.
+- **Idempotent tools**: `::copilot::tools::define_tool name description handler parameters 1`.
+- **Client turn ID**: the `client_turn_id` send option.
+- **Client mode**: the `mode` client option (`coding-agent`, the default, or `empty`).
+- **Shell output events**: `tool.shell_output` events reach `on_event` listeners; read them with `::copilot::types::make_shell_output_event_data`.
+- **Shell authentication**: the `on_shell_authentication_request` session option.
+- **Memory store**: the `store_memory` session option.
+- **Network callbacks**: the `network` client option (`scope`, `resolve_proxy`, `authenticate_negotiate`, `authenticate_basic`).
+- **Policy helper failure**: `::copilot::client::policy_helper_failure $error_options` after a failed create/resume, and `::copilot::types::make_policy_helper_failure`.
+- **Permission mode refusal reason**: `::copilot::session::set_permission_mode` returns `success`, `mode`, and `reason` (for example `managed_policy`).
+- **Permission prompts**: the `on_permission_request` session option answers protocol 4 `permission.requested` events. Without it the runtime denies operations that need approval, including custom tools, unless a tool is defined with `skip_permission` (`define_tool name description handler parameters idempotent 1`).
+
+```tcl
+# The handler gets a dict (kind, tool_call_id, request_id, details) and returns a decision:
+# approve, approve-for-session, deny, user-not-available, or a dict such as
+# {kind reject feedback "Not now"}.
+proc ::review {request} {
+    if {[dict get $request kind] in {read custom-tool}} { return approve }
+    return [dict create kind reject feedback "Only reads are allowed"]
+}
+set s [::copilot::client::create_session $c model "claude-sonnet-4.5" \
+    on_permission_request ::review]
+# Or approve everything: on_permission_request ::copilot::session::approve_all
+```
+
+Also new for this SDK (upstream v2.6.0 features): `client_info` (sent on `connect`), Auto routing
+tier (`auto_tier` option, `::copilot::session::set_auto_tier`), `ask_user_variant`,
+`github_token_provider` (answers `gitHubToken.getToken`), sandbox bypass
+(`make_sandbox_config allow_bypass 1`), `feature_flags`, session detach
+(`::copilot::session::detach_session`, also used by `destroy_session`), message source (the
+`source` send option with `::copilot::types::message_source` / `message_source_agent`),
+`::copilot::client::clear_managed_settings_cache`, `::copilot::session::get_managed_settings`,
+`::copilot::session::recheck_policy_helper`, `allowed_models`, `auth_client_id_metadata_url`,
+max output tokens (`make_model_capabilities_limits max_output_tokens 4096`), structured output
+(the `response_schema` send option), `agent_directories` / `hook_directories`,
+`trust_working_directory` (create only), `allow_transcript_recovery` (resume only),
+`make_image_generation_config` (`save_to_disk`), `make_autopilot_options` (`max_continues`),
+sub-agent hooks (`hooks [dict create on_subagent_start ... on_subagent_stop ...]`), and the BYOK
+API key command (`make_provider_config ... api_key_command "..."`).
+
+Tcl values are untyped, so build nested option values with the `make_*` builders, or pass exact
+JSON with `::copilot::jsonrpc::json_raw` (for example tool parameter schemas):
+
+```tcl
+set client [::copilot::client::new mode "coding-agent" \
+    client_info [::copilot::types::make_client_info editor_name "my-app" editor_version "1.2.0"]]
+::copilot::client::start $client
+
+# Idempotent tool with an exact JSON Schema
+::copilot::tools::define_tool lookup_order "Look up an order by ID" [list apply {{params} {
+    return "Order [dict get $params id] shipped"
+}}] [::copilot::jsonrpc::json_raw {{"type":"object","properties":{"id":{"type":"string"}}}}] 1
+
+# Named BYOK provider and model; Copilot API models disabled
+set session [::copilot::client::create_session $client \
+    model "gateway/chat" \
+    providers [list [::copilot::types::make_named_provider_config \
+        name gateway base_url https://models.example.com/v1 api_key $::env(MODEL_API_KEY)]] \
+    models [list [::copilot::types::make_provider_model_config \
+        provider gateway id chat model_id gpt-4o wire_model deployment]] \
+    capi [dict create enabled false] \
+    sandbox_config [::copilot::types::make_sandbox_config enabled 1 allow_bypass 1] \
+    autopilot [::copilot::types::make_autopilot_options continuation_enabled 1 max_continues 5]]
+
+# Turn ID, message source, and structured output
+set response [::copilot::client::send_and_wait $session [::copilot::types::make_send_options \
+    message "What is 2+2?" client_turn_id "turn-42" \
+    source [dict get [::copilot::types::message_source] USER] \
+    response_schema [::copilot::jsonrpc::json_raw {{"type":"object","properties":{"answer":{"type":"integer"}}}}]]]
+puts [dict get $response content]
+```
+
+Shell authentication, memory store, shell output, and network callbacks:
+
+```tcl
+proc answer_sudo {request context} {
+    if {[dict get $request input_kind] eq "confirm"} {
+        return [dict create action cancel]
+    }
+    return [dict create action accept value $::env(SUDO_PASSWORD)]
+}
+proc store_memory {memory context} {
+    set fh [open memories.txt a]
+    puts $fh "[dict get $memory subject]: [dict get $memory fact]"
+    close $fh
+}
+proc resolve_proxy {request} { return "PROXY proxy.example:8080; DIRECT" }
+
+set client [::copilot::client::new network [dict create scope connection resolve_proxy resolve_proxy]]
+::copilot::client::start $client   ;# registers the callback with network.setProvider
+
+# Empty mode would also require: available_tools {view grep}
+set session [::copilot::client::create_session $client \
+    on_shell_authentication_request answer_sudo store_memory store_memory]
+::copilot::session::on_event $session [list apply {{event} {
+    set chunk [::copilot::types::make_shell_output_event_data $event]
+    if {$chunk ne ""} { puts -nonewline [dict get $chunk text] }
+}}]
+```
+
+Policy helper failures, permission modes, and resume:
+
+```tcl
+if {[catch {::copilot::client::create_session $client} err opts]} {
+    set failure [::copilot::client::policy_helper_failure $opts]
+    if {$failure ne ""} { puts "Blocked by policy: [dict get $failure message]" }
+}
+
+set result [::copilot::session::set_permission_mode $session "allow-all"]
+if {![dict get $result success] && [dict get $result reason] eq "managed_policy"} {
+    puts "Managed policy keeps mode [dict get $result mode]"
+}
+
+set sid [dict get [::copilot::session::session_info $session] session_id]
+::copilot::session::detach_session $session
+set resumed [::copilot::client::resume_session $client $sid \
+    allow_transcript_recovery 1 capi [dict create enabled true] default_provider null]
+set resumed_session [dict get $resumed handle]
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI over stdio (or connecting to `cli_url`).
+- Handlers run synchronously while the SDK waits for a response, so a `shellAuthentication.cancel` only arrives after the handler for that request has returned; it is acknowledged without further action.
+- Tcl values are untyped: plain Tcl dicts are encoded with best-effort JSON typing. Use the `make_*` builders or `::copilot::jsonrpc::json_raw` for nested values whose JSON types matter.
 
 ## Architecture
 

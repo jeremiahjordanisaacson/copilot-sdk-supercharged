@@ -85,7 +85,7 @@ pub struct ToolInvocation {
 }
 
 /// Definition of a tool that can be exposed to the Copilot CLI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDefinition {
     pub name: String,
@@ -93,6 +93,10 @@ pub struct ToolDefinition {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
+    /// Marks the tool as safe to retry: repeated calls with the same arguments
+    /// have no additional side effects (`idempotent`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotent: Option<bool>,
 }
 
 /// Payload sent by the server when requesting a tool call.
@@ -896,6 +900,32 @@ pub struct SessionConfig {
     /// Autopilot continuation options (`autopilot`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autopilot: Option<AutopilotOptions>,
+
+    // --- v3.0.0 session options (SDK protocol 4) ---
+    /// Named BYOK provider connections (`inference.providers`). Select a registered
+    /// model with `"<provider>/<id>"`. Replaces the legacy single `provider`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<NamedProviderConfig>>,
+    /// Model definitions for the named providers (`inference.models`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<ProviderModelConfig>>,
+    /// Provider connection used for unqualified model names (`inference.defaultProvider`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<String>,
+    /// Built-in Copilot API (CAPI) policy, sent as `github.capi` (for example
+    /// `enabled: Some(false)` for a BYOK-only catalog).
+    #[serde(skip_serializing)]
+    pub capi: Option<CapiConfig>,
+    /// Handler for shell authentication prompts (`sudo`, `ssh`, `git`) raised by commands the
+    /// agent runs (not serialized). When set, the SDK sends
+    /// `interaction.requestShellAuthentication` and answers `shellAuthentication.request`.
+    #[serde(skip)]
+    pub on_shell_authentication_request: Option<ShellAuthenticationHandlerFn>,
+    /// Stores memories in the application instead of the built-in memory backends
+    /// (not serialized). When set, the SDK sends `state.hasMemoryStore` and answers
+    /// `memoryStore.store`.
+    #[serde(skip)]
+    pub store_memory: Option<MemoryStoreHandlerFn>,
     /// Per-session GitHub token provider (not serialized; mutually exclusive with `github_token`).
     ///
     /// The SDK registers it and sends `gitHubTokenProviderRegistrationId`; the runtime then
@@ -1101,6 +1131,31 @@ pub struct ResumeSessionConfig {
     /// Autopilot continuation options (`autopilot`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autopilot: Option<AutopilotOptions>,
+
+    // --- v3.0.0 session options (SDK protocol 4) ---
+    /// Named BYOK provider connections (`inference.providers`). Re-supply them after a
+    /// runtime restart: credentials are not persisted in session history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<NamedProviderConfig>>,
+    /// Model definitions for the named providers (`inference.models`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<ProviderModelConfig>>,
+    /// Default provider connection (`inference.defaultProvider`). `None` preserves the
+    /// existing default, `Some(None)` sends `null` to clear it, and `Some(Some(name))` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<Option<String>>,
+    /// Built-in Copilot API (CAPI) policy, sent as `github.capi`. Omit to preserve the
+    /// session's routing choice.
+    #[serde(skip_serializing)]
+    pub capi: Option<CapiConfig>,
+    /// Handler for shell authentication prompts (not serialized). When set, the SDK sends
+    /// `interaction.requestShellAuthentication` and answers `shellAuthentication.request`.
+    #[serde(skip)]
+    pub on_shell_authentication_request: Option<ShellAuthenticationHandlerFn>,
+    /// Stores memories in the application (not serialized). When set, the SDK sends
+    /// `state.hasMemoryStore` and answers `memoryStore.store`.
+    #[serde(skip)]
+    pub store_memory: Option<MemoryStoreHandlerFn>,
     /// Per-session GitHub token provider (not serialized; mutually exclusive with `github_token`).
     #[serde(skip)]
     pub github_token_provider: Option<GitHubTokenProviderFn>,
@@ -1239,6 +1294,10 @@ pub struct MessageOptions {
     /// `responseFormat: { type: "json_schema", jsonSchema: { name, strict, schema } }`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<serde_json::Value>,
+    /// Opaque caller-chosen identifier for this turn (`clientTurnId`), echoed on the
+    /// resulting turn events so the caller can correlate them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_turn_id: Option<String>,
 }
 
 impl From<&str> for MessageOptions {
@@ -1379,6 +1438,48 @@ impl SessionEvent {
             None
         }
     }
+
+    /// Returns the live output chunk of a `tool.shell_output` event.
+    /// Returns `None` for other event types or malformed data.
+    pub fn shell_output(&self) -> Option<ToolShellOutputData> {
+        if self.event_type == event_types::TOOL_SHELL_OUTPUT {
+            serde_json::from_value(self.data.clone()).ok()
+        } else {
+            None
+        }
+    }
+}
+
+/// Session event type identifiers (`SessionEvent::event_type`).
+///
+/// Unknown event types are always delivered unchanged, so handlers keep working
+/// when the runtime adds new events.
+pub mod event_types {
+    pub const ASSISTANT_MESSAGE: &str = "assistant.message";
+    pub const ASSISTANT_MESSAGE_DELTA: &str = "assistant.message_delta";
+    pub const SESSION_IDLE: &str = "session.idle";
+    pub const SESSION_ERROR: &str = "session.error";
+    pub const TOOL_EXECUTION_START: &str = "tool.execution_start";
+    pub const TOOL_EXECUTION_COMPLETE: &str = "tool.execution_complete";
+    /// Removed in SDK protocol 4; still delivered if an older runtime sends it.
+    pub const TOOL_EXECUTION_PARTIAL_RESULT: &str = "tool.execution_partial_result";
+    /// Live, append-only shell output (ephemeral; not replayed to late subscribers).
+    pub const TOOL_SHELL_OUTPUT: &str = "tool.shell_output";
+}
+
+/// Data of a `tool.shell_output` event: one chunk of live shell output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolShellOutputData {
+    /// Tool call that owns this shell output.
+    pub tool_call_id: String,
+    /// New output to append (chunks need not contain complete lines).
+    pub text: String,
+    /// Zero-based publication sequence across all output streams of the tool call.
+    pub sequence: u64,
+    /// Output source: `"stdout"` (also when omitted), `"stderr"`, or `"terminal"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<String>,
 }
 
 // ============================================================================
@@ -1390,9 +1491,83 @@ impl SessionEvent {
 #[serde(rename_all = "camelCase")]
 pub struct PingResponse {
     pub message: String,
+    /// Server time in milliseconds since the Unix epoch. Protocol 4 servers report an
+    /// RFC 3339 string, which is converted (an unparseable value becomes `0.0`).
+    #[serde(default, deserialize_with = "deserialize_ping_timestamp")]
     pub timestamp: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_version: Option<u32>,
+}
+
+/// Accepts the ping `timestamp` as epoch milliseconds (older servers) or as an RFC 3339
+/// string (protocol 4 servers).
+fn deserialize_ping_timestamp<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        serde_json::Value::String(s) => rfc3339_to_epoch_millis(&s).unwrap_or(0.0),
+        _ => 0.0,
+    })
+}
+
+/// Parses `YYYY-MM-DDTHH:MM:SS[.fraction](Z|+HH:MM|-HH:MM)` into milliseconds since the
+/// Unix epoch.
+fn rfc3339_to_epoch_millis(s: &str) -> Option<f64> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 19
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !matches!(bytes[10], b'T' | b't' | b' ')
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return None;
+    }
+    let field = |range: std::ops::Range<usize>| -> Option<i64> { s.get(range)?.parse().ok() };
+    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
+    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let mut rest = s.get(19..)?;
+    let mut fraction = 0.0;
+    if let Some(digits) = rest.strip_prefix('.') {
+        let len = digits
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(digits.len());
+        if len == 0 {
+            return None;
+        }
+        fraction = format!("0.{}", &digits[..len]).parse::<f64>().ok()?;
+        rest = &digits[len..];
+    }
+    let offset_minutes = match rest {
+        "Z" | "z" => 0,
+        _ => {
+            let sign = match rest.as_bytes().first()? {
+                b'+' => 1,
+                b'-' => -1,
+                _ => return None,
+            };
+            let hours: i64 = rest.get(1..3)?.parse().ok()?;
+            let minutes: i64 = rest.get(4..6)?.parse().ok()?;
+            sign * (hours * 60 + minutes)
+        }
+    };
+
+    // Days since 1970-01-01 for the proleptic Gregorian calendar (Hinnant's days_from_civil).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let year_of_era = y - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+
+    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second - offset_minutes * 60;
+    Some((seconds as f64 + fraction) * 1000.0)
 }
 
 // ============================================================================
@@ -1831,6 +2006,518 @@ impl std::fmt::Debug for GitHubTokenProviderFn {
 }
 
 // ============================================================================
+// v3.0.0 Types (SDK protocol 4)
+// ============================================================================
+
+/// Boxed error returned by application callbacks.
+pub type CallbackError = Box<dyn std::error::Error + Send + Sync>;
+
+/// How the client configures sessions (`mode`).
+///
+/// `CodingAgent` (the default) keeps the CLI-like coding tools and defaults. `Empty`
+/// disables ambient tools and optional CLI behavior: every session must list its
+/// `available_tools`, and safe defaults are applied under the session's own values.
+/// The legacy name `"copilot-cli"` is accepted as an alias of `"coding-agent"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ClientMode {
+    /// CLI-like coding tools and defaults (`"coding-agent"`).
+    #[default]
+    #[serde(rename = "coding-agent", alias = "copilot-cli")]
+    CodingAgent,
+    /// Only explicitly enabled capabilities (`"empty"`), for shared or multi-user hosts.
+    #[serde(rename = "empty")]
+    Empty,
+}
+
+impl ClientMode {
+    /// Returns the wire name (`"coding-agent"` or `"empty"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClientMode::CodingAgent => "coding-agent",
+            ClientMode::Empty => "empty",
+        }
+    }
+}
+
+impl std::fmt::Display for ClientMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ClientMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "coding-agent" | "copilot-cli" => Ok(ClientMode::CodingAgent),
+            "empty" => Ok(ClientMode::Empty),
+            other => Err(format!(
+                "invalid client mode \"{}\": expected \"coding-agent\" or \"empty\"",
+                other
+            )),
+        }
+    }
+}
+
+/// A named BYOK provider connection (`inference.providers[]`).
+///
+/// A connection owns its endpoint, wire API, transport, and credentials. Model
+/// definitions reference it by `name`, which cannot contain `/`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedProviderConfig {
+    pub name: String,
+    /// Provider type: `"openai"` (runtime default), `"azure"`, or `"anthropic"`.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub provider_type: Option<String>,
+    pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Command whose stdout is used as the API key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
+    /// `"completions"` (runtime default) or `"responses"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+    /// `"http"` (runtime default) or `"websockets"` (requires the Responses API).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub azure: Option<AzureProviderOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+}
+
+/// A model definition served by a named provider (`inference.models[]`).
+///
+/// Select it with the canonical `"<provider>/<id>"` model name.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelConfig {
+    /// Name of the `NamedProviderConfig` connection serving this model.
+    pub provider: String,
+    /// Provider-local model identifier.
+    pub id: String,
+    /// Known base model for behavior and capabilities (defaults to `id`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    /// Model or deployment name sent to the provider API (defaults to `id`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_model: Option<String>,
+    /// Display label (defaults to the canonical selection ID).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_prompt_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_context_window_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
+}
+
+/// Built-in Copilot API (CAPI) policy (`github.capi`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapiConfig {
+    /// Enables the built-in Copilot model catalog, authentication and inference
+    /// (runtime default: true on create; omission on resume preserves the policy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// A password or other answer that a shell command run by the agent asks for
+/// (`shellAuthentication.request`). The answer goes only to the program that asked.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ShellAuthenticationRequest {
+    /// Identifies the request; a `shellAuthentication.cancel` carries the same ID.
+    pub request_id: String,
+    /// The program that asked: `sudo`, `ssh`, or `git`.
+    pub program: String,
+    /// The prompt text the program supplied.
+    pub prompt: String,
+    /// `"secret"` (mask the input), `"text"`, or `"confirm"` (answer `"yes"` or cancel).
+    pub input_kind: String,
+    /// The shell command that triggered the prompt.
+    pub command: String,
+    /// The command's working directory.
+    pub cwd: String,
+}
+
+/// Answer to a [`ShellAuthenticationRequest`].
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum ShellAuthenticationResponse {
+    /// Send `value` to the program (`{ action: "accept", value }`).
+    Accept { value: String },
+    /// Decline the prompt (`{ action: "cancel" }`).
+    Cancel,
+}
+
+impl std::fmt::Debug for ShellAuthenticationResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShellAuthenticationResponse::Accept { .. } => f.write_str("Accept { value: <redacted> }"),
+            ShellAuthenticationResponse::Cancel => f.write_str("Cancel"),
+        }
+    }
+}
+
+/// Future returned by a [`ShellAuthenticationHandlerFn`].
+pub type ShellAuthenticationFuture =
+    Pin<Box<dyn Future<Output = Result<ShellAuthenticationResponse, CallbackError>> + Send>>;
+
+/// Clonable, debuggable async handler for shell authentication prompts.
+///
+/// Receives the request and the session ID. When the runtime cancels the prompt
+/// (`shellAuthentication.cancel`), the SDK drops the pending future and answers `cancel`.
+#[derive(Clone)]
+pub struct ShellAuthenticationHandlerFn(
+    pub Arc<dyn Fn(ShellAuthenticationRequest, String) -> ShellAuthenticationFuture + Send + Sync>,
+);
+
+impl ShellAuthenticationHandlerFn {
+    /// Wraps an async closure as a shell authentication handler.
+    pub fn new<F, Fut>(handler: F) -> Self
+    where
+        F: Fn(ShellAuthenticationRequest, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ShellAuthenticationResponse, CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(
+            move |request: ShellAuthenticationRequest, session_id: String| -> ShellAuthenticationFuture {
+                Box::pin(handler(request, session_id))
+            },
+        ))
+    }
+}
+
+impl std::fmt::Debug for ShellAuthenticationHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<shell_authentication_handler>")
+    }
+}
+
+/// A memory the agent asked to store (`memoryStore.store`), after the runtime's
+/// validation, secret filtering and approval.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StoredMemory {
+    /// Session that stored the memory.
+    pub session_id: String,
+    /// Short topic the memory is about.
+    pub subject: String,
+    /// The fact to remember.
+    pub fact: String,
+    /// Sources supporting the fact, such as file paths with line numbers.
+    pub citations: String,
+    /// Why the agent considers the fact worth remembering.
+    pub reason: String,
+}
+
+/// Future returned by a [`MemoryStoreHandlerFn`].
+pub type MemoryStoreFuture = Pin<Box<dyn Future<Output = Result<(), CallbackError>> + Send>>;
+
+/// Clonable, debuggable async callback that stores memories in the application.
+///
+/// `store_memory` succeeds for the agent only after the future resolves; an error
+/// fails the tool call and nothing is stored elsewhere.
+#[derive(Clone)]
+pub struct MemoryStoreHandlerFn(pub Arc<dyn Fn(StoredMemory) -> MemoryStoreFuture + Send + Sync>);
+
+impl MemoryStoreHandlerFn {
+    /// Wraps an async closure as a memory store callback.
+    pub fn new<F, Fut>(handler: F) -> Self
+    where
+        F: Fn(StoredMemory) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(move |memory: StoredMemory| -> MemoryStoreFuture {
+            Box::pin(handler(memory))
+        }))
+    }
+}
+
+impl std::fmt::Debug for MemoryStoreHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<memory_store_handler>")
+    }
+}
+
+/// Traffic the network callbacks serve (`network.setProvider` `scope`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkScope {
+    /// Requests of this SDK connection (runtime default).
+    Connection,
+    /// All requests of the runtime process.
+    Runtime,
+}
+
+/// Request for the proxies to use for a target (`network.resolveProxy`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NetworkResolveProxyRequest {
+    /// Request target as a PAC script sees it.
+    pub url: String,
+}
+
+/// Request for an initial SPNEGO token (`network.authenticateNegotiate`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NetworkAuthenticateNegotiateRequest {
+    /// Kerberos service principal (`service/host`, optionally followed by `@REALM`).
+    pub spn: String,
+}
+
+/// Request for proxy Basic credentials (`network.authenticateBasic`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NetworkAuthenticateBasicRequest {
+    /// Proxy that challenged, as `http://host:port` or `https://host:port`.
+    pub proxy: String,
+    /// Realm named by the proxy (untrusted text).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub realm: Option<String>,
+    /// True when the proxy rejected the credentials sent last.
+    pub previous_rejected: bool,
+}
+
+/// Proxy Basic credentials returned by an [`AuthenticateBasicFn`]. Never logged.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct BasicCredentials {
+    pub username: String,
+    pub password: Option<String>,
+}
+
+impl std::fmt::Debug for BasicCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BasicCredentials { <redacted> }")
+    }
+}
+
+/// Future returned by the network callbacks.
+pub type NetworkCallbackFuture<T> = Pin<Box<dyn Future<Output = Result<T, CallbackError>> + Send>>;
+
+/// Resolves the PAC-style proxy list for a request target (`None` leaves the
+/// request to the runtime's own proxy resolution).
+#[derive(Clone)]
+pub struct ResolveProxyFn(
+    pub Arc<dyn Fn(NetworkResolveProxyRequest) -> NetworkCallbackFuture<Option<String>> + Send + Sync>,
+);
+
+impl ResolveProxyFn {
+    /// Wraps an async closure as a proxy resolver.
+    pub fn new<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(NetworkResolveProxyRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Option<String>, CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(move |request: NetworkResolveProxyRequest| -> NetworkCallbackFuture<Option<String>> {
+            Box::pin(callback(request))
+        }))
+    }
+}
+
+impl std::fmt::Debug for ResolveProxyFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<resolve_proxy>")
+    }
+}
+
+/// Supplies a base64 initial SPNEGO token (without the `Negotiate` prefix), or `None`.
+#[derive(Clone)]
+pub struct AuthenticateNegotiateFn(
+    pub Arc<
+        dyn Fn(NetworkAuthenticateNegotiateRequest) -> NetworkCallbackFuture<Option<String>>
+            + Send
+            + Sync,
+    >,
+);
+
+impl AuthenticateNegotiateFn {
+    /// Wraps an async closure as a Negotiate token provider.
+    pub fn new<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(NetworkAuthenticateNegotiateRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Option<String>, CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(
+            move |request: NetworkAuthenticateNegotiateRequest| -> NetworkCallbackFuture<Option<String>> {
+                Box::pin(callback(request))
+            },
+        ))
+    }
+}
+
+impl std::fmt::Debug for AuthenticateNegotiateFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<authenticate_negotiate>")
+    }
+}
+
+/// Supplies proxy Basic credentials, or `None` when none are available.
+#[derive(Clone)]
+pub struct AuthenticateBasicFn(
+    pub Arc<
+        dyn Fn(NetworkAuthenticateBasicRequest) -> NetworkCallbackFuture<Option<BasicCredentials>>
+            + Send
+            + Sync,
+    >,
+);
+
+impl AuthenticateBasicFn {
+    /// Wraps an async closure as a Basic credentials provider.
+    pub fn new<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(NetworkAuthenticateBasicRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Option<BasicCredentials>, CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(
+            move |request: NetworkAuthenticateBasicRequest| -> NetworkCallbackFuture<Option<BasicCredentials>> {
+                Box::pin(callback(request))
+            },
+        ))
+    }
+}
+
+impl std::fmt::Debug for AuthenticateBasicFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<authenticate_basic>")
+    }
+}
+
+/// Client network callbacks (`network.setProvider`): proxy resolution and proxy
+/// authentication answered by the application instead of ambient settings.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkConfig {
+    /// Traffic the callbacks serve (runtime default: `Connection`).
+    pub scope: Option<NetworkScope>,
+    pub resolve_proxy: Option<ResolveProxyFn>,
+    pub authenticate_negotiate: Option<AuthenticateNegotiateFn>,
+    pub authenticate_basic: Option<AuthenticateBasicFn>,
+}
+
+impl NetworkConfig {
+    /// Returns true when at least one callback is registered.
+    pub fn has_callbacks(&self) -> bool {
+        self.resolve_proxy.is_some()
+            || self.authenticate_negotiate.is_some()
+            || self.authenticate_basic.is_some()
+    }
+
+    /// Builds the `network.setProvider` params: an empty object marks each registered callback.
+    pub fn set_provider_params(&self) -> serde_json::Value {
+        let mut params = serde_json::Map::new();
+        if let Some(scope) = self.scope {
+            if let Ok(value) = serde_json::to_value(scope) {
+                params.insert("scope".to_string(), value);
+            }
+        }
+        let marker = || serde_json::Value::Object(serde_json::Map::new());
+        if self.resolve_proxy.is_some() {
+            params.insert("resolveProxy".to_string(), marker());
+        }
+        if self.authenticate_negotiate.is_some() {
+            params.insert("authenticateNegotiate".to_string(), marker());
+        }
+        if self.authenticate_basic.is_some() {
+            params.insert("authenticateBasic".to_string(), marker());
+        }
+        serde_json::Value::Object(params)
+    }
+}
+
+/// One field-specific finding reported by a policy helper.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PolicyHelperFailureDetail {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Validated help link supplied by a policy helper (sanitize again before navigating).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PolicyHelperHelpLink {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// The latest unresolved managed-settings policy helper failure (`policyHelperFailure`).
+///
+/// Reported in the JSON-RPC error data of a failed `session.create` / `session.resume`
+/// (see [`crate::CopilotError::policy_helper_failure`]) and on managed settings snapshots.
+/// Helper-authored text is untrusted: render it as plain text.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PolicyHelperFailure {
+    /// Runtime classification such as `timeout`, `spawn`, or `schema` (open set).
+    pub category: String,
+    /// `ignore` or `failClosed`.
+    pub failure_mode: String,
+    /// Plain-text primary explanation.
+    pub message: String,
+    /// True when an earlier helper-derived policy layer still applies.
+    pub previous_policy_retained: bool,
+    /// Invocation reason such as `sessionStart` or `pluginActivation` (open set).
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Vec<PolicyHelperFailureDetail>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help_link: Option<PolicyHelperHelpLink>,
+}
+
+impl PolicyHelperFailure {
+    /// Extracts `policyHelperFailure` from a managed settings snapshot or RPC error data.
+    pub fn from_data(data: &serde_json::Value) -> Option<Self> {
+        data.get("policyHelperFailure")
+            .filter(|value| value.is_object())
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+    }
+}
+
+/// Known refusal reasons of `session.permissions.setMode`.
+pub mod permission_mode_refusal {
+    /// Managed (enterprise) policy does not allow the requested mode.
+    pub const MANAGED_POLICY: &str = "managed_policy";
+}
+
+/// Result of [`crate::CopilotSession::set_permission_mode`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PermissionsSetModeResult {
+    /// Whether the requested mode was applied.
+    pub success: bool,
+    /// Authoritative permission mode after the call (`manual`, `assisted`, `allow-all`).
+    pub mode: String,
+    /// Why the mode was refused, when known (for example `"managed_policy"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl PermissionsSetModeResult {
+    /// Returns true when managed policy refused the requested mode.
+    pub fn refused_by_managed_policy(&self) -> bool {
+        self.reason.as_deref() == Some(permission_mode_refusal::MANAGED_POLICY)
+    }
+}
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1879,6 +2566,10 @@ pub struct CopilotClientOptions {
     pub in_process: Option<bool>,
     /// Application identity declared on the `connect` handshake (`clientInfo`).
     pub client_info: Option<CopilotClientInfo>,
+    /// Session defaults policy: `CodingAgent` (default) or `Empty`.
+    pub mode: ClientMode,
+    /// Network callbacks registered with `network.setProvider` after connecting.
+    pub network: Option<NetworkConfig>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1905,6 +2596,8 @@ impl Default for CopilotClientOptions {
             builtin_plugin_directories: None,
             in_process: None,
             client_info: None,
+            mode: ClientMode::CodingAgent,
+            network: None,
         }
     }
 }

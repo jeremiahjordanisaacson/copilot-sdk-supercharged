@@ -36,7 +36,8 @@ type internal GitHubTokenRegistration(provider: GitHubTokenProvider, sessionId: 
 ///   } |> Async.RunSynchronously
 type CopilotClient(options: CopilotClientOptions) =
 
-    static let minProtocolVersion = 3
+    /// Client mode, validated at construction ("coding-agent" or "empty").
+    let clientMode = ClientMode.normalize options.Mode
 
     let sessions = ConcurrentDictionary<string, CopilotSession>()
     let gitHubTokenProviders = ConcurrentDictionary<string, GitHubTokenRegistration>()
@@ -128,19 +129,6 @@ type CopilotClient(options: CopilotClientOptions) =
         transport <- Some t
     }
 
-    let initializeHandshake () = async {
-        let t = transport |> Option.get
-        let! statusResponse =
-            t.SendRequestAsync<GetStatusResponse>("getStatus")
-        negotiatedProtocolVersion <- statusResponse.ProtocolVersion
-        match statusResponse.ProtocolVersion with
-        | Some v when v < minProtocolVersion ->
-            failwithf
-                "Server protocol version %d is below the minimum required version %d"
-                v minProtocolVersion
-        | _ -> ()
-    }
-
     let getTransport () =
         match transport with
         | Some t -> t
@@ -153,17 +141,67 @@ type CopilotClient(options: CopilotClientOptions) =
             | true, v when v.ValueKind = JsonValueKind.String -> Some (v.GetString())
             | _ -> None
 
+    let tryGetInt (elem: JsonElement) (name: string) =
+        if elem.ValueKind <> JsonValueKind.Object then None
+        else
+            match elem.TryGetProperty(name) with
+            | true, v when v.ValueKind = JsonValueKind.Number ->
+                match v.TryGetInt32() with
+                | true, n -> Some n
+                | _ -> None
+            | _ -> None
+
+    let tryGetBool (elem: JsonElement) (name: string) =
+        if elem.ValueKind <> JsonValueKind.Object then None
+        else
+            match elem.TryGetProperty(name) with
+            | true, v when v.ValueKind = JsonValueKind.True -> Some true
+            | true, v when v.ValueKind = JsonValueKind.False -> Some false
+            | _ -> None
+
     /// Send the `connect` request carrying clientInfo before the handshake.
-    /// Older CLIs that do not implement `connect` are tolerated.
+    /// Older CLIs that do not implement `connect` are tolerated. Returns the
+    /// protocol version reported by `connect`, when any.
     let sendClientInfo () = async {
         match options.ClientInfo |> Option.bind CopilotClientInfo.toWire with
         | Some info ->
             let t = getTransport ()
             try
-                do! t.SendRequestAsync<JsonElement>("connect", {| clientInfo = info |}) |> Async.Ignore
+                let! result = t.SendRequestAsync<JsonElement>("connect", {| clientInfo = info |})
+                return tryGetInt result "protocolVersion"
             with
-            | :? JsonRpcException as ex when ex.Code = -32601 || ex.Message.Contains("Unhandled method connect") -> ()
-        | None -> ()
+            | :? JsonRpcException as ex when ex.Code = -32601 || ex.Message.Contains("Unhandled method connect") ->
+                return None
+        | None -> return None
+    }
+
+    /// Fail unless the server speaks exactly SdkProtocolVersion.Version.
+    let verifyProtocolVersion (serverVersion: int option) =
+        let expected = SdkProtocolVersion.Version
+        match serverVersion with
+        | None ->
+            failwithf
+                "SDK protocol version mismatch: SDK supports version %d, but server does not report a protocol version. Please update your SDK or server to ensure compatibility."
+                expected
+        | Some actual when actual <> expected ->
+            failwithf
+                "SDK protocol version mismatch: SDK supports version %d, but server reports version %d. Please update your SDK or server to ensure compatibility."
+                expected actual
+        | Some _ -> ()
+
+    /// Read the server protocol version (from `connect`, else `ping`) and verify it.
+    let initializeHandshake (connectVersion: int option) = async {
+        let t = getTransport ()
+        let! serverVersion =
+            async {
+                match connectVersion with
+                | Some v -> return Some v
+                | None ->
+                    let! pong = t.SendRequestAsync<JsonElement>("ping", {| message = "ping" |})
+                    return tryGetInt pong "protocolVersion"
+            }
+        verifyProtocolVersion serverVersion
+        negotiatedProtocolVersion <- serverVersion
     }
 
     /// Handle a `gitHubToken.getToken` request by invoking the registered provider.
@@ -209,10 +247,136 @@ type CopilotClient(options: CopilotClientOptions) =
         return box result
     }
 
+    /// Handle a `shellAuthentication.request` by asking the session's handler.
+    /// Malformed requests and sessions without a handler are cancelled.
+    let handleShellAuthentication (parameters: JsonElement option) : Async<obj> = async {
+        let field name = parameters |> Option.bind (fun p -> tryGetString p name)
+        let cancel = box (ShellAuthenticationResult.toWire ShellAuthenticationCancel)
+        let validKind (kind: string) =
+            kind = ShellAuthenticationInputKind.Secret
+            || kind = ShellAuthenticationInputKind.Text
+            || kind = ShellAuthenticationInputKind.Confirm
+        match field "sessionId", field "requestId", field "program", field "prompt", field "inputKind" with
+        | Some sid, Some requestId, Some program, Some prompt, Some inputKind when validKind inputKind ->
+            match sessions.TryGetValue(sid) with
+            | true, session ->
+                let request : ShellAuthenticationRequest =
+                    { SessionId = sid
+                      RequestId = requestId
+                      Program = program
+                      Prompt = prompt
+                      InputKind = inputKind
+                      Command = field "command" |> Option.defaultValue ""
+                      Cwd = field "cwd" |> Option.defaultValue "" }
+                let! result = session.HandleShellAuthenticationAsync(request)
+                return box (ShellAuthenticationResult.toWire result)
+            | _ -> return cancel
+        | _ -> return cancel
+    }
+
+    /// Handle a `shellAuthentication.cancel` by cancelling the pending prompt.
+    let handleShellAuthenticationCancel (parameters: JsonElement option) : Async<obj> = async {
+        let field name = parameters |> Option.bind (fun p -> tryGetString p name)
+        match field "sessionId", field "requestId" with
+        | Some sid, Some requestId ->
+            match sessions.TryGetValue(sid) with
+            | true, session -> session.CancelShellAuthentication(requestId)
+            | _ -> ()
+        | _ -> ()
+        return box (Dictionary<string, obj>())
+    }
+
+    /// Handle a `memoryStore.store` request by invoking the session's store-memory callback.
+    let handleMemoryStore (parameters: JsonElement option) : Async<obj> = async {
+        let field name = parameters |> Option.bind (fun p -> tryGetString p name)
+        let sid = field "sessionId" |> Option.defaultValue ""
+        match sessions.TryGetValue(sid) with
+        | true, session ->
+            let memory : StoredMemory =
+                { SessionId = sid
+                  Subject = field "subject" |> Option.defaultValue ""
+                  Fact = field "fact" |> Option.defaultValue ""
+                  Citations = field "citations" |> Option.defaultValue ""
+                  Reason = field "reason" |> Option.defaultValue "" }
+            do! session.HandleMemoryStoreAsync(memory)
+            return null
+        | _ ->
+            return raise (InvalidOperationException("Memory store owner is unavailable"))
+    }
+
+    /// Handle `network.resolveProxy` {url} -> {proxy?}.
+    let handleResolveProxy (parameters: JsonElement option) : Async<obj> = async {
+        let result = Dictionary<string, obj>()
+        match options.Network |> Option.bind (fun n -> n.ResolveProxy) with
+        | Some resolve ->
+            let url = parameters |> Option.bind (fun p -> tryGetString p "url") |> Option.defaultValue ""
+            let! proxy = resolve url
+            match proxy with
+            | Some value when not (String.IsNullOrEmpty value) -> result.["proxy"] <- box value
+            | _ -> ()
+        | None -> ()
+        return box result
+    }
+
+    /// Handle `network.authenticateNegotiate` {spn} -> {token?}. Tokens are never logged.
+    let handleAuthenticateNegotiate (parameters: JsonElement option) : Async<obj> = async {
+        let result = Dictionary<string, obj>()
+        match options.Network |> Option.bind (fun n -> n.AuthenticateNegotiate) with
+        | Some authenticate ->
+            let spn = parameters |> Option.bind (fun p -> tryGetString p "spn") |> Option.defaultValue ""
+            let! token = authenticate spn
+            match token with
+            | Some value when not (String.IsNullOrEmpty value) -> result.["token"] <- box value
+            | _ -> ()
+        | None -> ()
+        return box result
+    }
+
+    /// Handle `network.authenticateBasic` {proxy, realm?, previousRejected} -> {username?, password?}.
+    /// Credentials are never logged.
+    let handleAuthenticateBasic (parameters: JsonElement option) : Async<obj> = async {
+        let result = Dictionary<string, obj>()
+        match options.Network |> Option.bind (fun n -> n.AuthenticateBasic) with
+        | Some authenticate ->
+            let request : NetworkBasicAuthRequest =
+                { Proxy = parameters |> Option.bind (fun p -> tryGetString p "proxy") |> Option.defaultValue ""
+                  Realm = parameters |> Option.bind (fun p -> tryGetString p "realm")
+                  PreviousRejected =
+                    parameters |> Option.bind (fun p -> tryGetBool p "previousRejected") |> Option.defaultValue false }
+            let! credentials = authenticate request
+            match credentials with
+            | Some creds ->
+                creds.Username |> Option.iter (fun v -> result.["username"] <- box v)
+                creds.Password |> Option.iter (fun v -> result.["password"] <- box v)
+            | None -> ()
+        | None -> ()
+        return box result
+    }
+
     /// Register the client-level server-to-client request handlers.
     let registerServerHandlers (t: JsonRpcTransport) =
         t.OnRequest("gitHubToken.getToken", acquireGitHubToken)
         t.OnRequest("hooks.invoke", handleHooksInvoke)
+        t.OnRequest("shellAuthentication.request", handleShellAuthentication)
+        t.OnRequest("shellAuthentication.cancel", handleShellAuthenticationCancel)
+        t.OnRequest("memoryStore.store", handleMemoryStore)
+        match options.Network with
+        | Some network ->
+            if network.ResolveProxy.IsSome then t.OnRequest("network.resolveProxy", handleResolveProxy)
+            if network.AuthenticateNegotiate.IsSome then
+                t.OnRequest("network.authenticateNegotiate", handleAuthenticateNegotiate)
+            if network.AuthenticateBasic.IsSome then t.OnRequest("network.authenticateBasic", handleAuthenticateBasic)
+        | None -> ()
+
+    /// Register the network callbacks with the runtime (`network.setProvider`).
+    let registerNetworkProvider () = async {
+        match options.Network with
+        | Some network when NetworkOptions.hasCallbacks network ->
+            let t = getTransport ()
+            do! t.SendRequestAsync<JsonElement>("network.setProvider", NetworkOptions.toSetProviderParams network)
+                |> Async.Ignore
+        | _ -> ()
+    }
 
     /// Store a GitHub token provider and return its registration id.
     let registerGitHubTokenProvider (provider: GitHubTokenProvider option) (sessionId: string option) =
@@ -266,8 +430,62 @@ type CopilotClient(options: CopilotClientOptions) =
         provider |> Option.iter (fun c -> WireJson.set request "provider" (box (ProviderConfig.toWire c)))
         WireJson.setOpt request "gitHubTokenProviderRegistrationId" registrationId
 
+    /// Add the SDK protocol 4 options shared by session.create and session.resume.
+    let addV4SessionOptions
+            (request: JsonObject)
+            (tools: RegisteredTool list option)
+            (availableTools: string list option)
+            (excludedTools: string list option)
+            (providers: NamedProviderConfig list option)
+            (models: ProviderModelConfig list option)
+            (defaultProvider: string option)
+            (capiEnabled: bool option)
+            (hasShellAuthentication: bool)
+            (hasMemoryStore: bool) =
+        tools
+        |> Option.iter (fun registered ->
+            WireJson.set request "tools" (box (registered |> List.map (fun r -> Tool.toWire r.Tool))))
+        WireJson.setOpt request "availableTools" availableTools
+        WireJson.setOpt request "excludedTools" excludedTools
+        providers
+        |> Option.iter (fun ps -> WireJson.set request "providers" (box (ps |> List.map NamedProviderConfig.toWire)))
+        models
+        |> Option.iter (fun ms -> WireJson.set request "models" (box (ms |> List.map ProviderModelConfig.toWire)))
+        WireJson.setOpt request "defaultProvider" defaultProvider
+        // capi.enabled joins autoTier / enableWebSocketResponses under "capi" (github.capi on the wire).
+        capiEnabled
+        |> Option.iter (fun enabled ->
+            match request.["capi"] with
+            | :? JsonObject as capi -> capi.["enabled"] <- JsonValue.Create(enabled)
+            | _ ->
+                let capi = JsonObject()
+                capi.["enabled"] <- JsonValue.Create(enabled)
+                request.["capi"] <- capi)
+        if hasShellAuthentication then WireJson.set request "requestShellAuthentication" (box true)
+        if hasMemoryStore then WireJson.set request "hasMemoryStore" (box true)
+
+    /// Fail when an empty-mode client creates or resumes a session without AvailableTools.
+    let requireAvailableToolsForMode (availableTools: string list option) =
+        if clientMode = ClientMode.Empty && availableTools.IsNone then
+            invalidOp
+                "CopilotClient is in mode 'empty' but the session config did not specify AvailableTools. \
+                 Empty mode requires every session to opt into the tools it wants."
+
+    /// Translate the flat payload into the SDK protocol 4 grouped payload and
+    /// apply the client-mode defaults (called right before sending).
+    let finalizeSessionParams (request: JsonObject) (isResume: bool) : JsonObject =
+        let grouped = SessionWire.groupSessionParams request isResume
+        if clientMode = ClientMode.Empty then SessionWire.applyEmptyModeDefaults grouped else grouped
+
     /// Wire up a newly created/resumed session and track it.
-    let trackSession (session: CopilotSession) (registrationId: string option) onStart onStop =
+    let trackSession
+            (session: CopilotSession)
+            (registrationId: string option)
+            onStart
+            onStop
+            (tools: RegisteredTool list option)
+            (onShellAuthentication: ShellAuthenticationHandler option)
+            (onStoreMemory: StoreMemoryHandler option) =
         let sid = session.SessionId
         registrationId
         |> Option.iter (fun id ->
@@ -275,16 +493,23 @@ type CopilotClient(options: CopilotClientOptions) =
             | true, registration -> registration.SessionId <- Some sid
             | _ -> ())
         session.SetSubagentHooks(onStart, onStop)
+        tools |> Option.iter session.RegisterTools
+        session.SetShellAuthenticationHandler(onShellAuthentication)
+        session.SetMemoryStoreHandler(onStoreMemory)
         session.AddDisconnectCallback(fun () ->
             removeGitHubTokenProvider registrationId
-            sessions.TryRemove(sid) |> ignore)
-        sessions.TryAdd(sid, session) |> ignore
+            // Only forget the session if a later create/resume did not replace it.
+            sessions.TryRemove(KeyValuePair(sid, session)) |> ignore)
+        sessions.[sid] <- session
 
     /// Create a client with default options.
     new() = new CopilotClient(CopilotClientOptions.defaults)
 
     /// Current connection state.
     member _.ConnectionState = connectionState
+
+    /// Client mode in effect: ClientMode.CodingAgent or ClientMode.Empty.
+    member _.Mode = clientMode
 
     /// Negotiated protocol version with the server.
     member _.NegotiatedProtocolVersion = negotiatedProtocolVersion
@@ -317,9 +542,11 @@ type CopilotClient(options: CopilotClientOptions) =
 
             transport |> Option.iter registerServerHandlers
 
-            do! sendClientInfo ()
+            let! connectVersion = sendClientInfo ()
 
-            do! initializeHandshake ()
+            do! initializeHandshake connectVersion
+
+            do! registerNetworkProvider ()
 
             // Set up session filesystem provider if configured
             match options.SessionFs with
@@ -362,6 +589,7 @@ type CopilotClient(options: CopilotClientOptions) =
         let t = getTransport ()
         if config.GitHubToken.IsSome && config.GitHubTokenProvider.IsSome then
             invalidArg "config" "GitHubToken and GitHubTokenProvider are mutually exclusive"
+        requireAvailableToolsForMode config.AvailableTools
         let tools =
             config.SkillDirectories
             |> Option.map (fun dirs -> {| skillDirectories = dirs |})
@@ -389,7 +617,7 @@ type CopilotClient(options: CopilotClientOptions) =
                        canvasProvider = config.CanvasProvider
                        customAgentsLocalOnly = config.CustomAgentsLocalOnly
                        toolSearch = config.ToolSearch
-                       experimentalMode = config.ExperimentalMode
+                       enableExperimentalMode = config.ExperimentalMode
                        contentExclusion = config.ContentExclusion
                        reasoningEffort = config.ReasoningEffort
                        // Signal to the runtime that a user-prompt-transformed hook is registered.
@@ -417,15 +645,30 @@ type CopilotClient(options: CopilotClientOptions) =
             (config.OnSubagentStart.IsSome || config.OnSubagentStop.IsSome)
             config.Provider
             registrationId
+        addV4SessionOptions
+            request
+            config.Tools
+            config.AvailableTools
+            config.ExcludedTools
+            config.Providers
+            config.Models
+            config.DefaultProvider
+            config.CapiEnabled
+            config.OnShellAuthenticationRequest.IsSome
+            config.OnStoreMemory.IsSome
+        WireJson.setOpt request "gitHubToken" config.GitHubToken
+        WireJson.setOpt request "modelCapabilities" config.ModelCapabilities
+        WireJson.setOpt request "mcpServers" config.McpServers
         // Create-only options.
         WireJson.setOpt request "name" config.Name
         WireJson.setOpt request "trustWorkingDirectory" config.TrustWorkingDirectory
         WireJson.setOpt request "refreshCustomInstructions" config.RefreshCustomInstructions
+        let wireRequest = finalizeSessionParams request false
 
         let! response =
             async {
                 try
-                    return! t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.create", request)
+                    return! t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.create", wireRequest)
                 with ex ->
                     removeGitHubTokenProvider registrationId
                     return raise ex
@@ -436,13 +679,21 @@ type CopilotClient(options: CopilotClientOptions) =
                 response.sessionId,
                 t,
                 response.workspacePath)
-        trackSession session registrationId config.OnSubagentStart config.OnSubagentStop
+        trackSession
+            session
+            registrationId
+            config.OnSubagentStart
+            config.OnSubagentStop
+            config.Tools
+            config.OnShellAuthenticationRequest
+            config.OnStoreMemory
         return session
     }
 
     /// Resume an existing session by ID.
     member _.ResumeSessionAsync(config: ResumeSessionConfig, ?cancellationToken: CancellationToken) : Async<CopilotSession> = async {
         let t = getTransport ()
+        requireAvailableToolsForMode config.AvailableTools
         let request =
             WireJson.toObject (
                 box
@@ -470,13 +721,31 @@ type CopilotClient(options: CopilotClientOptions) =
             (config.OnSubagentStart.IsSome || config.OnSubagentStop.IsSome)
             config.Provider
             registrationId
+        addV4SessionOptions
+            request
+            config.Tools
+            config.AvailableTools
+            config.ExcludedTools
+            config.Providers
+            config.Models
+            config.DefaultProvider
+            config.CapiEnabled
+            config.OnShellAuthenticationRequest.IsSome
+            config.OnStoreMemory.IsSome
         // Resume-only options.
         WireJson.setOpt request "allowTranscriptRecovery" config.AllowTranscriptRecovery
+        WireJson.setOpt request "suppressResumeEvent" config.SuppressResumeEvent
+        if config.ClearDefaultProvider = Some true then
+            // An explicit null clears the provider stored with the session.
+            let inference = JsonObject()
+            inference.["defaultProvider"] <- null
+            request.["inference"] <- inference
+        let wireRequest = finalizeSessionParams request true
 
         let! response =
             async {
                 try
-                    return! t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.resume", request)
+                    return! t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.resume", wireRequest)
                 with ex ->
                     removeGitHubTokenProvider registrationId
                     return raise ex
@@ -487,7 +756,14 @@ type CopilotClient(options: CopilotClientOptions) =
                 response.sessionId,
                 t,
                 response.workspacePath)
-        trackSession session registrationId config.OnSubagentStart config.OnSubagentStop
+        trackSession
+            session
+            registrationId
+            config.OnSubagentStart
+            config.OnSubagentStop
+            config.Tools
+            config.OnShellAuthenticationRequest
+            config.OnStoreMemory
         return session
     }
 
@@ -543,10 +819,15 @@ type CopilotClient(options: CopilotClientOptions) =
         return! t.SendRequestAsync<{| message: string; timestamp: string |}>("ping", {| message = msg |})
     }
 
-    /// Delete a session permanently.
+    /// Delete a session permanently. Failures surface as JsonRpcException.
     member _.DeleteSessionAsync(sessionId: string, ?cancellationToken: CancellationToken) : Async<unit> = async {
         let t = getTransport ()
-        do! t.SendNotificationAsync("session.delete", {| sessionId = sessionId |})
+        let! result = t.SendRequestAsync<JsonElement>("session.delete", {| sessionId = sessionId |})
+        match tryGetBool result "success" with
+        | Some false ->
+            let errMsg = tryGetString result "error" |> Option.defaultValue "Unknown error"
+            failwithf "Failed to delete session %s: %s" sessionId errMsg
+        | _ -> ()
         sessions.TryRemove(sessionId) |> ignore
     }
 

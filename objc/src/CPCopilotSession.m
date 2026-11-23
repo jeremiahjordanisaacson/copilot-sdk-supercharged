@@ -11,6 +11,31 @@ typedef struct {
     CPSessionEventHandler handler;
 } CPEventRegistration;
 
+static NSString *CPStringOrNil(id value) {
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+
+/// Lifecycle RPCs that answer `{success: false, error}` instead of a JSON-RPC error.
+static NSError *CPLifecycleFailure(NSDictionary *result, NSString *what) {
+    id success = result[@"success"];
+    if (![success isKindOfClass:[NSNumber class]] || [success boolValue]) return nil;
+    NSString *message = CPStringOrNil(result[@"error"]) ?: @"Unknown error";
+    return [NSError errorWithDomain:@"CPCopilotSessionErrorDomain"
+                               code:-7
+                           userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@: %@", what, message]}];
+}
+
+/// Maps the SDK's permission decision to the protocol 4 `PermissionDecision` kind.
+static NSString *CPPermissionDecisionKind(CPPermissionKind kind) {
+    switch (kind) {
+        case CPPermissionKindApproved: return @"approved";
+        case CPPermissionKindDeniedByRules: return @"denied-by-rules";
+        case CPPermissionKindDeniedNoRule: return @"denied-no-approval-rule-and-could-not-request-from-user";
+        case CPPermissionKindDeniedByUser: return @"denied-interactively-by-user";
+    }
+    return @"denied-interactively-by-user";
+}
+
 @interface CPCopilotSession ()
 
 @property (nonatomic, copy, readwrite) NSString *sessionId;
@@ -20,6 +45,8 @@ typedef struct {
 @property (nonatomic, assign) NSInteger nextHandlerId;
 @property (nonatomic, strong) dispatch_queue_t eventQueue;
 @property (nonatomic, copy, nullable) CPSessionConfig *config;
+/// Runs once when the session is detached (drops the GitHub token provider registration).
+@property (nonatomic, copy, nullable) void (^onRelease)(void);
 
 - (instancetype)initWithSessionId:(NSString *)sessionId
                     workspacePath:(nullable NSString *)workspacePath
@@ -102,19 +129,17 @@ typedef struct {
 
 - (void)send:(CPMessageOptions *)options
   completion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
-    NSDictionary *params = @{
-        @"sessionId": self.sessionId,
-        @"message": [options toDictionary],
-    };
+    NSMutableDictionary *params = [NSMutableDictionary dictionaryWithDictionary:[options toDictionary]];
+    params[@"sessionId"] = self.sessionId;
 
-    [self.rpcClient sendRequest:@"session/send"
+    [self.rpcClient sendRequest:@"session.send"
                          params:params
                      completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
         if (error) {
             completion(nil, error);
             return;
         }
-        completion(result[@"messageId"], nil);
+        completion(CPStringOrNil(result[@"messageId"]), nil);
     }];
 }
 
@@ -182,32 +207,194 @@ typedef struct {
 #pragma mark - Abort
 
 - (void)abortWithCompletion:(void (^)(NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"session/abort"
+    [self.rpcClient sendRequest:@"session.abort"
                          params:@{@"sessionId": self.sessionId}
                      completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
         completion(error);
     }];
 }
 
-#pragma mark - Disconnect
+#pragma mark - Disconnect / Detach
 
 - (void)disconnectWithCompletion:(void (^)(NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"session/disconnect"
-                         params:@{@"sessionId": self.sessionId}
+    [self detachWithCompletion:completion];
+}
+
+- (void)detachWithCompletion:(void (^)(NSError * _Nullable))completion {
+    NSDictionary *params = @{@"sessionId": self.sessionId};
+    [self.rpcClient sendRequest:@"session.detach"
+                         params:params
                      completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
-        completion(error);
+        if (CPJsonRpcIsMethodNotFoundError(error)) {
+            // CLIs that predate session.detach release sessions with session.destroy.
+            [self.rpcClient sendRequest:@"session.destroy"
+                                 params:params
+                             completion:^(NSDictionary * _Nullable destroyResult, NSError * _Nullable destroyError) {
+                [self finishDetachWithResult:destroyResult error:destroyError completion:completion];
+            }];
+            return;
+        }
+        [self finishDetachWithResult:result error:error completion:completion];
     }];
+}
+
+- (void)finishDetachWithResult:(nullable NSDictionary *)result
+                         error:(nullable NSError *)error
+                    completion:(void (^)(NSError * _Nullable))completion {
+    NSError *failure = error ?: CPLifecycleFailure(result, @"Failed to detach session");
+    if (!failure) {
+        void (^release)(void) = nil;
+        @synchronized (self) {
+            release = self.onRelease;
+            self.onRelease = nil;
+        }
+        if (release) release();
+    }
+    completion(failure);
 }
 
 #pragma mark - Metadata
 
 - (void)getMetadataWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable,
                                             NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"session/getMetadata"
+    [self.rpcClient sendRequest:@"session.getMetadata"
                          params:@{@"sessionId": self.sessionId}
                      completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
         completion(result, error);
     }];
+}
+
+#pragma mark - Model, Permissions, Managed Settings
+
+- (void)setAutoTier:(nullable NSString *)autoTier
+         completion:(void (^)(NSError * _Nullable))completion {
+    NSDictionary *params = @{
+        @"sessionId": self.sessionId,
+        @"autoTier": autoTier ?: (id)[NSNull null],
+    };
+    [self.rpcClient sendRequest:@"session.model.switchAutoTier"
+                         params:params
+                     completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
+        completion(error);
+    }];
+}
+
+- (void)setPermissionMode:(NSString *)mode
+               completion:(void (^)(CPPermissionModeResult * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.permissions.setMode"
+                         params:@{@"sessionId": self.sessionId, @"mode": mode}
+                     completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        completion([[CPPermissionModeResult alloc] initWithDictionary:result ?: @{}], nil);
+    }];
+}
+
+- (void)getManagedSettingsWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable,
+                                                   NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.managedSettings.get"
+                         params:@{@"sessionId": self.sessionId}
+                     completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
+        completion(result, error);
+    }];
+}
+
+- (void)recheckPolicyHelperWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable,
+                                                    NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.managedSettings.recheckPolicyHelper"
+                         params:@{@"sessionId": self.sessionId}
+                     completion:^(NSDictionary * _Nullable result, NSError * _Nullable error) {
+        completion(result, error);
+    }];
+}
+
+#pragma mark - Broadcast Requests (tools, permissions)
+
+/// Answers requests the runtime broadcasts as session events, off the transport's read queue.
+/// Called by the client.
+- (void)handleBroadcastEvent:(CPSessionEvent *)event {
+    NSDictionary *data = event.rawData;
+    BOOL isToolRequest = [event.type isEqualToString:@"external_tool.requested"];
+    BOOL isPermissionRequest = [event.type isEqualToString:@"permission.requested"];
+    if (!data || (!isToolRequest && !isPermissionRequest)) return;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        if (isToolRequest) {
+            [self handleExternalToolRequest:data];
+        } else {
+            [self handlePermissionRequested:data];
+        }
+    });
+}
+
+/// Handler of a tool defined with `CPDefineTool` in `CPSessionConfig.tools`, if any.
+- (nullable CPToolHandler)toolHandlerNamed:(NSString *)name {
+    for (id tool in self.config.tools) {
+        if (![tool isKindOfClass:[NSDictionary class]]) continue;
+        NSDictionary *definition = tool;
+        if (![definition[@"name"] isEqual:name]) continue;
+        id handler = definition[@"_handler"];
+        return handler;
+    }
+    return nil;
+}
+
+/// Runs the tool handler for `external_tool.requested` and answers with
+/// `session.tools.handlePendingToolCall`. Tools without a handler here are left to other clients.
+- (void)handleExternalToolRequest:(NSDictionary *)data {
+    if ([data[@"hasHandler"] isEqual:@NO]) return;
+    NSString *requestId = CPStringOrNil(data[@"requestId"]);
+    NSString *toolName = CPStringOrNil(data[@"toolName"]);
+    if (!requestId || !toolName) return;
+    CPToolHandler handler = [self toolHandlerNamed:toolName];
+    if (!handler) return;
+
+    id arguments = data[@"arguments"];
+    CPToolInvocation *invocation =
+        [[CPToolInvocation alloc] initWithSessionId:self.sessionId
+                                         toolCallId:CPStringOrNil(data[@"toolCallId"]) ?: @""
+                                           toolName:toolName
+                                          arguments:[arguments isKindOfClass:[NSDictionary class]] ? arguments : nil];
+    NSString *sessionId = self.sessionId;
+    CPJsonRpcClient *rpc = self.rpcClient;
+    handler(invocation, ^(CPToolResult *result) {
+        NSMutableDictionary *params = [NSMutableDictionary dictionary];
+        params[@"sessionId"] = sessionId;
+        params[@"requestId"] = requestId;
+        if (result) {
+            params[@"result"] = [result toDictionary];
+        } else {
+            params[@"error"] = @"Tool handler returned no result";
+        }
+        [rpc sendRequest:@"session.tools.handlePendingToolCall"
+                  params:params
+              completion:^(NSDictionary * _Nullable response, NSError * _Nullable error) {}];
+    });
+}
+
+/// Runs `CPSessionConfig.permissionHandler` for `permission.requested` and answers with
+/// `session.permissions.handlePendingPermissionRequest`.
+- (void)handlePermissionRequested:(NSDictionary *)data {
+    CPPermissionHandler handler = self.config.permissionHandler;
+    NSString *requestId = CPStringOrNil(data[@"requestId"]);
+    if (!handler || !requestId || [data[@"resolvedByHook"] isEqual:@YES]) return;
+
+    id request = data[@"permissionRequest"];
+    NSDictionary *requestDict = [request isKindOfClass:[NSDictionary class]] ? request : @{};
+    NSString *sessionId = self.sessionId;
+    NSDictionary *decisionContext = self.config.decisionContext;
+    CPJsonRpcClient *rpc = self.rpcClient;
+    handler(requestDict, sessionId, ^(CPPermissionKind kind) {
+        NSMutableDictionary *params = [NSMutableDictionary dictionary];
+        params[@"sessionId"] = sessionId;
+        params[@"requestId"] = requestId;
+        params[@"result"] = @{@"kind": CPPermissionDecisionKind(kind)};
+        if (decisionContext) params[@"decisionContext"] = decisionContext;
+        [rpc sendRequest:@"session.permissions.handlePendingPermissionRequest"
+                  params:params
+              completion:^(NSDictionary * _Nullable response, NSError * _Nullable error) {}];
+    });
 }
 
 @end

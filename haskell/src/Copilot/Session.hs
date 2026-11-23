@@ -22,6 +22,12 @@ module Copilot.Session
   , send
   , sendAndWait
 
+    -- * Session controls
+  , switchAutoTier
+  , detachSession
+  , recheckPolicyHelper
+  , setPermissionMode
+
     -- * Event subscription
   , onSessionEvent
   , dispatchSessionEvent
@@ -38,6 +44,12 @@ module Copilot.Session
   , handleSessionUserInputRequest
   , handleSessionHooksInvoke
 
+    -- * Shell authentication / memory store handlers (internal)
+  , registerSessionShellAuthenticationHandler
+  , handleSessionShellAuthenticationRequest
+  , registerSessionStoreMemoryHandler
+  , handleSessionStoreMemory
+
     -- * Exit plan mode (internal)
   , registerExitPlanModeHandler
   , handleExitPlanModeRequest
@@ -45,6 +57,10 @@ module Copilot.Session
     -- * Trace context (internal)
   , registerTraceContextProvider
   , injectTraceContext
+
+    -- * Release callbacks (internal)
+  , addSessionCloseCallback
+  , runSessionCloseCallbacks
 
     -- * Lifecycle
   , destroySession
@@ -99,6 +115,9 @@ data CopilotSession = CopilotSession
   , csHooks             :: !(IORef (Maybe SessionHooks))
   , csExitPlanModeHandler :: !(IORef (Maybe ExitPlanModeHandler))
   , csTraceContextProvider :: !(IORef (Maybe TraceContextProvider))
+  , csShellAuthHandler  :: !(IORef (Maybe ShellAuthenticationHandler))
+  , csStoreMemoryHandler :: !(IORef (Maybe StoreMemoryHandler))
+  , csCloseCallbacks    :: !(IORef [IO ()])
   }
 
 -- | Create a new session.
@@ -111,6 +130,9 @@ newCopilotSession sid rpc wsp = do
   hooksRef   <- newIORef Nothing
   exitPlanH  <- newIORef Nothing
   traceCtxP  <- newIORef Nothing
+  shellAuthH <- newIORef Nothing
+  memoryH    <- newIORef Nothing
+  closeCbs   <- newIORef []
   pure CopilotSession
     { csSessionId         = sid
     , csWorkspacePath     = wsp
@@ -122,6 +144,9 @@ newCopilotSession sid rpc wsp = do
     , csHooks             = hooksRef
     , csExitPlanModeHandler = exitPlanH
     , csTraceContextProvider = traceCtxP
+    , csShellAuthHandler  = shellAuthH
+    , csStoreMemoryHandler = memoryH
+    , csCloseCallbacks    = closeCbs
     }
 
 -- | Get the session ID.
@@ -138,6 +163,10 @@ workspacePath = csWorkspacePath
 
 -- | Send a message to the session.
 -- Returns the message ID.
+--
+-- 'moSource' and 'moClientTurnId' are sent as @source@ and @clientTurnId@;
+-- 'moResponseSchema' requests structured output (see
+-- 'structuredResponseFormat'). The legacy 'moResponseFormat' is not sent.
 send :: CopilotSession -> MessageOptions -> IO Text
 send session opts = do
   let reqParams = object $ filter ((/= Null) . snd)
@@ -148,8 +177,10 @@ send session opts = do
         , "agentMode"      .= moAgentMode opts
         , "displayPrompt"  .= moDisplayPrompt opts
         , "requestHeaders" .= moRequestHeaders opts
-        , "responseFormat" .= moResponseFormat opts
         , "imageOptions"   .= moImageOptions opts
+        , "source"         .= moSource opts
+        , "clientTurnId"   .= moClientTurnId opts
+        , "responseFormat" .= (structuredResponseFormat <$> moResponseSchema opts)
         ]
   result <- sendRequest (csJsonRpc session) "session.send" reqParams
   case result of
@@ -394,7 +425,56 @@ handleSessionHooksInvoke session hookType input sid = do
                 pure $ fmap Aeson.toJSON result
               Aeson.Error _ -> pure Nothing
 
+        "subagentStart" -> case shOnSubagentStart hooks of
+          Nothing -> pure Nothing
+          Just handler -> do
+            case Aeson.fromJSON input of
+              Aeson.Success inp -> do
+                result <- handler inp inv
+                pure $ fmap Aeson.toJSON result
+              Aeson.Error _ -> pure Nothing
+
+        "subagentStop" -> case shOnSubagentStop hooks of
+          Nothing -> pure Nothing
+          Just handler -> do
+            case Aeson.fromJSON input of
+              Aeson.Success inp -> do
+                result <- handler inp inv
+                pure $ fmap Aeson.toJSON result
+              Aeson.Error _ -> pure Nothing
+
         _ -> pure Nothing
+
+-- ============================================================================
+-- Shell Authentication / Memory Store
+-- ============================================================================
+
+-- | Register a shell authentication handler. (Internal)
+registerSessionShellAuthenticationHandler :: CopilotSession -> ShellAuthenticationHandler -> IO ()
+registerSessionShellAuthenticationHandler session handler =
+  writeIORef (csShellAuthHandler session) (Just handler)
+
+-- | Answer a shell authentication request; cancels when no handler is
+-- registered. (Internal)
+handleSessionShellAuthenticationRequest :: CopilotSession -> ShellAuthenticationRequest -> IO ShellAuthenticationResponse
+handleSessionShellAuthenticationRequest session req = do
+  mHandler <- readIORef (csShellAuthHandler session)
+  case mHandler of
+    Nothing      -> pure ShellAuthenticationCancel
+    Just handler -> handler req
+
+-- | Register a store-memory handler. (Internal)
+registerSessionStoreMemoryHandler :: CopilotSession -> StoreMemoryHandler -> IO ()
+registerSessionStoreMemoryHandler session handler =
+  writeIORef (csStoreMemoryHandler session) (Just handler)
+
+-- | Hand a memory the agent asked to keep to the session's handler. (Internal)
+handleSessionStoreMemory :: CopilotSession -> StoredMemory -> IO ()
+handleSessionStoreMemory session memory = do
+  mHandler <- readIORef (csStoreMemoryHandler session)
+  case mHandler of
+    Nothing      -> throwIO $ SessionRpcError "No memory store handler registered"
+    Just handler -> handler memory
 
 -- ============================================================================
 -- Exit Plan Mode
@@ -448,21 +528,97 @@ injectTraceContext session params = do
 -- Lifecycle
 -- ============================================================================
 
--- | Destroy this session and release resources.
+-- | Release this session: detach from it (@session.detach@, falling back to
+-- @session.destroy@ on runtimes without detach) and drop its handlers.
+-- Session state on disk is kept, so the session can be resumed later.
 destroySession :: CopilotSession -> IO ()
-destroySession session = do
+destroySession = detachSession
+
+-- | Detach from this session (@session.detach@) and release its handlers and
+-- registrations (for example a GitHub token provider). Session state on disk
+-- is kept, so the session can be resumed later with
+-- 'Copilot.Client.resumeSession'.
+detachSession :: CopilotSession -> IO ()
+detachSession session = do
   let params = object [ "sessionId" .= csSessionId session ]
-  result <- sendRequest (csJsonRpc session) "session.destroy" params
+  detached <- sendRequest (csJsonRpc session) "session.detach" params
+  result <- case detached of
+    Left err | jreCode err == (-32601) ->
+      sendRequest (csJsonRpc session) "session.destroy" params
+    other -> pure other
   case result of
     Left err -> throwIO $ SessionRpcError (jreMessage err)
-    Right _  -> do
-      writeIORef (csEventHandlers session) []
-      writeIORef (csToolHandlers session) Map.empty
-      writeIORef (csPermissionHandler session) Nothing
-      writeIORef (csUserInputHandler session) Nothing
-      writeIORef (csHooks session) Nothing
-      writeIORef (csExitPlanModeHandler session) Nothing
-      writeIORef (csTraceContextProvider session) Nothing
+    Right val -> do
+      let mSuccess = parseMaybe (withObject "" $ \o -> o .:? "success") val :: Maybe (Maybe Bool)
+          mError   = parseMaybe (withObject "" $ \o -> o .:? "error") val :: Maybe (Maybe Text)
+      case mSuccess of
+        Just (Just False) ->
+          throwIO $ SessionRpcError $ "Failed to detach session " <> csSessionId session
+            <> ": " <> maybe "Unknown error" id (maybe Nothing id mError)
+        _ -> do
+          writeIORef (csEventHandlers session) []
+          writeIORef (csToolHandlers session) Map.empty
+          writeIORef (csPermissionHandler session) Nothing
+          writeIORef (csUserInputHandler session) Nothing
+          writeIORef (csHooks session) Nothing
+          writeIORef (csExitPlanModeHandler session) Nothing
+          writeIORef (csTraceContextProvider session) Nothing
+          writeIORef (csShellAuthHandler session) Nothing
+          writeIORef (csStoreMemoryHandler session) Nothing
+          runSessionCloseCallbacks session
+
+-- | Register an action to run once when the session is released. (Internal)
+addSessionCloseCallback :: CopilotSession -> IO () -> IO ()
+addSessionCloseCallback session callback =
+  modifyIORef (csCloseCallbacks session) (callback :)
+
+-- | Run and clear the session's release actions. (Internal)
+runSessionCloseCallbacks :: CopilotSession -> IO ()
+runSessionCloseCallbacks session = do
+  callbacks <- atomicModifyIORef' (csCloseCallbacks session) (\cbs -> ([], cbs))
+  forM_ callbacks $ \cb -> cb `catch` (\(_ :: SomeException) -> pure ())
+
+-- | Change the Auto routing preference without changing the model
+-- (@session.model.switchAutoTier@, experimental). Pass a tier such as
+-- 'autoTierFast', 'autoTierEfficiency', 'autoTierBalance', or
+-- 'autoTierIntelligence'; 'Nothing' returns to the provider's default
+-- routing. Returns the runtime's acknowledgement.
+switchAutoTier :: CopilotSession -> Maybe Text -> IO Value
+switchAutoTier session tier = do
+  let params = object
+        [ "sessionId" .= csSessionId session
+        , "autoTier"  .= tier
+        ]
+  result <- sendRequest (csJsonRpc session) "session.model.switchAutoTier" params
+  case result of
+    Left err  -> throwIO $ SessionRpcError (jreMessage err)
+    Right val -> pure val
+
+-- | Re-run the managed-settings policy helper for this session
+-- (@session.managedSettings.recheckPolicyHelper@).
+recheckPolicyHelper :: CopilotSession -> IO Value
+recheckPolicyHelper session = do
+  let params = object [ "sessionId" .= csSessionId session ]
+  result <- sendRequest (csJsonRpc session) "session.managedSettings.recheckPolicyHelper" params
+  case result of
+    Left err  -> throwIO $ SessionRpcError (jreMessage err)
+    Right val -> pure val
+
+-- | Set the session permission mode (@session.permissions.setMode@). When the
+-- runtime refuses the mode, 'pmrReason' explains why (for example
+-- 'permissionModeRefusalManagedPolicy').
+setPermissionMode :: CopilotSession -> Text -> IO PermissionModeResult
+setPermissionMode session mode = do
+  let params = object
+        [ "sessionId" .= csSessionId session
+        , "mode"      .= mode
+        ]
+  result <- sendRequest (csJsonRpc session) "session.permissions.setMode" params
+  case result of
+    Left err  -> throwIO $ SessionRpcError (jreMessage err)
+    Right val -> case Aeson.fromJSON val of
+      Aeson.Success r -> pure r
+      Aeson.Error e   -> throwIO $ SessionRpcError (T.pack e)
 
 -- | Abort the currently processing message.
 abortSession :: CopilotSession -> IO ()

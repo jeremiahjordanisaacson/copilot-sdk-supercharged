@@ -9,7 +9,7 @@ module SdkProtocolVersion =
 
     /// The SDK protocol version.
     [<Literal>]
-    let Version = 3
+    let Version = 4
 
     /// Gets the SDK protocol version.
     let getVersion () = Version

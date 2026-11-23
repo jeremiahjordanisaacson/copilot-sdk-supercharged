@@ -11,7 +11,7 @@ To use the SDK, you'll need:
 ## Installation
 
 ```bash
-dotnet add package Microsoft.Copilot.SDK
+dotnet add package CopilotSDK.Supercharged
 ```
 
 The package downloads the pinned runtime for the build RID and verifies its archive against `SHA256SUMS.txt`.
@@ -1530,59 +1530,223 @@ var session = await client.CreateSessionAsync(new CreateSessionOptions
 });
 ```
 
+## What's New in v3.0.0
+
+v3.0.0 is a major release. The core SDK now tracks Microsoft Copilot SDK 2.0, which negotiates **SDK protocol 4** and requires **Copilot CLI runtime 1.0.113 or newer** (v2.5.3 used protocol 3). Upgrade the SDK and the runtime together: an older runtime fails connection negotiation.
+
+### Breaking changes
+
+Code written for v2.5.x needs a migration pass. The [v2 breaking changes guide](../docs/v2-breaking-changes.md) lists every rename; these are the main ones:
+
+- **Explicit client mode:** `new CopilotClient()` and null options are no longer accepted, and `CopilotClientOptions.Mode` is required. Use `CopilotClientMode.CodingAgent` (formerly `CopilotCli`) for CLI-like tools and defaults, or `CopilotClientMode.Empty` for multi-user services that enable each capability explicitly.
+- **Runtime connections, in-process by default:** `CopilotClientOptions.Connection` is now `Runtime`. `RuntimeConnection.ForStdio()` becomes `ForSpawnedStdio()`, the old spawning `ForTcp()` becomes `ForSpawnedTcp()`, `ForUri(url)` becomes the attached `ForTcp(host, port)`, and `ForInProcess()` plus the new `ForDefault()` complete the set. Without `Runtime`, the SDK loads the native runtime into your process; use `RuntimeConnection.ForSpawnedStdio()` or set `COPILOT_SDK_DEFAULT_CONNECTION=stdio` to keep a child process. The client-level `Environment` and `WorkingDirectory` move onto spawned connections.
+- **Grouped client options:** `LogLevel`, `Logger`, and `Telemetry` move under `Observability`; `GitHubToken`, `UseLoggedInUser`, and `OnGitHubTelemetry` become `GitHub.Token`, `GitHub.UseLoggedInUser`, and `GitHub.OnTelemetry`; `OnListModels` (now returning the generated `Microsoft.Copilot.Rpc.Model` instead of `ModelInfo`) and `RequestHandler` move under `Models`; `BuiltinPluginDirectories` becomes `Plugins.BuiltinDirectories`; `BaseDirectory` and `SessionIdleTimeoutSeconds` move onto owned runtime connections; `EnableRemoteSessions` is removed. New `Extensions` and `Installations` groups hold the extension launch provider and the installation confirmation handler.
+- **Grouped session options:** `SessionConfig`, `ResumeSessionConfig`, and `SessionConfigBase` become `CreateSessionOptions`, `ResumeSessionOptions`, and `SessionOptionsBase`, with nested `Inference`, `Tools`, `Permissions`, `Interaction`, `Events`, `Agents`, `Skills`, `Mcp`, `GitHub`, `Filesystem`, `Execution`, `Instructions`, `Hooks`, `Git`, `State`, `Plugins`, `Canvases`, `Extensions`, `Experiments`, and `Policy` options. `Model`, `WorkingDirectory`, `SystemMessage`, `ConfigDirectory`, and `EnableConfigDiscovery` stay at the top level.
+- **Named BYOK providers:** `Provider` is removed. Declare connections in `Inference.Providers`, optional model definitions in `Inference.Models` (selected as `provider/id`), and an optional pass-through connection in `Inference.DefaultProvider`. Set `GitHub.Capi.Enabled = false` for a BYOK-only catalog; adding a provider no longer turns off Copilot API models.
+- **.NET-specific:** every public API that accepts a `CancellationToken` takes it last with `= default` (prefer named arguments for optional generated RPC parameters), and server RPC rejections surface as `RemoteRpcException` instead of an `IOException` wrapper.
+
+A v3.0.0 client and session with the restructured options:
+
+```csharp
+using Microsoft.Copilot;
+
+await using var client = new CopilotClient(new CopilotClientOptions
+{
+    Mode = CopilotClientMode.CodingAgent,
+    Runtime = RuntimeConnection.ForSpawnedStdio(), // omit to host the runtime in-process
+    Observability = new ClientObservabilityOptions { LogLevel = CopilotLogLevel.Debug },
+    GitHub = new ClientGitHubOptions { Token = Environment.GetEnvironmentVariable("COPILOT_GITHUB_TOKEN") },
+});
+
+#pragma warning disable MCPSDK001 // Named providers are experimental.
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+{
+    Model = "gateway/chat",
+    Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll },
+    Inference = new SessionInferenceOptions
+    {
+        ReasoningEffort = "medium",
+        Providers = [new NamedProviderConfig
+        {
+            Name = "gateway",
+            Type = "openai",
+            BaseUrl = "https://models.example.com/v1",
+            ApiKey = Environment.GetEnvironmentVariable("MODEL_API_KEY"),
+        }],
+        Models = [new ProviderModelConfig { Provider = "gateway", Id = "chat", WireModel = "my-deployment" }],
+    },
+    GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } },
+    Events = new SessionEventOptions { Streaming = true },
+});
+#pragma warning restore MCPSDK001
+```
+
+### Package identity
+
+- The NuGet package keeps its name: `dotnet add package CopilotSDK.Supercharged` (version 3.0.0).
+- The C# namespace changes from `GitHub.Copilot` to `Microsoft.Copilot`, and generated RPC types move from `GitHub.Copilot.Rpc` to `Microsoft.Copilot.Rpc`. Replace `using GitHub.Copilot;` with `using Microsoft.Copilot;`.
+
+### New Microsoft Copilot SDK 2.0 features
+
+**Idempotent tool definitions:** declare that repeating a call with the same arguments has no further effect, so the runtime can safely repeat a call whose outcome was lost. Permission checks are unchanged.
+
+```csharp
+using Microsoft.Extensions.AI;
+using System.ComponentModel;
+
+var lookupIssue = CopilotTool.DefineTool(async ([Description("Issue ID")] string id) => await FetchIssueAsync(id),
+    toolOptions: new CopilotToolOptions { Idempotent = true },
+    factoryOptions: new AIFunctionFactoryOptions
+    {
+        Name = "lookup_issue",
+        Description = "Fetch issue details",
+    });
+```
+
+**Client turn IDs:** `MessageOptions.ClientTurnId` labels the turn. The runtime copies it into `_meta["com.github.copilot/turnId"]` on every MCP `tools/call` made for that turn (including sub-agents) and echoes it on the turn's `user.message` event.
+
+```csharp
+await session.SendAsync(new MessageOptions
+{
+    Prompt = "Triage the new issues",
+    ClientTurnId = "turn-42",
+});
+```
+
+**Shell authentication handler:** `Interaction.OnShellAuthenticationRequest` answers `sudo -A`, `ssh`, and `git` prompts from commands the agent runs. The answer goes only to the program that asked; the model never sees it. See [Shell password prompts](../docs/features/shell-password-prompts.md).
+
+```csharp
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+{
+    Interaction = new SessionInteractionOptions
+    {
+        OnShellAuthenticationRequest = async (request, cancellationToken) =>
+        {
+            var value = await PromptUserAsync(
+                $"{request.Program} asks: {request.Prompt}",
+                masked: request.InputKind == ShellAuthenticationInputKind.Secret,
+                cancellationToken);
+            return value is null ? ShellAuthenticationResponse.Cancel() : ShellAuthenticationResponse.Accept(value);
+        },
+    },
+});
+```
+
+**Memory store callback (experimental):** `MemoryConfiguration.StoreMemory` keeps the memories the agent saves in your own storage instead of the built-in backends. While it is set, the runtime retrieves no memories, so supply recall yourself (for example through `SystemMessage`) and set the callback again on every resume.
+
+```csharp
+#pragma warning disable MCPSDK001 // The memory store callback is experimental.
+await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+{
+    State = new SessionStateOptions
+    {
+        Memory = new MemoryConfiguration
+        {
+            Enabled = true,
+            StoreMemory = (memory, cancellationToken) =>
+                memoryStore.InsertAsync(memory.Subject, memory.Fact, memory.Citations, cancellationToken),
+        },
+    },
+});
+#pragma warning restore MCPSDK001
+```
+
+**Network callbacks (experimental):** `CopilotClientOptions.Network` lets your app choose the runtime's proxies (`ResolveProxy`) and answer proxy Negotiate (`AuthenticateNegotiate`) and Basic (`AuthenticateBasic`) challenges. See [Network callbacks](#network-callbacks-experimental) for the full contract.
+
+```csharp
+#pragma warning disable MCPSDK001 // Network callbacks are experimental.
+await using var client = new CopilotClient(new CopilotClientOptions
+{
+    Mode = CopilotClientMode.CodingAgent,
+    Network = new NetworkConfig
+    {
+        ResolveProxy = (request, cancellationToken) => LookupProxyAsync(request.Url, cancellationToken),
+        AuthenticateBasic = (request, cancellationToken) =>
+            LookupProxyCredentialsAsync(request.Proxy, request.PreviousRejected, cancellationToken),
+    },
+});
+#pragma warning restore MCPSDK001
+```
+
+**Structured Policy Helper failures:** managed-settings snapshots carry `PolicyHelperFailure` (with `Category`, `Severity`, `Message`, and optional `Remediation` and `HelpLink`) plus `PolicyHelperCapabilities`. When `Recheck` is supported, `session.Rpc.ManagedSettings.RecheckPolicyHelperAsync()` runs a fresh helper evaluation. Applicable `CreateSessionAsync` and `ResumeSessionAsync` failures also report the failure in their JSON-RPC error data.
+
+```csharp
+var snapshot = await session.Rpc.ManagedSettings.GetAsync();
+if (snapshot.PolicyHelperFailure is not null && snapshot.PolicyHelperCapabilities?.Recheck == true)
+{
+    var refreshed = await session.Rpc.ManagedSettings.RecheckPolicyHelperAsync();
+    Console.WriteLine(refreshed.PolicyHelperFailure?.Message ?? "Policy Helper recovered");
+}
+```
+
+**Permission-mode refusal reason:** when managed policy refuses a permission mode, the result reports `Reason == "managed_policy"` with the authoritative `Mode`. The same result is available as `session.PermissionModeResult` for a `Permissions.Mode` applied at create or resume.
+
+```csharp
+#pragma warning disable MCPSDK001 // Permission modes are experimental.
+var result = await session.Rpc.Permissions.SetModeAsync(PermissionMode.AllowAll);
+if (!result.Success && result.Reason == "managed_policy")
+{
+    Console.WriteLine($"Managed policy kept the session in {result.Mode} mode");
+}
+#pragma warning restore MCPSDK001
+```
+
 ## Recent Features (v2.4–v2.5)
 
-The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#copilotclient), [memory](#memory), [BYOK](#bring-your-own-key-byok), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Properties are set on `SessionConfig` (and `ResumeSessionConfig`) unless noted.
+The recent CLI syncs added a wave of session controls. A few already have their own sections above ([reasoning effort](#copilotclient), [memory](#memory), [BYOK](#bring-your-own-key-byok), [session hooks](#session-hooks), and [OTLP protocol](#telemetry)), so this section is a compact roundup of the rest, written with the v3.0.0 grouped option names. Properties are set on `CreateSessionOptions` (and `ResumeSessionOptions`) unless noted.
 
 **v2.5**
 
-- **Tool search** — `ToolSearch = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 }`. Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
-- **Session rewind** — `session.Rpc.History.ListRewindPointsAsync()`, `PreviewRewindAsync(...)`, and `RewindAsync(eventId, mode)`. Opt in to file capture with `EnableFileChangeTracking = true`.
-- **Content exclusion** — `session.Rpc.ContentExclusion.CheckPathsAsync(paths)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
-- **Additional directories** — `AdditionalDirectories`. Extra workspace roots the agent may access beyond the working directory.
-- **Disabled MCP servers** — `DisabledMcpServers`.
-- **GitHub MCP tool config** — `GitHubMcpToolConfig`.
-- **Canvas provider** — `CanvasProvider`.
-- **Custom agents local-only** — `CustomAgentsLocalOnly`.
-- **User-prompt-transformed hook** — `OnUserPromptTransformed` in `SessionHooks`.
-- **Permission decision context** — `DecisionContext` on a `PermissionDecision`.
-- **Built-in plugin directories** — `BuiltinPluginDirectories` (client option) and `PluginDirectories` (session option).
-- **Experimental mode** — `EnableExperimentalMode`.
+- **Tool search:** `Tools = new SessionToolOptions { Search = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 } }`. Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
+- **Session rewind:** `session.Rpc.History.ListRewindPointsAsync()`, `PreviewRewindAsync(...)`, and `RewindAsync(eventId, mode)`. Opt in to file capture with `Filesystem.TrackFileChanges = true`.
+- **Content exclusion:** `session.Rpc.ContentExclusion.CheckPathsAsync(paths)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories:** `Filesystem.AdditionalDirectories`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers:** `Mcp.DisabledServers`.
+- **GitHub MCP tool config:** `GitHub.Mcp` (a `GitHubMcpToolConfig`).
+- **Canvas provider:** `Canvases.Provider` (a `CanvasProviderIdentity`).
+- **Custom agents local-only:** `Agents.LocalDiscoveryOnly`.
+- **User-prompt-transformed hook:** `OnUserPromptTransformed` in `SessionHooks` (set through `Hooks.Handlers`).
+- **Permission decision context:** `DecisionContext` on a `PermissionDecision`.
+- **Built-in plugin directories:** `Plugins.BuiltinDirectories` (client option) and `Plugins.Directories` (session option).
+- **Experimental mode:** `Experiments.EnableExperimentalMode`.
 
 **v2.4**
 
-- **BYOK bearer-token provider** — `Provider.BearerTokenProvider` (`Func<ProviderTokenArgs, Task<string>>`); see [Bring Your Own Key (BYOK)](#bring-your-own-key-byok).
-- **MCP OAuth handler** — `OnMcpAuthRequest`.
-- **Session citations** — `EnableCitations`.
-- **Excluded built-in agents** — `ExcludedBuiltInAgents`.
-- **Session spending limits** — `SessionLimits` (caps such as `MaxAiCredits`).
-- **Pre-MCP-tool-call hook** — `OnPreMcpToolCall` in `SessionHooks`.
-- **Message agent mode / display prompt** — `AgentMode` and `DisplayPrompt` on `MessageOptions`.
-- **HTTP request handler** — `RequestHandler` on `CopilotClientOptions` (a `CopilotRequestHandler`).
-- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
-- **Experiment assignments** — `ExpAssignments`.
+- **BYOK bearer-token provider:** `BearerTokenProvider` (`Func<ProviderTokenArgs, Task<string>>`) on an `Inference.Providers` entry (`NamedProviderConfig`); see [Bring Your Own Key (BYOK)](#bring-your-own-key-byok).
+- **MCP OAuth handler:** `Mcp.OnAuthRequest`.
+- **Session citations:** `Inference.EnableCitations`.
+- **Excluded built-in agents:** `Agents.ExcludedBuiltInAgents`.
+- **Session spending limits:** `Execution.Limits` (caps such as `MaxAiCredits`).
+- **Pre-MCP-tool-call hook:** `OnPreMcpToolCall` in `SessionHooks` (set through `Hooks.Handlers`).
+- **Message agent mode / display prompt:** `AgentMode` and `DisplayPrompt` on `MessageOptions`.
+- **HTTP request handler:** `Models.RequestHandler` on `CopilotClientOptions` (a `CopilotRequestHandler`).
+- **GitHub attachments:** `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
+- **Experiment assignments:** `Experiments.Assignments`.
 
 **Reasoning effort and tool search:**
 
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     Model = "claude-sonnet-4.6",
-    ReasoningEffort = "high",
-    ToolSearch = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 },
-    AdditionalDirectories = ["/repo/shared", "/repo/docs"],
+    Inference = new SessionInferenceOptions { ReasoningEffort = "high" },
+    Tools = new SessionToolOptions { Search = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 } },
+    Filesystem = new CreateSessionFilesystemOptions { AdditionalDirectories = ["/repo/shared", "/repo/docs"] },
 });
 ```
 
-**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+**Session rewind:** roll a session back to an earlier user turn, optionally restoring files:
 
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+using Microsoft.Copilot.Rpc;
+
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
-    EnableFileChangeTracking = true,
+    Filesystem = new CreateSessionFilesystemOptions { TrackFileChanges = true },
 });
 await session.SendAndWaitAsync("Refactor Utils.cs");
 
+#pragma warning disable MCPSDK001 // History RPCs are experimental.
 var points = await session.Rpc.History.ListRewindPointsAsync();
 if (points.Points.Count > 0)
 {
@@ -1591,28 +1755,37 @@ if (points.Points.Count > 0)
         target.EventId,
         HistoryRewindMode.ConversationAndFiles); // or HistoryRewindMode.Conversation
 }
+#pragma warning restore MCPSDK001
 ```
 
-**Content exclusion** — check paths against the session's policy:
+**Content exclusion:** check paths against the session's policy:
 
 ```csharp
 var result = await session.Rpc.ContentExclusion.CheckPathsAsync(
     ["/repo/src/Secret.cs", "/repo/README.md"]);
 ```
 
-**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+**BYOK bearer-token provider:** supply tokens dynamically (never serialized; the runtime calls back before each request):
 
 ```csharp
-var session = await client.CreateSessionAsync(new SessionConfig
+#pragma warning disable MCPSDK001 // Named providers are experimental.
+var session = await client.CreateSessionAsync(new CreateSessionOptions
 {
     Model = "gpt-4",
-    Provider = new ProviderConfig
+    GitHub = new SessionGitHubOptions { Capi = new CapiSessionOptions { Enabled = false } },
+    Inference = new SessionInferenceOptions
     {
-        Type = "openai",
-        BaseUrl = "https://my-api.example.com/v1",
-        BearerTokenProvider = async args => await AcquireAccessTokenAsync(),
+        DefaultProvider = "byok",
+        Providers = [new NamedProviderConfig
+        {
+            Name = "byok",
+            Type = "openai",
+            BaseUrl = "https://my-api.example.com/v1",
+            BearerTokenProvider = async args => await AcquireAccessTokenAsync(),
+        }],
     },
 });
+#pragma warning restore MCPSDK001
 ```
 
 ## Telemetry

@@ -8,6 +8,7 @@
 
 require "./copilot_sdk/version"
 require "./copilot_sdk/types"
+require "./copilot_sdk/session_params"
 require "./copilot_sdk/jsonrpc"
 require "./copilot_sdk/tools"
 require "./copilot_sdk/session"

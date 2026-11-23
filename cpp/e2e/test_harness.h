@@ -47,6 +47,12 @@ public:
     /// Build a snapshot path relative to the repo root.
     std::string snapshotPath(const std::string& relativePath) const;
 
+    /// Resolve the Copilot CLI for E2E tests, in order: COPILOT_CLI_PATH (when the
+    /// file exists), nodejs/node_modules/@github/copilot/npm-loader.js, then the
+    /// legacy @github/copilot-<platform>/index.js and @github/copilot/index.js.
+    /// Falls back to "copilot" on PATH. The SDK runs ".js" paths with node.
+    std::string cliPath() const;
+
 private:
     std::string proxyUrl_;
     std::string repoRoot_;

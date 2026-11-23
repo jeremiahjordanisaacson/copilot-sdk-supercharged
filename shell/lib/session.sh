@@ -73,6 +73,50 @@ COPILOT_MESSAGE_SOURCE=""
 # payload carries responseFormat {"type":"json_schema","jsonSchema":{"name":"response",
 # "strict":true,"schema":<schema>}} in place of the legacy string response format.
 COPILOT_RESPONSE_SCHEMA=""
+# Opaque caller-chosen ID for the next turn (wire: clientTurnId), echoed on that turn's events
+COPILOT_CLIENT_TURN_ID=""
+# tool.shell_output handler function name. During send_and_wait each streamed chunk is passed
+# to it as {toolCallId, text, sequence, stream?} (see copilot_shell_output_event_data).
+COPILOT_ON_SHELL_OUTPUT=""
+
+# --- Custom Tools ---
+# Newline-separated "tool_name|handler_function" records used to answer
+# external_tool.requested events during send_and_wait (see copilot_register_tool).
+COPILOT_TOOL_HANDLER_REGISTRY=""
+
+# Register a custom tool: appends its definition to COPILOT_TOOLS (sent on the next
+# create/resume) and its handler to COPILOT_TOOL_HANDLER_REGISTRY.
+#
+# Arguments:
+#   $1 - Tool name
+#   $2 - Description shown to the model
+#   $3 - Handler function name: my_tool <arguments_json> → echoes the result text
+#        (a non-zero exit reports the call as failed)
+#   $4 - Optional JSON Schema for the parameters (JSON object string)
+#   $5 - Optional idempotent flag ("true"/"false")
+#   $6 - Optional skip_permission flag ("true"): run without a permission prompt; otherwise
+#        set COPILOT_PERMISSION_HANDLER to approve the tool
+#
+# Usage:
+#   lookup_order() { echo "Order $(echo "$1" | jq -r '.id') shipped"; }
+#   copilot_register_tool "lookup_order" "Look up an order" lookup_order \
+#       '{"type":"object","properties":{"id":{"type":"string"}}}' true
+copilot_register_tool() {
+    local name="$1"
+    local description="$2"
+    local handler="$3"
+    local parameters="${4:-}"
+    local idempotent="${5:-}"
+    local skip_permission="${6:-}"
+
+    local definition
+    definition=$(copilot_tool_definition "$name" "$description" "$parameters" "$idempotent" \
+        "$skip_permission") || return 1
+    COPILOT_TOOLS=$(jq -c -n --argjson tools "${COPILOT_TOOLS:-[]}" --argjson def "$definition" \
+        '[$tools[] | select(.name != $def.name)] + [$def]') || return 1
+    COPILOT_TOOL_HANDLER_REGISTRY+="${name}|${handler}"$'\n'
+    return 0
+}
 
 # --- Message Source Constants (MessageSource) ---
 COPILOT_MESSAGE_SOURCE_USER="user"
@@ -165,6 +209,8 @@ COPILOT_SESSION_LAST_RESPONSE=""
 COPILOT_SESSION_MESSAGES=""
 # Parsed structured result (compact JSON) from send_and_wait_structured
 COPILOT_SESSION_STRUCTURED_RESPONSE=""
+# Result JSON of the last copilot_session_set_permission_mode ({"success","mode","reason"?})
+COPILOT_PERMISSION_MODE_RESULT=""
 
 # --- Session Functions ---
 
@@ -354,6 +400,21 @@ copilot_session_send_and_wait() {
                     "assistant.message")
                         last_assistant_content=$(echo "$msg" | jq -r '.params.event.data.content // empty' 2>/dev/null)
                         ;;
+                    "tool.shell_output")
+                        if [[ -n "${COPILOT_ON_SHELL_OUTPUT:-}" ]] && declare -f "$COPILOT_ON_SHELL_OUTPUT" > /dev/null 2>&1; then
+                            local shell_output
+                            shell_output=$(copilot_shell_output_event_data "$(echo "$msg" | jq -c '.params.event' 2>/dev/null)")
+                            if [[ -n "$shell_output" ]]; then
+                                "$COPILOT_ON_SHELL_OUTPUT" "$shell_output" || true
+                            fi
+                        fi
+                        ;;
+                    "external_tool.requested")
+                        _copilot_session_handle_external_tool "$msg" "$session_id" || true
+                        ;;
+                    "permission.requested")
+                        _copilot_session_handle_permission_requested "$msg" "$session_id" || true
+                        ;;
                     "session.idle")
                         COPILOT_SESSION_LAST_RESPONSE="$last_assistant_content"
                         return 0
@@ -405,8 +466,9 @@ copilot_session_send_and_wait() {
                     copilot_jsonrpc_send_message "$response"
                 fi
 
-            # Answer server -> client requests (gitHubToken.getToken, hooks.invoke)
-            elif [[ "$method" == "gitHubToken.getToken" ]] || [[ "$method" == "hooks.invoke" ]]; then
+            # Answer other server -> client requests (gitHubToken.getToken, hooks.invoke,
+            # shellAuthentication.*, memoryStore.store, network.*)
+            elif [[ -n "$method" ]]; then
                 _copilot_handle_server_request "$msg" || true
             fi
         fi
@@ -703,6 +765,50 @@ copilot_session_recheck_policy_helper() {
     return 0
 }
 
+# Change the session's permission mode.
+#
+# Arguments:
+#   $1 - Permission mode: "manual", "assisted", or "allow-all"
+#   $2 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#
+# Sets:
+#   COPILOT_PERMISSION_MODE_RESULT - The result JSON ({"success","mode","reason"?})
+#   COPILOT_JSONRPC_LAST_RESPONSE  - The full session.permissions.setMode response
+#
+# When the runtime refuses the mode, the result has "success":false and, when known, a
+# "reason" such as $COPILOT_PERMISSION_MODE_REFUSAL_MANAGED_POLICY ("managed_policy").
+#
+# Returns 0 when the mode was applied, 1 when it was refused or the request failed.
+copilot_session_set_permission_mode() {
+    local mode="$1"
+    local session_id="${2:-$COPILOT_SESSION_ID}"
+
+    COPILOT_PERMISSION_MODE_RESULT=""
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: No active session. Create or resume a session first." >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" --arg mode "$mode" '{"sessionId":$sid,"mode":$mode}')
+
+    if ! copilot_jsonrpc_request "session.permissions.setMode" "$params"; then
+        echo "ERROR: Failed to set permission mode" >&2
+        return 1
+    fi
+
+    COPILOT_PERMISSION_MODE_RESULT=$(copilot_jsonrpc_get_result | jq -c '.' 2>/dev/null) || COPILOT_PERMISSION_MODE_RESULT=""
+    if [[ "$(echo "$COPILOT_PERMISSION_MODE_RESULT" | jq -r '.success // false' 2>/dev/null)" != "true" ]]; then
+        local reason
+        reason=$(echo "$COPILOT_PERMISSION_MODE_RESULT" | jq -r '.reason // "unknown"' 2>/dev/null) || reason="unknown"
+        echo "ERROR: Permission mode \"$mode\" was refused (reason: $reason)" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # --- Internal Functions ---
 
 # Append the message source and structured-output schema (if set) to send params.
@@ -712,6 +818,9 @@ _copilot_session_add_message_options() {
 
     if [[ -n "${COPILOT_MESSAGE_SOURCE:-}" ]]; then
         params=$(echo "$params" | jq -c --arg src "$COPILOT_MESSAGE_SOURCE" '. + {"source":$src}') || return 1
+    fi
+    if [[ -n "${COPILOT_CLIENT_TURN_ID:-}" ]]; then
+        params=$(echo "$params" | jq -c --arg ctid "$COPILOT_CLIENT_TURN_ID" '. + {"clientTurnId":$ctid}') || return 1
     fi
     if [[ -n "${COPILOT_RESPONSE_SCHEMA:-}" ]]; then
         params=$(echo "$params" | jq -c --argjson rs "$COPILOT_RESPONSE_SCHEMA" \
@@ -747,9 +856,289 @@ _copilot_handle_server_request() {
             _copilot_session_handle_hooks_invoke "$msg" "$req_id"
             return 0
             ;;
+        "shellAuthentication.request")
+            _copilot_session_handle_shell_authentication "$msg" "$req_id"
+            return 0
+            ;;
+        "shellAuthentication.cancel")
+            # Handlers run synchronously, so a cancellation only arrives after the handler
+            # for that request has returned; acknowledge it.
+            _copilot_send_rpc_result "$req_id" '{}'
+            return 0
+            ;;
+        "memoryStore.store")
+            _copilot_session_handle_memory_store "$msg" "$req_id"
+            return 0
+            ;;
+        "network.resolveProxy"|"network.authenticateNegotiate"|"network.authenticateBasic")
+            _copilot_handle_network_request "$method" "$msg" "$req_id"
+            return 0
+            ;;
     esac
 
     return 1
+}
+
+# Send a JSON-RPC success response.
+# Arguments:
+#   $1 - Request id (JSON)
+#   $2 - Result (JSON)
+_copilot_send_rpc_result() {
+    local response
+    response=$(jq -c -n --argjson id "$1" --argjson res "$2" '{"jsonrpc":"2.0","id":$id,"result":$res}') || return 1
+    copilot_jsonrpc_send_message "$response"
+}
+
+# Send a JSON-RPC error response.
+# Arguments:
+#   $1 - Request id (JSON)
+#   $2 - Error code (integer)
+#   $3 - Error message
+_copilot_send_rpc_error() {
+    local response
+    response=$(jq -c -n --argjson id "$1" --argjson code "$2" --arg msg "$3" \
+        '{"jsonrpc":"2.0","id":$id,"error":{"code":$code,"message":$msg}}') || return 1
+    copilot_jsonrpc_send_message "$response"
+}
+
+# Answer shellAuthentication.request by calling COPILOT_SHELL_AUTHENTICATION_HANDLER.
+# Only {"action":"accept","value":<string>} is forwarded; anything else cancels the prompt.
+# The answer is never logged.
+_copilot_session_handle_shell_authentication() {
+    local msg="$1"
+    local req_id="$2"
+    local result='{"action":"cancel"}'
+    local handler="${COPILOT_SHELL_AUTHENTICATION_HANDLER:-}"
+    local request
+    request=$(echo "$msg" | jq -c '.params // {}' 2>/dev/null) || request='{}'
+
+    if [[ -n "$handler" ]] && declare -f "$handler" > /dev/null 2>&1 && \
+        echo "$request" | jq -e '(.requestId | type) == "string" and (.program | type) == "string"
+            and (.prompt | type) == "string"
+            and (.inputKind == "secret" or .inputKind == "text" or .inputKind == "confirm")' \
+            > /dev/null 2>&1; then
+        local answer=""
+        answer=$("$handler" "$request" 2>/dev/null) || answer=""
+        if [[ -n "$answer" ]] && \
+            echo "$answer" | jq -e '.action == "accept" and (.value | type) == "string"' > /dev/null 2>&1; then
+            result=$(echo "$answer" | jq -c '{"action":"accept","value":.value}') || result='{"action":"cancel"}'
+        fi
+    fi
+
+    _copilot_send_rpc_result "$req_id" "$result"
+}
+
+# Answer memoryStore.store by calling COPILOT_MEMORY_STORE_HANDLER; replies with a null result.
+_copilot_session_handle_memory_store() {
+    local msg="$1"
+    local req_id="$2"
+    local handler="${COPILOT_MEMORY_STORE_HANDLER:-}"
+
+    if [[ -z "$handler" ]] || ! declare -f "$handler" > /dev/null 2>&1; then
+        _copilot_send_rpc_error "$req_id" -32603 "No memory store is registered"
+        return 0
+    fi
+
+    local memory
+    memory=$(echo "$msg" | jq -c '.params | {"sessionId": .sessionId, "subject": .subject,
+        "fact": .fact, "citations": .citations, "reason": .reason}' 2>/dev/null) || memory='{}'
+    if ! "$handler" "$memory" >&2; then
+        echo "WARN: Memory store callback failed" >&2
+        _copilot_send_rpc_error "$req_id" -32603 "Memory store callback failed"
+        return 0
+    fi
+
+    _copilot_send_rpc_result "$req_id" 'null'
+}
+
+# Answer network.resolveProxy / network.authenticateNegotiate / network.authenticateBasic by
+# calling the matching COPILOT_NETWORK_* function. Tokens and passwords are never logged.
+_copilot_handle_network_request() {
+    local method="$1"
+    local msg="$2"
+    local req_id="$3"
+    local handler request
+
+    case "$method" in
+        "network.resolveProxy")
+            handler="${COPILOT_NETWORK_RESOLVE_PROXY:-}"
+            request=$(echo "$msg" | jq -c '{"url": .params.url}' 2>/dev/null) || request='{}'
+            ;;
+        "network.authenticateNegotiate")
+            handler="${COPILOT_NETWORK_AUTHENTICATE_NEGOTIATE:-}"
+            request=$(echo "$msg" | jq -c '{"spn": .params.spn}' 2>/dev/null) || request='{}'
+            ;;
+        *)
+            handler="${COPILOT_NETWORK_AUTHENTICATE_BASIC:-}"
+            request=$(echo "$msg" | jq -c '{"proxy": .params.proxy, "realm": .params.realm,
+                "previousRejected": (.params.previousRejected == true)}' 2>/dev/null) || request='{}'
+            ;;
+    esac
+
+    if [[ -z "$handler" ]] || ! declare -f "$handler" > /dev/null 2>&1; then
+        _copilot_send_rpc_error "$req_id" -32603 "No callback is registered for $method"
+        return 0
+    fi
+
+    local output=""
+    if ! output=$("$handler" "$request"); then
+        _copilot_send_rpc_error "$req_id" -32603 "The $method callback failed"
+        return 0
+    fi
+
+    local result
+    case "$method" in
+        "network.resolveProxy")
+            result=$(jq -c -n --arg v "$output" 'if $v == "" then {} else {"proxy": $v} end')
+            ;;
+        "network.authenticateNegotiate")
+            result=$(jq -c -n --arg v "$output" 'if $v == "" then {} else {"token": $v} end')
+            ;;
+        *)
+            # Send only the credential fields, never other members of the handler output.
+            result=$(echo "${output:-null}" | jq -c 'if type == "object"
+                then {"username": .username, "password": .password} | with_entries(select(.value != null))
+                else {} end' 2>/dev/null) || result='{}'
+            ;;
+    esac
+
+    _copilot_send_rpc_result "$req_id" "$result"
+}
+
+# Answer an external_tool.requested event by running the registered tool handler and sending
+# session.tools.handlePendingToolCall without waiting for its response, so events that arrive
+# meanwhile stay in the send_and_wait loop.
+#
+# Arguments:
+#   $1 - The raw session.event notification
+#   $2 - Fallback session ID
+_copilot_session_handle_external_tool() {
+    local msg="$1"
+    local session_id="$2"
+    local tool_name request_id has_handler event_session_id
+    tool_name=$(echo "$msg" | jq -r '.params.event.data.toolName // empty' 2>/dev/null) || tool_name=""
+    request_id=$(echo "$msg" | jq -r '.params.event.data.requestId // empty' 2>/dev/null) || request_id=""
+    has_handler=$(echo "$msg" | jq -r '.params.event.data.hasHandler' 2>/dev/null) || has_handler=""
+    event_session_id=$(echo "$msg" | jq -r '.params.sessionId // empty' 2>/dev/null) || event_session_id=""
+    if [[ -n "$event_session_id" ]]; then
+        session_id="$event_session_id"
+    fi
+    if [[ -z "$tool_name" ]] || [[ -z "$request_id" ]] || [[ "$has_handler" == "false" ]]; then
+        return 0
+    fi
+
+    local handler="" line
+    while IFS= read -r line; do
+        if [[ "${line%%|*}" == "$tool_name" ]]; then
+            handler="${line#*|}"
+        fi
+    done <<< "${COPILOT_TOOL_HANDLER_REGISTRY:-}"
+    if [[ -z "$handler" ]] || ! declare -f "$handler" > /dev/null 2>&1; then
+        return 0
+    fi
+
+    local arguments output="" params
+    arguments=$(echo "$msg" | jq -c '.params.event.data.arguments // {}' 2>/dev/null) || arguments='{}'
+    if output=$("$handler" "$arguments"); then
+        params=$(jq -c -n --arg sid "$session_id" --arg rid "$request_id" --arg out "$output" \
+            '{"sessionId":$sid,"requestId":$rid,"result":$out}')
+    else
+        params=$(jq -c -n --arg sid "$session_id" --arg rid "$request_id" --arg tool "$tool_name" \
+            '{"sessionId":$sid,"requestId":$rid,"error":("Tool " + $tool + " failed")}')
+    fi
+
+    _copilot_jsonrpc_next_id
+    local request
+    request=$(jq -c -n --arg id "$COPILOT_JSONRPC_REQUEST_ID" --argjson params "$params" \
+        '{"jsonrpc":"2.0","id":($id | tonumber),"method":"session.tools.handlePendingToolCall","params":$params}')
+    copilot_jsonrpc_send_message "$request"
+}
+
+# Permission decision JSON for a COPILOT_PERMISSION_HANDLER result: "approve" / "allow" /
+# "true" approve once, "approve-for-session" approves for the session, "deny" / "reject" /
+# "false" reject, "user-not-available" (or empty output) reports that no user is available,
+# and a JSON object with "kind" (for example {"kind":"reject","feedback":"..."}) is sent as
+# given. Earlier result kinds ("approved", "denied-*") are mapped. "no-result" outputs nothing
+# (no reply: the request stays pending for another client).
+# Arguments:
+#   $1 - Handler result
+copilot_permission_decision_json() {
+    local decision="${1:-}"
+    local kind=""
+    if [[ "$decision" == "{"* ]]; then
+        kind=$(echo "$decision" | jq -r 'if type == "object" then (.kind // "") else "" end' 2>/dev/null) || kind=""
+        case "$kind" in
+            "no-result") return 0 ;;
+            "approve-once"|"approve-for-session"|"approve-permanently"|"reject"|"user-not-available")
+                echo "$decision" | jq -c '.'
+                return 0
+                ;;
+            *) decision="$kind" ;;
+        esac
+    fi
+    case "$decision" in
+        "no-result") return 0 ;;
+        "approve"|"approved"|"allow"|"approve-once"|"true"|"yes") kind="approve-once" ;;
+        "approve-for-session"|"approve-permanently") kind="$decision" ;;
+        ""|"user-not-available"|"denied-by-rules"|"denied-no-approval-rule-and-could-not-request-from-user"|"denied-by-content-exclusion-policy")
+            kind="user-not-available"
+            ;;
+        *) kind="reject" ;;
+    esac
+    jq -c -n --arg k "$kind" '{"kind":$k}'
+}
+
+# Permission handlers for COPILOT_PERMISSION_HANDLER.
+copilot_approve_all() {
+    echo "approve"
+}
+
+copilot_deny_all() {
+    echo "deny"
+}
+
+# Answer a permission.requested event with COPILOT_PERMISSION_HANDLER and send
+# session.permissions.handlePendingPermissionRequest without waiting for its response. A
+# failing handler reports that no user is available.
+#
+# Arguments:
+#   $1 - The raw session.event notification
+#   $2 - Fallback session ID
+_copilot_session_handle_permission_requested() {
+    local msg="$1"
+    local session_id="$2"
+    local handler="${COPILOT_PERMISSION_HANDLER:-}"
+    if [[ -z "$handler" ]] || ! declare -f "$handler" > /dev/null 2>&1; then
+        return 0
+    fi
+    local request_id resolved_by_hook event_session_id
+    request_id=$(echo "$msg" | jq -r '.params.event.data.requestId // empty' 2>/dev/null) || request_id=""
+    resolved_by_hook=$(echo "$msg" | jq -r '.params.event.data.resolvedByHook // false' 2>/dev/null) || resolved_by_hook="false"
+    event_session_id=$(echo "$msg" | jq -r '.params.sessionId // empty' 2>/dev/null) || event_session_id=""
+    if [[ -n "$event_session_id" ]]; then
+        session_id="$event_session_id"
+    fi
+    if [[ -z "$request_id" ]] || [[ "$resolved_by_hook" == "true" ]]; then
+        return 0
+    fi
+
+    local request decision result
+    request=$(echo "$msg" | jq -c '.params.event.data.permissionRequest // {}' 2>/dev/null) || request='{}'
+    if ! decision=$("$handler" "$request"); then
+        decision="user-not-available"
+    fi
+    result=$(copilot_permission_decision_json "$decision") || result='{"kind":"user-not-available"}'
+    if [[ -z "$result" ]]; then
+        return 0
+    fi
+
+    _copilot_jsonrpc_next_id
+    local params request_msg
+    params=$(jq -c -n --arg sid "$session_id" --arg rid "$request_id" --argjson res "$result" \
+        '{"sessionId":$sid,"requestId":$rid,"result":$res}')
+    request_msg=$(jq -c -n --arg id "$COPILOT_JSONRPC_REQUEST_ID" --argjson params "$params" \
+        '{"jsonrpc":"2.0","id":($id | tonumber),"method":"session.permissions.handlePendingPermissionRequest","params":$params}')
+    copilot_jsonrpc_send_message "$request_msg"
 }
 
 # Answer gitHubToken.getToken by calling the registered COPILOT_GITHUB_TOKEN_PROVIDER.

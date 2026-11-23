@@ -13,6 +13,8 @@ import std.format : format;
 import core.sync.mutex : Mutex;
 import core.sync.condition : Condition;
 
+import copilot.types : PolicyHelperFailure;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -24,6 +26,7 @@ private struct PendingRequest
     Nullable!JSONValue result;
     Nullable!string errorMsg;
     int errorCode;
+    JSONValue errorData;
     Condition cond;
 }
 
@@ -145,7 +148,7 @@ final class JsonRpcClient
         }
 
         if (!pr.errorMsg.isNull)
-            throw new JsonRpcError(pr.errorMsg.get, pr.errorCode);
+            throw new JsonRpcError(pr.errorMsg.get, pr.errorCode, pr.errorData);
 
         return pr.result.isNull ? JSONValue(null) : pr.result.get;
     }
@@ -292,6 +295,9 @@ final class JsonRpcClient
                 auto pCode = "code" in *pErr;
                 if (pCode !is null && (*pCode).type == JSONType.integer)
                     pr.errorCode = cast(int) (*pCode).integer;
+                auto pData = "data" in *pErr;
+                if (pData !is null)
+                    pr.errorData = *pData;
             }
             else
             {
@@ -364,6 +370,9 @@ class JsonRpcError : Exception
     /// JSON-RPC error code reported by the server (0 when unknown).
     int code;
 
+    /// Structured error data reported by the server (JSON null when absent).
+    JSONValue data;
+
     this(string msg, string file = __FILE__, size_t line = __LINE__) @safe pure nothrow
     {
         super(msg, file, line);
@@ -373,5 +382,24 @@ class JsonRpcError : Exception
     {
         super(msg, file, line);
         this.code = code;
+    }
+
+    this(string msg, int code, JSONValue data, string file = __FILE__,
+        size_t line = __LINE__) @safe pure nothrow
+    {
+        super(msg, file, line);
+        this.code = code;
+        this.data = data;
+    }
+
+    /// The structured Policy Helper failure carried in the error data
+    /// (`error.data.policyHelperFailure`), for example when `session.create`
+    /// or `session.resume` is refused by managed policy.
+    Nullable!PolicyHelperFailure policyHelperFailure() const @trusted
+    {
+        if (data.type != JSONType.object) return Nullable!PolicyHelperFailure.init;
+        auto p = "policyHelperFailure" in data;
+        if (p is null) return Nullable!PolicyHelperFailure.init;
+        return PolicyHelperFailure.fromJson(cast(JSONValue) *p);
     }
 }

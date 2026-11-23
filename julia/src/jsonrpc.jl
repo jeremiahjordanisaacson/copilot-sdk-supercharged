@@ -109,6 +109,12 @@ function on_request!(client::JsonRpcClient, method::String, handler::Function)
     client.request_handlers[method] = handler
 end
 
+# Do-block forms: `on_request!(rpc, "method") do params ... end`.
+on_notification!(handler::Function, client::JsonRpcClient, method::String) =
+    on_notification!(client, method, handler)
+on_request!(handler::Function, client::JsonRpcClient, method::String) =
+    on_request!(client, method, handler)
+
 """
     send_request(client, method, params; timeout=60) -> Any
 
@@ -251,7 +257,8 @@ function _handle_notification(client::JsonRpcClient, msg::Dict{String, Any})
     handler = get(client.notification_handlers, method, nothing)
     if handler !== nothing
         @async try
-            handler(params)
+            # invokelatest: callbacks defined after start! must be callable from the reader task
+            Base.invokelatest(handler, params)
         catch e
             @error "Notification handler error" method exception=(e, catch_backtrace())
         end
@@ -269,7 +276,7 @@ function _handle_server_request(client::JsonRpcClient, msg::Dict{String, Any})
             _send_error_response(client, id, -32601, "Method not found: $method")
             return
         end
-        result = handler(params)
+        result = Base.invokelatest(handler, params)
         _send_response(client, id, result)
     catch e
         if e isa JsonRpcError

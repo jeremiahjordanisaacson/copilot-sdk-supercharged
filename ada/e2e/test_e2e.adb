@@ -50,11 +50,13 @@ procedure Test_E2E is
    --  Shared proxy instance.
    Proxy : Capi_Proxy;
 
-   --  Utility: create a Client_Options with the proxy URL filled in.
+   --  Utility: client options that spawn the CLI found by Cli_Path.  The
+   --  CLI reaches the replay proxy through COPILOT_API_URL (set by
+   --  Proxy.Start).
    function Make_Options return Client_Options is
       Opts : Client_Options := Default_Options;
    begin
-      Opts.CLI_Url := To_Unbounded_String (Proxy.Proxy_Url);
+      Opts.CLI_Path := To_Unbounded_String (Test_Harness.Cli_Path);
       return Opts;
    end Make_Options;
 

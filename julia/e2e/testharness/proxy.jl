@@ -133,7 +133,10 @@ end
 """
     cli_path_from_repo() -> String
 
-Resolve the Copilot CLI executable path.
+Resolve the Copilot CLI executable path: `COPILOT_CLI_PATH` (when the file exists), then the
+CLI 1.0.113+ `npm-loader.js` entry point, then the legacy `index.js` entry points under
+`nodejs/node_modules/@github`. The client runs a `.js` path with node and executes any other
+path (such as `node_modules/.bin/copilot`) directly.
 """
 function cli_path_from_repo()::String
     env_path = get(ENV, "COPILOT_CLI_PATH", "")
@@ -142,9 +145,18 @@ function cli_path_from_repo()::String
     end
 
     repo_root = normpath(joinpath(@__DIR__, "..", "..", ".."))
-    node_cli = joinpath(repo_root, "nodejs", "node_modules", "@github", "copilot", "index.js")
-    if isfile(node_cli)
-        return abspath(node_cli)
+    github_dir = joinpath(repo_root, "nodejs", "node_modules", "@github")
+    candidates = [joinpath(github_dir, "copilot", "npm-loader.js")]
+    if isdir(github_dir)
+        for entry in sort(readdir(github_dir))
+            startswith(entry, "copilot-") && push!(candidates, joinpath(github_dir, entry, "index.js"))
+        end
+    end
+    push!(candidates, joinpath(github_dir, "copilot", "index.js"))
+    for candidate in candidates
+        if isfile(candidate)
+            return abspath(candidate)
+        end
     end
 
     return "copilot"

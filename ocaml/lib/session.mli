@@ -73,3 +73,41 @@ val setup_notifications : t -> unit
 
 val is_idle : t -> bool
 (** [is_idle t] is [true] when the last event was [session.idle]. *)
+
+(** {1 v2.6.0 / v3.0.0 session operations} *)
+
+val switch_auto_tier : t -> string option -> Yojson.Safe.t Lwt.t
+(** [switch_auto_tier t tier] changes the Auto routing preference
+    ([session.model.switchAutoTier]); [None] returns to the default
+    routing. Experimental. *)
+
+val detach : t -> unit Lwt.t
+(** [detach t] sends [session.detach]: the session is released from this
+    connection and can be resumed later. *)
+
+val get_managed_settings : t -> Yojson.Safe.t Lwt.t
+(** [get_managed_settings t] returns the managed settings in effect. *)
+
+val recheck_policy_helper : t -> Yojson.Safe.t Lwt.t
+(** [recheck_policy_helper t] re-runs the managed-settings policy helper
+    ([session.managedSettings.recheckPolicyHelper]). *)
+
+val set_permission_mode : t -> string -> Types.permission_mode_set_result Lwt.t
+(** [set_permission_mode t mode] calls [session.permissions.setMode]. A
+    refused change reports [pms_success = false] and may carry the reason
+    {!Types.permission_mode_refusal_managed_policy}. *)
+
+val handle_hooks_invoke : t -> string -> Yojson.Safe.t -> Yojson.Safe.t option Lwt.t
+(** Dispatches a [hooks.invoke] request ("subagentStart" / "subagentStop")
+    to the session's hook handlers. Used by {!Client}. *)
+
+val handle_shell_authentication :
+  t -> Types.shell_authentication_request -> Types.shell_authentication_response Lwt.t
+(** Answers a [shellAuthentication.request] with the session's handler;
+    cancels when no handler is set or the request is cancelled first. *)
+
+val cancel_shell_authentication : t -> string -> unit
+(** Cancels a pending shell authentication prompt by request id. *)
+
+val handle_memory_store : t -> Types.stored_memory -> unit Lwt.t
+(** Delivers a [memoryStore.store] request to the session's callback. *)

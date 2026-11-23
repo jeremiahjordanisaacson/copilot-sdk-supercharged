@@ -21,7 +21,7 @@ replaces both with the CLI version published for that snapshot.
 ## Installation
 
 ```bash
-npm install @microsoft/copilot-sdk
+npm install copilot-sdk-supercharged
 ```
 
 ## Model provider metadata
@@ -67,7 +67,7 @@ const client = new CopilotClient({
 <!-- docs-validate: strict -->
 
 ```typescript
-import { CopilotClient } from "@microsoft/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 await using client = new CopilotClient({ mode: "coding-agent" });
 await client.start();
@@ -140,7 +140,7 @@ Supply `createSession` to materialize fresh AHP sessions in your application:
 <!-- docs-validate: strict -->
 
 ```typescript
-import { approveAll, CopilotClient, defineTool } from "@microsoft/copilot-sdk";
+import { approveAll, CopilotClient, defineTool } from "copilot-sdk-supercharged";
 
 await using client = new CopilotClient({ mode: "coding-agent" });
 await using host = await client.startAhpHost({
@@ -219,7 +219,7 @@ runtimes without these RPC operations cannot start a host.
 <!-- docs-validate: strict -->
 
 ```typescript
-import { CopilotClient, approveAll } from "@microsoft/copilot-sdk";
+import { CopilotClient, approveAll } from "copilot-sdk-supercharged";
 
 // Create and start client
 const client = new CopilotClient({ mode: "coding-agent" });
@@ -257,7 +257,7 @@ Sessions also support `Symbol.asyncDispose` for use with [`await using`](https:/
 <!-- docs-validate: strict -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 await using session = await client.createSession({
     model: "gpt-5",
@@ -294,7 +294,7 @@ Optional credential contexts retain their original connection and credential aut
 
 The [runnable fetch example](examples/fetch.mjs) demonstrates all modes, file survival after disconnect, and caller cleanup against a local fixture.
 
-Import `FetchSendParams`, `FetchSendResult`, `FetchTransportErrorData`, `FetchFileErrorData`, and `CredentialContextErrorData` from `@microsoft/copilot-sdk`.
+Import `FetchSendParams`, `FetchSendResult`, `FetchTransportErrorData`, `FetchFileErrorData`, and `CredentialContextErrorData` from `copilot-sdk-supercharged`.
 
 ### CopilotClient
 
@@ -609,7 +609,7 @@ Use `source: "system"` for automated messages from your application:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -628,7 +628,7 @@ For a message from another agent, use its trusted sender ID:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -674,7 +674,7 @@ JSON Schema before sending them:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -707,7 +707,7 @@ For a typed result, pass the Zod schema as the **second argument** instead:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 import { z } from "zod";
@@ -796,7 +796,7 @@ Subscribe to a specific event type. The handler receives properly typed events.
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -841,7 +841,7 @@ Subscribe to all session events. Returns an unsubscribe function.
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -888,7 +888,7 @@ Watch for the outcome through the `session.model_change` event on success or the
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -919,20 +919,20 @@ const result = await session.setFusionTier("max");
 
 ##### `rpc.model.getReasoningSummaries(params)` (experimental)
 
-Read the current model's reasoning-summary presentation policy without changing session state. Call `session.rpc.model.list()` first to load the model catalog; otherwise the result may have `ready: false`. The request and result types are exported from `@microsoft/copilot-sdk`.
+Read the current model's reasoning-summary presentation policy without changing session state. Call `session.rpc.model.list()` first to load the model catalog; otherwise the result may have `ready: false`. The request and result types are exported from `copilot-sdk-supercharged`.
 
 <!-- docs-validate: strict -->
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
 import type {
     ModelGetReasoningSummariesRequest,
     ModelGetReasoningSummariesResult,
-} from "@microsoft/copilot-sdk";
+} from "copilot-sdk-supercharged";
 
 const presentation: ModelGetReasoningSummariesRequest = { summariesVisible: false };
 const policy: ModelGetReasoningSummariesResult =
@@ -945,7 +945,7 @@ const policy: ModelGetReasoningSummariesResult =
 import type {
     ModelGetReasoningSummariesRequest,
     ModelGetReasoningSummariesResult,
-} from "@microsoft/copilot-sdk";
+} from "copilot-sdk-supercharged";
 
 const presentation: ModelGetReasoningSummariesRequest = { summariesVisible: false };
 const policy: ModelGetReasoningSummariesResult =
@@ -964,10 +964,10 @@ Once the runtime accepts the replacement, every tool call this session dispatche
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 import { z } from "zod";
 
 declare function searchIssues(query: string): Promise<string>;
@@ -1015,7 +1015,7 @@ Host capabilities reported when the session was created or resumed. Use this to 
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -1063,7 +1063,7 @@ The SDK supports image attachments via the `attachments` parameter. You can atta
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 declare const base64ImageData: string;
@@ -1125,7 +1125,7 @@ Supported image formats are PNG, JPEG, WebP, and GIF. Images in other formats, s
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -1202,7 +1202,7 @@ Note: `assistant.message` and `assistant.reasoning` (final events) are always se
 <!-- docs-validate: strict -->
 
 ```typescript
-import { CopilotClient } from "@microsoft/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({ mode: "coding-agent" });
 
@@ -1224,7 +1224,7 @@ You can let the CLI call back into your process when the model needs capabilitie
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 declare function fetchIssue(id: string): Promise<string>;
 
@@ -1251,7 +1251,7 @@ const session = await client.createSession({
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",
@@ -1283,7 +1283,7 @@ If a handler throws, the call fails and the model sees only the generic message 
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 declare function findIssue(id: string): Promise<string | undefined>;
 
@@ -1307,7 +1307,7 @@ const lookupIssue = defineTool("lookup_issue", {
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 const lookupIssue = defineTool("lookup_issue", {
     description: "Fetch issue details from our tracker",
@@ -1334,7 +1334,7 @@ If you register a tool with the same name as a built-in CLI tool (e.g. `edit_fil
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 defineTool("edit_file", {
     description: "Custom file editor with project-specific validation",
@@ -1369,7 +1369,7 @@ dispatching to any SDK. Both a Zod-inferred Node handler and
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 defineTool("apply_patch", {
     parameters: z.string(),
@@ -1400,7 +1400,7 @@ Set `skipPermission: true` on a tool definition to allow it to execute without t
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 defineTool("safe_lookup", {
     description: "A read-only lookup that needs no confirmation",
@@ -1434,7 +1434,7 @@ Set `defer` to control whether a tool may be loaded lazily via tool search rathe
 
 ```ts
 import { z } from "zod";
-import { defineTool } from "@microsoft/copilot-sdk";
+import { defineTool } from "copilot-sdk-supercharged";
 
 defineTool("lookup_issue", {
     description: "Fetch issue details",
@@ -1467,7 +1467,7 @@ Register slash commands so that users of the CLI's TUI can invoke custom actions
 <!-- docs-validate: hidden -->
 
 ```ts
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     permissions: {
@@ -1524,7 +1524,7 @@ When the session has elicitation support — either from the CLI's TUI or from a
 <!-- docs-validate: hidden -->
 
 ```ts
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     permissions: {
@@ -1634,8 +1634,8 @@ Use `mode: "customize"` to selectively override individual sections of the promp
 <!-- docs-validate: strict -->
 
 ```typescript
-import { SYSTEM_MESSAGE_SECTIONS } from "@microsoft/copilot-sdk";
-import type { SectionOverride, SystemMessageSection } from "@microsoft/copilot-sdk";
+import { SYSTEM_MESSAGE_SECTIONS } from "copilot-sdk-supercharged";
+import type { SectionOverride, SystemMessageSection } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",
@@ -1832,8 +1832,8 @@ files on disk. Provider skills join the session's skill catalog and load on dema
 <!-- docs-validate: hidden -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
-import type { SkillProvider } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
+import type { SkillProvider } from "copilot-sdk-supercharged";
 
 declare const db: {
     findSkill(
@@ -1862,7 +1862,7 @@ const session = await client.createSession({
 <!-- /docs-validate: hidden -->
 
 ```typescript
-import type { SkillProvider } from "@microsoft/copilot-sdk";
+import type { SkillProvider } from "copilot-sdk-supercharged";
 
 const skillProvider: SkillProvider = {
     listSkills: async () => [
@@ -1946,7 +1946,7 @@ const session = await client.createSession({
 <!-- docs-validate: hidden -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     permissions: {
@@ -2072,56 +2072,194 @@ const session = await client.createSession({
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `type: "azure"`, not `type: "openai"`.
 > - The `baseUrl` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
 
+## What's New in v3.0.0
+
+v3.0.0 is a major release. The core SDK now tracks Microsoft Copilot SDK 2.0, which negotiates **SDK protocol 4** and requires **Copilot CLI runtime 1.0.113 or newer** (v2.5.3 used protocol 3). Upgrade the SDK and the runtime together: an older runtime fails connection negotiation.
+
+### Breaking changes
+
+Code written for v2.5.x needs a migration pass. The [v2 breaking changes guide](../docs/v2-breaking-changes.md) lists every rename; these are the main ones:
+
+- **Explicit client mode:** `mode` is required. Pass `"coding-agent"` for CLI-like tools and defaults, or `"empty"` for multi-user services that enable each capability explicitly. Replace any `"copilot-cli"` value with `"coding-agent"`.
+- **Runtime connections, in-process by default:** the `connection` option is now `runtime`. `RuntimeConnection.forStdio()` becomes `forSpawnedStdio()`, the old spawning `forTcp()` becomes `forSpawnedTcp()`, `forUri(url)` becomes the attached `forTcp(host, port)`, and `forInProcess()` plus the new `forDefault()` complete the set. Without `runtime`, the SDK loads the native runtime into your process; pass `RuntimeConnection.forSpawnedStdio()` or set `COPILOT_SDK_DEFAULT_CONNECTION=stdio` to keep a child process. The client-level `env` and `workingDirectory` move onto spawned connections, next to `path` and `args`.
+- **Grouped client options:** `logLevel`, `telemetry`, and `onGetTraceContext` move under `observability`; `gitHubToken`, `useLoggedInUser`, and `onGitHubTelemetry` become `github.token`, `github.useLoggedInUser`, and `github.onTelemetry`; `onListModels` (now returning the generated `Model` type instead of `ModelInfo`) and `requestHandler` move under `models`; `builtinPluginDirectories` becomes `plugins.builtinDirectories`; `baseDirectory` and `sessionIdleTimeoutSeconds` move onto owned `runtime` connections; `enableRemoteSessions` is removed. New `extensions` and `installations` groups hold the extension launch provider and the installation confirmation handler.
+- **Grouped session options:** `SessionConfig`, `ResumeSessionConfig`, and `SessionConfigBase` become `CreateSessionOptions`, `ResumeSessionOptions`, and `SessionOptionsBase`. Flat settings move under `inference`, `tools`, `permissions`, `interaction`, `events`, `agents`, `skills`, `mcp`, `github`, `filesystem`, `execution`, `instructions`, `hooks`, `git`, `state`, `plugins`, `canvases`, `extensions`, `experiments`, and `policy`. `model`, `workingDirectory`, `systemMessage`, `configDirectory`, and `enableConfigDiscovery` stay at the root.
+- **Named BYOK providers:** the singular `provider` option is removed. Declare connections in `inference.providers`, optional model definitions in `inference.models` (selected as `provider/id`), and an optional pass-through connection in `inference.defaultProvider`. Set `github: { capi: { enabled: false } }` for a BYOK-only catalog; adding a provider no longer turns off Copilot API models.
+
+A v3.0.0 client and session with the restructured options:
+
+```typescript
+import { approveAll, CopilotClient, RuntimeConnection } from "copilot-sdk-supercharged";
+
+const client = new CopilotClient({
+    mode: "coding-agent",
+    runtime: RuntimeConnection.forSpawnedStdio(), // omit to host the runtime in-process
+    observability: { logLevel: "debug" },
+    github: { token: process.env.COPILOT_GITHUB_TOKEN },
+});
+
+const session = await client.createSession({
+    model: "gateway/chat",
+    permissions: { onRequest: approveAll },
+    inference: {
+        reasoningEffort: "medium",
+        providers: [
+            {
+                name: "gateway",
+                type: "openai",
+                baseUrl: "https://models.example.com/v1",
+                apiKey: process.env.MODEL_API_KEY,
+            },
+        ],
+        models: [{ provider: "gateway", id: "chat", wireModel: "my-deployment" }],
+    },
+    github: { capi: { enabled: false } },
+    events: { streaming: true },
+});
+```
+
+### Package identity
+
+- The npm package keeps its name: install `copilot-sdk-supercharged@3` and keep importing from `"copilot-sdk-supercharged"` (extensions use `"copilot-sdk-supercharged/extension"`). Code ported from the upstream Microsoft Copilot SDK only needs its import specifier changed to `copilot-sdk-supercharged`.
+- The runtime ships in the optional `@microsoft/copilot-sdk-<platform>` package for your platform, so installing the SDK brings a verified runtime and startup downloads nothing. Set `COPILOT_CLI_PATH` to use an existing installation instead.
+
+### New Microsoft Copilot SDK 2.0 features
+
+**Idempotent tool definitions:** declare that repeating a call with the same arguments has no further effect, so the runtime can safely repeat a call whose outcome was lost. Permission checks are unchanged.
+
+```typescript
+import { defineTool } from "copilot-sdk-supercharged";
+import { z } from "zod";
+
+const lookupIssue = defineTool("lookup_issue", {
+    description: "Fetch issue details",
+    parameters: z.object({ id: z.string() }),
+    idempotent: true,
+    handler: async ({ id }) => fetchIssue(id),
+});
+```
+
+**Client turn IDs:** `clientTurnId` on `send` and `sendAndWait` labels the turn. The runtime copies it into `_meta["com.github.copilot/turnId"]` on every MCP `tools/call` made for that turn (including sub-agents) and echoes it on the turn's `user.message` event.
+
+```typescript
+await session.send({ prompt: "Triage the new issues", clientTurnId: "turn-42" });
+```
+
+**Shell authentication handler:** `interaction.onShellAuthenticationRequest` answers `sudo -A`, `ssh`, and `git` prompts from commands the agent runs. The answer goes only to the program that asked; the model never sees it. See [Shell password prompts](../docs/features/shell-password-prompts.md).
+
+```typescript
+const session = await client.createSession({
+    interaction: {
+        onShellAuthenticationRequest: async (request, { signal }) => {
+            const value = await promptUser(`${request.program} asks: ${request.prompt}`, {
+                masked: request.inputKind === "secret",
+                signal,
+            });
+            return value === undefined ? { action: "cancel" } : { action: "accept", value };
+        },
+    },
+});
+```
+
+**Memory store callback (experimental):** `state.memory.storeMemory` keeps the memories the agent saves in your own storage instead of the built-in backends. While it is set, the runtime retrieves no memories, so supply recall yourself (for example through `systemMessage`) and pass the callback again on every resume.
+
+```typescript
+const session = await client.createSession({
+    state: {
+        memory: {
+            enabled: true,
+            storeMemory: async ({ subject, fact, citations, reason }) => {
+                await memories.insert({ subject, fact, citations, reason });
+            },
+        },
+    },
+});
+```
+
+**Network callbacks (experimental):** the client `network` option lets your app choose the runtime's proxies (`resolveProxy`) and answer proxy Negotiate (`authenticateNegotiate`) and Basic (`authenticateBasic`) challenges. See [Network callbacks](#network-callbacks-experimental) for the full contract.
+
+```typescript
+import { CopilotClient } from "copilot-sdk-supercharged";
+
+const client = new CopilotClient({
+    mode: "coding-agent",
+    network: {
+        resolveProxy: async ({ url }, signal) => lookupProxy(url, signal),
+        authenticateBasic: async ({ proxy, realm }, signal) =>
+            promptForProxyCredentials(proxy, realm, signal),
+    },
+});
+```
+
+**Structured Policy Helper failures:** managed-settings snapshots carry `policyHelperFailure` (with `category`, `severity`, `message`, and optional `remediation` and `helpLink`) plus `policyHelperCapabilities`. When `recheck` is supported, `session.rpc.managedSettings.recheckPolicyHelper()` runs a fresh helper evaluation. Applicable `createSession` and `resumeSession` failures attach the same data as `error.data.policyHelperFailure`. See [Policy Helper failures and scoped recheck](#policy-helper-failures-and-scoped-recheck).
+
+```typescript
+const snapshot = await session.rpc.managedSettings.get();
+if (snapshot.policyHelperFailure && snapshot.policyHelperCapabilities?.recheck) {
+    const refreshed = await session.rpc.managedSettings.recheckPolicyHelper();
+    console.log(refreshed.policyHelperFailure?.message ?? "Policy Helper recovered");
+}
+```
+
+**Permission-mode refusal reason:** when managed policy refuses a permission mode, the result reports `reason: "managed_policy"` with the authoritative `mode`. The same result is available as `session.permissionModeResult` for a `permissions.mode` applied at create or resume.
+
+```typescript
+const result = await session.rpc.permissions.setMode({ mode: "allow-all" });
+if (!result.success && result.reason === "managed_policy") {
+    console.warn(`Managed policy kept the session in "${result.mode}" mode`);
+}
+```
+
 ## Recent Features (v2.4–v2.5)
 
-The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#copilotclient), [in-process transport](#copilotclient), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Options are passed to `createSession(...)` / `resumeSession(...)` unless noted; experimental surfaces are marked `@experimental` in the type definitions.
+The recent CLI syncs added a wave of session controls. A few already have their own sections above ([reasoning effort](#copilotclient), [in-process transport](#copilotclient), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry)), so this section is a compact roundup of the rest, written with the v3.0.0 grouped option names. Options are passed to `createSession(...)` / `resumeSession(...)` unless noted; experimental surfaces are marked `@experimental` in the type definitions.
 
 **v2.5**
 
-- **Tool search** — `toolSearch?: ToolSearchConfig` (`{ enabled, deferThreshold }`). Let the model discover tools on demand through the built-in `tool_search_tool` instead of preloading every definition.
-- **Session rewind** — `session.rpc.history.listRewindPoints()`, `previewRewind(...)`, and `rewind({ eventId, mode })`. Opt in to file capture at create time with `enableFileChangeTracking: true`.
-- **Content exclusion** — `session.rpc.contentExclusion.checkPaths({ paths })`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
-- **Additional directories** — `additionalDirectories?: string[]`. Extra workspace roots the agent may access beyond the working directory.
-- **Disabled MCP servers** — `disabledMcpServers?: string[]`.
-- **GitHub MCP tool config** — `githubMcpToolConfig?: GitHubMcpToolConfig`.
-- **Canvas provider** — `canvasProvider?: CanvasProviderIdentity`.
-- **Custom agents local-only** — `customAgentsLocalOnly?: boolean`.
-- **User-prompt-transformed hook** — `onUserPromptTransformed` in [`SessionHooks`](#session-hooks).
-- **Permission decision context** — `decisionContext` on an attributed permission result.
-- **Built-in plugin directories** — `builtinPluginDirectories?` (client option) and `pluginDirectories?` (session option).
-- **Agent factory authoring** — `defineFactory(...)` with a typed `argsSchema`.
-- **Experimental mode** — `enableExperimentalMode?: boolean`.
+- **Tool search:** `tools.search?: ToolSearchConfig` (`{ enabled, deferThreshold }`). Let the model discover tools on demand through the built-in `tool_search_tool` instead of preloading every definition.
+- **Session rewind:** `session.rpc.history.listRewindPoints()`, `previewRewind(...)`, and `rewind({ eventId, mode })`. Opt in to file capture at create time with `filesystem: { trackFileChanges: true }`.
+- **Content exclusion:** `session.rpc.contentExclusion.checkPaths({ paths })`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories:** `filesystem.additionalDirectories?: string[]`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers:** `mcp.disabledServers?: string[]`.
+- **GitHub MCP tool config:** `github.mcp?: GitHubMcpToolConfig`.
+- **Canvas provider:** `canvases.provider?: CanvasProviderIdentity`.
+- **Custom agents local-only:** `agents.localDiscoveryOnly?: boolean`.
+- **User-prompt-transformed hook:** `onUserPromptTransformed` in [`hooks.handlers`](#session-hooks) (`SessionHooks`).
+- **Permission decision context:** `decisionContext` on an attributed permission result.
+- **Built-in plugin directories:** `plugins.builtinDirectories` (client option) and `plugins.directories` (session option).
+- **Workflow authoring (formerly agent factories):** `defineWorkflow(...)` with a typed `meta.argsSchema`.
+- **Experimental mode:** `experiments.enableExperimentalMode?: boolean`.
 
 **v2.4**
 
-- **BYOK bearer-token provider** — `provider.bearerTokenProvider: (args) => Promise<string>` for managed-identity / on-demand auth (see [Custom Providers](#custom-providers)).
-- **MCP OAuth handler** — `onMcpAuthRequest?: McpAuthHandler`.
-- **Session citations** — `enableCitations?: boolean`.
-- **Excluded built-in agents** — `excludedBuiltinAgents?: string[]`.
-- **Session spending limits** — `sessionLimits?: SessionLimitsConfig` (caps such as `maxAiCredits`).
-- **WebSocket responses** — `capi.enableWebSocketResponses?: boolean`.
-- **Tool defer loading** — `defer?: "auto" | "never"` on a tool definition.
-- **Pre-MCP-tool-call hook** — `onPreMcpToolCall` in [`SessionHooks`](#session-hooks).
-- **Message agent mode / display prompt** — `agentMode` and `displayPrompt` on send options.
-- **HTTP request handler** — `requestHandler?: CopilotRequestHandler` (client option).
-- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
-- **Experiment assignments** — `expAssignments?`.
+- **BYOK bearer-token provider:** `bearerTokenProvider: (args) => Promise<string>` on an `inference.providers` entry (`NamedProviderConfig`) for managed-identity or on-demand auth (see [Custom Providers](#custom-providers)).
+- **MCP OAuth handler:** `mcp.onAuthRequest?: McpAuthHandler`.
+- **Session citations:** `inference.enableCitations?: boolean`.
+- **Excluded built-in agents:** `agents.excludedBuiltinAgents?: string[]`.
+- **Session spending limits:** `execution.limits?: SessionLimitsConfig` (caps such as `maxAiCredits`).
+- **WebSocket responses:** `github.capi.enableWebSocketResponses?: boolean`.
+- **Tool defer loading:** `defer?: "auto" | "never"` on a tool definition.
+- **Pre-MCP-tool-call hook:** `onPreMcpToolCall` in [`hooks.handlers`](#session-hooks) (`SessionHooks`).
+- **Message agent mode / display prompt:** `agentMode` and `displayPrompt` on send options.
+- **HTTP request handler:** `models.requestHandler?: CopilotRequestHandler` (client option).
+- **GitHub attachments:** `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
+- **Experiment assignments:** `experiments.assignments?` (internal).
 
 **Reasoning effort and tool search:**
 
 ```typescript
 const session = await client.createSession({
     model: "claude-sonnet-4.6",
-    reasoningEffort: "high",
-    toolSearch: { enabled: true, deferThreshold: 30 },
-    additionalDirectories: ["/repo/shared", "/repo/docs"],
+    inference: { reasoningEffort: "high" },
+    tools: { search: { enabled: true, deferThreshold: 30 } },
+    filesystem: { additionalDirectories: ["/repo/shared", "/repo/docs"] },
 });
 ```
 
-**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+**Session rewind:** roll a session back to an earlier user turn, optionally restoring files:
 
 ```typescript
-const session = await client.createSession({ enableFileChangeTracking: true });
+const session = await client.createSession({ filesystem: { trackFileChanges: true } });
 await session.sendAndWait({ prompt: "Refactor src/utils.ts" });
 
 const { points } = await session.rpc.history.listRewindPoints();
@@ -2134,7 +2272,7 @@ if (target) {
 }
 ```
 
-**Content exclusion** — check paths against the session's policy:
+**Content exclusion:** check paths against the session's policy:
 
 ```typescript
 const result = await session.rpc.contentExclusion.checkPaths({
@@ -2142,15 +2280,22 @@ const result = await session.rpc.contentExclusion.checkPaths({
 });
 ```
 
-**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+**BYOK bearer-token provider:** supply tokens dynamically (never serialized; the runtime calls back before each request):
 
 ```typescript
 const session = await client.createSession({
     model: "gpt-4",
-    provider: {
-        type: "openai",
-        baseUrl: "https://my-api.example.com/v1",
-        bearerTokenProvider: async () => await getAccessToken(),
+    github: { capi: { enabled: false } },
+    inference: {
+        defaultProvider: "byok",
+        providers: [
+            {
+                name: "byok",
+                type: "openai",
+                baseUrl: "https://my-api.example.com/v1",
+                bearerTokenProvider: async () => await getAccessToken(),
+            },
+        ],
     },
 });
 ```
@@ -2162,7 +2307,7 @@ The SDK supports OpenTelemetry for distributed tracing. Provide a `telemetry` co
 <!-- docs-validate: strict -->
 
 ```typescript
-import { CopilotClient } from "@microsoft/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     mode: "coding-agent",
@@ -2194,7 +2339,7 @@ With just this configuration, the runtime emits spans for every session, message
 If you're already using `@opentelemetry/api` in your app and want this linkage, provide a callback:
 
 ```typescript
-import { CopilotClient } from "@microsoft/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 import { propagation, context } from "@opentelemetry/api";
 
 const client = new CopilotClient({
@@ -2226,7 +2371,7 @@ Use the built-in `approveAll` helper when managed settings are disabled:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",
@@ -2239,7 +2384,7 @@ const session = await client.createSession({
 <!-- /docs-validate: hidden -->
 
 ```typescript
-import { CopilotClient, approveAll } from "@microsoft/copilot-sdk";
+import { CopilotClient, approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",
@@ -2258,7 +2403,7 @@ Provide your own function to inspect each request and apply custom logic. Check 
 <!-- docs-validate: strict -->
 
 ```typescript
-import type { PermissionRequest, PermissionRequestResult } from "@microsoft/copilot-sdk";
+import type { PermissionRequest, PermissionRequestResult } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",
@@ -2336,7 +2481,7 @@ and sanitize `helpLink` before navigation.
 <!-- docs-validate: hidden -->
 
 ```typescript
-import type { CopilotSession } from "@microsoft/copilot-sdk";
+import type { CopilotSession } from "copilot-sdk-supercharged";
 
 declare const session: CopilotSession;
 
@@ -2397,7 +2542,7 @@ You may pass `permissions.onRequest` when resuming a session too:
 <!-- docs-validate: hidden -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.resumeSession("session-id", {
     permissions: {
@@ -2458,7 +2603,7 @@ When a person answers a prompt in your UI, label the result with `createAttribut
 <!-- docs-validate: strict -->
 
 ```typescript
-import { createAttributedResult, type PermissionDecisionContext } from "@microsoft/copilot-sdk";
+import { createAttributedResult, type PermissionDecisionContext } from "copilot-sdk-supercharged";
 
 const personAnswered: PermissionDecisionContext = {
     source: "human_response",
@@ -2493,7 +2638,7 @@ Register an `interaction.onElicitationRequest` handler to let your client act as
 <!-- docs-validate: strict -->
 
 ```typescript
-import { approveAll } from "@microsoft/copilot-sdk";
+import { approveAll } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",

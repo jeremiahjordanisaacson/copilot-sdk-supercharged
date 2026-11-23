@@ -57,6 +57,18 @@
        01  WS-JSON-WORK-LEN         PIC 9(5)    VALUE 0.
        01  WS-FG-SESSION-ID         PIC X(256)  VALUE SPACES.
 
+      *    SDK protocol 4 handshake and RPC helpers
+       01  WS-PATH-LEN              PIC 9(3)    VALUE 0.
+       01  WS-SERVER-PROTOCOL       PIC 9(4)    VALUE 0.
+       01  WS-SERVER-PROTO-ED       PIC Z(3)9.
+       01  WS-SUPPORTED-PROTO-ED    PIC Z9.
+       01  WS-PROTO-FOUND           PIC 9       VALUE 0.
+       01  WS-DIGIT                 PIC 9       VALUE 0.
+       01  WS-SCAN-COUNT            PIC 9(5)    VALUE 0.
+       01  WS-SCAN-POS              PIC 9(5)    VALUE 0.
+       01  WS-FIELD-COUNT           PIC 9(2)    VALUE 0.
+       01  WS-ERROR-TEXT            PIC X(200)  VALUE SPACES.
+
        LINKAGE SECTION.
        01  LS-REQUEST               PIC X(8192).
        01  LS-RESPONSE              PIC X(8192).
@@ -146,6 +158,40 @@
            GOBACK
            .
 
+      *----------------------------------------------------------------*
+      * WRITE: Write one JSON-RPC message (request, notification or    *
+      * reply to a server request) without reading.                    *
+      * Input:  LS-REQUEST                                             *
+      * Output: LS-RETURN-CODE                                         *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-CLIENT-WRITE" USING LS-REQUEST LS-RETURN-CODE.
+           PERFORM WRITE-ONLY-MESSAGE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * READ: Read the next JSON-RPC message (response, notification   *
+      * or server-to-client request).                                  *
+      * Output: LS-RESPONSE, LS-RETURN-CODE                            *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-CLIENT-READ" USING LS-RESPONSE LS-RETURN-CODE.
+           PERFORM READ-ONLY-MESSAGE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * CLEAR-SETTINGS-CACHE: Clear the cached enterprise managed      *
+      * settings (managedSettings.clearCache).                         *
+      * Output: LS-RESPONSE, LS-RETURN-CODE                            *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-CLEAR-SETTINGS-CACHE" USING LS-RESPONSE
+           LS-RETURN-CODE.
+           PERFORM CLEAR-MANAGED-SETTINGS-CACHE
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
       *================================================================*
       * INTERNAL PARAGRAPHS                                            *
       *================================================================*
@@ -158,8 +204,23 @@
            SET CLIENT-IS-STOPPED TO TRUE
            MOVE SPACES TO WS-LAST-ERROR
 
+      *    Client mode: "coding-agent" (default) or "empty";
+      *    "copilot-cli" is accepted as an alias of "coding-agent".
+           IF NOT CLIENT-MODE-CODING-AGENT AND NOT CLIENT-MODE-EMPTY
+               MOVE -1 TO WS-RETURN-CODE
+               MOVE "Unknown client mode (use coding-agent or empty)"
+                   TO WS-LAST-ERROR
+               EXIT PARAGRAPH
+           END-IF
+
            IF WS-CLI-PATH = SPACES AND WS-CLI-URL = SPACES
-               MOVE "copilot" TO WS-CLI-PATH
+               ACCEPT WS-CLI-PATH FROM ENVIRONMENT "COPILOT_CLI_PATH"
+                   ON EXCEPTION
+                       MOVE SPACES TO WS-CLI-PATH
+               END-ACCEPT
+               IF WS-CLI-PATH = SPACES
+                   MOVE "copilot" TO WS-CLI-PATH
+               END-IF
            END-IF
 
            IF WS-AUTO-START = 1
@@ -170,7 +231,9 @@
            .
 
       *----------------------------------------------------------------*
-      * START-CLI-PROCESS: Launch the Copilot CLI in server mode.      *
+      * START-CLI-PROCESS: Launch the Copilot CLI in headless stdio    *
+      * mode (--headless --no-auto-update --stdio), open the pipes and *
+      * run the SDK protocol 4 handshake (CONNECT-HANDSHAKE).          *
       * Uses CALL "SYSTEM" to start the process and sets up named      *
       * pipes or temporary files for communication.                    *
       *----------------------------------------------------------------*
@@ -188,11 +251,24 @@
 
            PERFORM SETUP-PIPE-NAMES
 
+      *    A .js entry point (for example npm-loader.js) runs through
+      *    node; any other path (native binary or the .bin/copilot
+      *    shim) runs directly.
            MOVE SPACES TO WS-CLI-COMMAND
            MOVE 1 TO WS-CMD-PTR
+           MOVE FUNCTION LENGTH(FUNCTION TRIM(WS-CLI-PATH TRAILING))
+               TO WS-PATH-LEN
+           IF WS-PATH-LEN > 3
+               IF WS-CLI-PATH(WS-PATH-LEN - 2:3) = ".js"
+                   STRING "node " DELIMITED SIZE
+                       INTO WS-CLI-COMMAND
+                       WITH POINTER WS-CMD-PTR
+                   END-STRING
+               END-IF
+           END-IF
            STRING
-               FUNCTION TRIM(WS-CLI-PATH)
-               " server --stdio"
+               '"' FUNCTION TRIM(WS-CLI-PATH) '"'
+               " --headless --no-auto-update --stdio"
                DELIMITED SIZE
                INTO WS-CLI-COMMAND
                WITH POINTER WS-CMD-PTR
@@ -214,13 +290,22 @@
 
            PERFORM OPEN-COMMUNICATION
 
-           IF WS-IO-RETURN-CODE = 0
-               SET CLIENT-IS-ACTIVE TO TRUE
-               MOVE 0 TO WS-RETURN-CODE
-           ELSE
+           IF WS-IO-RETURN-CODE NOT = 0
                MOVE -4 TO WS-RETURN-CODE
                MOVE "Failed to open communication"
                    TO WS-LAST-ERROR
+               EXIT PARAGRAPH
+           END-IF
+
+           SET CLIENT-IS-ACTIVE TO TRUE
+           MOVE 0 TO WS-RETURN-CODE
+           PERFORM CONNECT-HANDSHAKE
+           IF WS-RETURN-CODE = 0
+               PERFORM REGISTER-NETWORK-PROVIDER
+           END-IF
+           IF WS-RETURN-CODE NOT = 0
+               PERFORM STOP-CLI-PROCESS
+               MOVE -4 TO WS-RETURN-CODE
            END-IF
            .
 
@@ -346,7 +431,9 @@
 
       *----------------------------------------------------------------*
       * CREATE-SESSION: Create a new conversation session.             *
-      * Input:  LS-REQUEST (JSON params)                               *
+      * Input:  LS-REQUEST (JSON params). SDK protocol 4 expects the   *
+      *   grouped payload; COPILOT-SESSION BUILD-CREATE-PARAMS builds  *
+      *   it from the flat session options.                            *
       * Supports: authToken / auth_token, idleTimeout / idle_timeout,  *
       *   elicitation, skills, excludedTools / excluded_tools,         *
       *   requestHeaders / request_headers, modelCapabilities /        *
@@ -391,6 +478,335 @@
            WS-RETURN-CODE.
            PERFORM LIST-SESSIONS-PARA
            GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * CONNECT-HANDSHAKE: SDK protocol 4 handshake. Sends connect     *
+      * with clientInfo (and the connection token when set), falls     *
+      * back to ping when the server does not know connect, and        *
+      * accepts exactly protocol version 4 (WS-PROTO-MIN to            *
+      * WS-PROTO-MAX).                                                 *
+      *----------------------------------------------------------------*
+       CONNECT-HANDSHAKE.
+           PERFORM BUILD-CONNECT-REQUEST
+           PERFORM WRITE-FRAMED-MESSAGE
+           IF WS-IO-RETURN-CODE = 0
+               PERFORM READ-FRAMED-MESSAGE
+           END-IF
+           IF WS-IO-RETURN-CODE NOT = 0
+               MOVE -4 TO WS-RETURN-CODE
+               MOVE "Connection handshake failed" TO WS-LAST-ERROR
+               EXIT PARAGRAPH
+           END-IF
+
+      *    Servers without connect answer "Method not found".
+           MOVE 0 TO WS-SCAN-COUNT
+           INSPECT WS-READ-BUFFER TALLYING WS-SCAN-COUNT
+               FOR ALL "-32601" ALL "Unhandled method connect"
+           IF WS-SCAN-COUNT > 0
+               MOVE SPACES TO WS-WRITE-BUFFER
+               MOVE '{"jsonrpc":"2.0","method":"ping","id":0}'
+                   TO WS-WRITE-BUFFER
+               MOVE FUNCTION LENGTH(
+                   FUNCTION TRIM(WS-WRITE-BUFFER TRAILING))
+                   TO WS-WRITE-LEN
+               PERFORM WRITE-FRAMED-MESSAGE
+               IF WS-IO-RETURN-CODE = 0
+                   PERFORM READ-FRAMED-MESSAGE
+               END-IF
+               IF WS-IO-RETURN-CODE NOT = 0
+                   MOVE -4 TO WS-RETURN-CODE
+                   MOVE "Ping handshake failed" TO WS-LAST-ERROR
+                   EXIT PARAGRAPH
+               END-IF
+           END-IF
+
+           PERFORM CHECK-PROTOCOL-VERSION
+           .
+
+      *----------------------------------------------------------------*
+      * BUILD-CONNECT-REQUEST: connect params with the connection      *
+      * token and clientInfo (ClientInfo). Blank clientInfo fields are *
+      * dropped; clientInfo is omitted when every field is blank.      *
+      *----------------------------------------------------------------*
+       BUILD-CONNECT-REQUEST.
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           MOVE 0 TO WS-FIELD-COUNT
+           STRING '{"jsonrpc":"2.0","method":"connect","params":{'
+               DELIMITED SIZE INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           IF WS-TCP-CONN-TOKEN NOT = SPACES
+               STRING '"token":"' FUNCTION TRIM(WS-TCP-CONN-TOKEN) '"'
+                   DELIMITED SIZE INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+               MOVE 1 TO WS-FIELD-COUNT
+           END-IF
+           IF WS-CLIENT-INFO NOT = SPACES
+               IF WS-FIELD-COUNT > 0
+                   STRING ',' DELIMITED SIZE INTO WS-WRITE-BUFFER
+                       WITH POINTER WS-JSON-WORK-LEN
+                   END-STRING
+               END-IF
+               STRING '"clientInfo":{' DELIMITED SIZE
+                   INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+               MOVE 0 TO WS-FIELD-COUNT
+               IF WS-CI-EDITOR-NAME NOT = SPACES
+                   PERFORM CLIENT-INFO-SEPARATOR
+                   STRING '"editorName":"'
+                       FUNCTION TRIM(WS-CI-EDITOR-NAME) '"'
+                       DELIMITED SIZE INTO WS-WRITE-BUFFER
+                       WITH POINTER WS-JSON-WORK-LEN
+                   END-STRING
+               END-IF
+               IF WS-CI-EDITOR-VERSION NOT = SPACES
+                   PERFORM CLIENT-INFO-SEPARATOR
+                   STRING '"editorVersion":"'
+                       FUNCTION TRIM(WS-CI-EDITOR-VERSION) '"'
+                       DELIMITED SIZE INTO WS-WRITE-BUFFER
+                       WITH POINTER WS-JSON-WORK-LEN
+                   END-STRING
+               END-IF
+               IF WS-CI-EXTENSION-NAME NOT = SPACES
+                   PERFORM CLIENT-INFO-SEPARATOR
+                   STRING '"extensionName":"'
+                       FUNCTION TRIM(WS-CI-EXTENSION-NAME) '"'
+                       DELIMITED SIZE INTO WS-WRITE-BUFFER
+                       WITH POINTER WS-JSON-WORK-LEN
+                   END-STRING
+               END-IF
+               IF WS-CI-EXTENSION-VER NOT = SPACES
+                   PERFORM CLIENT-INFO-SEPARATOR
+                   STRING '"extensionVersion":"'
+                       FUNCTION TRIM(WS-CI-EXTENSION-VER) '"'
+                       DELIMITED SIZE INTO WS-WRITE-BUFFER
+                       WITH POINTER WS-JSON-WORK-LEN
+                   END-STRING
+               END-IF
+               STRING '}' DELIMITED SIZE INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           STRING '},"id":0}' DELIMITED SIZE INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+           .
+
+       CLIENT-INFO-SEPARATOR.
+           IF WS-FIELD-COUNT > 0
+               STRING ',' DELIMITED SIZE INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           ADD 1 TO WS-FIELD-COUNT
+           .
+
+      *----------------------------------------------------------------*
+      * CHECK-PROTOCOL-VERSION: Read protocolVersion from the connect  *
+      * or ping result in WS-READ-BUFFER and accept exactly the        *
+      * supported range; otherwise WS-RETURN-CODE -4 and the mismatch  *
+      * message in WS-LAST-ERROR.                                      *
+      *----------------------------------------------------------------*
+       CHECK-PROTOCOL-VERSION.
+           MOVE 0 TO WS-SERVER-PROTOCOL
+           MOVE 0 TO WS-PROTO-FOUND
+           MOVE 0 TO WS-SCAN-POS
+           INSPECT WS-READ-BUFFER TALLYING WS-SCAN-POS
+               FOR CHARACTERS BEFORE INITIAL '"protocolVersion":'
+           IF WS-SCAN-POS < FUNCTION LENGTH(WS-READ-BUFFER) - 20
+      *        Skip the 18-character key to the first value character.
+               ADD 19 TO WS-SCAN-POS
+               PERFORM UNTIL WS-SCAN-POS >= FUNCTION LENGTH(
+                                               WS-READ-BUFFER)
+                       OR WS-READ-BUFFER(WS-SCAN-POS:1) NOT = SPACE
+                   ADD 1 TO WS-SCAN-POS
+               END-PERFORM
+               PERFORM UNTIL WS-SCAN-POS >= FUNCTION LENGTH(
+                                               WS-READ-BUFFER)
+                       OR WS-READ-BUFFER(WS-SCAN-POS:1) IS NOT NUMERIC
+                       OR WS-SERVER-PROTOCOL > 999
+                   MOVE WS-READ-BUFFER(WS-SCAN-POS:1) TO WS-DIGIT
+                   COMPUTE WS-SERVER-PROTOCOL =
+                       WS-SERVER-PROTOCOL * 10 + WS-DIGIT
+                   MOVE 1 TO WS-PROTO-FOUND
+                   ADD 1 TO WS-SCAN-POS
+               END-PERFORM
+           END-IF
+
+           MOVE WS-PROTO-MAX TO WS-SUPPORTED-PROTO-ED
+           MOVE SPACES TO WS-LAST-ERROR
+           IF WS-PROTO-FOUND = 0
+               MOVE -4 TO WS-RETURN-CODE
+               STRING "SDK protocol version mismatch: SDK supports "
+                   "version " FUNCTION TRIM(WS-SUPPORTED-PROTO-ED)
+                   ", but server does not report a protocol "
+                   "version. Please update your SDK or server to "
+                   "ensure compatibility."
+                   DELIMITED SIZE INTO WS-LAST-ERROR
+               END-STRING
+               EXIT PARAGRAPH
+           END-IF
+           IF WS-SERVER-PROTOCOL < WS-PROTO-MIN
+              OR WS-SERVER-PROTOCOL > WS-PROTO-MAX
+               MOVE -4 TO WS-RETURN-CODE
+               MOVE WS-SERVER-PROTOCOL TO WS-SERVER-PROTO-ED
+               STRING "SDK protocol version mismatch: SDK supports "
+                   "version " FUNCTION TRIM(WS-SUPPORTED-PROTO-ED)
+                   ", but server reports version "
+                   FUNCTION TRIM(WS-SERVER-PROTO-ED)
+                   ". Please update your SDK or server to ensure "
+                   "compatibility."
+                   DELIMITED SIZE INTO WS-LAST-ERROR
+               END-STRING
+               EXIT PARAGRAPH
+           END-IF
+           MOVE 0 TO WS-RETURN-CODE
+           .
+
+      *----------------------------------------------------------------*
+      * REGISTER-NETWORK-PROVIDER: network.setProvider for the         *
+      * network callback programs named in WS-NETWORK-OPTIONS (an      *
+      * empty object marks each registered callback). Requests are     *
+      * answered by COPILOT-SESSION (ANSWER-NETWORK).                  *
+      *----------------------------------------------------------------*
+       REGISTER-NETWORK-PROVIDER.
+           IF WS-NET-PROXY-PGM = SPACES
+              AND WS-NET-NEGOTIATE-PGM = SPACES
+              AND WS-NET-BASIC-PGM = SPACES
+               EXIT PARAGRAPH
+           END-IF
+           MOVE SPACES TO WS-REQ-PARAMS
+           MOVE 1 TO WS-JSON-WORK-LEN
+           MOVE 0 TO WS-FIELD-COUNT
+           STRING '{' DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           IF WS-NET-SCOPE NOT = SPACES
+               STRING '"scope":"' FUNCTION TRIM(WS-NET-SCOPE) '"'
+                   DELIMITED SIZE INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+               MOVE 1 TO WS-FIELD-COUNT
+           END-IF
+           IF WS-NET-PROXY-PGM NOT = SPACES
+               PERFORM NETWORK-SEPARATOR
+               STRING '"resolveProxy":{}' DELIMITED SIZE
+                   INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           IF WS-NET-NEGOTIATE-PGM NOT = SPACES
+               PERFORM NETWORK-SEPARATOR
+               STRING '"authenticateNegotiate":{}' DELIMITED SIZE
+                   INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           IF WS-NET-BASIC-PGM NOT = SPACES
+               PERFORM NETWORK-SEPARATOR
+               STRING '"authenticateBasic":{}' DELIMITED SIZE
+                   INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           STRING '}' DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-REQ-PARAMS-LEN
+           MOVE "network.setProvider" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           .
+
+       NETWORK-SEPARATOR.
+           IF WS-FIELD-COUNT > 0
+               STRING ',' DELIMITED SIZE INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           ADD 1 TO WS-FIELD-COUNT
+           .
+
+      *----------------------------------------------------------------*
+      * CLEAR-MANAGED-SETTINGS-CACHE: managedSettings.clearCache {}.   *
+      *----------------------------------------------------------------*
+       CLEAR-MANAGED-SETTINGS-CACHE.
+           MOVE "managedSettings.clearCache" TO WS-REQ-METHOD
+           MOVE "{}" TO WS-REQ-PARAMS
+           MOVE 2 TO WS-REQ-PARAMS-LEN
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * CHECK-RESPONSE-ERROR: Protocol 4 reports failures (including   *
+      * session.delete and session.setForeground) as JSON-RPC errors.  *
+      * An error in WS-READ-BUFFER sets WS-RETURN-CODE -1 and          *
+      * WS-LAST-ERROR to "<WS-REQ-METHOD> failed: <message>".          *
+      *----------------------------------------------------------------*
+       CHECK-RESPONSE-ERROR.
+           MOVE 0 TO WS-SCAN-COUNT
+           INSPECT WS-READ-BUFFER TALLYING WS-SCAN-COUNT
+               FOR ALL '"error":{'
+           IF WS-SCAN-COUNT = 0
+               EXIT PARAGRAPH
+           END-IF
+           MOVE -1 TO WS-RETURN-CODE
+           MOVE SPACES TO WS-ERROR-TEXT
+           MOVE 0 TO WS-SCAN-POS
+           INSPECT WS-READ-BUFFER TALLYING WS-SCAN-POS
+               FOR CHARACTERS BEFORE INITIAL '"message":"'
+      *    Skip the 11-character key to the first message character.
+           ADD 12 TO WS-SCAN-POS
+           IF WS-SCAN-POS < FUNCTION LENGTH(WS-READ-BUFFER)
+               UNSTRING WS-READ-BUFFER DELIMITED '"'
+                   INTO WS-ERROR-TEXT
+                   WITH POINTER WS-SCAN-POS
+               END-UNSTRING
+           END-IF
+           MOVE SPACES TO WS-LAST-ERROR
+           STRING FUNCTION TRIM(WS-REQ-METHOD) " failed: "
+               FUNCTION TRIM(WS-ERROR-TEXT)
+               DELIMITED SIZE INTO WS-LAST-ERROR
+           END-STRING
+           .
+
+      *----------------------------------------------------------------*
+      * WRITE-ONLY-MESSAGE / READ-ONLY-MESSAGE: Single-direction I/O   *
+      * for the COPILOT-CLIENT-WRITE and COPILOT-CLIENT-READ entries.  *
+      *----------------------------------------------------------------*
+       WRITE-ONLY-MESSAGE.
+           MOVE LS-REQUEST TO WS-WRITE-BUFFER
+           MOVE FUNCTION LENGTH(
+               FUNCTION TRIM(LS-REQUEST TRAILING))
+               TO WS-WRITE-LEN
+           PERFORM WRITE-FRAMED-MESSAGE
+           IF WS-IO-RETURN-CODE = 0
+               MOVE 0 TO LS-RETURN-CODE
+           ELSE
+               MOVE -1 TO LS-RETURN-CODE
+           END-IF
+           .
+
+       READ-ONLY-MESSAGE.
+           PERFORM READ-FRAMED-MESSAGE
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO LS-RETURN-CODE
+           ELSE
+               MOVE -1 TO LS-RETURN-CODE
+           END-IF
            .
 
       *----------------------------------------------------------------*
@@ -482,6 +898,8 @@
 
            IF WS-IO-RETURN-CODE = 0
                MOVE 0 TO WS-RETURN-CODE
+               MOVE "session.setForeground" TO WS-REQ-METHOD
+               PERFORM CHECK-RESPONSE-ERROR
            ELSE
                MOVE -4 TO WS-RETURN-CODE
                MOVE "Failed to set foreground session"
@@ -817,18 +1235,37 @@
                EXIT PARAGRAPH
            END-IF
 
+      *    Complete protocol 4 resume params (with sessionId, for
+      *    example from BUILD-RESUME-PARAMS in COPILOT-SESSION) are
+      *    sent as they are; otherwise only the session id is sent.
+           MOVE 0 TO WS-SCAN-COUNT
+           INSPECT LS-REQUEST TALLYING WS-SCAN-COUNT
+               FOR ALL '"sessionId"'
            MOVE SPACES TO WS-WRITE-BUFFER
            MOVE 1 TO WS-JSON-WORK-LEN
-           STRING
-               '{"jsonrpc":"2.0",'
-               '"method":"session.resume",'
-               '"params":{"sessionId":"'
-               FUNCTION TRIM(WS-FG-SESSION-ID)
-               '"},"id":9}'
-               DELIMITED SIZE
-               INTO WS-WRITE-BUFFER
-               WITH POINTER WS-JSON-WORK-LEN
-           END-STRING
+           IF WS-SCAN-COUNT > 0
+               STRING
+                   '{"jsonrpc":"2.0",'
+                   '"method":"session.resume",'
+                   '"params":'
+                   FUNCTION TRIM(LS-REQUEST TRAILING)
+                   ',"id":9}'
+                   DELIMITED SIZE
+                   INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           ELSE
+               STRING
+                   '{"jsonrpc":"2.0",'
+                   '"method":"session.resume",'
+                   '"params":{"sessionId":"'
+                   FUNCTION TRIM(WS-FG-SESSION-ID)
+                   '"},"id":9}'
+                   DELIMITED SIZE
+                   INTO WS-WRITE-BUFFER
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
            SUBTRACT 1 FROM WS-JSON-WORK-LEN
                GIVING WS-WRITE-LEN
 
@@ -872,6 +1309,8 @@
 
            IF WS-IO-RETURN-CODE = 0
                MOVE 0 TO WS-RETURN-CODE
+               MOVE "session.delete" TO WS-REQ-METHOD
+               PERFORM CHECK-RESPONSE-ERROR
            ELSE
                MOVE -4 TO WS-RETURN-CODE
            END-IF

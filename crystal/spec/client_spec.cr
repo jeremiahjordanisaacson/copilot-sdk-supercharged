@@ -11,8 +11,9 @@ describe CopilotSDK do
   end
 
   describe "MIN_PROTOCOL_VERSION" do
-    it "is at least 2" do
-      CopilotSDK::MIN_PROTOCOL_VERSION.should be >= 3
+    it "only accepts SDK protocol 4" do
+      CopilotSDK::SDK_PROTOCOL_VERSION.should eq(4)
+      CopilotSDK::MIN_PROTOCOL_VERSION.should eq(4)
     end
   end
 end
@@ -168,10 +169,10 @@ end
 
 describe CopilotSDK::GetStatusResponse do
   it "deserializes protocol version" do
-    json = %Q({"version":"1.0","protocolVersion":3,"status":"ok"})
+    json = %Q({"version":"1.0","protocolVersion":4,"status":"ok"})
     status = CopilotSDK::GetStatusResponse.from_json(json)
     status.version.should eq("1.0")
-    status.protocol_version.should eq(3)
+    status.protocol_version.should eq(4)
     status.status.should eq("ok")
   end
 end

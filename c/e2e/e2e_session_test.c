@@ -24,9 +24,16 @@
 
 static test_harness_t g_harness;
 
+/* Copilot CLI resolved by test_harness_cli_path() (empty: rely on PATH). */
+static char g_cli_path[2048];
+
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
+
+static const char *cli_path_or_null(void) {
+    return g_cli_path[0] != '\0' ? g_cli_path : NULL;
+}
 
 static int configure_for_test(const char *snapshot_rel_path) {
     char snapshot[2048];
@@ -58,6 +65,7 @@ static int test_session_create_disconnect(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL && "copilot_client_create returned NULL");
@@ -102,6 +110,7 @@ static int test_send_message(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -156,6 +165,7 @@ static int test_session_fs_config(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
     opts.session_fs = &fs_config;
 
     /* Verify the fields were stored correctly */
@@ -197,6 +207,7 @@ static int test_multi_turn_conversation(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -257,6 +268,7 @@ static int test_session_resume(void) {
     /* First client: create session, capture id */
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -289,6 +301,7 @@ static int test_session_resume(void) {
 
     copilot_client_options_t opts2 = copilot_client_options_default();
     opts2.cwd = g_harness.repo_root;
+    opts2.cli_path = cli_path_or_null();
 
     copilot_client_t *client2 = copilot_client_create(&opts2);
     assert(client2 != NULL);
@@ -329,6 +342,7 @@ static int test_session_list(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -380,6 +394,7 @@ static int test_session_metadata(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -424,6 +439,7 @@ static int test_session_delete(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -479,6 +495,7 @@ static int test_model_list(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -516,6 +533,7 @@ static int test_ping(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -553,6 +571,7 @@ static int test_auth_status(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -587,6 +606,7 @@ static int test_client_lifecycle(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -629,6 +649,7 @@ static int test_foreground_session(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -678,6 +699,7 @@ static int test_tools(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -726,6 +748,7 @@ static int test_streaming(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -773,6 +796,7 @@ static int test_system_message_customization(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -818,6 +842,7 @@ static int test_session_fs_provider(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
     opts.session_fs = &fs_config;
 
     copilot_client_t *client = copilot_client_create(&opts);
@@ -849,6 +874,7 @@ static int test_mcp_servers_config(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -888,6 +914,7 @@ static int test_skills_config(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -927,6 +954,7 @@ static int test_compaction(void) {
 
     copilot_client_options_t opts = copilot_client_options_default();
     opts.cwd = g_harness.repo_root;
+    opts.cli_path = cli_path_or_null();
 
     copilot_client_t *client = copilot_client_create(&opts);
     assert(client != NULL);
@@ -975,6 +1003,12 @@ int main(void) {
     printf("=== C SDK E2E Tests ===\n\n");
 
     test_harness_init(&g_harness);
+
+    if (test_harness_cli_path(&g_harness, g_cli_path, (int)sizeof(g_cli_path)) == 0) {
+        printf("Using Copilot CLI: %s\n", g_cli_path);
+    } else {
+        printf("Copilot CLI not found under nodejs/node_modules; using 'copilot' from PATH\n");
+    }
 
     if (test_harness_start(&g_harness) != 0) {
         fprintf(stderr, "FATAL: failed to start test harness\n");

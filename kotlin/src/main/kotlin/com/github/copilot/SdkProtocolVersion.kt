@@ -7,10 +7,10 @@
 package com.github.copilot
 
 /**
- * The SDK protocol version.
- * This must match the version expected by the copilot-agent-runtime server.
+ * The SDK protocol version (4: grouped session payloads, Copilot CLI 1.0.113 or newer).
+ * This must match the version reported by the copilot-agent-runtime server.
  */
-const val SDK_PROTOCOL_VERSION: Int = 3
+const val SDK_PROTOCOL_VERSION: Int = 4
 
 /**
  * Gets the SDK protocol version.

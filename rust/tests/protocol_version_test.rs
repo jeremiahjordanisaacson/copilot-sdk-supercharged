@@ -82,9 +82,9 @@ async fn verify_with_result(
 
 #[tokio::test]
 async fn accepted_when_version_in_range() {
-    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 3 })).await;
+    let (res, version) = verify_with_result(serde_json::json!({ "protocolVersion": 4 })).await;
     assert!(res.is_ok());
-    assert_eq!(version, Some(3));
+    assert_eq!(version, Some(4));
 }
 
 #[tokio::test]
@@ -132,7 +132,7 @@ async fn connect_handshake_supplies_protocol_version() {
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": req["id"],
-        "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+        "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
     });
     write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 
@@ -141,7 +141,7 @@ async fn connect_handshake_supplies_protocol_version() {
         .unwrap()
         .unwrap();
     assert!(res.is_ok());
-    assert_eq!(client.protocol_version(), Some(3));
+    assert_eq!(client.protocol_version(), Some(4));
 }
 
 /// Positive coverage for token forwarding on the `connect` handshake. A
@@ -176,7 +176,7 @@ async fn connect_handshake_forwards_explicit_token() {
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": req["id"],
-        "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+        "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
     });
     write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 
@@ -230,7 +230,7 @@ async fn connect_handshake_forwards_auto_generated_token() {
     let response = serde_json::json!({
         "jsonrpc": "2.0",
         "id": req["id"],
-        "result": { "ok": true, "protocolVersion": 3, "version": "test-1.0.0" },
+        "result": { "ok": true, "protocolVersion": 4, "version": "test-1.0.0" },
     });
     write_framed(&mut server_write, &serde_json::to_vec(&response).unwrap()).await;
 

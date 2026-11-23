@@ -45,6 +45,151 @@ copilot_session_destroy
 copilot_client_stop
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older
+CLIs are rejected by `copilot_client_start` with a protocol version mismatch error. Every
+existing `COPILOT_*` variable keeps working: the SDK still builds the same flat options and then
+translates them into the grouped v4 `session.create` / `session.resume` payload (for example
+`"streaming"` becomes `events.streaming`, `COPILOT_EXCLUDED_TOOLS` becomes `tools.excludedTools`,
+and the sub-agent hooks flag becomes `hooks.hasHandlers`). Fork-specific options that the runtime
+does not group stay at the payload root. A legacy `COPILOT_PROVIDER` is sent as a named
+`"default"` connection with Copilot API models disabled, which preserves the v1 BYOK behavior.
+
+New in this release:
+
+- **Named BYOK providers**: `COPILOT_PROVIDERS`, `COPILOT_MODELS`, `COPILOT_DEFAULT_PROVIDER` (the literal `null` clears a saved default on resume), and `COPILOT_CAPI`, with the `copilot_named_provider_config` and `copilot_provider_model_config` builders.
+- **Custom tools and idempotent tools**: `copilot_register_tool <name> <description> <handler> [schema] [idempotent] [skip_permission]` (calls are answered during `copilot_session_send_and_wait`).
+- **Permission prompts**: `COPILOT_PERMISSION_HANDLER` answers protocol 4 `permission.requested` events (`copilot_approve_all` and `copilot_deny_all` are ready-made handlers). Without a handler the runtime denies operations that need approval, including custom tools registered without `skip_permission`.
+
+```bash
+review_permission() {
+    # $1 is the permission request JSON ({"kind":"write"|"shell"|"custom-tool"|..., ...})
+    case "$(echo "$1" | jq -r '.kind')" in
+        read|custom-tool) echo "approve" ;;
+        *) echo '{"kind":"reject","feedback":"Only reads are allowed"}' ;;
+    esac
+}
+COPILOT_PERMISSION_HANDLER="review_permission"
+```
+- **Client turn ID**: `COPILOT_CLIENT_TURN_ID` on `copilot_session_send*`.
+- **Client mode**: `COPILOT_CLIENT_MODE` (`coding-agent`, the default, or `empty`).
+- **Shell output events**: `COPILOT_EVENT_TOOL_SHELL_OUTPUT`, the `COPILOT_ON_SHELL_OUTPUT` handler, and `copilot_shell_output_event_data`.
+- **Shell authentication**: `COPILOT_SHELL_AUTHENTICATION_HANDLER`.
+- **Memory store**: `COPILOT_MEMORY_STORE_HANDLER`.
+- **Network callbacks**: `COPILOT_NETWORK_SCOPE`, `COPILOT_NETWORK_RESOLVE_PROXY`, `COPILOT_NETWORK_AUTHENTICATE_NEGOTIATE`, and `COPILOT_NETWORK_AUTHENTICATE_BASIC`.
+- **Policy helper failure**: `COPILOT_POLICY_HELPER_FAILURE` after a failed create/resume, plus `copilot_policy_helper_failure <json>`.
+- **Permission mode refusal reason**: `copilot_session_set_permission_mode <mode>` sets `COPILOT_PERMISSION_MODE_RESULT`, whose `reason` can be `$COPILOT_PERMISSION_MODE_REFUSAL_MANAGED_POLICY`.
+
+Also available (added in v2.6.0): client info (`COPILOT_CLIENT_INFO_APPLICATION_NAME` and
+friends, sent on the `connect` handshake), Auto routing tier (`COPILOT_AUTO_TIER`,
+`copilot_session_set_auto_tier`), ask-user variant (`COPILOT_ASK_USER_VARIANT`), GitHub token
+provider (`COPILOT_GITHUB_TOKEN_PROVIDER`), sandbox bypass (`copilot_sandbox_config true true`),
+feature flags (`COPILOT_FEATURE_FLAGS`), session detach (`copilot_session_destroy` sends
+`session.detach`), message source (`COPILOT_MESSAGE_SOURCE`), managed settings
+(`copilot_client_clear_managed_settings_cache`, `copilot_session_get_managed_settings`,
+`copilot_session_recheck_policy_helper`), model allowlist (`COPILOT_ALLOWED_MODELS`), OAuth client
+metadata URL (`COPILOT_AUTH_CLIENT_ID_METADATA_URL`), max output tokens
+(`copilot_model_capabilities_limits "" "" 4096`), structured output (`COPILOT_RESPONSE_SCHEMA`,
+`copilot_session_send_and_wait_structured`), agent and hook directories
+(`COPILOT_AGENT_DIRECTORIES`, `COPILOT_HOOK_DIRECTORIES`), working directory trust
+(`COPILOT_TRUST_WORKING_DIRECTORY`, create only), transcript recovery
+(`COPILOT_ALLOW_TRANSCRIPT_RECOVERY`, resume only), image generation config
+(`copilot_image_generation_config`), autopilot options (`copilot_autopilot_options`), sub-agent
+hooks (`COPILOT_ON_SUBAGENT_START`, `COPILOT_ON_SUBAGENT_STOP`), and the BYOK API key command
+(`PROVIDER_API_KEY_COMMAND` with `copilot_provider_config`).
+
+### Named BYOK providers
+
+```bash
+COPILOT_PROVIDERS="[$(copilot_named_provider_config gateway https://models.example.com/v1 openai "$MODEL_API_KEY")]"
+COPILOT_MODELS="[$(copilot_provider_model_config gateway chat gpt-4o deployment)]"
+COPILOT_CAPI='{"enabled":false}'
+copilot_client_create_session "gateway/chat"
+
+# Later: re-enable Copilot API models and clear the saved default connection on resume
+COPILOT_PROVIDERS="" COPILOT_MODELS=""
+COPILOT_CAPI='{"enabled":true}'
+COPILOT_DEFAULT_PROVIDER="null"
+copilot_client_resume_session "$COPILOT_SESSION_ID" "gpt-5"
+```
+
+### Custom tools, turn IDs, and client mode
+
+```bash
+lookup_order() {
+    local args="$1"
+    echo "Order $(echo "$args" | jq -r '.id') shipped"
+}
+copilot_register_tool "lookup_order" "Look up an order by ID" lookup_order \
+    '{"type":"object","properties":{"id":{"type":"string"}}}' true
+
+# Empty mode: no ambient tools; every create/resume must set COPILOT_AVAILABLE_TOOLS
+COPILOT_CLIENT_MODE="empty"
+copilot_client_start
+COPILOT_AVAILABLE_TOOLS='["lookup_order"]'
+copilot_client_create_session
+
+COPILOT_CLIENT_TURN_ID="turn-42"
+copilot_session_send_and_wait "Where is order 42?"
+```
+
+### Shell output, shell authentication, and memory store
+
+```bash
+on_shell_output() { echo "$1" | jq -r '.text'; }
+answer_sudo() {
+    local request="$1"
+    if [[ "$(echo "$request" | jq -r '.inputKind')" == "confirm" ]]; then
+        echo '{"action":"cancel"}'
+    else
+        jq -c -n --arg v "$SUDO_PASSWORD" '{"action":"accept","value":$v}'
+    fi
+}
+store_memory() { echo "$1" | jq -c '{subject, fact}' >> memories.jsonl; }
+
+COPILOT_ON_SHELL_OUTPUT="on_shell_output"
+COPILOT_SHELL_AUTHENTICATION_HANDLER="answer_sudo"
+COPILOT_MEMORY_STORE_HANDLER="store_memory"
+copilot_client_create_session
+```
+
+### Network callbacks
+
+```bash
+resolve_proxy() { echo "PROXY proxy.example:8080; DIRECT"; }
+proxy_basic_auth() { jq -c -n --arg p "$PROXY_PASSWORD" '{"username":"svc-build","password":$p}'; }
+
+COPILOT_NETWORK_SCOPE="connection"
+COPILOT_NETWORK_RESOLVE_PROXY="resolve_proxy"
+COPILOT_NETWORK_AUTHENTICATE_BASIC="proxy_basic_auth"
+copilot_client_start   # registers the callbacks with network.setProvider
+```
+
+### Policy helper failures and permission modes
+
+```bash
+if ! copilot_client_create_session; then
+    if [[ -n "$COPILOT_POLICY_HELPER_FAILURE" ]]; then
+        echo "Blocked by policy: $(echo "$COPILOT_POLICY_HELPER_FAILURE" | jq -r '.message')" >&2
+    fi
+fi
+
+if ! copilot_session_set_permission_mode "allow-all"; then
+    reason=$(echo "$COPILOT_PERMISSION_MODE_RESULT" | jq -r '.reason // empty')
+    if [[ "$reason" == "$COPILOT_PERMISSION_MODE_REFUSAL_MANAGED_POLICY" ]]; then
+        echo "Managed policy keeps the current permission mode" >&2
+    fi
+fi
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI over stdio.
+- Handlers run synchronously, so a `shellAuthentication.cancel` only arrives after the handler for that request has returned; it is acknowledged without further action.
+- Custom tool calls, shell output events, and other session events are processed while `copilot_session_send_and_wait` is polling; `copilot_session_send` alone does not process them.
+
 ## Architecture
 
 The SDK is composed of four modules, each sourced by the main `copilot_sdk.sh` entry point:
@@ -65,7 +210,7 @@ shell/
 
 | Module | Purpose |
 |--------|---------|
-| `sdk_protocol_version.sh` | Defines `COPILOT_SDK_PROTOCOL_VERSION=2` matching the server expectation |
+| `sdk_protocol_version.sh` | Defines `COPILOT_SDK_PROTOCOL_VERSION=4` matching the server expectation |
 | `json_rpc.sh` | Low-level JSON-RPC 2.0 over stdio with Content-Length framing using `coproc` |
 | `client.sh` | Client lifecycle: start/stop, ping, create/resume/delete sessions, list models |
 | `session.sh` | Session operations: send, send_and_wait, get_messages, abort, destroy |
@@ -237,7 +382,7 @@ Check if the CLI process is still running.
 
 | Variable | Description |
 |----------|-------------|
-| `COPILOT_SDK_PROTOCOL_VERSION` | Protocol version (currently 2) |
+| `COPILOT_SDK_PROTOCOL_VERSION` | Protocol version (currently 4) |
 | `COPILOT_SDK_NAME` | SDK name (`copilot-sdk-shell`) |
 | `COPILOT_SDK_VERSION` | SDK version |
 | `COPILOT_CLIENT_STATE` | Connection state: `disconnected`, `connecting`, `connected`, `error` |

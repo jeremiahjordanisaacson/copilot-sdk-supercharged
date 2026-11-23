@@ -16,6 +16,7 @@ local JsonRpcClient       = require("copilot.json_rpc_client")
 local CopilotSession      = require("copilot.session")
 local types               = require("copilot.types")
 local sdk_protocol_version = require("copilot.sdk_protocol_version")
+local session_params      = require("copilot.session_params")
 
 -- ---------------------------------------------------------------------------
 -- CopilotClient class
@@ -32,7 +33,16 @@ function CopilotClient.new(options)
     local self = setmetatable({}, CopilotClient)
 
     -- Resolve options with defaults
-    self._cli_path       = options.cliPath or os.getenv("COPILOT_CLI_PATH") or "copilot"
+    local cli_path = options.cliPath or os.getenv("COPILOT_CLI_PATH") or "copilot"
+    if cli_path == "" then
+        cli_path = "copilot"
+    end
+    -- A .js entry point (such as @github/copilot/npm-loader.js) runs with node;
+    -- anything else (the native binary or the npm bin shim) runs directly.
+    if cli_path:match("%.js$") and not cli_path:match("^node%s") then
+        cli_path = 'node "' .. cli_path .. '"'
+    end
+    self._cli_path       = cli_path
     self._cwd            = options.cwd
     self._log_level      = options.logLevel or "info"
     self._env            = options.env
@@ -40,6 +50,25 @@ function CopilotClient.new(options)
     self._use_logged_in  = options.useLoggedInUser
     self._auto_start     = (options.autoStart ~= false)
     self._auto_restart   = (options.autoRestart ~= false)
+    self._client_info    = options.clientInfo
+
+    -- Client mode: "coding-agent" (default) or "empty"; "copilot-cli" is a legacy alias.
+    local mode = options.mode or types.ClientMode.CODING_AGENT
+    if mode == types.ClientMode.COPILOT_CLI then
+        mode = types.ClientMode.CODING_AGENT
+    end
+    if mode ~= types.ClientMode.CODING_AGENT and mode ~= types.ClientMode.EMPTY then
+        error('mode must be "coding-agent" or "empty"', 2)
+    end
+    self._mode = mode
+
+    -- Host network callbacks (NetworkConfig)
+    self._network = options.network
+    if self._network and self._network.scope ~= nil
+        and self._network.scope ~= types.NetworkScope.CONNECTION
+        and self._network.scope ~= types.NetworkScope.RUNTIME then
+        error('network scope must be "connection" or "runtime"', 2)
+    end
 
     -- State
     self._state          = types.ConnectionState.DISCONNECTED
@@ -51,6 +80,7 @@ function CopilotClient.new(options)
     self._stdout_handle  = nil
     self._read_thread    = nil    -- coroutine for the read loop
     self._on_get_trace_context = options.onGetTraceContext  -- optional trace context provider
+    self._github_token_providers = {}  -- registrationId -> { provider = fn, sessionId = id }
 
     return self
 end
@@ -174,11 +204,25 @@ function CopilotClient:start()
     -- Kick off the read loop coroutine (it will yield on I/O)
     -- For synchronous mode, the read loop runs inline inside request()
 
+    -- Declare the integrating application's identity (connect handshake)
+    local info_ok, info_err = self:_send_client_info()
+    if not info_ok then
+        self._state = types.ConnectionState.ERROR
+        return false, info_err
+    end
+
     -- Verify protocol version
     local ping_ok, ping_err = self:_verify_protocol_version()
     if not ping_ok then
         self._state = types.ConnectionState.ERROR
         return false, ping_err
+    end
+
+    -- Register host network callbacks, if any
+    local net_ok, net_err = self:_register_network_provider()
+    if not net_ok then
+        self._state = types.ConnectionState.ERROR
+        return false, net_err
     end
 
     self._state = types.ConnectionState.CONNECTED
@@ -224,6 +268,9 @@ function CopilotClient:stop()
 
     -- Clear models cache
     self._models_cache = nil
+
+    -- Drop all GitHub token provider registrations
+    self._github_token_providers = {}
 
     self._state = types.ConnectionState.DISCONNECTED
 
@@ -347,19 +394,37 @@ end
 -- @param config table|nil  SessionConfig (see types.SessionConfig)
 -- @return CopilotSession|nil
 -- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data, policyHelperFailure }
+--   when session.create failed with an error response
 function CopilotClient:create_session(config)
     local ok, err = self:_ensure_connected()
     if not ok then return nil, err end
 
     config = config or {}
-    local req = self:_build_create_session_request(config)
+    local valid, valid_err = self:_validate_session_config(config)
+    if not valid then return nil, valid_err end
 
-    local result, req_err = self._rpc_client:request("session.create", req)
+    local registration_id, reg_err = self:_register_github_token_provider(config, config.sessionId)
+    if reg_err then return nil, reg_err end
+
+    local req = self:_build_create_session_request(config)
+    if registration_id then
+        req.gitHubTokenProviderRegistrationId = registration_id
+    end
+    -- SDK protocol 4: move the flat options into their option groups.
+    req = session_params.group(req, false)
+    if self._mode == types.ClientMode.EMPTY then
+        session_params.apply_empty_mode_defaults(req)
+    end
+
+    local result, req_err, rpc_err = self._rpc_client:request("session.create", req)
     if req_err then
-        return nil, "failed to create session: " .. tostring(req_err)
+        self:_unregister_github_token_provider(registration_id)
+        return nil, "failed to create session: " .. tostring(req_err), self:_session_open_error(rpc_err)
     end
 
     if not result or not result.sessionId then
+        self:_unregister_github_token_provider(registration_id)
         return nil, "invalid create session response"
     end
 
@@ -370,22 +435,7 @@ function CopilotClient:create_session(config)
     )
 
     -- Register tools, permission handler, user input handler, hooks
-    session:_register_tools(config.tools)
-    if config.onPermissionRequest then
-        session:_register_permission_handler(config.onPermissionRequest)
-    end
-    if config.onUserInputRequest then
-        session:_register_user_input_handler(config.onUserInputRequest)
-    end
-    if config.hooks then
-        session:_register_hooks(config.hooks)
-    end
-    if config.onExitPlanMode then
-        session:_register_exit_plan_mode_handler(config.onExitPlanMode)
-    end
-    if self._on_get_trace_context then
-        session:_register_trace_context_provider(self._on_get_trace_context)
-    end
+    self:_register_session_handlers(session, config, registration_id)
 
     self._sessions[result.sessionId] = session
     return session, nil
@@ -396,19 +446,37 @@ end
 -- @param config table|nil   ResumeSessionConfig
 -- @return CopilotSession|nil
 -- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data, policyHelperFailure }
+--   when session.resume failed with an error response
 function CopilotClient:resume_session(session_id, config)
     local ok, err = self:_ensure_connected()
     if not ok then return nil, err end
 
     config = config or {}
-    local req = self:_build_resume_session_request(session_id, config)
+    local valid, valid_err = self:_validate_session_config(config)
+    if not valid then return nil, valid_err end
 
-    local result, req_err = self._rpc_client:request("session.resume", req)
+    local registration_id, reg_err = self:_register_github_token_provider(config, session_id)
+    if reg_err then return nil, reg_err end
+
+    local req = self:_build_resume_session_request(session_id, config)
+    if registration_id then
+        req.gitHubTokenProviderRegistrationId = registration_id
+    end
+    -- SDK protocol 4: move the flat options into their option groups.
+    req = session_params.group(req, true)
+    if self._mode == types.ClientMode.EMPTY then
+        session_params.apply_empty_mode_defaults(req)
+    end
+
+    local result, req_err, rpc_err = self._rpc_client:request("session.resume", req)
     if req_err then
-        return nil, "failed to resume session: " .. tostring(req_err)
+        self:_unregister_github_token_provider(registration_id)
+        return nil, "failed to resume session: " .. tostring(req_err), self:_session_open_error(rpc_err)
     end
 
     if not result or not result.sessionId then
+        self:_unregister_github_token_provider(registration_id)
         return nil, "invalid resume session response"
     end
 
@@ -418,25 +486,21 @@ function CopilotClient:resume_session(session_id, config)
         result.workspacePath
     )
 
-    session:_register_tools(config.tools)
-    if config.onPermissionRequest then
-        session:_register_permission_handler(config.onPermissionRequest)
-    end
-    if config.onUserInputRequest then
-        session:_register_user_input_handler(config.onUserInputRequest)
-    end
-    if config.hooks then
-        session:_register_hooks(config.hooks)
-    end
-    if config.onExitPlanMode then
-        session:_register_exit_plan_mode_handler(config.onExitPlanMode)
-    end
-    if self._on_get_trace_context then
-        session:_register_trace_context_provider(self._on_get_trace_context)
-    end
+    self:_register_session_handlers(session, config, registration_id)
 
     self._sessions[result.sessionId] = session
     return session, nil
+end
+
+--- Clear the runtime's cached managed (enterprise policy) settings so they are
+-- re-read on next use.
+-- @return table|nil result
+-- @return string|nil error
+function CopilotClient:clear_managed_settings_cache()
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    return self._rpc_client:request("managedSettings.clearCache", {})
 end
 
 --- List all sessions.
@@ -686,6 +750,34 @@ function CopilotClient:_setup_handlers()
         return self:_handle_exit_plan_mode_request(params)
     end)
 
+    -- gitHubToken.getToken (sessions created with a gitHubTokenProvider)
+    self._rpc_client:set_request_handler("gitHubToken.getToken", function(params)
+        return self:_handle_github_token_request(params)
+    end)
+
+    -- shellAuthentication.request / .cancel (sessions with onShellAuthenticationRequest)
+    self._rpc_client:set_request_handler("shellAuthentication.request", function(params)
+        return self:_handle_shell_authentication_request(params), nil
+    end)
+    self._rpc_client:set_request_handler("shellAuthentication.cancel", function(params)
+        if type(params) == "table" and type(params.sessionId) == "string"
+            and type(params.requestId) == "string" then
+            local session = self._sessions[params.sessionId]
+            if session then
+                session:_cancel_shell_authentication_request(params.requestId)
+            end
+        end
+        return {}, nil
+    end)
+
+    -- memoryStore.store (sessions with storeMemory); answers JSON null
+    self._rpc_client:set_request_handler("memoryStore.store", function(params)
+        return self:_handle_memory_store_request(params)
+    end)
+
+    -- network.* callbacks (client network option)
+    self:_setup_network_handlers()
+
     -- sessionFs.* provider requests (serviced against the real filesystem)
     self._rpc_client:set_request_handler("sessionFs.readFile", function(params)
         return self:_handle_session_fs_read_file(params)
@@ -914,6 +1006,289 @@ function CopilotClient:_handle_exit_plan_mode_request(params)
     end
 
     return result, nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Internal: v3.0.0 session callbacks, client mode and network callbacks
+-- ---------------------------------------------------------------------------
+
+--- Validate session callbacks and, in "empty" mode, require availableTools.
+-- @return boolean ok
+-- @return string|nil error
+function CopilotClient:_validate_session_config(config)
+    if config.onShellAuthenticationRequest ~= nil and type(config.onShellAuthenticationRequest) ~= "function" then
+        return false, "onShellAuthenticationRequest must be a function"
+    end
+    if config.storeMemory ~= nil and type(config.storeMemory) ~= "function" then
+        return false, "storeMemory must be a function"
+    end
+    if self._mode == types.ClientMode.EMPTY and config.availableTools == nil then
+        return false, 'CopilotClient is in mode "empty" but the session config did not specify '
+            .. "availableTools. Empty mode requires every session to explicitly opt into the "
+            .. "tools it wants."
+    end
+    return true, nil
+end
+
+--- Register all session-scoped handlers on a newly created or resumed session.
+function CopilotClient:_register_session_handlers(session, config, registration_id)
+    session:_register_tools(config.tools)
+    if config.onPermissionRequest then
+        session:_register_permission_handler(config.onPermissionRequest)
+    end
+    if config.onUserInputRequest then
+        session:_register_user_input_handler(config.onUserInputRequest)
+    end
+    if config.hooks then
+        session:_register_hooks(config.hooks)
+    end
+    if config.onExitPlanMode then
+        session:_register_exit_plan_mode_handler(config.onExitPlanMode)
+    end
+    if config.onShellAuthenticationRequest then
+        session:_register_shell_authentication_handler(config.onShellAuthenticationRequest)
+    end
+    if config.storeMemory then
+        session:_register_memory_store(config.storeMemory)
+    end
+    if self._on_get_trace_context then
+        session:_register_trace_context_provider(self._on_get_trace_context)
+    end
+    if registration_id then
+        local entry = self._github_token_providers[registration_id]
+        if entry then
+            entry.sessionId = session.session_id
+        end
+        session:_on_destroy(function()
+            self._github_token_providers[registration_id] = nil
+        end)
+    end
+end
+
+--- Build the structured error returned as the third value of create_session /
+-- resume_session, including a parsed policyHelperFailure when present.
+function CopilotClient:_session_open_error(rpc_err)
+    if type(rpc_err) ~= "table" then
+        return nil
+    end
+    return {
+        code                = rpc_err.code,
+        message             = rpc_err.message,
+        data                = rpc_err.data,
+        policyHelperFailure = types.policy_helper_failure(rpc_err),
+    }
+end
+
+--- Validate a session's gitHubTokenProvider and store it in the client registry.
+-- @return string|nil registration id sent on the wire
+-- @return string|nil error
+function CopilotClient:_register_github_token_provider(config, session_id)
+    local provider = config.gitHubTokenProvider
+    if provider == nil then
+        return nil, nil
+    end
+    if config.gitHubToken ~= nil then
+        return nil, "gitHubToken and gitHubTokenProvider are mutually exclusive"
+    end
+    if type(provider) ~= "function" then
+        return nil, "gitHubTokenProvider must be a function"
+    end
+    local registration_id = JsonRpcClient.generate_uuid()
+    self._github_token_providers[registration_id] = { provider = provider, sessionId = session_id }
+    return registration_id, nil
+end
+
+--- Release a GitHub token provider registration.
+function CopilotClient:_unregister_github_token_provider(registration_id)
+    if registration_id then
+        self._github_token_providers[registration_id] = nil
+    end
+end
+
+--- Answer gitHubToken.getToken with { kind = "token", accessToken, tokenType?, expiresIn }
+-- or { kind = "cancelled" }.
+function CopilotClient:_handle_github_token_request(params)
+    local registration_id = type(params) == "table" and params.registrationId or nil
+    local registration = type(registration_id) == "string" and self._github_token_providers[registration_id] or nil
+    if not registration then
+        return nil, {
+            code = -32603,
+            message = 'No GitHub token provider registered for registration ID "' .. tostring(registration_id) .. '"',
+        }
+    end
+
+    local session_id = params.sessionId
+    if type(session_id) ~= "string" then
+        session_id = registration.sessionId
+    end
+    local args = { host = params.host, sessionId = session_id, reason = params.reason }
+    local ok, result = pcall(registration.provider, args)
+    if not ok then
+        return nil, { code = -32603, message = "gitHubTokenProvider failed" }
+    end
+    if type(result) ~= "table" then
+        return nil, { code = -32603, message = "gitHubTokenProvider must return a table" }
+    end
+    if result.kind == "cancelled" then
+        return { kind = "cancelled" }, nil
+    end
+    local wire = {
+        kind        = "token",
+        accessToken = result.accessToken or result.access_token,
+        expiresIn   = result.expiresIn or result.expires_in,
+    }
+    local token_type = result.tokenType or result.token_type
+    if token_type then
+        wire.tokenType = token_type
+    end
+    return wire, nil
+end
+
+--- Answer shellAuthentication.request. Malformed requests and unknown sessions cancel.
+-- @return table { action = "accept", value } or { action = "cancel" }
+function CopilotClient:_handle_shell_authentication_request(params)
+    local input_kinds = { secret = true, text = true, confirm = true }
+    if type(params) ~= "table"
+        or type(params.sessionId) ~= "string" or type(params.requestId) ~= "string"
+        or type(params.program) ~= "string" or type(params.prompt) ~= "string"
+        or not input_kinds[params.inputKind] then
+        return { action = "cancel" }
+    end
+
+    local session = self._sessions[params.sessionId]
+    if not session then
+        return { action = "cancel" }
+    end
+
+    return session:_handle_shell_authentication_request({
+        sessionId = params.sessionId,
+        requestId = params.requestId,
+        program   = params.program,
+        prompt    = params.prompt,
+        inputKind = params.inputKind,
+        command   = type(params.command) == "string" and params.command or "",
+        cwd       = type(params.cwd) == "string" and params.cwd or "",
+    })
+end
+
+--- Answer memoryStore.store by invoking the session's storeMemory callback
+-- (JSON null on success).
+function CopilotClient:_handle_memory_store_request(params)
+    local session = type(params) == "table" and type(params.sessionId) == "string"
+        and self._sessions[params.sessionId] or nil
+    if not session then
+        return nil, { code = -32603, message = "Memory store owner is unavailable" }
+    end
+    local ok, err = session:_handle_memory_store({
+        sessionId = params.sessionId,
+        subject   = params.subject,
+        fact      = params.fact,
+        citations = params.citations,
+        reason    = params.reason,
+    })
+    if not ok then
+        return nil, { code = -32603, message = tostring(err) }
+    end
+    return nil, nil
+end
+
+--- Declare the integrating application's identity on the connect handshake.
+-- Skipped when no clientInfo field is set; older CLIs without connect are tolerated.
+-- @return boolean ok
+-- @return string|nil error
+function CopilotClient:_send_client_info()
+    local wire = types.client_info_to_wire(self._client_info)
+    if not wire then
+        return true, nil
+    end
+    local _, err = self._rpc_client:request("connect", { clientInfo = wire })
+    if err and not tostring(err):find("-32601", 1, true)
+        and not tostring(err):find("Unhandled method connect", 1, true) then
+        return false, "connect failed: " .. tostring(err)
+    end
+    return true, nil
+end
+
+--- Run a network callback. Failures are reported by label only so that secrets
+-- in an error message are never logged or sent back over the wire.
+local function invoke_network_callback(label, callback, request)
+    local ok, result = pcall(callback, request)
+    if not ok then
+        return nil, { code = -32603, message = label .. " callback failed" }
+    end
+    return result, nil
+end
+
+--- Register the host network callbacks with network.setProvider. An empty
+-- object marks each callback the client answers; the scope is sent only when set.
+-- @return boolean ok
+-- @return string|nil error
+function CopilotClient:_register_network_provider()
+    local network = self._network
+    if not network or not (network.resolveProxy or network.authenticateNegotiate or network.authenticateBasic) then
+        return true, nil
+    end
+    local params = {}
+    if network.scope then params.scope = network.scope end
+    if network.resolveProxy then params.resolveProxy = {} end
+    if network.authenticateNegotiate then params.authenticateNegotiate = {} end
+    if network.authenticateBasic then params.authenticateBasic = {} end
+    local _, err = self._rpc_client:request("network.setProvider", params)
+    if err then
+        return false, "network.setProvider failed: " .. tostring(err)
+    end
+    return true, nil
+end
+
+--- Register the server -> client handlers for the configured network callbacks.
+function CopilotClient:_setup_network_handlers()
+    local network = self._network
+    if not network then
+        return
+    end
+
+    if network.resolveProxy then
+        self._rpc_client:set_request_handler("network.resolveProxy", function(params)
+            local url = type(params) == "table" and params.url or nil
+            local proxy, err = invoke_network_callback("Proxy resolution", network.resolveProxy, { url = url })
+            if err then return nil, err end
+            if type(proxy) == "string" and proxy ~= "" then
+                return { proxy = proxy }, nil
+            end
+            return {}, nil
+        end)
+    end
+    if network.authenticateNegotiate then
+        self._rpc_client:set_request_handler("network.authenticateNegotiate", function(params)
+            local spn = type(params) == "table" and params.spn or nil
+            local token, err = invoke_network_callback("Negotiate authentication", network.authenticateNegotiate, { spn = spn })
+            if err then return nil, err end
+            if type(token) == "string" and token ~= "" then
+                return { token = token }, nil
+            end
+            return {}, nil
+        end)
+    end
+    if network.authenticateBasic then
+        self._rpc_client:set_request_handler("network.authenticateBasic", function(params)
+            params = type(params) == "table" and params or {}
+            local realm = params.realm
+            if type(realm) ~= "string" then realm = nil end
+            local credentials, err = invoke_network_callback("Basic authentication", network.authenticateBasic, {
+                proxy            = params.proxy,
+                realm            = realm,
+                previousRejected = params.previousRejected == true,
+            })
+            if err then return nil, err end
+            -- Send only the credential fields, never other entries of the caller's table.
+            local result = {}
+            if type(credentials) == "table" then
+                if credentials.username ~= nil then result.username = tostring(credentials.username) end
+                if credentials.password ~= nil then result.password = tostring(credentials.password) end
+            end
+            return result, nil
+        end)
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1174,16 +1549,43 @@ end
 -- Internal: request building
 -- ---------------------------------------------------------------------------
 
---- Build the request body for session.create.
-function CopilotClient:_build_create_session_request(config)
+--- Return t marked so cjson encodes it as a JSON array even when empty.
+local function as_array(t)
+    if type(t) == "table" and next(t) == nil and cjson.array_mt then
+        setmetatable(t, cjson.array_mt)
+    end
+    return t
+end
+
+--- True when any hook handler is set.
+local function has_any_hook(h)
+    return h.onPreToolUse or h.onPostToolUse or h.onUserPromptSubmitted
+        or h.onUserPromptTransformed or h.onSessionStart or h.onSessionEnd
+        or h.onErrorOccurred or h.onPreMcpToolCall or h.onSubagentStart
+        or h.onSubagentStop
+end
+
+--- Build the flat session.create / session.resume options shared by both RPCs.
+-- The result is translated to the grouped SDK protocol 4 shape by
+-- session_params.group() right before it is sent.
+-- @param config table  SessionConfig / ResumeSessionConfig
+-- @param resume boolean
+-- @return table flat request
+function CopilotClient:_build_session_request(config, resume)
     local req = {}
 
     if config.model then req.model = config.model end
-    if config.sessionId then req.sessionId = config.sessionId end
     if config.reasoningEffort then req.reasoningEffort = config.reasoningEffort end
     if config.configDir then req.configDir = config.configDir end
     if config.workingDirectory then req.workingDirectory = config.workingDirectory end
-    if config.systemMessage then req.systemMessage = config.systemMessage end
+    if config.systemMessage then
+        -- A plain string is appended to the default system message.
+        if type(config.systemMessage) == "string" then
+            req.systemMessage = { mode = "append", content = config.systemMessage }
+        else
+            req.systemMessage = config.systemMessage
+        end
+    end
     if config.provider then req.provider = config.provider end
     if config.instructions then req.instructions = config.instructions end
     if config.agent then req.agent = config.agent end
@@ -1196,18 +1598,25 @@ function CopilotClient:_build_create_session_request(config)
                 name        = tool.name,
                 description = tool.description,
                 parameters  = tool.parameters,
+                idempotent  = tool.idempotent,
             })
         end
         req.tools = tool_defs
     end
 
-    if config.availableTools then req.availableTools = config.availableTools end
-    if config.excludedTools then req.excludedTools = config.excludedTools end
+    if config.availableTools then req.availableTools = as_array(config.availableTools) end
+    if config.excludedTools then req.excludedTools = as_array(config.excludedTools) end
     if config.mcpServers then req.mcpServers = config.mcpServers end
     if config.customAgents then req.customAgents = config.customAgents end
     if config.skillDirectories then req.skillDirectories = config.skillDirectories end
     if config.disabledSkills then req.disabledSkills = config.disabledSkills end
     if config.infiniteSessions then req.infiniteSessions = config.infiniteSessions end
+    if config.includeSubAgentStreamingEvents ~= nil then
+        req.includeSubAgentStreamingEvents = config.includeSubAgentStreamingEvents
+    end
+    if config.enableConfigDiscovery ~= nil then req.enableConfigDiscovery = config.enableConfigDiscovery end
+    if config.gitHubToken then req.gitHubToken = config.gitHubToken end
+    if config.instructionDirectories then req.instructionDirectories = config.instructionDirectories end
 
     -- Upstream-sync session options (parity with @github/copilot-sdk)
     if config.enableCitations ~= nil then req.enableCitations = config.enableCitations end
@@ -1215,7 +1624,6 @@ function CopilotClient:_build_create_session_request(config)
     if config.sessionLimits then req.sessionLimits = config.sessionLimits end
     if config.memory then req.memory = config.memory end
     if config.otlpProtocol then req.otlpProtocol = config.otlpProtocol end
-    if config.enableWebSocketResponses ~= nil then req.enableWebSocketResponses = config.enableWebSocketResponses end
     if config.expAssignments then req.expAssignments = config.expAssignments end
     -- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk)
     if config.rewindEnabled ~= nil then req.rewindEnabled = config.rewindEnabled end
@@ -1233,70 +1641,88 @@ function CopilotClient:_build_create_session_request(config)
     if config.contentExclusion ~= nil then req.contentExclusion = config.contentExclusion end
     if config.onMcpAuthRequest then req.mcpAuthHandler = true end
 
-    if config.streaming then req.streaming = true end
+    -- v2.6.0 upstream-sync session options. An explicit capi ({ enabled = ... })
+    -- is merged with the Auto tier / WebSocket options.
+    local capi, has_capi = {}, false
+    if type(config.capi) == "table" then
+        for k, v in pairs(config.capi) do
+            capi[k] = v
+            has_capi = true
+        end
+    end
+    if config.autoTier then
+        capi.autoTier = config.autoTier
+        has_capi = true
+    end
+    if config.enableWebSocketResponses ~= nil then
+        capi.enableWebSocketResponses = config.enableWebSocketResponses
+        has_capi = true
+    end
+    if has_capi then req.capi = capi end
+    if config.askUserVariant then req.askUserVariant = config.askUserVariant end
+    if config.sandboxConfig then req.sandboxConfig = config.sandboxConfig end
+    if config.featureFlags then req.featureFlags = config.featureFlags end
+    if config.allowedModels then req.allowedModels = as_array(config.allowedModels) end
+    if config.authClientIdMetadataUrl then req.authClientIdMetadataUrl = config.authClientIdMetadataUrl end
+    if config.agentDirectories then req.agentDirectories = config.agentDirectories end
+    if config.hookDirectories then req.hookDirectories = config.hookDirectories end
+    if config.interactiveUser ~= nil then req.interactiveUser = config.interactiveUser end
+    if config.excludedManagedSettings then req.excludedManagedSettings = config.excludedManagedSettings end
+    if config.enforceManagedModelDefaults ~= nil then
+        req.enforceManagedModelDefaults = config.enforceManagedModelDefaults
+    end
+    if config.imageGeneration then req.imageGeneration = config.imageGeneration end
+    if config.autopilot then req.autopilot = config.autopilot end
+
+    if config.streaming ~= nil then req.streaming = config.streaming end
     if config.onPermissionRequest then req.requestPermission = true end
     if config.onUserInputRequest then req.requestUserInput = true end
     if config.onExitPlanMode then req.requestExitPlanMode = true end
     if config.modelCapabilities then req.modelCapabilities = config.modelCapabilities end
 
-    if config.hooks then
-        local h = config.hooks
-        if h.onPreToolUse or h.onPostToolUse or h.onUserPromptSubmitted
-            or h.onSessionStart or h.onSessionEnd or h.onErrorOccurred
-            or h.onPreMcpToolCall then
-            req.hooks = true
+    if config.hooks and has_any_hook(config.hooks) then
+        req.hooks = true
+    end
+
+    -- v3.0.0 (SDK protocol 4) session options
+    if config.providers then req.providers = config.providers end
+    if config.models then req.models = config.models end
+    if config.defaultProvider then
+        req.defaultProvider = config.defaultProvider
+    elseif resume and (config.clearDefaultProvider or config.defaultProvider == cjson.null) then
+        -- An explicit null clears the session's default provider on resume.
+        req.defaultProvider = cjson.null
+    end
+    if config.onShellAuthenticationRequest then req.requestShellAuthentication = true end
+    if config.storeMemory then req.hasMemoryStore = true end
+    if config.permissionMode then req.permissionMode = config.permissionMode end
+
+    if resume then
+        if config.disableResume then req.disableResume = true end
+        if config.allowTranscriptRecovery ~= nil then
+            req.allowTranscriptRecovery = config.allowTranscriptRecovery
+        end
+    else
+        if config.sessionId then req.sessionId = config.sessionId end
+        if config.name then req.name = config.name end
+        if config.trustWorkingDirectory then req.trustWorkingDirectory = config.trustWorkingDirectory end
+        if config.refreshCustomInstructions ~= nil then
+            req.refreshCustomInstructions = config.refreshCustomInstructions
         end
     end
 
     return req
 end
 
+--- Build the request body for session.create.
+function CopilotClient:_build_create_session_request(config)
+    return self:_build_session_request(config, false)
+end
+
 --- Build the request body for session.resume.
 function CopilotClient:_build_resume_session_request(session_id, config)
-    local req = { sessionId = session_id }
-
-    if config.model then req.model = config.model end
-    if config.reasoningEffort then req.reasoningEffort = config.reasoningEffort end
-    if config.configDir then req.configDir = config.configDir end
-    if config.workingDirectory then req.workingDirectory = config.workingDirectory end
-    if config.systemMessage then req.systemMessage = config.systemMessage end
-    if config.provider then req.provider = config.provider end
-
-    if config.tools and #config.tools > 0 then
-        local tool_defs = {}
-        for _, tool in ipairs(config.tools) do
-            table.insert(tool_defs, {
-                name        = tool.name,
-                description = tool.description,
-                parameters  = tool.parameters,
-            })
-        end
-        req.tools = tool_defs
-    end
-
-    if config.availableTools then req.availableTools = config.availableTools end
-    if config.excludedTools then req.excludedTools = config.excludedTools end
-    if config.mcpServers then req.mcpServers = config.mcpServers end
-    if config.customAgents then req.customAgents = config.customAgents end
-    if config.skillDirectories then req.skillDirectories = config.skillDirectories end
-    if config.disabledSkills then req.disabledSkills = config.disabledSkills end
-    if config.infiniteSessions then req.infiniteSessions = config.infiniteSessions end
-
-    if config.streaming then req.streaming = true end
-    if config.onPermissionRequest then req.requestPermission = true end
-    if config.onUserInputRequest then req.requestUserInput = true end
-    if config.onExitPlanMode then req.requestExitPlanMode = true end
-    if config.modelCapabilities then req.modelCapabilities = config.modelCapabilities end
-    if config.disableResume then req.disableResume = true end
-
-    if config.hooks then
-        local h = config.hooks
-        if h.onPreToolUse or h.onPostToolUse or h.onUserPromptSubmitted
-            or h.onSessionStart or h.onSessionEnd or h.onErrorOccurred then
-            req.hooks = true
-        end
-    end
-
+    local req = self:_build_session_request(config, true)
+    req.sessionId = session_id
     return req
 end
 
@@ -1319,17 +1745,17 @@ function CopilotClient:_verify_protocol_version()
     end
 
     local server_version = result.protocolVersion
-    if server_version == nil then
+    if server_version == nil or server_version == cjson.null then
         return false, string.format(
-            "SDK protocol version mismatch: SDK expects version %d, but server does not report a protocol version. Please update your server to ensure compatibility.",
+            "SDK protocol version mismatch: SDK supports version %d, but server does not report a protocol version. Please update your server to ensure compatibility.",
             expected
         )
     end
 
     if server_version ~= expected then
         return false, string.format(
-            "SDK protocol version mismatch: SDK expects version %d, but server reports version %d. Please update your SDK or server to ensure compatibility.",
-            expected, server_version
+            "SDK protocol version mismatch: SDK supports version %d, but server reports version %s. Please update your SDK or server to ensure compatibility.",
+            expected, tostring(server_version)
         )
     end
 

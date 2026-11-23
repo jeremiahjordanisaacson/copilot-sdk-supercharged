@@ -68,6 +68,9 @@ class CopilotClient
     /** @var array<string, array{provider: callable, sessionId: ?string}> gitHubTokenProvider registrations keyed by registration ID */
     private array $gitHubTokenProviders = [];
 
+    /** Normalized client mode ("coding-agent" or "empty"). */
+    private string $mode = ClientMode::CODING_AGENT;
+
     /**
      * Creates a new CopilotClient instance.
      *
@@ -77,6 +80,17 @@ class CopilotClient
     public function __construct(?CopilotClientOptions $options = null)
     {
         $this->options = $options ?? new CopilotClientOptions();
+
+        $mode = $this->options->mode === ClientMode::COPILOT_CLI ? ClientMode::CODING_AGENT : $this->options->mode;
+        if ($mode !== ClientMode::CODING_AGENT && $mode !== ClientMode::EMPTY) {
+            throw new \InvalidArgumentException('mode must be "coding-agent" or "empty"');
+        }
+        $this->mode = $mode;
+
+        $scope = $this->options->network?->scope;
+        if ($scope !== null && $scope !== NetworkScope::CONNECTION && $scope !== NetworkScope::RUNTIME) {
+            throw new \InvalidArgumentException('network scope must be "connection" or "runtime"');
+        }
 
         // Validate mutually exclusive options
         if ($this->options->cliUrl !== null && ($this->options->useStdio || $this->options->cliPath !== null)) {
@@ -118,6 +132,7 @@ class CopilotClient
 
             $this->connectToServer();
             $this->verifyProtocolVersion();
+            $this->registerNetworkProvider();
 
             $this->state = ConnectionState::Connected;
         } catch (\Throwable $e) {
@@ -273,6 +288,7 @@ class CopilotClient
             }
         }
 
+        $this->validateSessionConfigForMode($config->availableTools);
         $registrationId = $this->registerGitHubTokenProvider(
             $config->gitHubTokenProvider,
             $config->gitHubToken,
@@ -281,6 +297,10 @@ class CopilotClient
         $params = $config->toServerParams();
         if ($registrationId !== null) {
             $params['gitHubTokenProviderRegistrationId'] = $registrationId;
+        }
+        $params = SessionParams::group($params, false);
+        if ($this->mode === ClientMode::EMPTY) {
+            $params = SessionParams::applyEmptyModeDefaults($params);
         }
         try {
             $response = $this->connection->request('session.create', $params);
@@ -308,6 +328,8 @@ class CopilotClient
         if ($config->onExitPlanMode !== null) {
             $session->registerExitPlanModeHandler($config->onExitPlanMode);
         }
+        $session->registerShellAuthenticationHandler($config->onShellAuthenticationRequest);
+        $session->registerMemoryStore($config->storeMemory);
         if ($this->options->onGetTraceContext !== null) {
             $session->registerTraceContextProvider($this->options->onGetTraceContext);
         }
@@ -337,6 +359,7 @@ class CopilotClient
             }
         }
 
+        $this->validateSessionConfigForMode($config->availableTools);
         $registrationId = $this->registerGitHubTokenProvider(
             $config->gitHubTokenProvider,
             $config->gitHubToken,
@@ -345,6 +368,10 @@ class CopilotClient
         $params = $config->toServerParams($sessionId);
         if ($registrationId !== null) {
             $params['gitHubTokenProviderRegistrationId'] = $registrationId;
+        }
+        $params = SessionParams::group($params, true);
+        if ($this->mode === ClientMode::EMPTY) {
+            $params = SessionParams::applyEmptyModeDefaults($params);
         }
         try {
             $response = $this->connection->request('session.resume', $params);
@@ -372,6 +399,8 @@ class CopilotClient
         if ($config->onExitPlanMode !== null) {
             $session->registerExitPlanModeHandler($config->onExitPlanMode);
         }
+        $session->registerShellAuthenticationHandler($config->onShellAuthenticationRequest);
+        $session->registerMemoryStore($config->storeMemory);
         if ($this->options->onGetTraceContext !== null) {
             $session->registerTraceContextProvider($this->options->onGetTraceContext);
         }
@@ -734,15 +763,60 @@ class CopilotClient
 
         if ($serverVersion === null) {
             throw new \RuntimeException(
-                "SDK protocol version mismatch: SDK expects version {$expectedVersion}, "
-                . "but server does not report a protocol version. Please update your server."
+                "SDK protocol version mismatch: SDK supports version {$expectedVersion}, "
+                . "but server does not report a protocol version. "
+                . "Please update your server to ensure compatibility."
             );
         }
 
         if ($serverVersion !== $expectedVersion) {
             throw new \RuntimeException(
-                "SDK protocol version mismatch: SDK expects version {$expectedVersion}, "
-                . "but server reports version {$serverVersion}. Please update your SDK or server."
+                "SDK protocol version mismatch: SDK supports version {$expectedVersion}, "
+                . "but server reports version {$serverVersion}. "
+                . "Please update your SDK or server to ensure compatibility."
+            );
+        }
+    }
+
+    /**
+     * Register the host network callbacks with `network.setProvider`. An empty object
+     * marks each callback the client answers; the scope is sent only when set.
+     */
+    private function registerNetworkProvider(): void
+    {
+        $network = $this->options->network;
+        if ($network === null || !$network->hasAnyCallback()) {
+            return;
+        }
+
+        $params = [];
+        if ($network->scope !== null) {
+            $params['scope'] = $network->scope;
+        }
+        if ($network->resolveProxy !== null) {
+            $params['resolveProxy'] = new \stdClass();
+        }
+        if ($network->authenticateNegotiate !== null) {
+            $params['authenticateNegotiate'] = new \stdClass();
+        }
+        if ($network->authenticateBasic !== null) {
+            $params['authenticateBasic'] = new \stdClass();
+        }
+        $this->connection->request('network.setProvider', $params);
+    }
+
+    /**
+     * In "empty" mode every session must explicitly opt into its tools.
+     *
+     * @param string[]|null $availableTools
+     */
+    private function validateSessionConfigForMode(?array $availableTools): void
+    {
+        if ($this->mode === ClientMode::EMPTY && $availableTools === null) {
+            throw new \InvalidArgumentException(
+                'CopilotClient is in mode "empty" but the session config did not specify '
+                . 'availableTools. Empty mode requires every session to explicitly opt into '
+                . 'the tools it wants.'
             );
         }
     }
@@ -783,8 +857,11 @@ class CopilotClient
             $args[] = '--no-auto-login';
         }
 
-        // Build command
-        $command = escapeshellarg($cliPath);
+        // Build command. A .js entry point (such as @github/copilot/npm-loader.js)
+        // runs with node; anything else (the native binary or the npm bin shim) runs directly.
+        $command = str_ends_with(strtolower($cliPath), '.js')
+            ? 'node ' . escapeshellarg($cliPath)
+            : escapeshellarg($cliPath);
         foreach ($args as $arg) {
             $command .= ' ' . escapeshellarg($arg);
         }
@@ -948,6 +1025,32 @@ class CopilotClient
         $this->connection->setRequestHandler('gitHubToken.getToken', function (array $params): array {
             return $this->handleGitHubTokenRequest($params);
         });
+
+        // Shell authentication prompts for sessions created with onShellAuthenticationRequest.
+        $this->connection->setRequestHandler('shellAuthentication.request', function (array $params): array {
+            return $this->handleShellAuthenticationRequest($params);
+        });
+        $this->connection->setRequestHandler('shellAuthentication.cancel', function (array $params): object {
+            $sessionId = $params['sessionId'] ?? null;
+            $requestId = $params['requestId'] ?? null;
+            if (is_string($sessionId) && is_string($requestId)) {
+                ($this->sessions[$sessionId] ?? null)?->cancelShellAuthenticationRequestInternal($requestId);
+            }
+            return new \stdClass();
+        });
+
+        // Memory store callback for sessions created with storeMemory; answers JSON null.
+        $this->connection->setRequestHandler('memoryStore.store', function (array $params): mixed {
+            $sessionId = $params['sessionId'] ?? null;
+            $session = is_string($sessionId) ? ($this->sessions[$sessionId] ?? null) : null;
+            if ($session === null) {
+                throw new \RuntimeException('Memory store owner is unavailable');
+            }
+            $session->handleMemoryStoreInternal(StoredMemory::fromArray($params));
+            return null;
+        });
+
+        $this->registerNetworkHandlers();
 
         // Session filesystem provider callbacks. When a provider is registered via
         // setSessionFsProvider(), the CLI drives filesystem access by sending these
@@ -1396,6 +1499,92 @@ class CopilotClient
             throw new \RuntimeException('gitHubTokenProvider must return a GitHubTokenResult or an array');
         }
         return $result;
+    }
+
+    // ---- v3.0.0 server -> client callbacks ----
+
+    /**
+     * Answer `shellAuthentication.request` with {action: "accept", value} or
+     * {action: "cancel"}. Malformed requests and unknown sessions cancel.
+     */
+    private function handleShellAuthenticationRequest(array $params): array
+    {
+        $inputKinds = [
+            ShellAuthenticationRequest::INPUT_SECRET,
+            ShellAuthenticationRequest::INPUT_TEXT,
+            ShellAuthenticationRequest::INPUT_CONFIRM,
+        ];
+        if (!is_string($params['sessionId'] ?? null) || !is_string($params['requestId'] ?? null)
+            || !is_string($params['program'] ?? null) || !is_string($params['prompt'] ?? null)
+            || !in_array($params['inputKind'] ?? null, $inputKinds, true)) {
+            return ['action' => 'cancel'];
+        }
+
+        $session = $this->sessions[$params['sessionId']] ?? null;
+        if ($session === null) {
+            return ['action' => 'cancel'];
+        }
+        return $session->handleShellAuthenticationRequestInternal(ShellAuthenticationRequest::fromArray($params));
+    }
+
+    /**
+     * Register the server -> client handlers for the configured network callbacks.
+     */
+    private function registerNetworkHandlers(): void
+    {
+        $network = $this->options->network;
+        if ($network === null || $this->connection === null) {
+            return;
+        }
+
+        if ($network->resolveProxy !== null) {
+            $this->connection->setRequestHandler('network.resolveProxy', function (array $params) use ($network): object {
+                $request = new NetworkResolveProxyRequest((string) ($params['url'] ?? ''));
+                $proxy = $this->invokeNetworkCallback('Proxy resolution', fn () => ($network->resolveProxy)($request));
+                return ($proxy === null || $proxy === '') ? new \stdClass() : (object) ['proxy' => (string) $proxy];
+            });
+        }
+        if ($network->authenticateNegotiate !== null) {
+            $this->connection->setRequestHandler('network.authenticateNegotiate', function (array $params) use ($network): object {
+                $request = new NetworkAuthenticateNegotiateRequest((string) ($params['spn'] ?? ''));
+                $token = $this->invokeNetworkCallback('Negotiate authentication', fn () => ($network->authenticateNegotiate)($request));
+                return ($token === null || $token === '') ? new \stdClass() : (object) ['token' => (string) $token];
+            });
+        }
+        if ($network->authenticateBasic !== null) {
+            $this->connection->setRequestHandler('network.authenticateBasic', function (array $params) use ($network): object {
+                $request = new NetworkAuthenticateBasicRequest(
+                    (string) ($params['proxy'] ?? ''),
+                    isset($params['realm']) ? (string) $params['realm'] : null,
+                    (bool) ($params['previousRejected'] ?? false),
+                );
+                $credentials = $this->invokeNetworkCallback('Basic authentication', fn () => ($network->authenticateBasic)($request));
+                $result = new \stdClass();
+                if (is_array($credentials)) {
+                    // Send only the credential fields, never other entries of the caller's array.
+                    if (isset($credentials['username'])) {
+                        $result->username = (string) $credentials['username'];
+                    }
+                    if (isset($credentials['password'])) {
+                        $result->password = (string) $credentials['password'];
+                    }
+                }
+                return $result;
+            });
+        }
+    }
+
+    /**
+     * Run a network callback. Failures are reported by type only so that secrets in an
+     * error message are never logged or sent back over the wire.
+     */
+    private function invokeNetworkCallback(string $label, callable $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException("{$label} callback failed (" . get_class($e) . ')');
+        }
     }
 
     /**

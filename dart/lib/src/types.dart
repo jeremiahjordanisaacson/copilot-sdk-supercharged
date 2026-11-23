@@ -190,11 +190,17 @@ class Tool {
   /// Handler function invoked when the tool is called.
   final ToolHandler handler;
 
+  /// When true, repeating a call with the same arguments has no additional
+  /// effect beyond the first call (true of any tool without side effects).
+  /// The runtime may then safely repeat a call whose outcome was lost.
+  final bool? idempotent;
+
   const Tool({
     required this.name,
     this.description,
     this.parameters,
     required this.handler,
+    this.idempotent,
   });
 
   /// Serialize the tool definition for the JSON-RPC session.create call.
@@ -202,6 +208,7 @@ class Tool {
         'name': name,
         if (description != null) 'description': description,
         if (parameters != null) 'parameters': parameters,
+        if (idempotent != null) 'idempotent': idempotent,
       };
 }
 
@@ -1018,6 +1025,16 @@ class SessionHooks {
   final SessionEndHandler? onSessionEnd;
   final ErrorOccurredHandler? onErrorOccurred;
 
+  /// Invoked before a sub-agent's first turn (hook type `subagentStart`).
+  /// Return [SubagentStartHookOutput.additionalContext] to prepend context to
+  /// the child's prompt.
+  final SubagentStartHandler? onSubagentStart;
+
+  /// Invoked after a sub-agent completes a turn (hook type `subagentStop`).
+  /// Return `decision: 'block'` with a reason to continue the child, or a
+  /// `modifiedResponse` to rewrite what the parent sees.
+  final SubagentStopHandler? onSubagentStop;
+
   const SessionHooks({
     this.onPreToolUse,
     this.onPostToolUse,
@@ -1027,6 +1044,8 @@ class SessionHooks {
     this.onSessionStart,
     this.onSessionEnd,
     this.onErrorOccurred,
+    this.onSubagentStart,
+    this.onSubagentStop,
   });
 
   /// Returns true if any hook handler is set.
@@ -1038,8 +1057,120 @@ class SessionHooks {
       onUserPromptTransformed != null ||
       onSessionStart != null ||
       onSessionEnd != null ||
-      onErrorOccurred != null;
+      onErrorOccurred != null ||
+      onSubagentStart != null ||
+      onSubagentStop != null;
 }
+
+/// Input for the `subagentStart` hook, fired before a sub-agent's first turn.
+class SubagentStartHookInput extends BaseHookInput {
+  final String transcriptPath;
+  final String agentName;
+  final String? agentDisplayName;
+  final String? agentDescription;
+
+  SubagentStartHookInput({
+    required super.timestamp,
+    required super.cwd,
+    required this.transcriptPath,
+    required this.agentName,
+    this.agentDisplayName,
+    this.agentDescription,
+  });
+
+  factory SubagentStartHookInput.fromJson(Map<String, dynamic> json) {
+    return SubagentStartHookInput(
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      cwd: json['cwd'] as String? ?? '',
+      transcriptPath: json['transcriptPath'] as String? ?? '',
+      agentName: json['agentName'] as String? ?? '',
+      agentDisplayName: json['agentDisplayName'] as String?,
+      agentDescription: json['agentDescription'] as String?,
+    );
+  }
+}
+
+/// Output for the `subagentStart` hook.
+class SubagentStartHookOutput {
+  /// Context prepended to the sub-agent's initial prompt.
+  final String? additionalContext;
+
+  const SubagentStartHookOutput({this.additionalContext});
+
+  Map<String, dynamic> toJson() => {
+        if (additionalContext != null) 'additionalContext': additionalContext,
+      };
+}
+
+typedef SubagentStartHandler = Future<SubagentStartHookOutput?> Function(
+  SubagentStartHookInput input,
+  SessionInvocationContext context,
+);
+
+/// Input for the `subagentStop` hook, fired after a sub-agent completes a turn.
+class SubagentStopHookInput extends SubagentStartHookInput {
+  final String? agentId;
+  final String agentType;
+  final String stopReason;
+
+  /// The sub-agent's last assistant message before any hook rewrite.
+  final String response;
+
+  SubagentStopHookInput({
+    required super.timestamp,
+    required super.cwd,
+    required super.transcriptPath,
+    required super.agentName,
+    super.agentDisplayName,
+    super.agentDescription,
+    this.agentId,
+    required this.agentType,
+    required this.stopReason,
+    required this.response,
+  });
+
+  factory SubagentStopHookInput.fromJson(Map<String, dynamic> json) {
+    return SubagentStopHookInput(
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      cwd: json['cwd'] as String? ?? '',
+      transcriptPath: json['transcriptPath'] as String? ?? '',
+      agentName: json['agentName'] as String? ?? '',
+      agentDisplayName: json['agentDisplayName'] as String?,
+      agentDescription: json['agentDescription'] as String?,
+      agentId: json['agentId'] as String?,
+      agentType: json['agentType'] as String? ?? '',
+      stopReason: json['stopReason'] as String? ?? 'end_turn',
+      response: json['response'] as String? ?? '',
+    );
+  }
+}
+
+/// Output for the `subagentStop` hook. `decision: 'block'` with a non-empty
+/// [reason] continues the child; otherwise [modifiedResponse] replaces the
+/// response reported to the parent.
+class SubagentStopHookOutput {
+  /// `'block'` or `'allow'`.
+  final String? decision;
+  final String? reason;
+  final String? modifiedResponse;
+
+  const SubagentStopHookOutput({
+    this.decision,
+    this.reason,
+    this.modifiedResponse,
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (decision != null) 'decision': decision,
+        if (reason != null) 'reason': reason,
+        if (modifiedResponse != null) 'modifiedResponse': modifiedResponse,
+      };
+}
+
+typedef SubagentStopHandler = Future<SubagentStopHookOutput?> Function(
+  SubagentStopHookInput input,
+  SessionInvocationContext context,
+);
 
 // ---------------------------------------------------------------------------
 // MCP Server Configuration
@@ -1189,7 +1320,15 @@ class InfiniteSessionConfig {
 // Provider Configuration (BYOK)
 // ---------------------------------------------------------------------------
 
-/// Configuration for a custom API provider.
+/// Configuration for a custom API provider (legacy single BYOK provider).
+///
+/// SDK protocol 4 no longer accepts a single `provider`: the client sends it
+/// as a `"default"` named provider (`inference.providers`) with
+/// `inference.defaultProvider = "default"` and Copilot API models disabled
+/// (`github.capi.enabled = false`). The model fields ([modelId],
+/// [wireModel], [maxPromptTokens], [maxContextWindowTokens],
+/// [maxOutputTokens]) become an `inference.models` entry for the session
+/// model.
 class ProviderConfig {
   /// One of: openai, azure, anthropic
   final String? type;
@@ -1199,16 +1338,47 @@ class ProviderConfig {
 
   final String baseUrl;
   final String? apiKey;
+
+  /// Command whose stdout is used as the API key for each provider request.
+  final String? apiKeyCommand;
   final String? bearerToken;
   final AzureProviderOptions? azure;
+
+  /// Product serving the model (for example "ollama" or "lm_studio"),
+  /// reported in telemetry.
+  final String? modelProvider;
+
+  /// Transport: "http" (default) or "websockets".
+  final String? transport;
+
+  /// Custom HTTP headers sent with every provider request.
+  final Map<String, String>? headers;
+
+  /// Well-known base model id used for capability lookup.
+  final String? modelId;
+
+  /// Model name sent to the provider API.
+  final String? wireModel;
+  final int? maxPromptTokens;
+  final int? maxContextWindowTokens;
+  final int? maxOutputTokens;
 
   const ProviderConfig({
     this.type,
     this.wireApi,
     required this.baseUrl,
     this.apiKey,
+    this.apiKeyCommand,
     this.bearerToken,
     this.azure,
+    this.modelProvider,
+    this.transport,
+    this.headers,
+    this.modelId,
+    this.wireModel,
+    this.maxPromptTokens,
+    this.maxContextWindowTokens,
+    this.maxOutputTokens,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1216,8 +1386,18 @@ class ProviderConfig {
         if (wireApi != null) 'wireApi': wireApi,
         'baseUrl': baseUrl,
         if (apiKey != null) 'apiKey': apiKey,
+        if (apiKeyCommand != null) 'apiKeyCommand': apiKeyCommand,
         if (bearerToken != null) 'bearerToken': bearerToken,
         if (azure != null) 'azure': azure!.toJson(),
+        if (modelProvider != null) 'modelProvider': modelProvider,
+        if (transport != null) 'transport': transport,
+        if (headers != null) 'headers': headers,
+        if (modelId != null) 'modelId': modelId,
+        if (wireModel != null) 'wireModel': wireModel,
+        if (maxPromptTokens != null) 'maxPromptTokens': maxPromptTokens,
+        if (maxContextWindowTokens != null)
+          'maxContextWindowTokens': maxContextWindowTokens,
+        if (maxOutputTokens != null) 'maxOutputTokens': maxOutputTokens,
       };
 }
 
@@ -1890,7 +2070,11 @@ class MessageOptions {
   /// One of: enqueue, immediate
   final String? mode;
 
-  /// Desired response format (text, image, or json_object).
+  /// Legacy per-message response format.
+  ///
+  /// Deprecated: SDK protocol 4 uses `responseFormat` for structured output,
+  /// so this value is no longer sent. Use [responseSchema] for structured
+  /// output and the session-level `imageGeneration` option for images.
   final ResponseFormat? responseFormat;
 
   /// Options for image generation (used when [responseFormat] is image).
@@ -1905,6 +2089,19 @@ class MessageOptions {
   /// Custom HTTP headers to include in outbound model requests for this turn.
   final Map<String, String>? requestHeaders;
 
+  /// Message provenance: [MessageSource.user], [MessageSource.system], or
+  /// `MessageSource.agent(id)` (`"agent-<id>"`). Omitted by default.
+  final String? source;
+
+  /// JSON Schema for a structured response. Sent as
+  /// `responseFormat: {type: "json_schema", jsonSchema: {name: "response",
+  /// strict: true, schema: <schema>}}`.
+  final Map<String, dynamic>? responseSchema;
+
+  /// Opaque caller-chosen ID for the turn this message starts, sent as
+  /// `clientTurnId`. The runtime echoes it on the `user.message` event.
+  final String? clientTurnId;
+
   const MessageOptions({
     required this.prompt,
     this.attachments,
@@ -1914,7 +2111,22 @@ class MessageOptions {
     this.agentMode,
     this.displayPrompt,
     this.requestHeaders,
+    this.source,
+    this.responseSchema,
+    this.clientTurnId,
   });
+}
+
+/// Well-known [MessageOptions.source] values.
+class MessageSource {
+  /// A message typed by the user (the runtime default).
+  static const String user = 'user';
+
+  /// Application-generated context.
+  static const String system = 'system';
+
+  /// A message from the identified agent (`"agent-<id>"`).
+  static String agent(String agentId) => 'agent-$agentId';
 }
 
 // ---------------------------------------------------------------------------
@@ -2182,6 +2394,73 @@ class SessionConfig {
   /// Enable content-exclusion enforcement.
   final bool? contentExclusion;
 
+  // --- v2.6.0 upstream-sync session options ---
+
+  /// Session name (create only).
+  final String? name;
+
+  /// Ask-user tool variant: `"legacy"` or `"elicitation"`.
+  final String? askUserVariant;
+
+  /// Per-session GitHub token callback. The client registers it under a
+  /// generated registration ID, sends `gitHubTokenProviderRegistrationId`,
+  /// and answers the runtime's `gitHubToken.getToken` requests with it.
+  /// Mutually exclusive with [gitHubToken].
+  final GitHubTokenProvider? gitHubTokenProvider;
+
+  /// Sandbox configuration for tool execution (`permissions.sandbox`).
+  final SandboxConfig? sandboxConfig;
+
+  /// Runtime feature flag overrides (`experiments.flags`).
+  final Map<String, bool>? featureFlags;
+
+  /// Model allowlist (`policy.allowedModels`).
+  final List<String>? allowedModels;
+
+  /// OAuth Client ID Metadata Document URL for MCP authorization.
+  final String? authClientIdMetadataUrl;
+
+  /// Custom agent definition directories (`agents.directories`).
+  final List<String>? agentDirectories;
+
+  /// Hook definition directories (`hooks.directories`).
+  final List<String>? hookDirectories;
+
+  /// Grant working-directory trust at creation: `"session"` or `"user"`
+  /// (create only).
+  final String? trustWorkingDirectory;
+
+  /// Image generation configuration (`tools.imageGeneration`).
+  final ImageGenerationConfig? imageGeneration;
+
+  /// Autopilot continuation options (`execution.autopilot`).
+  final AutopilotOptions? autopilot;
+
+  // --- v3.0.0 (SDK protocol 4) session options ---
+
+  /// Named BYOK provider connections (`inference.providers`).
+  final List<NamedProviderConfig>? providers;
+
+  /// BYOK model definitions (`inference.models`). Select one with
+  /// `"<provider>/<id>"`.
+  final List<ProviderModelConfig>? models;
+
+  /// Named connection for unqualified BYOK selections
+  /// (`inference.defaultProvider`). Requires `capi: CapiSessionOptions(enabled: false)`.
+  final String? defaultProvider;
+
+  /// Copilot API options (`github.capi`).
+  final CapiSessionOptions? capi;
+
+  /// Answers `shellAuthentication.request` prompts (sudo, ssh, git) for
+  /// commands the agent runs. When set, the client sends
+  /// `interaction.requestShellAuthentication`.
+  final ShellAuthenticationHandler? onShellAuthenticationRequest;
+
+  /// Stores memories in the app. When set, the client sends
+  /// `state.hasMemoryStore` and answers `memoryStore.store` requests.
+  final MemoryStoreHandler? onStoreMemory;
+
   const SessionConfig({
     this.sessionId,
     this.model,
@@ -2229,6 +2508,24 @@ class SessionConfig {
     this.toolSearch,
     this.experimentalMode,
     this.contentExclusion,
+    this.name,
+    this.askUserVariant,
+    this.gitHubTokenProvider,
+    this.sandboxConfig,
+    this.featureFlags,
+    this.allowedModels,
+    this.authClientIdMetadataUrl,
+    this.agentDirectories,
+    this.hookDirectories,
+    this.trustWorkingDirectory,
+    this.imageGeneration,
+    this.autopilot,
+    this.providers,
+    this.models,
+    this.defaultProvider,
+    this.capi,
+    this.onShellAuthenticationRequest,
+    this.onStoreMemory,
   });
 }
 
@@ -2283,6 +2580,73 @@ class ResumeSessionConfig {
   /// Directories to search for instruction files.
   final List<String>? instructionDirectories;
 
+  // --- v2.6.0 upstream-sync resume options ---
+
+  /// Ask-user tool variant: `"legacy"` or `"elicitation"`.
+  final String? askUserVariant;
+
+  /// Per-session GitHub token callback answering `gitHubToken.getToken`
+  /// requests. Mutually exclusive with [gitHubToken].
+  final GitHubTokenProvider? gitHubTokenProvider;
+
+  /// Sandbox configuration for tool execution (`permissions.sandbox`).
+  final SandboxConfig? sandboxConfig;
+
+  /// Runtime feature flag overrides (`experiments.flags`).
+  final Map<String, bool>? featureFlags;
+
+  /// Model allowlist (`policy.allowedModels`).
+  final List<String>? allowedModels;
+
+  /// OAuth Client ID Metadata Document URL for MCP authorization.
+  final String? authClientIdMetadataUrl;
+
+  /// Custom agent definition directories (`agents.directories`).
+  final List<String>? agentDirectories;
+
+  /// Hook definition directories (`hooks.directories`).
+  final List<String>? hookDirectories;
+
+  /// Allow the runtime to recover a damaged transcript (resume only).
+  final bool? allowTranscriptRecovery;
+
+  /// Image generation configuration (`tools.imageGeneration`).
+  final ImageGenerationConfig? imageGeneration;
+
+  /// Autopilot continuation options (`execution.autopilot`).
+  final AutopilotOptions? autopilot;
+
+  // --- v3.0.0 (SDK protocol 4) resume options ---
+
+  /// Skip emitting the `session.resume` event. Takes precedence over the
+  /// legacy [disableResume] alias.
+  final bool? suppressResumeEvent;
+
+  /// Named BYOK provider connections (`inference.providers`).
+  final List<NamedProviderConfig>? providers;
+
+  /// BYOK model definitions (`inference.models`).
+  final List<ProviderModelConfig>? models;
+
+  /// Named connection for unqualified BYOK selections
+  /// (`inference.defaultProvider`).
+  final String? defaultProvider;
+
+  /// When true, sends `defaultProvider: null` to clear the session's
+  /// default provider.
+  final bool? clearDefaultProvider;
+
+  /// Copilot API options (`github.capi`).
+  final CapiSessionOptions? capi;
+
+  /// Answers `shellAuthentication.request` prompts for commands the agent
+  /// runs (sends `interaction.requestShellAuthentication`).
+  final ShellAuthenticationHandler? onShellAuthenticationRequest;
+
+  /// Stores memories in the app (sends `state.hasMemoryStore` and answers
+  /// `memoryStore.store`).
+  final MemoryStoreHandler? onStoreMemory;
+
   const ResumeSessionConfig({
     this.model,
     this.reasoningEffort,
@@ -2312,6 +2676,25 @@ class ResumeSessionConfig {
     this.enableSessionTelemetry,
     this.disableResume,
     this.instructionDirectories,
+    this.askUserVariant,
+    this.gitHubTokenProvider,
+    this.sandboxConfig,
+    this.featureFlags,
+    this.allowedModels,
+    this.authClientIdMetadataUrl,
+    this.agentDirectories,
+    this.hookDirectories,
+    this.allowTranscriptRecovery,
+    this.imageGeneration,
+    this.autopilot,
+    this.suppressResumeEvent,
+    this.providers,
+    this.models,
+    this.defaultProvider,
+    this.clearDefaultProvider,
+    this.capi,
+    this.onShellAuthenticationRequest,
+    this.onStoreMemory,
   });
 }
 
@@ -2470,6 +2853,21 @@ class CopilotClientOptions {
   /// Use the in-process FFI transport instead of spawning a CLI.
   final bool? inProcess;
 
+  /// Identity of the integrating application, declared on the `connect`
+  /// handshake so the runtime attributes its telemetry to this surface.
+  final ClientInfo? clientInfo;
+
+  /// Client defaulting strategy: `"coding-agent"` (default, today's
+  /// behavior) or `"empty"` (ambient features off; every session must set
+  /// `availableTools`). `"copilot-cli"` is accepted as an alias of
+  /// `"coding-agent"`. See [ClientMode].
+  final String? mode;
+
+  /// Network callbacks (proxy resolution and proxy authentication). When any
+  /// callback is set, the client calls `network.setProvider` after
+  /// connecting.
+  final NetworkConfig? network;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -2490,6 +2888,9 @@ class CopilotClientOptions {
     this.onGetTraceContext,
     this.builtinPluginDirectories,
     this.inProcess,
+    this.clientInfo,
+    this.mode,
+    this.network,
   });
 }
 
@@ -2625,4 +3026,647 @@ class GitHubAttachment {
   static const String gitHubUrl = 'GitHubUrl';
   static const String gitHubFile = 'GitHubFile';
   static const String gitHubSnippet = 'GitHubSnippet';
+}
+
+// ---------------------------------------------------------------------------
+// v2.6.0 / v3.0.0 upstream-sync types (parity with @github/copilot-sdk,
+// SDK protocol 4)
+// ---------------------------------------------------------------------------
+
+/// Identity of the integrating application, sent as `clientInfo` on the
+/// `connect` handshake. Empty fields are dropped; an all-empty identity is
+/// not sent.
+class ClientInfo {
+  /// Name of the application using the SDK (for example "acme-portal").
+  final String? editorName;
+
+  /// Version of the application using the SDK.
+  final String? editorVersion;
+
+  /// Name of the integration within the application (extension, plugin).
+  final String? extensionName;
+
+  /// Version of the integration.
+  final String? extensionVersion;
+
+  const ClientInfo({
+    this.editorName,
+    this.editorVersion,
+    this.extensionName,
+    this.extensionVersion,
+  });
+
+  /// The wire form, or null when every field is empty.
+  Map<String, dynamic>? toWire() {
+    final wire = <String, dynamic>{
+      if (editorName != null && editorName!.isNotEmpty) 'editorName': editorName,
+      if (editorVersion != null && editorVersion!.isNotEmpty)
+        'editorVersion': editorVersion,
+      if (extensionName != null && extensionName!.isNotEmpty)
+        'extensionName': extensionName,
+      if (extensionVersion != null && extensionVersion!.isNotEmpty)
+        'extensionVersion': extensionVersion,
+    };
+    return wire.isEmpty ? null : wire;
+  }
+}
+
+/// Values for [CopilotClientOptions.mode].
+class ClientMode {
+  /// Default: identical to the Copilot CLI's ambient behavior.
+  static const String codingAgent = 'coding-agent';
+
+  /// Ambient features off; every session must set `availableTools`.
+  static const String empty = 'empty';
+
+  /// Legacy alias of [codingAgent].
+  static const String copilotCli = 'copilot-cli';
+}
+
+/// Auto routing tiers for [CopilotSession.switchAutoTier].
+class AutoTier {
+  static const String fast = 'fast';
+  static const String efficiency = 'efficiency';
+  static const String balance = 'balance';
+  static const String intelligence = 'intelligence';
+}
+
+/// Values for the ask-user tool variant (`askUserVariant`).
+class AskUserVariant {
+  static const String legacy = 'legacy';
+  static const String elicitation = 'elicitation';
+}
+
+/// Request passed to a [GitHubTokenProvider] (`gitHubToken.getToken`).
+class GitHubTokenRequest {
+  /// Effective GitHub host the token is for.
+  final String host;
+
+  /// Session receiving the token, when known.
+  final String? sessionId;
+
+  /// Why the runtime is requesting a credential.
+  final String reason;
+
+  const GitHubTokenRequest({
+    required this.host,
+    this.sessionId,
+    required this.reason,
+  });
+}
+
+/// Result of a [GitHubTokenProvider]: a token or a cancellation.
+class GitHubTokenResult {
+  /// `"token"` or `"cancelled"`.
+  final String kind;
+  final String? accessToken;
+
+  /// OAuth token type (defaults to bearer when omitted).
+  final String? tokenType;
+
+  /// Remaining token lifetime in seconds (must exceed one hour).
+  final int? expiresIn;
+
+  const GitHubTokenResult.token({
+    required String this.accessToken,
+    required int this.expiresIn,
+    this.tokenType,
+  }) : kind = 'token';
+
+  const GitHubTokenResult.cancelled()
+      : kind = 'cancelled',
+        accessToken = null,
+        tokenType = null,
+        expiresIn = null;
+
+  Map<String, dynamic> toJson() => kind == 'cancelled'
+      ? {'kind': 'cancelled'}
+      : {
+          'kind': 'token',
+          'accessToken': accessToken,
+          if (tokenType != null) 'tokenType': tokenType,
+          'expiresIn': expiresIn,
+        };
+}
+
+/// Acquires a GitHub token for one session on demand.
+typedef GitHubTokenProvider = Future<GitHubTokenResult> Function(
+    GitHubTokenRequest request);
+
+/// Sandbox configuration (`permissions.sandbox`).
+class SandboxConfig {
+  final bool enabled;
+
+  /// User sandbox policy (filesystem / network rules), passed through as-is.
+  final Map<String, dynamic>? userPolicy;
+  final bool? addCurrentWorkingDirectory;
+  final bool? sandboxMcpServers;
+  final bool? sandboxLspServers;
+  final bool? sandboxExtensions;
+
+  /// Opt in to letting the agent request an individual command outside the
+  /// sandbox through the normal permission flow.
+  final bool? allowBypass;
+
+  const SandboxConfig({
+    required this.enabled,
+    this.userPolicy,
+    this.addCurrentWorkingDirectory,
+    this.sandboxMcpServers,
+    this.sandboxLspServers,
+    this.sandboxExtensions,
+    this.allowBypass,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        if (userPolicy != null) 'userPolicy': userPolicy,
+        if (addCurrentWorkingDirectory != null)
+          'addCurrentWorkingDirectory': addCurrentWorkingDirectory,
+        if (sandboxMcpServers != null) 'sandboxMcpServers': sandboxMcpServers,
+        if (sandboxLspServers != null) 'sandboxLspServers': sandboxLspServers,
+        if (sandboxExtensions != null) 'sandboxExtensions': sandboxExtensions,
+        if (allowBypass != null) 'allowBypass': allowBypass,
+      };
+}
+
+/// Session image generation configuration (`tools.imageGeneration`).
+class ImageGenerationConfig {
+  final bool? enabled;
+
+  /// Request a visible "Made with AI" label on generated images.
+  final bool? watermark;
+
+  /// Save generated images under the session-state `images` folder.
+  final bool? saveToDisk;
+
+  const ImageGenerationConfig({this.enabled, this.watermark, this.saveToDisk});
+
+  Map<String, dynamic> toJson() => {
+        if (enabled != null) 'enabled': enabled,
+        if (watermark != null) 'watermark': watermark,
+        if (saveToDisk != null) 'saveToDisk': saveToDisk,
+      };
+}
+
+/// Autopilot continuation options (`execution.autopilot`).
+class AutopilotOptions {
+  final bool? continuationEnabled;
+  final int? maxContinues;
+
+  const AutopilotOptions({this.continuationEnabled, this.maxContinues});
+
+  Map<String, dynamic> toJson() => {
+        if (continuationEnabled != null)
+          'continuationEnabled': continuationEnabled,
+        if (maxContinues != null) 'maxContinues': maxContinues,
+      };
+}
+
+/// Model capability limit overrides. Wire keys are snake_case; for example
+/// [maxOutputTokens] is sent as `max_output_tokens`.
+class ModelLimitsOverride {
+  final int? maxPromptTokens;
+  final int? maxContextWindowTokens;
+  final int? maxOutputTokens;
+
+  const ModelLimitsOverride({
+    this.maxPromptTokens,
+    this.maxContextWindowTokens,
+    this.maxOutputTokens,
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (maxPromptTokens != null) 'max_prompt_tokens': maxPromptTokens,
+        if (maxContextWindowTokens != null)
+          'max_context_window_tokens': maxContextWindowTokens,
+        if (maxOutputTokens != null) 'max_output_tokens': maxOutputTokens,
+      };
+}
+
+/// Typed builder for `SessionConfig.modelCapabilities`
+/// (`inference.capabilities`).
+class ModelCapabilitiesOverride {
+  /// Feature support overrides (for example `{'vision': true}`).
+  final Map<String, dynamic>? supports;
+  final ModelLimitsOverride? limits;
+
+  const ModelCapabilitiesOverride({this.supports, this.limits});
+
+  Map<String, dynamic> toJson() => {
+        if (supports != null) 'supports': supports,
+        if (limits != null) 'limits': limits!.toJson(),
+      };
+}
+
+/// A named BYOK provider connection (`inference.providers`).
+class NamedProviderConfig {
+  /// Stable identifier referenced by [ProviderModelConfig.provider].
+  final String name;
+  final String? type;
+  final String baseUrl;
+  final String? apiKey;
+  final String? apiKeyCommand;
+  final String? bearerToken;
+  final String? wireApi;
+  final String? transport;
+  final AzureProviderOptions? azure;
+  final Map<String, String>? headers;
+  final String? modelProvider;
+
+  const NamedProviderConfig({
+    required this.name,
+    this.type,
+    required this.baseUrl,
+    this.apiKey,
+    this.apiKeyCommand,
+    this.bearerToken,
+    this.wireApi,
+    this.transport,
+    this.azure,
+    this.headers,
+    this.modelProvider,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        if (type != null) 'type': type,
+        'baseUrl': baseUrl,
+        if (apiKey != null) 'apiKey': apiKey,
+        if (apiKeyCommand != null) 'apiKeyCommand': apiKeyCommand,
+        if (bearerToken != null) 'bearerToken': bearerToken,
+        if (wireApi != null) 'wireApi': wireApi,
+        if (transport != null) 'transport': transport,
+        if (azure != null) 'azure': azure!.toJson(),
+        if (headers != null) 'headers': headers,
+        if (modelProvider != null) 'modelProvider': modelProvider,
+      };
+}
+
+/// A BYOK model definition (`inference.models`) served by a named provider.
+class ProviderModelConfig {
+  /// Name of the [NamedProviderConfig] serving this model.
+  final String provider;
+
+  /// Provider-local model id; select it with `"<provider>/<id>"`.
+  final String id;
+  final String? modelId;
+  final String? wireModel;
+  final String? name;
+  final int? maxPromptTokens;
+  final int? maxContextWindowTokens;
+  final int? maxOutputTokens;
+  final Map<String, dynamic>? capabilities;
+
+  const ProviderModelConfig({
+    required this.provider,
+    required this.id,
+    this.modelId,
+    this.wireModel,
+    this.name,
+    this.maxPromptTokens,
+    this.maxContextWindowTokens,
+    this.maxOutputTokens,
+    this.capabilities,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        'id': id,
+        if (modelId != null) 'modelId': modelId,
+        if (wireModel != null) 'wireModel': wireModel,
+        if (name != null) 'name': name,
+        if (maxPromptTokens != null) 'maxPromptTokens': maxPromptTokens,
+        if (maxContextWindowTokens != null)
+          'maxContextWindowTokens': maxContextWindowTokens,
+        if (maxOutputTokens != null) 'maxOutputTokens': maxOutputTokens,
+        if (capabilities != null) 'capabilities': capabilities,
+      };
+}
+
+/// Copilot API (CAPI) options (`github.capi`).
+class CapiSessionOptions {
+  /// Enables Copilot API models; `false` for BYOK-only sessions.
+  final bool? enabled;
+
+  /// Auto routing preference (see [AutoTier]).
+  final String? autoTier;
+
+  /// Use the WebSocket Responses transport.
+  final bool? enableWebSocketResponses;
+
+  const CapiSessionOptions({
+    this.enabled,
+    this.autoTier,
+    this.enableWebSocketResponses,
+  });
+
+  Map<String, dynamic> toJson() => {
+        if (enabled != null) 'enabled': enabled,
+        if (autoTier != null) 'autoTier': autoTier,
+        if (enableWebSocketResponses != null)
+          'enableWebSocketResponses': enableWebSocketResponses,
+      };
+}
+
+/// A password or other answer a shell command run by the agent asks for
+/// (`shellAuthentication.request`). The answer goes only to that program.
+class ShellAuthenticationRequest {
+  final String sessionId;
+
+  /// Identifies the request; a `shellAuthentication.cancel` carries it too.
+  final String requestId;
+
+  /// The program that asked: `sudo`, `ssh`, or `git`.
+  final String program;
+  final String prompt;
+
+  /// `"secret"` (mask the input), `"text"`, or `"confirm"` (yes/no).
+  final String inputKind;
+  final String command;
+  final String cwd;
+
+  const ShellAuthenticationRequest({
+    required this.sessionId,
+    required this.requestId,
+    required this.program,
+    required this.prompt,
+    required this.inputKind,
+    required this.command,
+    required this.cwd,
+  });
+
+  factory ShellAuthenticationRequest.fromJson(Map<String, dynamic> json) {
+    return ShellAuthenticationRequest(
+      sessionId: json['sessionId'] as String? ?? '',
+      requestId: json['requestId'] as String? ?? '',
+      program: json['program'] as String? ?? '',
+      prompt: json['prompt'] as String? ?? '',
+      inputKind: json['inputKind'] as String? ?? 'secret',
+      command: json['command'] as String? ?? '',
+      cwd: json['cwd'] as String? ?? '',
+    );
+  }
+}
+
+/// Answer to a [ShellAuthenticationRequest].
+class ShellAuthenticationResponse {
+  /// `"accept"` or `"cancel"`.
+  final String action;
+  final String? value;
+
+  /// Answers the prompt with [value] (use `"yes"` for a confirm prompt).
+  const ShellAuthenticationResponse.accept(String this.value)
+      : action = 'accept';
+
+  /// Declines the prompt.
+  const ShellAuthenticationResponse.cancel()
+      : action = 'cancel',
+        value = null;
+
+  Map<String, dynamic> toJson() => action == 'accept'
+      ? {'action': 'accept', 'value': value}
+      : {'action': 'cancel'};
+}
+
+/// Answers shell authentication prompts. The answer is ignored when the
+/// runtime cancels the request first.
+typedef ShellAuthenticationHandler = Future<ShellAuthenticationResponse>
+    Function(
+  ShellAuthenticationRequest request,
+  SessionInvocationContext context,
+);
+
+/// A memory the agent asked to store (`memoryStore.store`), after validation,
+/// secret filtering and approval.
+class StoredMemory {
+  final String sessionId;
+  final String subject;
+  final String fact;
+  final String citations;
+  final String reason;
+
+  const StoredMemory({
+    required this.sessionId,
+    required this.subject,
+    required this.fact,
+    required this.citations,
+    required this.reason,
+  });
+
+  factory StoredMemory.fromJson(Map<String, dynamic> json) {
+    return StoredMemory(
+      sessionId: json['sessionId'] as String? ?? '',
+      subject: json['subject'] as String? ?? '',
+      fact: json['fact'] as String? ?? '',
+      citations: json['citations'] as String? ?? '',
+      reason: json['reason'] as String? ?? '',
+    );
+  }
+}
+
+/// Stores a memory in the app. `store_memory` succeeds once this completes.
+typedef MemoryStoreHandler = Future<void> Function(
+  StoredMemory memory,
+  SessionInvocationContext context,
+);
+
+/// Request for `network.authenticateBasic`.
+class NetworkAuthenticateBasicRequest {
+  /// Proxy URL that issued the Basic challenge.
+  final String proxy;
+
+  /// Realm from the proxy (untrusted text).
+  final String? realm;
+
+  /// True when the proxy rejected the previously supplied credentials.
+  final bool previousRejected;
+
+  const NetworkAuthenticateBasicRequest({
+    required this.proxy,
+    this.realm,
+    required this.previousRejected,
+  });
+}
+
+/// Credentials returned for `network.authenticateBasic`.
+class NetworkBasicCredentials {
+  final String? username;
+  final String? password;
+
+  const NetworkBasicCredentials({this.username, this.password});
+}
+
+/// Network callbacks through which the host decides the runtime's proxies
+/// and supplies proxy credentials. Never log the returned tokens or
+/// passwords.
+class NetworkConfig {
+  /// `"connection"` (default) or `"runtime"`.
+  final String? scope;
+
+  /// Returns a PAC-style proxy list for a URL (`DIRECT` for none), or null to
+  /// let the runtime resolve it (`network.resolveProxy`).
+  final Future<String?> Function(String url)? resolveProxy;
+
+  /// Returns a base64 SPNEGO token for a service principal name, or null
+  /// (`network.authenticateNegotiate`).
+  final Future<String?> Function(String spn)? authenticateNegotiate;
+
+  /// Returns Basic credentials for a proxy, or null
+  /// (`network.authenticateBasic`).
+  final Future<NetworkBasicCredentials?> Function(
+      NetworkAuthenticateBasicRequest request)? authenticateBasic;
+
+  const NetworkConfig({
+    this.scope,
+    this.resolveProxy,
+    this.authenticateNegotiate,
+    this.authenticateBasic,
+  });
+
+  /// True when at least one callback is set.
+  bool get hasCallbacks =>
+      resolveProxy != null ||
+      authenticateNegotiate != null ||
+      authenticateBasic != null;
+}
+
+/// Session event type names.
+class SessionEventTypes {
+  /// Live, append-only shell output (`tool.shell_output`); not persisted.
+  static const String toolShellOutput = 'tool.shell_output';
+
+  /// Removed upstream; still tolerated when received.
+  static const String toolExecutionPartialResult =
+      'tool.execution_partial_result';
+}
+
+/// Data of a `tool.shell_output` event.
+class ToolShellOutputData {
+  final String toolCallId;
+  final String text;
+
+  /// Zero-based publication sequence across the call's output streams.
+  final int sequence;
+
+  /// `"stdout"`, `"stderr"`, or null (stdout).
+  final String? stream;
+
+  const ToolShellOutputData({
+    required this.toolCallId,
+    required this.text,
+    required this.sequence,
+    this.stream,
+  });
+
+  factory ToolShellOutputData.fromJson(Map<String, dynamic> json) {
+    return ToolShellOutputData(
+      toolCallId: json['toolCallId'] as String? ?? '',
+      text: json['text'] as String? ?? '',
+      sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+      stream: json['stream'] as String?,
+    );
+  }
+}
+
+/// A field-specific finding reported by a Policy Helper.
+class PolicyHelperFailureDetail {
+  final String message;
+  final String? path;
+
+  const PolicyHelperFailureDetail({required this.message, this.path});
+
+  factory PolicyHelperFailureDetail.fromJson(Map<String, dynamic> json) {
+    return PolicyHelperFailureDetail(
+      message: json['message'] as String? ?? '',
+      path: json['path'] as String?,
+    );
+  }
+}
+
+/// The latest unresolved Policy Helper failure. Exposed from the JSON-RPC
+/// error data (`error.data.policyHelperFailure`) when `session.create` /
+/// `session.resume` fails (see [JsonRpcError.policyHelperFailure]). Helper
+/// text is untrusted: render it as plain text.
+class PolicyHelperFailure {
+  final String category;
+  final String failureMode;
+  final String message;
+  final bool previousPolicyRetained;
+  final String reason;
+  final String? authority;
+  final String? code;
+  final List<PolicyHelperFailureDetail>? details;
+  final String? diagnostic;
+
+  /// Validated additional-information link (`{url, label?}`), if any.
+  final Map<String, dynamic>? helpLink;
+
+  const PolicyHelperFailure({
+    required this.category,
+    required this.failureMode,
+    required this.message,
+    required this.previousPolicyRetained,
+    required this.reason,
+    this.authority,
+    this.code,
+    this.details,
+    this.diagnostic,
+    this.helpLink,
+  });
+
+  factory PolicyHelperFailure.fromJson(Map<String, dynamic> json) {
+    final details = json['details'];
+    final helpLink = json['helpLink'];
+    return PolicyHelperFailure(
+      category: json['category'] as String? ?? '',
+      failureMode: json['failureMode'] as String? ?? '',
+      message: json['message'] as String? ?? '',
+      previousPolicyRetained: json['previousPolicyRetained'] as bool? ?? false,
+      reason: json['reason'] as String? ?? '',
+      authority: json['authority'] as String?,
+      code: json['code'] as String?,
+      details: details is List
+          ? details
+              .whereType<Map<String, dynamic>>()
+              .map(PolicyHelperFailureDetail.fromJson)
+              .toList()
+          : null,
+      diagnostic: json['diagnostic'] as String?,
+      helpLink: helpLink is Map<String, dynamic> ? helpLink : null,
+    );
+  }
+}
+
+/// Known refusal reasons on a [PermissionModeSetResult].
+class PermissionModeRefusalReason {
+  /// Managed (enterprise) policy refused the requested permission mode.
+  static const String managedPolicy = 'managed_policy';
+}
+
+/// Result of `session.permissions.setMode`.
+class PermissionModeSetResult {
+  /// Whether the requested mode was applied.
+  final bool success;
+
+  /// Authoritative permission mode after the call.
+  final String mode;
+
+  /// Why the mode was refused, when known (see
+  /// [PermissionModeRefusalReason.managedPolicy]).
+  final String? reason;
+
+  const PermissionModeSetResult({
+    required this.success,
+    required this.mode,
+    this.reason,
+  });
+
+  factory PermissionModeSetResult.fromJson(Map<String, dynamic> json) {
+    return PermissionModeSetResult(
+      success: json['success'] as bool? ?? false,
+      mode: json['mode'] as String? ?? '',
+      reason: json['reason'] as String?,
+    );
+  }
 }

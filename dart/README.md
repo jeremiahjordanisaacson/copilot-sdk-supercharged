@@ -21,7 +21,7 @@ This SDK follows the same architecture and protocol as all other SDKs in the [co
 ## Requirements
 
 - Dart SDK >= 3.0.0
-- GitHub Copilot CLI installed and accessible
+- GitHub Copilot CLI 1.0.113 or newer (SDK protocol 4) installed and accessible
 
 ## Installation
 
@@ -76,6 +76,212 @@ void main() async {
   await client.stop();
 }
 ```
+
+## What's New in v3.0.0
+
+SDK protocol 4 support (the upstream SDK 2.0 wire format). **Requires Copilot
+CLI 1.0.113 or newer**: `start()` rejects older CLIs with
+`SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+
+Existing options keep working. You still pass the flat `SessionConfig` /
+`ResumeSessionConfig` options; right before `session.create` /
+`session.resume` the client groups them into the protocol 4 payload
+(`streaming` becomes `events.streaming`, `onPermissionRequest` becomes
+`permissions.request`, `skillDirectories` becomes `skills.directories`, and so
+on). A legacy `provider` is sent as a `"default"` named provider with
+`inference.defaultProvider = "default"` and Copilot API models disabled
+(`github.capi.enabled = false`), so v2.x BYOK sessions behave as before. A
+plain-string `systemMessage` is sent as `{mode: 'append', content: ...}`, and
+`destroy()` now sends `session.detach` (falling back to `session.destroy`).
+
+```dart
+import 'dart:io';
+
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
+
+Future<void> main() async {
+  final client = CopilotClient(CopilotClientOptions(
+    // Client mode: ClientMode.codingAgent (default) or ClientMode.empty;
+    // 'copilot-cli' is accepted as an alias of 'coding-agent'.
+    mode: ClientMode.codingAgent,
+    // Client info: sent as `clientInfo` on the `connect` handshake.
+    clientInfo: const ClientInfo(
+      editorName: 'acme-portal',
+      editorVersion: '2.4.0',
+      extensionName: 'acme-copilot',
+      extensionVersion: '0.9.0',
+    ),
+    // Network callbacks: the client calls `network.setProvider` after
+    // connecting and answers `network.resolveProxy` with this callback.
+    network: NetworkConfig(
+      resolveProxy: (url) async =>
+          url.contains('corp.example') ? 'PROXY proxy.corp.example:8080' : null,
+    ),
+  ));
+  await client.start();
+
+  final session = await client.createSession(SessionConfig(
+    // Named BYOK providers: select a registered model with "<provider>/<id>".
+    model: 'local/qwen3',
+    providers: const [
+      NamedProviderConfig(
+        name: 'local',
+        type: 'openai',
+        baseUrl: 'http://localhost:11434/v1',
+        apiKeyCommand: 'op read op://dev/llm/api-key',
+      ),
+    ],
+    models: const [
+      ProviderModelConfig(provider: 'local', id: 'qwen3', maxOutputTokens: 8192),
+    ],
+    defaultProvider: 'local',
+    capi: const CapiSessionOptions(enabled: false),
+    // Idempotent tools: `idempotent` is sent in tools.definitions[].
+    tools: [
+      defineTool(
+        'lookup_ticket',
+        description: 'Look up a ticket by ID',
+        idempotent: true,
+        handler: (args, invocation) async => {'status': 'open'},
+      ),
+    ],
+    // Shell authentication: answers `shellAuthentication.request` prompts.
+    onShellAuthenticationRequest: (request, context) async =>
+        request.inputKind == 'confirm'
+            ? const ShellAuthenticationResponse.accept('yes')
+            : const ShellAuthenticationResponse.cancel(),
+    // Memory store: answers `memoryStore.store` (sends state.hasMemoryStore).
+    onStoreMemory: (memory, context) async {
+      stdout.writeln('remember ${memory.subject}: ${memory.fact}');
+    },
+    // v2.6.0 options, grouped for protocol 4.
+    askUserVariant: AskUserVariant.elicitation,
+    sandboxConfig: const SandboxConfig(enabled: true, allowBypass: true),
+    featureFlags: const {'someRuntimeFlag': true},
+    allowedModels: const ['local/qwen3', 'gpt-5'],
+    authClientIdMetadataUrl: 'https://example.com/oauth/client.json',
+    agentDirectories: const ['./.github/agents'],
+    hookDirectories: const ['./.github/hooks'],
+    trustWorkingDirectory: 'session',
+    imageGeneration:
+        const ImageGenerationConfig(enabled: true, watermark: true, saveToDisk: true),
+    autopilot: const AutopilotOptions(continuationEnabled: true, maxContinues: 5),
+    modelCapabilities: const ModelCapabilitiesOverride(
+      limits: ModelLimitsOverride(maxOutputTokens: 8192),
+    ).toJson(),
+    hooks: SessionHooks(
+      onSubagentStart: (input, context) async => SubagentStartHookOutput(
+          additionalContext: 'Focus for ${input.agentName}: security review'),
+      onSubagentStop: (input, context) async =>
+          SubagentStopHookOutput(modifiedResponse: input.response.trim()),
+    ),
+  ));
+
+  // Shell output events (`tool.shell_output`).
+  final shellSub = session.shellOutput.listen((chunk) {
+    (chunk.stream == 'stderr' ? stderr : stdout).write(chunk.text);
+  });
+
+  // Client turn ID, message source, and structured output.
+  await session.sendAndWait(MessageOptions(
+    prompt: 'Summarize open tickets',
+    clientTurnId: 'turn-42',
+    source: MessageSource.agent('triage'),
+    responseSchema: {
+      'type': 'object',
+      'properties': {
+        'count': {'type': 'integer'},
+      },
+      'required': ['count'],
+    },
+  ));
+
+  // Auto routing tier, policy helper recheck, permission mode refusal reason.
+  await session.switchAutoTier(AutoTier.efficiency);
+  await session.recheckPolicyHelper();
+  final mode = await session.setPermissionMode('allow-all');
+  if (!mode.success && mode.reason == PermissionModeRefusalReason.managedPolicy) {
+    stdout.writeln('Managed policy keeps the current permission mode');
+  }
+
+  await shellSub.cancel();
+  await session.detach(); // session.detach: on-disk state is kept
+
+  // Resume with transcript recovery, without emitting session.resume.
+  try {
+    final resumed = await client.resumeSession(
+      session.sessionId,
+      const ResumeSessionConfig(
+        suppressResumeEvent: true,
+        allowTranscriptRecovery: true,
+        clearDefaultProvider: true,
+      ),
+    );
+    await resumed.detach();
+  } on JsonRpcError catch (e) {
+    // Policy helper failure from `error.data.policyHelperFailure`.
+    final failure = e.policyHelperFailure;
+    if (failure != null) stderr.writeln('${failure.category}: ${failure.message}');
+    rethrow;
+  }
+
+  await client.clearManagedSettingsCache(); // managedSettings.clearCache
+  await client.stop();
+}
+```
+
+New in this release:
+
+- **Protocol 4 grouped payloads**: `create`/`resume` send grouped options
+  (for example `hooks: {hasHandlers: true}`); `ResumeSessionConfig.suppressResumeEvent`
+  (alias `disableResume`) and `allowTranscriptRecovery` stay top level.
+- **Named BYOK providers**: `providers`, `models`, `defaultProvider` (or
+  `clearDefaultProvider: true` on resume), `capi`.
+- **Client mode**: `CopilotClientOptions.mode`. In `ClientMode.empty`, every
+  session must set `availableTools` (an `ArgumentError` otherwise) and the
+  empty-mode defaults (no experimental mode, telemetry, persistent MCP tokens,
+  embeddings, cross-session store, memory, on-demand instructions, repository
+  hooks, or host git operations) are applied under your values.
+- **Client info**, **network callbacks**, **shell authentication**,
+  **memory store**, **shell output events** (`SessionEventTypes.toolShellOutput`,
+  `ToolShellOutputData`), **idempotent tools**, **client turn ID**,
+  **policy helper failure** (`JsonRpcError.policyHelperFailure`,
+  `PolicyHelperFailure`), and **permission mode refusal reason**
+  (`PermissionModeSetResult.reason`, `PermissionModeRefusalReason.managedPolicy`).
+- **v2.6.0 parity**: `switchAutoTier`, `askUserVariant`, `gitHubTokenProvider`
+  (answers `gitHubToken.getToken`, mutually exclusive with `gitHubToken`),
+  `SandboxConfig.allowBypass`, `featureFlags`, `detach()`, `MessageSource`,
+  `clearManagedSettingsCache()`, `recheckPolicyHelper()`, `allowedModels`,
+  `authClientIdMetadataUrl`, `ModelLimitsOverride.maxOutputTokens`
+  (`max_output_tokens`), `responseSchema`, `agentDirectories` /
+  `hookDirectories`, `trustWorkingDirectory`, `allowTranscriptRecovery`,
+  `ImageGenerationConfig.saveToDisk`, `AutopilotOptions.maxContinues`,
+  `onSubagentStart` / `onSubagentStop` hooks, and `ProviderConfig.apiKeyCommand`.
+
+GitHub token provider example:
+
+```dart
+final session = await client.createSession(SessionConfig(
+  gitHubTokenProvider: (request) async => GitHubTokenResult.token(
+    accessToken: await mintToken(request.host, request.sessionId),
+    expiresIn: 7200,
+  ),
+));
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC
+  families) is an experimental upstream surface that depends on the runtime's
+  in-process hosting library; it is not available in this SDK.
+- In-process native runtime hosting is not available: the client always
+  spawns the CLI (stdio or TCP) or connects to `cliUrl`. The `inProcess`
+  option is accepted but has no effect.
+- The legacy per-message `MessageOptions.responseFormat` is no longer sent
+  (protocol 4 uses `responseFormat` for structured output): use
+  `responseSchema`, or the session-level `imageGeneration` option for images.
+- `commands`, `onElicitationRequest`, `onExitPlanMode` and `onMcpAuthRequest`
+  are accepted on `SessionConfig` but not yet wired to runtime requests.
 
 ## Architecture
 
@@ -340,7 +546,8 @@ await client.start();
 ## Protocol Version
 
 The SDK verifies protocol compatibility on connect via the `ping` response.
-The current SDK protocol version is **2** (matching `sdk-protocol-version.json`).
+The current SDK protocol version is **4** (matching `sdk-protocol-version.json`);
+Copilot CLI 1.0.113 or newer is required.
 
 ## API Reference
 
@@ -360,6 +567,7 @@ The current SDK protocol version is **2** (matching `sdk-protocol-version.json`)
 | `getStatus()` | Get CLI version info |
 | `getAuthStatus()` | Get auth status |
 | `listModels()` | List available models |
+| `clearManagedSettingsCache()` | Re-fetch enterprise managed settings (`managedSettings.clearCache`) |
 | `onLifecycle(handler)` | Subscribe to lifecycle events |
 
 ### CopilotSession
@@ -370,23 +578,30 @@ The current SDK protocol version is **2** (matching `sdk-protocol-version.json`)
 | `workspacePath` | Workspace directory path |
 | `events` | Broadcast stream of all events |
 | `on(eventType)` | Filtered event stream |
+| `shellOutput` | Stream of `tool.shell_output` chunks (`ToolShellOutputData`) |
 | `send(options)` | Send a message |
 | `sendAndWait(options)` | Send and wait for idle |
 | `getMessages()` | Get conversation history |
 | `abort()` | Abort current processing |
-| `destroy()` | Destroy the session |
+| `switchAutoTier(tier)` | Change the Auto routing tier (`session.model.switchAutoTier`) |
+| `recheckPolicyHelper()` | Re-run the managed-settings policy helper |
+| `setPermissionMode(mode)` | Set the permission mode (`PermissionModeSetResult`) |
+| `detach()` | Release the session, keeping it resumable (`session.detach`) |
+| `destroy()` | Same as `detach()` |
 
 ## Image Generation
 
-Request image responses using `responseFormat` and `imageOptions`:
+Opt in to image generation for the session with `imageGeneration`:
 
 ```dart
-final response = await session.sendAndWait(MessageOptions(
-  prompt: 'Generate a sunset over mountains',
-  responseFormat: ResponseFormat.image,
-  imageOptions: ImageOptions(size: '1024x1024', quality: 'hd', style: 'natural'),
+final session = await client.createSession(const SessionConfig(
+  imageGeneration: ImageGenerationConfig(enabled: true, saveToDisk: true),
 ));
 ```
+
+The legacy per-message `responseFormat: ResponseFormat.image` is no longer sent
+(SDK protocol 4 uses `responseFormat` for structured output); `imageOptions`
+is still forwarded.
 
 ## Recent Features (v2.4–v2.5)
 

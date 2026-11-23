@@ -67,6 +67,138 @@ Await.result(session.destroy(), 10.seconds)
 client.stop()
 ```
 
+## What's New in v3.0.0
+
+This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
+
+- **Requires Copilot CLI 1.0.113 or newer.** Older CLIs are rejected at `start()` with
+  `SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+- **Existing options keep working.** `SessionConfig` and `ResumeSessionConfig` keep their flat
+  fields; the SDK translates the payload into the grouped protocol 4 shape (`inference`, `tools`,
+  `permissions`, `interaction`, `events`, `agents`, `mcp`, `github`, `state`, ...) right before
+  `session.create` and `session.resume`.
+- **Legacy BYOK keeps working.** `provider = Some(ProviderConfig(...))` becomes a named `"default"`
+  connection that is also the default provider, and Copilot API models are disabled for that
+  session, exactly as in v1. Explicit `providers`/`defaultProvider`/`capi` win.
+- **Protocol 4 tool and permission flow.** Custom tools and `onPermissionRequest` are served
+  through the runtime's `external_tool.requested` and `permission.requested` events, answered
+  with `session.tools.handlePendingToolCall` and `session.permissions.handlePendingPermissionRequest`.
+
+### New in v3.0.0
+
+```scala
+// Named BYOK providers and model definitions (select a model as "provider/id")
+val session = Await.result(client.createSession(SessionConfig(
+  model = Some("gateway/chat"),
+  providers = Some(List(NamedProviderConfig(
+    name = "gateway",
+    baseUrl = "https://models.example.com/v1",
+    apiKeyCommand = Some("print-model-key"),
+    wireApi = Some("responses")
+  ))),
+  models = Some(List(ProviderModelConfig(provider = "gateway", id = "chat", wireModel = Some("my-deployment")))),
+  capi = Some(CapiConfig(enabled = Some(false)))     // BYOK-only catalog
+)), 30.seconds)
+
+// Clear a default provider on resume
+client.resumeSession(sessionId, ResumeSessionConfig(clearDefaultProvider = true, capi = Some(CapiConfig(enabled = Some(true)))))
+```
+
+```scala
+// Idempotent tools: the runtime may safely retry them
+val lookup = Tool(
+  name = "lookup_order",
+  description = Some("Look up an order by ID"),
+  idempotent = Some(true),
+  handler = (_, _) => Future.successful(ToolResultObject("shipped", ToolResultType.Success))
+)
+
+// Client turn IDs are echoed on the turn's events
+session.send(MessageOptions(prompt = "Summarize the diff", clientTurnId = Some("turn-42")))
+
+// Resume without emitting session.resume
+client.resumeSession(sessionId, ResumeSessionConfig(suppressResumeEvent = Some(true)))
+```
+
+```scala
+// Client mode: "coding-agent" (default) or "empty" (every session must pick its tools,
+// and telemetry, repository hooks, cross-session memory, and similar features default off)
+val client = CopilotClient(CopilotClientOptions(mode = ClientMode.Empty))
+val session = client.createSession(SessionConfig(availableTools = Some(List("view", "grep"))))
+```
+
+```scala
+// Live shell output events
+session.on(SessionEventType.ToolShellOutput, event =>
+  ToolShellOutputData.fromEvent(event).foreach(out => print(out.text)))   // out.stream: Some("stderr"), ...
+
+// Shell authentication: answer sudo/ssh prompts from programs that shell tools run
+SessionConfig(onShellAuthenticationRequest = Some((request, _) =>
+  Future.successful(
+    if request.inputKind == "confirm" then ShellAuthenticationResult.Accept("yes")
+    else ShellAuthenticationResult.Cancel
+  )))
+
+// Memory store: receive the memories the agent saves (requires memory enabled)
+SessionConfig(memory = Some(MemoryConfiguration(enabled = true, storeMemory = Some(memory =>
+  Future(myStore.save(memory.subject, memory.fact))))))
+```
+
+```scala
+// Network callbacks: proxy resolution and proxy authentication (never log credentials)
+val client = CopilotClient(CopilotClientOptions(network = Some(NetworkConfig(
+  scope = Some(NetworkScope.Connection),
+  resolveProxy = Some(_ => Future.successful(Some("PROXY proxy.corp.example:8080; DIRECT"))),
+  authenticateBasic = Some(_ => Future.successful(Some(NetworkBasicCredentials(Some(proxyUser), Some(proxyPassword)))))
+))))
+```
+
+```scala
+// Policy Helper failures on create/resume, and permission-mode refusal reasons
+client.createSession(SessionConfig(permissionMode = Some(PermissionMode.Manual))).failed.foreach { e =>
+  PolicyHelperFailure.fromError(e).foreach(f => println(s"${f.category}: ${f.message}"))
+}
+
+session.setPermissionMode(PermissionMode.AllowAll).foreach { result =>
+  if !result.success && result.reason.contains(PermissionModeRefusalReason.ManagedPolicy) then
+    println(s"Blocked by managed policy; mode stays ${result.mode}")
+}
+```
+
+### Also available (shipped in v2.6.0)
+
+- **Client info handshake**: `CopilotClientOptions(clientInfo = Some(ClientInfo(applicationName = Some("acme-portal"), applicationVersion = Some("2.4.0"))))`.
+- **Auto routing tier**: `session.setAutoTier(Some(AutoTier.Balance))` (sends `session.model.switchAutoTier`) or `SessionConfig(autoTier = ...)`.
+- **Ask-user variant**: `SessionConfig(askUserVariant = Some(AskUserVariant.Elicitation))`.
+- **GitHub token provider**: `SessionConfig(gitHubTokenProvider = Some(args => Future.successful(GitHubTokenProviderResult.Token(fetchToken(args.host), 3600))))`.
+- **Sandbox bypass**: `SessionConfig(sandboxConfig = Some(SandboxConfig(enabled = true, allowBypass = Some(true))))`.
+- **Feature flag overrides**: `SessionConfig(featureFlags = Some(Map("my_flag" -> true)))`.
+- **Session detach**: `session.destroy()` sends `session.detach`, so the session can be resumed later.
+- **Message source**: `MessageOptions(prompt = "Run the checks", source = Some(MessageSource.agent("planner")))`.
+- **Managed settings cache clear**: `client.clearManagedSettingsCache()`.
+- **Policy helper recheck**: `session.recheckPolicyHelper()` (parse the snapshot's `policyHelperFailure` with `PolicyHelperFailure.fromJson`).
+- **Model allowlist**: `SessionConfig(allowedModels = Some(List("gpt-5", "claude-sonnet-4.5")))`.
+- **OAuth client metadata URL**: `SessionConfig(authClientIdMetadataUrl = Some("https://example.com/oauth/client.json"))`.
+- **Max output tokens override**: `SessionConfig(modelCapabilities = Some(Map("limits" -> Json.obj("max_output_tokens" -> 8192.asJson))))`.
+- **Structured output**: `session.sendAndWaitStructured(MessageOptions(prompt = "List three colors"), schema)` or `MessageOptions(..., responseSchema = Some(schema))`.
+- **Agent/hook directories**: `SessionConfig(agentDirectories = Some(List("./agents")), hookDirectories = Some(List("./hooks")))`.
+- **Working directory trust** (create only): `SessionConfig(trustWorkingDirectory = Some(WorkingDirectoryTrust.Session))`.
+- **Transcript recovery** (resume only): `ResumeSessionConfig(allowTranscriptRecovery = Some(true))`.
+- **Image generation config**: `SessionConfig(imageGeneration = Some(ImageGenerationConfig(enabled = Some(true), watermark = Some(true), saveToDisk = Some(false))))`.
+- **Autopilot options**: `SessionConfig(autopilot = Some(AutopilotOptions(continuationEnabled = Some(true), maxContinues = Some(3))))`.
+- **Subagent lifecycle hooks**: `SessionHooks(onSubagentStart = Some((input, _) => Future.successful(None)), onSubagentStop = Some((input, _) => Future.successful(None)))`.
+- **BYOK API key command**: `ProviderConfig(baseUrl = "https://models.example.com/v1", apiKeyCommand = Some("print-model-key"))` or `NamedProviderConfig(..., apiKeyCommand = ...)`.
+
+### Known limitations
+
+- **AHP host**: the runtime-supervised AHP host (`startAhpHost` and the `ahp.*`/`host.*` RPC
+  families) is not implemented. It is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+- **In-process hosting**: this SDK keeps spawning the CLI (or connecting over TCP) instead of
+  hosting the runtime in-process by default; `CopilotClientOptions.inProcess` is unchanged.
+- **Legacy response format**: `MessageOptions.responseFormat` is no longer sent, because protocol 4
+  rejects it. Use `responseSchema` for structured output and `SessionConfig.imageGeneration` for images.
+
 ## Architecture
 
 The SDK follows the same architecture as all other SDKs in this repository (40 languages supported):
@@ -304,7 +436,7 @@ val config = SessionConfig(
 
 ## Protocol Version
 
-The SDK verifies protocol version compatibility on connect. The current version is **2** (defined in `SdkProtocolVersion.scala`). If the server reports a different version, the client throws an error.
+The SDK verifies protocol version compatibility on connect. The current version is **4** (defined in `SdkProtocolVersion.scala`; requires Copilot CLI 1.0.113 or newer). If the server reports a different version, the client throws an error.
 
 ## Error Handling
 
@@ -322,12 +454,16 @@ sbt "runMain BasicExample"
 
 ## Image Generation
 
-Request image responses using `responseFormat` and `imageOptions`:
+Opt in to image generation for the session with `SessionConfig.imageGeneration`. Per-message
+`imageOptions` are still forwarded; the legacy `responseFormat` string is no longer sent because
+protocol 4 rejects it (use `responseSchema` for structured output).
 
 ```scala
+val session = Await.result(client.createSession(SessionConfig(
+  imageGeneration = Some(ImageGenerationConfig(enabled = Some(true), saveToDisk = Some(false)))
+)), 30.seconds)
 val response = session.sendAndWait(MessageOptions(
   prompt = "Generate a sunset over mountains",
-  responseFormat = Some(ResponseFormat.Image),
   imageOptions = Some(ImageOptions(size = Some("1024x1024"), quality = Some("hd"), style = Some("natural")))
 ))
 ```

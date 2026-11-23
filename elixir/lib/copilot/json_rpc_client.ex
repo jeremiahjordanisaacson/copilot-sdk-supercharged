@@ -335,8 +335,15 @@ defmodule Copilot.JsonRpcClient do
 
         Task.start(fn ->
           try do
-            result = handler.(params)
-            send_response(port, id, result || %{})
+            # A handler returns :null to answer with a JSON null result.
+            result =
+              case handler.(params) do
+                :null -> nil
+                nil -> %{}
+                other -> other
+              end
+
+            send_response(port, id, result)
           rescue
             e ->
               send_error_response(port, id, -32603, Exception.message(e))

@@ -79,6 +79,15 @@ Namespace GitHub.Copilot.SDK
         ''' </summary>
         Public Property ClientInfo As CopilotClientInfo
 
+        ''' <summary>
+        ''' Client mode: <see cref="ClientMode.CodingAgent"/> (default when Nothing) or
+        ''' <see cref="ClientMode.Empty"/>. "copilot-cli" is accepted as a legacy alias of "coding-agent".
+        ''' </summary>
+        Public Property Mode As String
+
+        ''' <summary>Host network callbacks (proxy resolution, Negotiate and Basic proxy authentication).</summary>
+        Public Property Network As NetworkOptions
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -298,6 +307,32 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Hook invoked after a sub-agent completes a turn (hook type "subagentStop").</summary>
         Public Property OnSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
 
+        ' --- v3.0.0 session options (SDK protocol 4) ---
+
+        ''' <summary>Per-session GitHub token (mutually exclusive with <see cref="GitHubTokenProvider"/>).</summary>
+        Public Property GitHubToken As String
+
+        ''' <summary>Allow-list of tool names (required for every session in <see cref="ClientMode.Empty"/>).</summary>
+        Public Property AvailableTools As List(Of String)
+
+        ''' <summary>Named BYOK provider connections (inference.providers).</summary>
+        Public Property Providers As List(Of NamedProviderConfig)
+
+        ''' <summary>Models served by the named providers (inference.models).</summary>
+        Public Property Models As List(Of ProviderModelConfig)
+
+        ''' <summary>Provider used for unqualified model selections (inference.defaultProvider).</summary>
+        Public Property DefaultProvider As String
+
+        ''' <summary>Whether Copilot API models are available (github.capi.enabled); False for BYOK only.</summary>
+        Public Property CapiEnabled As Boolean? = Nothing
+
+        ''' <summary>Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).</summary>
+        Public Property OnShellAuthenticationRequest As ShellAuthenticationHandler
+
+        ''' <summary>Persists agent memories (sends state.hasMemoryStore).</summary>
+        Public Property OnStoreMemory As Func(Of StoredMemory, Task)
+
     End Class
 
     ''' <summary>
@@ -393,6 +428,38 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Hook invoked after a sub-agent completes a turn (hook type "subagentStop").</summary>
         Public Property OnSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
 
+        ' --- v3.0.0 session options (SDK protocol 4) ---
+
+        ''' <summary>Model override for the resumed session.</summary>
+        Public Property Model As String
+
+        ''' <summary>Suppress the resume event emitted by the runtime (wire: suppressResumeEvent).</summary>
+        Public Property SuppressResumeEvent As Boolean? = Nothing
+
+        ''' <summary>Allow-list of tool names (required for every session in <see cref="ClientMode.Empty"/>).</summary>
+        Public Property AvailableTools As List(Of String)
+
+        ''' <summary>Named BYOK provider connections (inference.providers).</summary>
+        Public Property Providers As List(Of NamedProviderConfig)
+
+        ''' <summary>Models served by the named providers (inference.models).</summary>
+        Public Property Models As List(Of ProviderModelConfig)
+
+        ''' <summary>Provider used for unqualified model selections (inference.defaultProvider).</summary>
+        Public Property DefaultProvider As String
+
+        ''' <summary>Send <c>inference.defaultProvider = null</c> to clear the provider stored with the session.</summary>
+        Public Property ClearDefaultProvider As Boolean = False
+
+        ''' <summary>Whether Copilot API models are available (github.capi.enabled); False for BYOK only.</summary>
+        Public Property CapiEnabled As Boolean? = Nothing
+
+        ''' <summary>Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).</summary>
+        Public Property OnShellAuthenticationRequest As ShellAuthenticationHandler
+
+        ''' <summary>Persists agent memories (sends state.hasMemoryStore).</summary>
+        Public Property OnStoreMemory As Func(Of StoredMemory, Task)
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -433,6 +500,9 @@ Namespace GitHub.Copilot.SDK
         ''' output. Sent as a <c>json_schema</c> <c>responseFormat</c>.
         ''' </summary>
         Public Property ResponseSchema As Object
+
+        ''' <summary>Opaque caller-chosen turn identifier (wire: clientTurnId). Omitted when Nothing.</summary>
+        Public Property ClientTurnId As String
 
         ''' <summary>Returns a shallow copy of these options with <see cref="ResponseSchema"/> replaced.</summary>
         Friend Function WithResponseSchema(schema As Object) As MessageOptions
@@ -544,6 +614,10 @@ Namespace GitHub.Copilot.SDK
         <JsonPropertyName("responseFormat")>
         <JsonIgnore(Condition:=JsonIgnoreCondition.WhenWritingNull)>
         Public Property ResponseFormat As Object
+
+        <JsonPropertyName("clientTurnId")>
+        <JsonIgnore(Condition:=JsonIgnoreCondition.WhenWritingNull)>
+        Public Property ClientTurnId As String
 
     End Class
 
@@ -954,6 +1028,41 @@ Namespace GitHub.Copilot.SDK
     ''' </summary>
     Public Class SessionCompactionCompleteEvent
         Inherits SessionEvent
+    End Class
+
+    ''' <summary>
+    ''' Event "tool.shell_output": live, append-only shell output. It is not persisted or
+    ''' replayed to late subscribers; chunks need not contain complete lines.
+    ''' </summary>
+    Public Class ToolShellOutputEvent
+        Inherits SessionEvent
+
+        <JsonPropertyName("data")>
+        Public Property Data As ToolShellOutputData
+
+    End Class
+
+    ''' <summary>
+    ''' Payload of a <see cref="ToolShellOutputEvent"/>.
+    ''' </summary>
+    Public Class ToolShellOutputData
+
+        ''' <summary>Tool call that owns this output.</summary>
+        <JsonPropertyName("toolCallId")>
+        Public Property ToolCallId As String
+
+        ''' <summary>New output to append.</summary>
+        <JsonPropertyName("text")>
+        Public Property Text As String
+
+        ''' <summary>Zero-based publication sequence across all streams of the tool call.</summary>
+        <JsonPropertyName("sequence")>
+        Public Property Sequence As Long
+
+        ''' <summary>"stdout" or "stderr"; Nothing means stdout.</summary>
+        <JsonPropertyName("stream")>
+        Public Property Stream As String
+
     End Class
 
     ''' <summary>
@@ -1514,7 +1623,8 @@ Namespace GitHub.Copilot.SDK
         <JsonPropertyName("timestamp")>
         Public Property Timestamp As Long? = Nothing
 
-        <JsonPropertyName("workingDirectory")>
+        ''' <summary>Working directory of the hook (wire: cwd).</summary>
+        <JsonPropertyName("cwd")>
         Public Property WorkingDirectory As String
 
         <JsonPropertyName("transcriptPath")>
@@ -1593,6 +1703,468 @@ Namespace GitHub.Copilot.SDK
             If ModifiedResponse IsNot Nothing Then d("modifiedResponse") = ModifiedResponse
             Return d
         End Function
+
+    End Class
+
+    ' -----------------------------------------------------------------------
+    '  v3.0.0 feature types (SDK protocol 4)
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Client modes for <see cref="CopilotClientOptions.Mode"/>.
+    ''' </summary>
+    Public NotInheritable Class ClientMode
+        ''' <summary>Default mode, identical to the behavior before modes existed.</summary>
+        Public Const CodingAgent As String = "coding-agent"
+
+        ''' <summary>
+        ''' Every session must list AvailableTools, and locked-down defaults are applied under the
+        ''' caller's values (no experimental mode, telemetry, persistent memory, cross-session store,
+        ''' on-demand instructions, repository hooks, or host git operations).
+        ''' </summary>
+        Public Const Empty As String = "empty"
+
+        ''' <summary>Legacy alias of <see cref="CodingAgent"/>.</summary>
+        Public Const CopilotCli As String = "copilot-cli"
+
+        ''' <summary>Normalizes a mode to "coding-agent" or "empty"; throws for any other value.</summary>
+        Public Shared Function Normalize(mode As String) As String
+            If String.IsNullOrEmpty(mode) OrElse mode = CodingAgent OrElse mode = CopilotCli Then Return CodingAgent
+            If mode = Empty Then Return Empty
+            Throw New ArgumentException($"Mode must be '{CodingAgent}' or '{Empty}', got '{mode}'.", NameOf(mode))
+        End Function
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' A named BYOK provider connection (inference.providers).
+    ''' </summary>
+    Public Class NamedProviderConfig
+
+        ''' <summary>Connection name referenced by <see cref="ProviderModelConfig.Provider"/> and DefaultProvider.</summary>
+        Public Property Name As String
+
+        ''' <summary>Provider type ("openai", "azure" or "anthropic").</summary>
+        Public Property Type As String
+
+        ''' <summary>API endpoint URL.</summary>
+        Public Property BaseUrl As String
+
+        ''' <summary>Static API key.</summary>
+        Public Property ApiKey As String
+
+        ''' <summary>Command whose stdout is used as the API key (run before each request).</summary>
+        Public Property ApiKeyCommand As String
+
+        ''' <summary>Bearer token sent as the Authorization header.</summary>
+        Public Property BearerToken As String
+
+        ''' <summary>API format ("completions" or "responses").</summary>
+        Public Property WireApi As String
+
+        ''' <summary>Transport ("http" or "websocket").</summary>
+        Public Property Transport As String
+
+        ''' <summary>Azure API version (Azure providers only).</summary>
+        Public Property AzureApiVersion As String
+
+        ''' <summary>Extra HTTP headers sent with each request.</summary>
+        Public Property Headers As Dictionary(Of String, String)
+
+        ''' <summary>Product serving the model (for example "ollama").</summary>
+        Public Property ModelProvider As String
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object) From {{"name", Name}}
+            If Not String.IsNullOrEmpty(Type) Then d("type") = Type
+            If Not String.IsNullOrEmpty(BaseUrl) Then d("baseUrl") = BaseUrl
+            If Not String.IsNullOrEmpty(ApiKey) Then d("apiKey") = ApiKey
+            If Not String.IsNullOrEmpty(ApiKeyCommand) Then d("apiKeyCommand") = ApiKeyCommand
+            If Not String.IsNullOrEmpty(BearerToken) Then d("bearerToken") = BearerToken
+            If Not String.IsNullOrEmpty(WireApi) Then d("wireApi") = WireApi
+            If Not String.IsNullOrEmpty(Transport) Then d("transport") = Transport
+            If Not String.IsNullOrEmpty(AzureApiVersion) Then
+                d("azure") = New Dictionary(Of String, Object) From {{"apiVersion", AzureApiVersion}}
+            End If
+            If Headers IsNot Nothing Then d("headers") = Headers
+            If Not String.IsNullOrEmpty(ModelProvider) Then d("modelProvider") = ModelProvider
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' A model served by a named BYOK provider (inference.models). Select it with the session
+    ''' model "provider/id".
+    ''' </summary>
+    Public Class ProviderModelConfig
+
+        ''' <summary>Name of the <see cref="NamedProviderConfig"/> serving this model.</summary>
+        Public Property Provider As String
+
+        ''' <summary>Model id used in "provider/id" selections.</summary>
+        Public Property Id As String
+
+        ''' <summary>Model id sent to the provider, when different from <see cref="Id"/>.</summary>
+        Public Property ModelId As String
+
+        ''' <summary>Model name sent on the wire, when different from <see cref="ModelId"/>.</summary>
+        Public Property WireModel As String
+
+        ''' <summary>Display name.</summary>
+        Public Property Name As String
+
+        Public Property MaxPromptTokens As Integer? = Nothing
+
+        Public Property MaxContextWindowTokens As Integer? = Nothing
+
+        Public Property MaxOutputTokens As Integer? = Nothing
+
+        ''' <summary>Model capabilities override.</summary>
+        Public Property Capabilities As Dictionary(Of String, Object)
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object) From {{"provider", Provider}, {"id", Id}}
+            If Not String.IsNullOrEmpty(ModelId) Then d("modelId") = ModelId
+            If Not String.IsNullOrEmpty(WireModel) Then d("wireModel") = WireModel
+            If Not String.IsNullOrEmpty(Name) Then d("name") = Name
+            If MaxPromptTokens.HasValue Then d("maxPromptTokens") = MaxPromptTokens.Value
+            If MaxContextWindowTokens.HasValue Then d("maxContextWindowTokens") = MaxContextWindowTokens.Value
+            If MaxOutputTokens.HasValue Then d("maxOutputTokens") = MaxOutputTokens.Value
+            If Capabilities IsNot Nothing Then d("capabilities") = Capabilities
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Traffic served by the network callbacks (<see cref="NetworkOptions.Scope"/>).
+    ''' </summary>
+    Public NotInheritable Class NetworkScope
+        ''' <summary>Only requests made for this connection and its sessions (default).</summary>
+        Public Const Connection As String = "connection"
+
+        ''' <summary>Also the runtime's shared background traffic.</summary>
+        Public Const Runtime As String = "runtime"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Payload of a <c>network.authenticateBasic</c> request.
+    ''' </summary>
+    Public Class NetworkBasicAuthRequest
+
+        ''' <summary>Proxy that challenged, as "http://host:port" or "https://host:port".</summary>
+        Public Property Proxy As String
+
+        ''' <summary>Realm named by the proxy (untrusted text), when any.</summary>
+        Public Property Realm As String
+
+        ''' <summary>True when the proxy rejected the credentials sent last.</summary>
+        Public Property PreviousRejected As Boolean
+
+    End Class
+
+    ''' <summary>
+    ''' Proxy Basic credentials. Never log or persist them.
+    ''' </summary>
+    Public Class NetworkBasicCredentials
+
+        Public Property Username As String
+
+        Public Property Password As String
+
+    End Class
+
+    ''' <summary>
+    ''' Host-provided network callbacks. When any callback is set, the client registers them with
+    ''' <c>network.setProvider</c> after connecting.
+    ''' </summary>
+    Public Class NetworkOptions
+
+        ''' <summary>"connection" (default) or "runtime" (see <see cref="NetworkScope"/>).</summary>
+        Public Property Scope As String
+
+        ''' <summary>Returns a PAC-style proxy list for a URL (Nothing leaves it to the runtime).</summary>
+        Public Property ResolveProxy As Func(Of String, Task(Of String))
+
+        ''' <summary>Returns a base64 SPNEGO token for a service principal name (Nothing when unavailable).</summary>
+        Public Property AuthenticateNegotiate As Func(Of String, Task(Of String))
+
+        ''' <summary>Returns proxy Basic credentials (Nothing when unavailable).</summary>
+        Public Property AuthenticateBasic As Func(Of NetworkBasicAuthRequest, Task(Of NetworkBasicCredentials))
+
+        ''' <summary>True when at least one callback is registered.</summary>
+        Public ReadOnly Property HasCallbacks As Boolean
+            Get
+                Return ResolveProxy IsNot Nothing OrElse AuthenticateNegotiate IsNot Nothing OrElse AuthenticateBasic IsNot Nothing
+            End Get
+        End Property
+
+        ''' <summary>Build the <c>network.setProvider</c> params (an empty object marks each callback).</summary>
+        Public Function ToSetProviderParams() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If Not String.IsNullOrEmpty(Scope) Then d("scope") = Scope
+            If ResolveProxy IsNot Nothing Then d("resolveProxy") = New Dictionary(Of String, Object)
+            If AuthenticateNegotiate IsNot Nothing Then d("authenticateNegotiate") = New Dictionary(Of String, Object)
+            If AuthenticateBasic IsNot Nothing Then d("authenticateBasic") = New Dictionary(Of String, Object)
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Input kinds of a shell authentication prompt.
+    ''' </summary>
+    Public NotInheritable Class ShellAuthenticationInputKind
+        ''' <summary>A password or passphrase (mask the input).</summary>
+        Public Const Secret As String = "secret"
+
+        ''' <summary>A visible answer such as a user name.</summary>
+        Public Const Text As String = "text"
+
+        ''' <summary>A yes/no question; answer "yes" to accept.</summary>
+        Public Const Confirm As String = "confirm"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' A <c>shellAuthentication.request</c> from a program (sudo, ssh, git) run by the agent.
+    ''' </summary>
+    Public Class ShellAuthenticationRequest
+
+        Public Property SessionId As String
+
+        ''' <summary>Identifies the request; a cancellation carries the same id.</summary>
+        Public Property RequestId As String
+
+        ''' <summary>The program that asked: "sudo", "ssh", or "git".</summary>
+        Public Property Program As String
+
+        ''' <summary>The prompt text the program supplied.</summary>
+        Public Property Prompt As String
+
+        ''' <summary>"secret", "text", or "confirm" (see <see cref="ShellAuthenticationInputKind"/>).</summary>
+        Public Property InputKind As String
+
+        ''' <summary>The shell command that triggered the prompt.</summary>
+        Public Property Command As String
+
+        ''' <summary>The command's working directory.</summary>
+        Public Property Cwd As String
+
+    End Class
+
+    ''' <summary>
+    ''' Answer to a <see cref="ShellAuthenticationRequest"/>.
+    ''' </summary>
+    Public Class ShellAuthenticationResponse
+
+        ''' <summary>"accept" or "cancel".</summary>
+        Public Property Action As String = "cancel"
+
+        ''' <summary>The answer sent to the program (accept only).</summary>
+        Public Property Value As String
+
+        ''' <summary>Accept the prompt with a value (answer "yes" to a confirm prompt).</summary>
+        Public Shared Function Accept(value As String) As ShellAuthenticationResponse
+            Return New ShellAuthenticationResponse With {.Action = "accept", .Value = value}
+        End Function
+
+        ''' <summary>Decline the prompt.</summary>
+        Public Shared Function Cancel() As ShellAuthenticationResponse
+            Return New ShellAuthenticationResponse With {.Action = "cancel"}
+        End Function
+
+        ''' <summary>Build the JSON-RPC result ({action:"accept", value} or {action:"cancel"}).</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            If Action = "accept" AndAlso Value IsNot Nothing Then
+                Return New Dictionary(Of String, Object) From {{"action", "accept"}, {"value", Value}}
+            End If
+            Return New Dictionary(Of String, Object) From {{"action", "cancel"}}
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Answers shell authentication prompts. The token is cancelled when the answer is no longer
+    ''' needed (<c>shellAuthentication.cancel</c>).
+    ''' </summary>
+    Public Delegate Function ShellAuthenticationHandler(
+        request As ShellAuthenticationRequest,
+        cancellationToken As System.Threading.CancellationToken) As Task(Of ShellAuthenticationResponse)
+
+    ''' <summary>
+    ''' A fact the agent asked the host to remember (<c>memoryStore.store</c>).
+    ''' </summary>
+    Public Class StoredMemory
+
+        Public Property SessionId As String
+
+        ''' <summary>Short topic the memory is about.</summary>
+        Public Property Subject As String
+
+        ''' <summary>The fact to remember.</summary>
+        Public Property Fact As String
+
+        ''' <summary>Sources supporting the fact, such as file paths with line numbers.</summary>
+        Public Property Citations As String
+
+        ''' <summary>Why the agent considers the fact worth remembering.</summary>
+        Public Property Reason As String
+
+    End Class
+
+    ''' <summary>
+    ''' One field-specific finding reported by a Policy Helper.
+    ''' </summary>
+    Public Class PolicyHelperFailureDetail
+        Public Property Message As String
+        Public Property Path As String
+    End Class
+
+    ''' <summary>
+    ''' Validated help link supplied by a Policy Helper.
+    ''' </summary>
+    Public Class PolicyHelperHelpLink
+        Public Property Url As String
+        Public Property Label As String
+    End Class
+
+    ''' <summary>
+    ''' The latest unresolved Policy Helper failure. Helper-authored text is untrusted: render it as
+    ''' plain text and never execute it.
+    ''' </summary>
+    Public Class PolicyHelperFailure
+
+        ''' <summary>Runtime classification such as "spawn", "timeout", or "schema".</summary>
+        Public Property Category As String
+
+        ''' <summary>"ignore" or "failClosed".</summary>
+        Public Property FailureMode As String
+
+        Public Property Message As String
+
+        Public Property PreviousPolicyRetained As Boolean
+
+        ''' <summary>Invocation reason such as "sessionStart".</summary>
+        Public Property Reason As String
+
+        Public Property Authority As String
+
+        Public Property Code As String
+
+        Public Property Details As List(Of PolicyHelperFailureDetail)
+
+        Public Property Diagnostic As String
+
+        Public Property HelpLink As PolicyHelperHelpLink
+
+        Public Property Remediation As String
+
+        Public Property Severity As String
+
+        ''' <summary>Parse a PolicyHelperFailure JSON object (Nothing when the value is not an object).</summary>
+        Public Shared Function FromJson(element As System.Text.Json.JsonElement) As PolicyHelperFailure
+            If element.ValueKind <> System.Text.Json.JsonValueKind.Object Then Return Nothing
+            Dim failure As New PolicyHelperFailure With {
+                .Category = ReadString(element, "category"),
+                .FailureMode = ReadString(element, "failureMode"),
+                .Message = ReadString(element, "message"),
+                .Reason = ReadString(element, "reason"),
+                .Authority = ReadString(element, "authority"),
+                .Code = ReadString(element, "code"),
+                .Diagnostic = ReadString(element, "diagnostic"),
+                .Remediation = ReadString(element, "remediation"),
+                .Severity = ReadString(element, "severity")
+            }
+            Dim retained As System.Text.Json.JsonElement = Nothing
+            If element.TryGetProperty("previousPolicyRetained", retained) Then
+                failure.PreviousPolicyRetained = retained.ValueKind = System.Text.Json.JsonValueKind.True
+            End If
+            Dim details As System.Text.Json.JsonElement = Nothing
+            If element.TryGetProperty("details", details) AndAlso details.ValueKind = System.Text.Json.JsonValueKind.Array Then
+                failure.Details = New List(Of PolicyHelperFailureDetail)
+                For Each item In details.EnumerateArray()
+                    If item.ValueKind = System.Text.Json.JsonValueKind.Object Then
+                        failure.Details.Add(New PolicyHelperFailureDetail With {
+                            .Message = ReadString(item, "message"),
+                            .Path = ReadString(item, "path")
+                        })
+                    End If
+                Next
+            End If
+            Dim link As System.Text.Json.JsonElement = Nothing
+            If element.TryGetProperty("helpLink", link) AndAlso link.ValueKind = System.Text.Json.JsonValueKind.Object Then
+                failure.HelpLink = New PolicyHelperHelpLink With {
+                    .Url = ReadString(link, "url"),
+                    .Label = ReadString(link, "label")
+                }
+            End If
+            Return failure
+        End Function
+
+        Private Shared Function ReadString(element As System.Text.Json.JsonElement, name As String) As String
+            Dim value As System.Text.Json.JsonElement = Nothing
+            If element.TryGetProperty(name, value) AndAlso value.ValueKind = System.Text.Json.JsonValueKind.String Then
+                Return value.GetString()
+            End If
+            Return Nothing
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Session permission modes (<c>session.permissions.setMode</c>).
+    ''' </summary>
+    Public NotInheritable Class PermissionMode
+        ''' <summary>Permission requests follow the normal approval flow.</summary>
+        Public Const Manual As String = "manual"
+
+        ''' <summary>Requests carry an LLM safety recommendation.</summary>
+        Public Const Assisted As String = "assisted"
+
+        ''' <summary>Tool, path, and URL permission requests are approved automatically.</summary>
+        Public Const AllowAll As String = "allow-all"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Why a permission-mode change was refused (<see cref="PermissionModeSetResult.Reason"/>).
+    ''' </summary>
+    Public NotInheritable Class PermissionModeRefusalReason
+        ''' <summary>Managed (enterprise) policy does not allow the requested mode.</summary>
+        Public Const ManagedPolicy As String = "managed_policy"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Result of <c>session.permissions.setMode</c>.
+    ''' </summary>
+    Public Class PermissionModeSetResult
+
+        <JsonPropertyName("success")>
+        Public Property Success As Boolean
+
+        ''' <summary>Authoritative permission mode after the change.</summary>
+        <JsonPropertyName("mode")>
+        Public Property Mode As String
+
+        ''' <summary>Why the requested mode was refused, when known (see <see cref="PermissionModeRefusalReason"/>).</summary>
+        <JsonPropertyName("reason")>
+        Public Property Reason As String
 
     End Class
 

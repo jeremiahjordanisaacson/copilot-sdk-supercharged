@@ -78,6 +78,11 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
   private val resolvedRequestHandler: Option[CopilotRequestHandler] = options.requestHandler
   /** Bring-your-own-key bearer token provider, if configured. */
   private val resolvedBearerTokenProvider: Option[BearerTokenProvider] = options.bearerTokenProvider
+  /** Client mode; the legacy "copilot-cli" value is an alias of "coding-agent". */
+  private val resolvedMode: String = options.mode match
+    case ClientMode.CodingAgent | ClientMode.CopilotCli => ClientMode.CodingAgent
+    case ClientMode.Empty => ClientMode.Empty
+    case other => throw new IllegalArgumentException(s"mode must be 'coding-agent' or 'empty', got '$other'")
 
   // Validate options
   if options.cliUrl.isDefined && options.cliPath.isDefined then
@@ -134,6 +139,19 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         case Right(r) => r
         case Left(err) => throw new RuntimeException(s"Failed to decode ping response: $err")
       verifyProtocolVersion(pingResult)
+
+      // Register network callbacks (proxy resolution and proxy authentication) if configured
+      options.network.filter(_.hasCallbacks).foreach { network =>
+        concurrent.Await.result(
+          rpcClient.get.sendRequest("network.setProvider", Json.obj(
+            "scope" -> network.scope.asJson,
+            "resolveProxy" -> Option.when(network.resolveProxy.isDefined)(Json.obj()).asJson,
+            "authenticateNegotiate" -> Option.when(network.authenticateNegotiate.isDefined)(Json.obj()).asJson,
+            "authenticateBasic" -> Option.when(network.authenticateBasic.isDefined)(Json.obj()).asJson
+          ).dropNullValues),
+          scala.concurrent.duration.Duration(10, "s")
+        )
+      }
 
       // Register session filesystem provider if configured
       options.sessionFs.foreach { fs =>
@@ -226,14 +244,17 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
    * @return A Future that resolves with the created session
    */
   def createSession(config: SessionConfig = SessionConfig()): Future[CopilotSession] =
-    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider).flatMap(_ => ensureConnected()).flatMap { client =>
+    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider)
+      .flatMap(_ => checkSessionOptions(config.availableTools, config.memory))
+      .flatMap(_ => ensureConnected()).flatMap { client =>
       val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, config.sessionId)
       val toolDefs = config.tools.map(t => Json.obj(
         "name" -> t.name.asJson,
         "description" -> t.description.asJson,
         "parameters" -> t.parameters.map(Json.fromJsonObject).asJson,
-        "defer" -> t.defer.asJson
-      ))
+        "defer" -> t.defer.asJson,
+        "idempotent" -> t.idempotent.asJson
+      ).dropNullValues)
 
       val hookTypes: Option[List[String]] = config.hooks.map { h =>
         List(
@@ -296,12 +317,13 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "canvasProvider" -> config.canvasProvider.asJson,
         "customAgentsLocalOnly" -> config.customAgentsLocalOnly.asJson,
         "toolSearch" -> config.toolSearch.asJson,
-        "experimentalMode" -> config.experimentalMode.asJson,
+        "enableExperimentalMode" -> config.experimentalMode.asJson,
         "contentExclusion" -> config.contentExclusion.asJson,
+        "instructionDirectories" -> config.instructionDirectories.asJson,
         "mcpAuthHandler" -> config.onMcpAuthRequest.isDefined.asJson,
-        // v2.6.0 upstream-sync session options. The runtime only accepts
-        // autoTier/enableWebSocketResponses under "capi".
-        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses).asJson,
+        // v2.6.0 upstream-sync session options. CAPI options go to github.capi;
+        // explicit CapiConfig members win over the flat fields.
+        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses, config.capi).asJson,
         "askUserVariant" -> config.askUserVariant.asJson,
         "gitHubTokenProviderRegistrationId" -> registrationId.asJson,
         "sandboxConfig" -> config.sandboxConfig.asJson,
@@ -318,9 +340,17 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "refreshCustomInstructions" -> config.refreshCustomInstructions.asJson,
         "imageGeneration" -> config.imageGeneration.asJson,
         "autopilot" -> config.autopilot.asJson,
+        // v3.0.0 session options (SDK protocol 4)
+        "providers" -> config.providers.asJson,
+        "models" -> config.models.asJson,
+        "defaultProvider" -> config.defaultProvider.asJson,
+        "hasMemoryStore" -> Option.when(config.memory.exists(_.storeMemory.isDefined))(true).asJson,
+        "requestShellAuthentication" -> Option.when(config.onShellAuthenticationRequest.isDefined)(true).asJson,
+        "permissionMode" -> config.permissionMode.asJson,
       ).dropNullValues
 
-      client.sendRequest("session.create", injectTraceContext(params)).map { result =>
+      val payload = applyModeDefaults(groupSessionParams(injectTraceContext(params), resume = false))
+      client.sendRequest("session.create", payload).map { result =>
         val sessionId = result.hcursor.get[String]("sessionId").getOrElse(
           throw new RuntimeException("session.create response missing sessionId")
         )
@@ -331,6 +361,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
         config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
+        config.onShellAuthenticationRequest.foreach(session.registerShellAuthenticationHandler)
+        config.memory.flatMap(_.storeMemory).foreach(session.registerMemoryStore)
         commitGitHubTokenProvider(session, registrationId)
         sessions.put(sessionId, session)
         session
@@ -348,13 +380,17 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
    * @return A Future that resolves with the resumed session
    */
   def resumeSession(sessionId: String, config: ResumeSessionConfig = ResumeSessionConfig()): Future[CopilotSession] =
-    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider).flatMap(_ => ensureConnected()).flatMap { client =>
+    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider)
+      .flatMap(_ => checkSessionOptions(config.availableTools, config.memory))
+      .flatMap(_ => ensureConnected()).flatMap { client =>
       val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, Some(sessionId))
       val toolDefs = config.tools.map(t => Json.obj(
         "name" -> t.name.asJson,
         "description" -> t.description.asJson,
-        "parameters" -> t.parameters.map(Json.fromJsonObject).asJson
-      ))
+        "parameters" -> t.parameters.map(Json.fromJsonObject).asJson,
+        "defer" -> t.defer.asJson,
+        "idempotent" -> t.idempotent.asJson
+      ).dropNullValues)
 
       val params = Json.obj(
         "sessionId" -> sessionId.asJson,
@@ -381,8 +417,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "enableConfigDiscovery" -> config.enableConfigDiscovery.asJson,
         "gitHubToken" -> config.gitHubToken.asJson,
         "disableResume" -> config.disableResume.asJson,
+        "instructionDirectories" -> config.instructionDirectories.asJson,
         // v2.6.0 upstream-sync session options.
-        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses).asJson,
+        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses, config.capi).asJson,
         "askUserVariant" -> config.askUserVariant.asJson,
         "gitHubTokenProviderRegistrationId" -> registrationId.asJson,
         "sandboxConfig" -> config.sandboxConfig.asJson,
@@ -397,9 +434,27 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "allowTranscriptRecovery" -> config.allowTranscriptRecovery.asJson,
         "imageGeneration" -> config.imageGeneration.asJson,
         "autopilot" -> config.autopilot.asJson,
+        // v3.0.0 session options (SDK protocol 4)
+        "suppressResumeEvent" -> config.suppressResumeEvent.asJson,
+        "continuePendingWork" -> config.continuePendingWork.asJson,
+        "providers" -> config.providers.asJson,
+        "models" -> config.models.asJson,
+        "defaultProvider" -> config.defaultProvider.asJson,
+        "memory" -> config.memory.map { (m: MemoryConfiguration) =>
+          Json.obj("enabled" -> m.enabled.asJson)
+        }.asJson,
+        "hasMemoryStore" -> Option.when(config.memory.exists(_.storeMemory.isDefined))(true).asJson,
+        "requestShellAuthentication" -> Option.when(config.onShellAuthenticationRequest.isDefined)(true).asJson,
+        "permissionMode" -> config.permissionMode.asJson,
       ).dropNullValues
+      // An explicit null clears the default provider; dropNullValues above would otherwise remove it.
+      val flat =
+        if config.clearDefaultProvider && config.defaultProvider.isEmpty then
+          params.deepMerge(Json.obj("defaultProvider" -> Json.Null))
+        else params
 
-      client.sendRequest("session.resume", injectTraceContext(params)).map { result =>
+      val payload = applyModeDefaults(groupSessionParams(injectTraceContext(flat), resume = true))
+      client.sendRequest("session.resume", payload).map { result =>
         val resumedId = result.hcursor.get[String]("sessionId").getOrElse(sessionId)
         val workspacePath = result.hcursor.get[String]("workspacePath").toOption
         val session = new CopilotSession(resumedId, client, workspacePath)
@@ -408,6 +463,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
         config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
+        config.onShellAuthenticationRequest.foreach(session.registerShellAuthenticationHandler)
+        config.memory.flatMap(_.storeMemory).foreach(session.registerMemoryStore)
         commitGitHubTokenProvider(session, registrationId)
         sessions.put(resumedId, session)
         session
@@ -606,7 +663,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     if !resolvedUseLoggedInUser then
       args += "--no-auto-login"
 
-    val processBuilder = new ProcessBuilder((resolvedCliPath +: args.toSeq)*)
+    // A .js entry point (for example the CLI's npm-loader.js) runs with node; other paths run directly.
+    val command = if resolvedCliPath.endsWith(".js") then Seq("node", resolvedCliPath) else Seq(resolvedCliPath)
+    val processBuilder = new ProcessBuilder((command ++ args.toSeq)*)
     processBuilder.redirectErrorStream(false)
 
     // Set working directory
@@ -688,13 +747,13 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     pingResult.protocolVersion match
       case None =>
         throw new RuntimeException(
-          s"SDK protocol version mismatch: SDK expects version $expectedVersion, " +
-            "but server does not report a protocol version. Please update your server."
+          s"SDK protocol version mismatch: SDK supports version $expectedVersion, " +
+            "but server does not report a protocol version. Please update your server to ensure compatibility."
         )
       case Some(serverVersion) if serverVersion != expectedVersion =>
         throw new RuntimeException(
-          s"SDK protocol version mismatch: SDK expects version $expectedVersion, " +
-            s"but server reports version $serverVersion. Please update your SDK or server."
+          s"SDK protocol version mismatch: SDK supports version $expectedVersion, " +
+            s"but server reports version $serverVersion. Please update your SDK or server to ensure compatibility."
         )
       case _ => // versions match
 
@@ -728,6 +787,16 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
 
     // gitHubToken.getToken (server asks a session's GitHub token provider for a credential)
     client.onRequest("gitHubToken.getToken", handleGitHubTokenRequest)
+
+    // shellAuthentication.* (server asks a session to answer or cancel a shell prompt)
+    client.onRequest("shellAuthentication.request", handleShellAuthenticationRequest)
+    client.onRequest("shellAuthentication.cancel", handleShellAuthenticationCancel)
+
+    // memoryStore.store (server hands a session's memory store a memory to save)
+    client.onRequest("memoryStore.store", handleMemoryStoreRequest)
+
+    // network.* (server asks the configured network callbacks)
+    attachNetworkHandlers(client)
 
     // sessionFs.* (server drives filesystem access through the client)
     client.onRequest("sessionFs.readFile", handleSessionFsReadFile)
@@ -894,6 +963,66 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         )
         registration.provider(args).map(_.asJson)
 
+  /** Answers `shellAuthentication.request` with the owning session's handler (`cancel` when unavailable). */
+  private def handleShellAuthenticationRequest(params: Json): Future[Json] =
+    params.hcursor.get[String]("sessionId").toOption.flatMap(id => Option(sessions.get(id))) match
+      case Some(session) => session.handleShellAuthenticationRequest(params)
+      case None => Future.successful(Json.obj("action" -> "cancel".asJson))
+
+  /** Cancels a pending shell authentication prompt; always answers `{}`. */
+  private def handleShellAuthenticationCancel(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    for
+      sessionId <- cursor.get[String]("sessionId").toOption
+      requestId <- cursor.get[String]("requestId").toOption
+      session   <- Option(sessions.get(sessionId))
+    do session.cancelShellAuthentication(requestId)
+    Future.successful(Json.obj())
+
+  /** Stores a memory through the owning session's callback; answers with a JSON null result. */
+  private def handleMemoryStoreRequest(params: Json): Future[Json] =
+    params.hcursor.get[String]("sessionId").toOption.flatMap(id => Option(sessions.get(id))) match
+      case Some(session) => session.handleMemoryStore(params)
+      case None => Future.failed(new IllegalStateException("Memory store owner is unavailable"))
+
+  /** Serves the configured network callbacks. Tokens and passwords are never logged. */
+  private def attachNetworkHandlers(client: JsonRpcClient): Unit =
+    options.network.foreach { network =>
+      network.resolveProxy.foreach { resolver =>
+        client.onRequest("network.resolveProxy", { params =>
+          val url = params.hcursor.get[String]("url").getOrElse("")
+          Future.delegate(resolver(NetworkResolveProxyRequest(url))).map { proxy =>
+            Json.obj("proxy" -> proxy.asJson).dropNullValues
+          }
+        })
+      }
+      network.authenticateNegotiate.foreach { authenticator =>
+        client.onRequest("network.authenticateNegotiate", { params =>
+          val spn = params.hcursor.get[String]("spn").getOrElse("")
+          Future.delegate(authenticator(NetworkAuthenticateNegotiateRequest(spn))).map { token =>
+            Json.obj("token" -> token.asJson).dropNullValues
+          }
+        })
+      }
+      network.authenticateBasic.foreach { authenticator =>
+        client.onRequest("network.authenticateBasic", { params =>
+          val cursor = params.hcursor
+          val request = NetworkAuthenticateBasicRequest(
+            proxy = cursor.get[String]("proxy").getOrElse(""),
+            realm = cursor.get[String]("realm").toOption,
+            previousRejected = cursor.get[Boolean]("previousRejected").getOrElse(false)
+          )
+          // Send only the credential fields.
+          Future.delegate(authenticator(request)).map { credentials =>
+            Json.obj(
+              "username" -> credentials.flatMap(_.username).asJson,
+              "password" -> credentials.flatMap(_.password).asJson
+            ).dropNullValues
+          }
+        })
+      }
+    }
+
   // -------------------------------------------------------------------------
   // v2.6.0 helpers: client info handshake, CAPI options, GitHub token providers
   // -------------------------------------------------------------------------
@@ -923,14 +1052,57 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     ).flatten
     if fields.isEmpty then None else Some(Json.obj(fields*))
 
-  /** Builds the `capi` provider options object, or None when neither field is set. */
-  private def capiOptions(autoTier: Option[String], enableWebSocketResponses: Option[Boolean]): Option[Json] =
-    if autoTier.isEmpty && enableWebSocketResponses.isEmpty then None
+  /**
+   * Builds the `capi` provider options object (`github.capi`), or None when nothing is set.
+   * Members of the explicit `capi` options win over the flat `autoTier`/`enableWebSocketResponses` fields.
+   */
+  private def capiOptions(
+    autoTier: Option[String],
+    enableWebSocketResponses: Option[Boolean],
+    capi: Option[CapiConfig] = None
+  ): Option[Json] =
+    val wire = Json.obj(
+      "enabled" -> capi.flatMap(_.enabled).asJson,
+      "autoTier" -> capi.flatMap(_.autoTier).orElse(autoTier).asJson,
+      "enableWebSocketResponses" -> capi.flatMap(_.enableWebSocketResponses).orElse(enableWebSocketResponses).asJson
+    ).dropNullValues
+    if wire.asObject.exists(_.isEmpty) then None else Some(wire)
+
+  /** Rejects session options that cannot work: empty mode without tools, or a memory store without memory. */
+  private def checkSessionOptions(
+    availableTools: Option[List[String]],
+    memory: Option[MemoryConfiguration]
+  ): Future[Unit] =
+    if resolvedMode == ClientMode.Empty && availableTools.isEmpty then
+      Future.failed(new IllegalArgumentException(
+        "CopilotClient is in mode 'empty' but the session config did not specify availableTools. " +
+          "Empty mode requires every session to explicitly opt into the tools it wants."
+      ))
+    else if memory.exists(m => m.storeMemory.isDefined && !m.enabled) then
+      Future.failed(new IllegalArgumentException("memory.storeMemory requires memory.enabled to be true."))
+    else Future.unit
+
+  /** Empty mode: applies safe runtime defaults under the caller's values (caller values win). */
+  private def applyModeDefaults(wire: Json): Json =
+    if resolvedMode != ClientMode.Empty then wire
     else
-      Some(Json.obj(
-        "autoTier" -> autoTier.asJson,
-        "enableWebSocketResponses" -> enableWebSocketResponses.asJson
-      ).dropNullValues)
+      val defaults = List(
+        ("experiments", "enableExperimentalMode", false.asJson),
+        ("github", "telemetryEnabled", false.asJson),
+        ("mcp", "oauthTokenStorage", "in-memory".asJson),
+        ("state", "skipEmbeddingRetrieval", true.asJson),
+        ("state", "embeddingCacheStorage", "in-memory".asJson),
+        ("state", "enableCrossSessionStore", false.asJson),
+        ("state", "memory", Json.obj("enabled" -> false.asJson)),
+        ("instructions", "onDemandDiscovery", false.asJson),
+        ("hooks", "enableRepositoryHooks", false.asJson),
+        ("git", "enableHostGitOperations", false.asJson)
+      )
+      defaults.foldLeft(wire) { case (acc, (group, member, value)) =>
+        val existing = acc.hcursor.downField(group).focus.flatMap(_.asObject).getOrElse(JsonObject.empty)
+        if existing.contains(member) then acc
+        else acc.mapObject(_.add(group, Json.fromJsonObject(existing.add(member, value))))
+      }
 
   private def checkGitHubTokenOptions(
     gitHubToken: Option[String],
@@ -1186,17 +1358,19 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
 // Message payload builder + wire constants
 // ============================================================================
 
-/** Builds the JSON-RPC `session.send` payload from [[MessageOptions]]. */
+/**
+ * Builds the JSON-RPC `session.send` payload from [[MessageOptions]]. The legacy string
+ * `responseFormat` is not sent: protocol 4 only accepts the structured format.
+ */
 private[copilot] def buildSendPayload(sessionId: String, options: MessageOptions): Json =
   Json.obj(
     "sessionId" -> sessionId.asJson,
     "prompt" -> options.prompt.asJson,
     "source" -> options.source.asJson,
+    "clientTurnId" -> options.clientTurnId.asJson,
     "attachments" -> options.attachments.asJson,
     "mode" -> options.mode.asJson,
-    // Structured output takes the responseFormat slot over the legacy string format.
-    "responseFormat" -> options.responseSchema.map(structuredResponseFormat)
-      .orElse(options.responseFormat.map(_.asJson)).asJson,
+    "responseFormat" -> options.responseSchema.map(structuredResponseFormat).asJson,
     "imageOptions" -> options.imageOptions.asJson,
     "requestHeaders" -> options.requestHeaders.asJson,
     "agentMode" -> options.agentMode.asJson,
@@ -1213,6 +1387,232 @@ private[copilot] def structuredResponseFormat(schema: JsonObject): Json =
       "schema" -> Json.fromJsonObject(schema)
     )
   )
+
+// ============================================================================
+// SDK protocol 4: grouped session payloads
+// ============================================================================
+
+/** Flat keys that stay at the root of protocol 4 create/resume payloads. */
+private[copilot] val RootSessionKeys: Set[String] = Set(
+  "sessionId", "model", "name", "clientName", "workingDirectory", "configDirectory",
+  "enableConfigDiscovery", "systemMessage", "diagnostics", "lifecycleDiagnostics", "cloud",
+  "traceparent", "tracestate", "suppressResumeEvent", "continuePendingWork",
+  "allowTranscriptRecovery", "requestedEnvironmentVariables"
+)
+
+/** Flat keys accepted only by `session.create`; dropped on resume. */
+private[copilot] val CreateOnlySessionKeys: Set[String] =
+  Set("name", "cloud", "trustWorkingDirectory", "refreshCustomInstructions")
+
+/** Flat keys accepted only by `session.resume`; dropped on create. */
+private[copilot] val ResumeOnlySessionKeys: Set[String] = Set(
+  "suppressResumeEvent", "continuePendingWork", "allowTranscriptRecovery", "requestedEnvironmentVariables", "openCanvases"
+)
+
+/** Option groups of protocol 4 create/resume payloads. */
+private[copilot] val SessionOptionGroups: Set[String] = Set(
+  "inference", "tools", "permissions", "interaction", "events", "agents", "skills", "mcp",
+  "github", "filesystem", "execution", "instructions", "hooks", "git", "state", "plugins",
+  "canvases", "extensions", "experiments", "policy"
+)
+
+/** Flat keys whose JSON null is an explicit clear that must be sent rather than skipped. */
+private[copilot] val ExplicitNullSessionKeys: Set[String] = Set("defaultProvider")
+
+/** Legacy provider fields that describe the model rather than the connection. */
+private[copilot] val ProviderModelFields: Set[String] = Set(
+  "modelId", "wireModel", "maxPromptTokens", "maxContextWindowTokens", "maxOutputTokens", "capabilities"
+)
+
+/** Flat keys mapped to their protocol 4 (group, member) location. */
+private[copilot] val GroupedSessionKeys: Map[String, (String, String)] = Map(
+  "reasoningEffort" -> ("inference", "reasoningEffort"),
+  "reasoningSummary" -> ("inference", "reasoningSummary"),
+  "contextTier" -> ("inference", "contextTier"),
+  "allowMultipleToolCalls" -> ("inference", "allowMultipleToolCalls"),
+  "enableCitations" -> ("inference", "enableCitations"),
+  "modelCapabilities" -> ("inference", "capabilities"),
+  "verbosity" -> ("inference", "verbosity"),
+  "providers" -> ("inference", "providers"),
+  "models" -> ("inference", "models"),
+  "defaultProvider" -> ("inference", "defaultProvider"),
+  "tools" -> ("tools", "definitions"),
+  "availableTools" -> ("tools", "availableTools"),
+  "excludedTools" -> ("tools", "excludedTools"),
+  "toolSearch" -> ("tools", "search"),
+  "largeOutput" -> ("tools", "largeOutput"),
+  "imageGeneration" -> ("tools", "imageGeneration"),
+  "manageScheduleEnabled" -> ("tools", "manageScheduleEnabled"),
+  "webSearch" -> ("tools", "webSearch"),
+  "shell" -> ("tools", "shell"),
+  "maxInlineBinaryBytes" -> ("tools", "maxInlineBinaryBytes"),
+  "requestPermission" -> ("permissions", "request"),
+  "sandboxConfig" -> ("permissions", "sandbox"),
+  "sandbox" -> ("permissions", "sandbox"),
+  "permissionMode" -> ("permissions", "mode"),
+  "sandboxConfigSource" -> ("permissions", "sandboxSource"),
+  "commands" -> ("interaction", "commands"),
+  "askUserVariant" -> ("interaction", "askUserVariant"),
+  "requestUserInput" -> ("interaction", "requestUserInput"),
+  "requestElicitation" -> ("interaction", "requestElicitation"),
+  "requestShellAuthentication" -> ("interaction", "requestShellAuthentication"),
+  "requestExitPlanMode" -> ("interaction", "requestExitPlanMode"),
+  "requestAutoModeSwitch" -> ("interaction", "requestAutoModeSwitch"),
+  "requestAutoModeRecovery" -> ("interaction", "requestAutoModeRecovery"),
+  "streaming" -> ("events", "streaming"),
+  "includeSubAgentStreamingEvents" -> ("events", "includeSubAgentStreamingEvents"),
+  "customAgents" -> ("agents", "definitions"),
+  "defaultAgent" -> ("agents", "default"),
+  "agent" -> ("agents", "selected"),
+  "includedBuiltinAgents" -> ("agents", "includedBuiltinAgents"),
+  "excludedBuiltinAgents" -> ("agents", "excludedBuiltinAgents"),
+  "customAgentsLocalOnly" -> ("agents", "localDiscoveryOnly"),
+  "agentDirectories" -> ("agents", "directories"),
+  "skillDirectories" -> ("skills", "directories"),
+  "enableSkills" -> ("skills", "enabled"),
+  "includedBuiltinSkills" -> ("skills", "includedBuiltinSkills"),
+  "disabledSkills" -> ("skills", "disabledSkills"),
+  "hasSkillProvider" -> ("skills", "hasProvider"),
+  "ignoredSkillsLocations" -> ("skills", "ignoredLocations"),
+  "mcpServers" -> ("mcp", "servers"),
+  "disabledMcpServers" -> ("mcp", "disabledServers"),
+  "requestMcpApps" -> ("mcp", "enableApps"),
+  "enableMcpApps" -> ("mcp", "enableApps"),
+  "mcpOAuthTokenStorage" -> ("mcp", "oauthTokenStorage"),
+  "authClientIdMetadataUrl" -> ("mcp", "authClientIdMetadataUrl"),
+  "envValueMode" -> ("mcp", "envValueMode"),
+  "managedMcpServers" -> ("mcp", "managedServers"),
+  "allowAllMcpServerInstructions" -> ("mcp", "allowAllServerInstructions"),
+  "gitHubToken" -> ("github", "token"),
+  "gitHubTokenProviderRegistrationId" -> ("github", "tokenProviderRegistrationId"),
+  "githubMcpToolConfig" -> ("github", "mcp"),
+  "capi" -> ("github", "capi"),
+  "enableSessionTelemetry" -> ("github", "telemetryEnabled"),
+  "enableManagedSettings" -> ("github", "fetchManagedSettings"),
+  "interactiveUser" -> ("github", "interactiveUser"),
+  "enableGitHubTelemetryForwarding" -> ("github", "telemetryForwarding"),
+  "authInfo" -> ("github", "authInfo"),
+  "copilotUrl" -> ("github", "copilotUrl"),
+  "additionalDirectories" -> ("filesystem", "additionalDirectories"),
+  "enableFileChangeTracking" -> ("filesystem", "trackFileChanges"),
+  "trustWorkingDirectory" -> ("filesystem", "trustWorkingDirectory"),
+  "sessionLimits" -> ("execution", "limits"),
+  "autopilot" -> ("execution", "autopilot"),
+  "autopilotContinuation" -> ("execution", "autopilotContinuation"),
+  "instructionDirectories" -> ("instructions", "directories"),
+  "organizationCustomInstructions" -> ("instructions", "organizationText"),
+  "enableOnDemandInstructionDiscovery" -> ("instructions", "onDemandDiscovery"),
+  "skipCustomInstructions" -> ("instructions", "skipCustomInstructions"),
+  "refreshCustomInstructions" -> ("instructions", "refreshCustomInstructions"),
+  "hooks" -> ("hooks", "hasHandlers"),
+  "hookDirectories" -> ("hooks", "directories"),
+  "enableFileHooks" -> ("hooks", "enableRepositoryHooks"),
+  "coauthorEnabled" -> ("git", "coauthorEnabled"),
+  "enableHostGitOperations" -> ("git", "enableHostGitOperations"),
+  "infiniteSessions" -> ("state", "infiniteSessions"),
+  "memory" -> ("state", "memory"),
+  "hasMemoryStore" -> ("state", "hasMemoryStore"),
+  "enableSessionStore" -> ("state", "enableCrossSessionStore"),
+  "skipEmbeddingRetrieval" -> ("state", "skipEmbeddingRetrieval"),
+  "embeddingCacheStorage" -> ("state", "embeddingCacheStorage"),
+  "pluginDirectories" -> ("plugins", "directories"),
+  "installedPlugins" -> ("plugins", "installed"),
+  "canvases" -> ("canvases", "definitions"),
+  "canvasProvider" -> ("canvases", "provider"),
+  "requestCanvasRenderer" -> ("canvases", "requestRenderer"),
+  "openCanvases" -> ("canvases", "open"),
+  "requestExtensions" -> ("extensions", "enabled"),
+  "extensionSdkPath" -> ("extensions", "sdkPath"),
+  "extensionInfo" -> ("extensions", "identity"),
+  "enableExperimentalMode" -> ("experiments", "enableExperimentalMode"),
+  "isExperimentalMode" -> ("experiments", "enableExperimentalMode"),
+  "featureFlags" -> ("experiments", "flags"),
+  "expAssignments" -> ("experiments", "assignments"),
+  "featureFlagConfiguration" -> ("experiments", "configuration"),
+  "allowedModels" -> ("policy", "allowedModels"),
+  "managedSettings" -> ("policy", "managedSettings"),
+  "excludedManagedSettings" -> ("policy", "excludedManagedSettings"),
+  "enforceManagedModelDefaults" -> ("policy", "enforceManagedModelDefaults"),
+)
+
+/**
+ * Converts the flat `session.create`/`session.resume` payload this SDK builds into the SDK protocol 4
+ * grouped payload. Root keys stay at the top level, known flat keys move to their option group,
+ * unknown keys pass through unchanged, null values are skipped (except explicit clears such as
+ * `defaultProvider`), empty groups are omitted, and members of an already-grouped object win over
+ * flat keys. A legacy single `provider` becomes the named "default" connection.
+ */
+private[copilot] def groupSessionParams(flat: Json, resume: Boolean): Json =
+  val fields = flat.asObject.map(_.toList).getOrElse(Nil)
+  val root = mutable.LinkedHashMap[String, Json]()
+  val groups = mutable.LinkedHashMap[String, mutable.LinkedHashMap[String, Json]]()
+  // Already-grouped objects first, so their members win over flat keys.
+  for (key, value) <- fields if SessionOptionGroups.contains(key) && value.isObject do
+    val group = groups.getOrElseUpdate(key, mutable.LinkedHashMap.empty[String, Json])
+    for (member, memberValue) <- value.asObject.map(_.toList).getOrElse(Nil) if !memberValue.isNull do
+      group(member) = memberValue
+  var legacyProvider: Option[JsonObject] = None
+  for (flatKey, value) <- fields do
+    val isGroupObject = SessionOptionGroups.contains(flatKey) && value.isObject
+    val skippedNull = value.isNull && !ExplicitNullSessionKeys.contains(flatKey)
+    if !isGroupObject && !skippedNull then
+      val key = flatKey match
+        case "configDir"     => "configDirectory"
+        case "disableResume" => "suppressResumeEvent"
+        case other           => other
+      val dropped = if resume then CreateOnlySessionKeys.contains(key) else ResumeOnlySessionKeys.contains(key)
+      if !dropped then
+        if key == "provider" then legacyProvider = value.asObject
+        else
+          val path = if RootSessionKeys.contains(key) then None else GroupedSessionKeys.get(key)
+          path match
+            case None =>
+              if !root.contains(key) then root(key) = value
+            case Some((groupName, member)) =>
+              val group = groups.getOrElseUpdate(groupName, mutable.LinkedHashMap.empty[String, Json])
+              if !group.contains(member) then group(member) = value
+  groups.get("mcp").foreach { mcp =>
+    if mcp.contains("servers") && !mcp.contains("envValueMode") then mcp("envValueMode") = "direct".asJson
+  }
+  legacyProvider.foreach(provider => translateLegacyProvider(provider, root.get("model"), groups))
+  for (groupName, members) <- groups if members.nonEmpty do
+    root(groupName) = Json.fromFields(members)
+  Json.fromFields(root)
+
+/**
+ * Translates a legacy single BYOK `provider` into the named "default" connection (plus a model
+ * definition when model-specific fields are present), selects it as the default provider, and
+ * disables Copilot API models as v1 BYOK did. Explicit `providers`, `defaultProvider`, or
+ * `capi.enabled` win: the legacy provider is then dropped.
+ */
+private def translateLegacyProvider(
+  provider: JsonObject,
+  model: Option[Json],
+  groups: mutable.LinkedHashMap[String, mutable.LinkedHashMap[String, Json]]
+): Unit =
+  val inference = groups.getOrElseUpdate("inference", mutable.LinkedHashMap.empty[String, Json])
+  val github = groups.getOrElseUpdate("github", mutable.LinkedHashMap.empty[String, Json])
+  val capi = github.get("capi").flatMap(_.asObject)
+  val explicit = inference.contains("providers") || inference.contains("defaultProvider") ||
+    capi.exists(_.contains("enabled"))
+  if !explicit then
+    val connection = mutable.LinkedHashMap[String, Json]("name" -> "default".asJson)
+    val modelFields = mutable.LinkedHashMap[String, Json]()
+    for (field, value) <- provider.toList if !value.isNull && field != "name" do
+      if ProviderModelFields.contains(field) then modelFields(field) = value
+      else connection(field) = value
+    inference("providers") = Json.arr(Json.fromFields(connection))
+    inference("defaultProvider") = "default".asJson
+    model.filterNot(_.isNull).foreach { modelId =>
+      if modelFields.nonEmpty && !inference.contains("models") then
+        val definition = mutable.LinkedHashMap[String, Json]("provider" -> "default".asJson, "id" -> modelId)
+        definition ++= modelFields
+        inference("models") = Json.arr(Json.fromFields(definition))
+    }
+    val capiWire = mutable.LinkedHashMap[String, Json]()
+    capi.foreach(existing => capiWire ++= existing.toList)
+    capiWire("enabled") = false.asJson
+    github("capi") = Json.fromFields(capiWire)
 
 /** Tool deferral policies for [[Tool.defer]]. */
 object ToolDefer:

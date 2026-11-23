@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <map>
 #include <optional>
@@ -109,6 +111,8 @@ struct Tool {
     std::optional<std::string> description;
     std::optional<nlohmann::json> parameters; // JSON Schema
     ToolHandler handler;
+    /// Safe to retry: repeated calls with the same arguments have no additional effect.
+    std::optional<bool> idempotent;
 };
 
 // ============================================================================
@@ -767,6 +771,37 @@ inline void to_json(nlohmann::json& j, const Attachment& a) {
 // Session Event
 // ============================================================================
 
+/// Well-known session event types.
+namespace SessionEventType {
+    /// Live, append-only shell output (not persisted or replayed). See ToolShellOutputData.
+    inline constexpr const char* ToolShellOutput = "tool.shell_output";
+}
+
+/// Shell output streams reported by "tool.shell_output" events.
+namespace ShellOutputStream {
+    inline constexpr const char* Stdout = "stdout";
+    inline constexpr const char* Stderr = "stderr";
+}
+
+/// Data of a "tool.shell_output" event.
+struct ToolShellOutputData {
+    /// Tool call that owns this output.
+    std::string toolCallId;
+    /// New output to append (chunks need not contain complete lines).
+    std::string text;
+    /// Zero-based publication sequence across all streams for this tool call.
+    int64_t sequence = 0;
+    /// "stdout", "stderr", or std::nullopt (omitted means stdout).
+    std::optional<std::string> stream;
+};
+
+inline void from_json(const nlohmann::json& j, ToolShellOutputData& d) {
+    d.toolCallId = j.value("toolCallId", "");
+    d.text = j.value("text", "");
+    d.sequence = j.contains("sequence") && j["sequence"].is_number() ? j["sequence"].get<int64_t>() : 0;
+    if (j.contains("stream") && j["stream"].is_string()) d.stream = j["stream"].get<std::string>();
+}
+
 /// A session event received from the CLI server.
 /// The 'type' field indicates the event kind (e.g., "assistant.message", "session.idle").
 /// The 'data' field contains event-specific payload as JSON.
@@ -777,6 +812,12 @@ struct SessionEvent {
     std::optional<bool> ephemeral;
     std::string type;
     nlohmann::json data;
+
+    /// Parsed data of a "tool.shell_output" event; std::nullopt for other event types.
+    std::optional<ToolShellOutputData> shellOutput() const {
+        if (type != SessionEventType::ToolShellOutput || !data.is_object()) return std::nullopt;
+        return data.get<ToolShellOutputData>();
+    }
 };
 
 inline void from_json(const nlohmann::json& j, SessionEvent& e) {
@@ -1077,6 +1118,284 @@ inline void to_json(nlohmann::json& j, const ModelCapabilitiesOverride& c) {
 }
 
 // ============================================================================
+// v3.0.0 feature types (SDK protocol 4 parity with @github/copilot-sdk 2.0)
+// ============================================================================
+
+/// Client modes (`CopilotClientOptions::mode`). The legacy value "copilot-cli" is
+/// accepted as an alias of CodingAgent.
+namespace ClientMode {
+    /// Full coding-agent defaults (identical to earlier releases).
+    inline constexpr const char* CodingAgent = "coding-agent";
+    /// Minimal defaults; every create/resume must specify availableTools.
+    inline constexpr const char* Empty = "empty";
+}
+
+/// Session permission modes (`permissionMode`, CopilotSession::setPermissionMode()).
+namespace PermissionMode {
+    inline constexpr const char* Manual = "manual";
+    inline constexpr const char* Assisted = "assisted";
+    inline constexpr const char* AllowAll = "allow-all";
+}
+
+/// Known reasons a permission mode change was refused (PermissionModeResult::reason).
+namespace PermissionModeRefusalReason {
+    inline constexpr const char* ManagedPolicy = "managed_policy";
+}
+
+/// Result of CopilotSession::setPermissionMode() (`session.permissions.setMode`).
+struct PermissionModeResult {
+    /// Whether the requested mode was applied.
+    bool success = false;
+    /// Authoritative permission mode after the request.
+    std::string mode;
+    /// Why the mode was refused (see PermissionModeRefusalReason), when known.
+    std::optional<std::string> reason;
+};
+
+inline void from_json(const nlohmann::json& j, PermissionModeResult& r) {
+    r.success = j.value("success", false);
+    r.mode = j.value("mode", "");
+    if (j.contains("reason") && j["reason"].is_string()) r.reason = j["reason"].get<std::string>();
+}
+
+/// Named BYOK provider connection (`inference.providers[]`).
+struct NamedProviderConfig {
+    /// Provider name referenced by ProviderModelConfig::provider (must not contain '/').
+    std::string name;
+    std::optional<std::string> type;       // "openai", "azure", "anthropic"
+    std::string baseUrl;
+    std::optional<std::string> apiKey;
+    /// Command whose stdout is used as the API key; run by the runtime before each request.
+    std::optional<std::string> apiKeyCommand;
+    std::optional<std::string> bearerToken;
+    std::optional<std::string> wireApi;    // "completions", "responses"
+    std::optional<std::string> transport;  // "http", "websockets"
+    std::optional<AzureProviderOptions> azure;
+    std::optional<std::map<std::string, std::string>> headers;
+    /// Product serving the models (see ModelProvider).
+    std::optional<std::string> modelProvider;
+};
+
+inline void to_json(nlohmann::json& j, const NamedProviderConfig& c) {
+    j = {{"name", c.name}, {"baseUrl", c.baseUrl}};
+    if (c.type) j["type"] = *c.type;
+    if (c.apiKey) j["apiKey"] = *c.apiKey;
+    if (c.apiKeyCommand) j["apiKeyCommand"] = *c.apiKeyCommand;
+    if (c.bearerToken) j["bearerToken"] = *c.bearerToken;
+    if (c.wireApi) j["wireApi"] = *c.wireApi;
+    if (c.transport) j["transport"] = *c.transport;
+    if (c.azure) j["azure"] = *c.azure;
+    if (c.headers) j["headers"] = *c.headers;
+    if (c.modelProvider) j["modelProvider"] = *c.modelProvider;
+}
+
+/// BYOK model definition (`inference.models[]`). Select it with model "<provider>/<id>".
+struct ProviderModelConfig {
+    /// Name of the NamedProviderConfig serving this model.
+    std::string provider;
+    /// Provider-local model id.
+    std::string id;
+    std::optional<std::string> modelId;
+    std::optional<std::string> wireModel;
+    std::optional<std::string> name;
+    std::optional<int> maxPromptTokens;
+    std::optional<int> maxContextWindowTokens;
+    std::optional<int> maxOutputTokens;
+    std::optional<nlohmann::json> capabilities;
+};
+
+inline void to_json(nlohmann::json& j, const ProviderModelConfig& c) {
+    j = {{"provider", c.provider}, {"id", c.id}};
+    if (c.modelId) j["modelId"] = *c.modelId;
+    if (c.wireModel) j["wireModel"] = *c.wireModel;
+    if (c.name) j["name"] = *c.name;
+    if (c.maxPromptTokens) j["maxPromptTokens"] = *c.maxPromptTokens;
+    if (c.maxContextWindowTokens) j["maxContextWindowTokens"] = *c.maxContextWindowTokens;
+    if (c.maxOutputTokens) j["maxOutputTokens"] = *c.maxOutputTokens;
+    if (c.capabilities) j["capabilities"] = *c.capabilities;
+}
+
+/// Copilot API options (`github.capi`).
+struct CapiConfig {
+    /// Enables Copilot API models alongside or instead of BYOK providers.
+    std::optional<bool> enabled;
+};
+
+/// Input kinds of a shell authentication request.
+namespace ShellAuthenticationInputKind {
+    inline constexpr const char* Secret = "secret";
+    inline constexpr const char* Text = "text";
+    inline constexpr const char* Confirm = "confirm";
+}
+
+/// A password or other answer a shell command run by the agent asks for
+/// (`shellAuthentication.request`). The answer goes only to the program that asked.
+struct ShellAuthenticationRequest {
+    std::string requestId;
+    /// Program that asked, such as "sudo", "ssh", or "git".
+    std::string program;
+    std::string prompt;
+    /// See ShellAuthenticationInputKind; "secret" input must be masked.
+    std::string inputKind;
+    std::string command;
+    std::string cwd;
+};
+
+/// Answer to a ShellAuthenticationRequest. Answer "confirm" requests with "yes".
+struct ShellAuthenticationResponse {
+    std::string action = "cancel"; // "accept" or "cancel"
+    std::string value;
+
+    static ShellAuthenticationResponse accept(std::string value) {
+        ShellAuthenticationResponse r;
+        r.action = "accept";
+        r.value = std::move(value);
+        return r;
+    }
+
+    static ShellAuthenticationResponse cancel() { return ShellAuthenticationResponse{}; }
+};
+
+/// Context passed to a ShellAuthenticationHandler.
+struct ShellAuthenticationInvocation {
+    std::string sessionId;
+    /// Returns true once the runtime cancelled the prompt (`shellAuthentication.cancel`);
+    /// the SDK then answers "cancel" regardless of the handler's result.
+    std::function<bool()> isCancelled;
+};
+
+using ShellAuthenticationHandler = std::function<ShellAuthenticationResponse(
+    const ShellAuthenticationRequest& request, const ShellAuthenticationInvocation& invocation)>;
+
+/// A memory the agent asked to store, after validation, secret filtering and approval
+/// (`memoryStore.store`).
+struct StoredMemory {
+    std::string sessionId;
+    std::string subject;
+    std::string fact;
+    std::string citations;
+    std::string reason;
+};
+
+/// Persists a stored memory. Throw to fail the store request.
+using MemoryStoreHandler = std::function<void(const StoredMemory& memory)>;
+
+/// Traffic network callbacks serve (NetworkOptions::scope).
+namespace NetworkScope {
+    inline constexpr const char* Connection = "connection";
+    inline constexpr const char* Runtime = "runtime";
+}
+
+/// A proxy's Basic authentication challenge (`network.authenticateBasic`).
+struct NetworkBasicAuthRequest {
+    std::string proxy;
+    /// Realm named by the proxy (untrusted text), when present.
+    std::optional<std::string> realm;
+    /// True when the proxy rejected the credentials sent last.
+    bool previousRejected = false;
+};
+
+/// Basic credentials; leave username empty to supply none.
+struct NetworkBasicCredentials {
+    std::string username;
+    std::string password;
+};
+
+/// Network callbacks registered with `network.setProvider` after the client connects.
+/// The SDK never logs tokens or passwords.
+struct NetworkOptions {
+    /// See NetworkScope; the runtime defaults to "connection".
+    std::optional<std::string> scope;
+    /// Returns a PAC-style proxy list such as "PROXY host:8080; DIRECT", or std::nullopt
+    /// to leave the request to the runtime's own proxy resolution.
+    std::function<std::optional<std::string>(const std::string& url)> resolveProxy;
+    /// Returns a base64 SPNEGO token for a Kerberos service principal, or std::nullopt.
+    std::function<std::optional<std::string>(const std::string& spn)> authenticateNegotiate;
+    /// Answers a proxy Basic challenge.
+    std::function<NetworkBasicCredentials(const NetworkBasicAuthRequest& request)> authenticateBasic;
+};
+
+/// One field-specific finding of a Policy Helper failure.
+struct PolicyHelperFailureDetail {
+    std::string message;
+    std::optional<std::string> path;
+};
+
+/// Validated help link of a Policy Helper failure.
+struct PolicyHelperHelpLink {
+    std::string url;
+    std::optional<std::string> label;
+};
+
+/// Structured Policy Helper failure. Reported in the JSON-RPC error data of a failed
+/// session.create/session.resume (see JsonRpcException::policyHelperFailure()) and on
+/// managed-settings snapshots. Helper-authored text is untrusted: render it as plain text.
+struct PolicyHelperFailure {
+    std::string category;
+    std::string failureMode;  // "ignore" or "failClosed"
+    std::string message;
+    bool previousPolicyRetained = false;
+    std::string reason;
+    std::optional<std::string> severity;
+    std::optional<std::string> authority;
+    std::optional<std::string> code;
+    std::vector<PolicyHelperFailureDetail> details;
+    std::optional<std::string> diagnostic;
+    std::optional<PolicyHelperHelpLink> helpLink;
+    std::optional<std::string> remediation;
+
+    /// Reads a failure from the failure object itself or from any object carrying it
+    /// under "policyHelperFailure" (JSON-RPC error data, managed-settings snapshots).
+    static std::optional<PolicyHelperFailure> from(const nlohmann::json& j);
+};
+
+inline void from_json(const nlohmann::json& j, PolicyHelperFailure& f) {
+    auto optString = [&j](const char* key) -> std::optional<std::string> {
+        if (j.contains(key) && j[key].is_string()) return j[key].get<std::string>();
+        return std::nullopt;
+    };
+    f.category = j.value("category", "");
+    f.failureMode = j.value("failureMode", "");
+    f.message = j.value("message", "");
+    f.previousPolicyRetained = j.value("previousPolicyRetained", false);
+    f.reason = j.value("reason", "");
+    f.severity = optString("severity");
+    f.authority = optString("authority");
+    f.code = optString("code");
+    f.diagnostic = optString("diagnostic");
+    f.remediation = optString("remediation");
+    f.details.clear();
+    if (j.contains("details") && j["details"].is_array()) {
+        for (const auto& d : j["details"]) {
+            if (!d.is_object()) continue;
+            PolicyHelperFailureDetail detail;
+            detail.message = d.value("message", "");
+            if (d.contains("path") && d["path"].is_string()) detail.path = d["path"].get<std::string>();
+            f.details.push_back(std::move(detail));
+        }
+    }
+    if (j.contains("helpLink") && j["helpLink"].is_object()) {
+        PolicyHelperHelpLink link;
+        link.url = j["helpLink"].value("url", "");
+        if (j["helpLink"].contains("label") && j["helpLink"]["label"].is_string()) {
+            link.label = j["helpLink"]["label"].get<std::string>();
+        }
+        f.helpLink = std::move(link);
+    }
+}
+
+inline std::optional<PolicyHelperFailure> PolicyHelperFailure::from(const nlohmann::json& j) {
+    if (!j.is_object()) return std::nullopt;
+    const nlohmann::json& failure =
+        j.contains("policyHelperFailure") ? j["policyHelperFailure"] : j;
+    if (!failure.is_object() || !failure.contains("category") || !failure["category"].is_string() ||
+        !failure.contains("message") || !failure["message"].is_string()) {
+        return std::nullopt;
+    }
+    return failure.get<PolicyHelperFailure>();
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -1197,6 +1516,22 @@ struct SessionConfig {
     std::optional<ImageGenerationConfig> imageGeneration;
     /// Autopilot continuation options.
     std::optional<AutopilotOptions> autopilot;
+
+    // --- v3.0.0 session options (SDK protocol 4 parity with @github/copilot-sdk 2.0) ---
+    /// Named BYOK provider connections (`inference.providers`).
+    std::optional<std::vector<NamedProviderConfig>> providers;
+    /// BYOK model definitions (`inference.models`); select one as "<provider>/<id>".
+    std::optional<std::vector<ProviderModelConfig>> models;
+    /// Provider used for unqualified model IDs (`inference.defaultProvider`).
+    std::optional<std::string> defaultProvider;
+    /// Copilot API options (`github.capi`), for example {enabled: false} for BYOK-only sessions.
+    std::optional<CapiConfig> capi;
+    /// Initial permission mode (see PermissionMode).
+    std::optional<std::string> permissionMode;
+    /// Answers password and confirmation prompts from shell commands (`shellAuthentication.request`).
+    ShellAuthenticationHandler onShellAuthenticationRequest;
+    /// Persists memories the agent stores (`memoryStore.store`).
+    MemoryStoreHandler storeMemory;
 };
 
 struct ResumeSessionConfig {
@@ -1274,6 +1609,27 @@ struct ResumeSessionConfig {
     std::optional<ImageGenerationConfig> imageGeneration;
     /// Autopilot continuation options.
     std::optional<AutopilotOptions> autopilot;
+
+    // --- v3.0.0 session options (SDK protocol 4 parity with @github/copilot-sdk 2.0) ---
+    /// Skip the session.resume event and its side effects (`suppressResumeEvent`).
+    /// `disableResume` remains supported as a legacy alias.
+    bool suppressResumeEvent = false;
+    /// Named BYOK provider connections (`inference.providers`); re-supply them on cold resume.
+    std::optional<std::vector<NamedProviderConfig>> providers;
+    /// BYOK model definitions (`inference.models`); select one as "<provider>/<id>".
+    std::optional<std::vector<ProviderModelConfig>> models;
+    /// Provider used for unqualified model IDs (`inference.defaultProvider`).
+    std::optional<std::string> defaultProvider;
+    /// Send defaultProvider: null to clear the default provider (ignored when defaultProvider is set).
+    bool clearDefaultProvider = false;
+    /// Copilot API options (`github.capi`).
+    std::optional<CapiConfig> capi;
+    /// Permission mode (see PermissionMode).
+    std::optional<std::string> permissionMode;
+    /// Answers password and confirmation prompts from shell commands (`shellAuthentication.request`).
+    ShellAuthenticationHandler onShellAuthenticationRequest;
+    /// Persists memories the agent stores (`memoryStore.store`).
+    MemoryStoreHandler storeMemory;
 };
 
 // ============================================================================
@@ -1400,22 +1756,64 @@ struct MessageOptions {
     /// JSON Schema for structured output. When set, the request carries
     /// responseFormat {"type": "json_schema", ...} instead of the legacy responseFormat.
     std::optional<nlohmann::json> responseSchema;
+    /// Opaque client-generated turn ID echoed on this turn's events (`clientTurnId`).
+    std::optional<std::string> clientTurnId;
 };
 
 // ============================================================================
 // Ping Response
 // ============================================================================
 
+namespace detail {
+
+/// Parses an ISO 8601 UTC timestamp ("2026-11-22T21:29:43.527Z") into Unix epoch
+/// milliseconds; returns 0 when the text is malformed.
+inline int64_t parseIso8601UtcMillis(const std::string& text) {
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (std::sscanf(text.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d",
+                    &year, &month, &day, &hour, &minute, &second) != 6 ||
+        month < 1 || month > 12) {
+        return 0;
+    }
+    int64_t millis = 0;
+    auto dot = text.find('.');
+    if (dot != std::string::npos) {
+        int64_t scale = 100;
+        for (std::size_t i = dot + 1; i < text.size() && scale > 0; ++i, scale /= 10) {
+            if (text[i] < '0' || text[i] > '9') break;
+            millis += static_cast<int64_t>(text[i] - '0') * scale;
+        }
+    }
+    // Days since 1970-01-01 for the proleptic Gregorian calendar.
+    const int64_t y = static_cast<int64_t>(year) - (month <= 2 ? 1 : 0);
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const int64_t yoe = y - era * 400;
+    const int64_t doy = (153 * static_cast<int64_t>(month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const int64_t days = era * 146097 + doe - 719468;
+    return ((days * 24 + hour) * 60 + minute) * 60000 + static_cast<int64_t>(second) * 1000 + millis;
+}
+
+} // namespace detail
+
 struct PingResponse {
     std::string message;
+    /// Server time in Unix epoch milliseconds (the CLI reports an ISO 8601 string).
     int64_t timestamp = 0;
     std::optional<int> protocolVersion;
 };
 
 inline void from_json(const nlohmann::json& j, PingResponse& r) {
-    if (j.contains("message")) j["message"].get_to(r.message);
-    if (j.contains("timestamp")) j["timestamp"].get_to(r.timestamp);
-    if (j.contains("protocolVersion") && !j["protocolVersion"].is_null())
+    if (j.contains("message") && j["message"].is_string()) j["message"].get_to(r.message);
+    if (j.contains("timestamp")) {
+        const auto& ts = j["timestamp"];
+        if (ts.is_number()) {
+            r.timestamp = ts.get<int64_t>();
+        } else if (ts.is_string()) {
+            r.timestamp = detail::parseIso8601UtcMillis(ts.get<std::string>());
+        }
+    }
+    if (j.contains("protocolVersion") && j["protocolVersion"].is_number_integer())
         r.protocolVersion = j["protocolVersion"].get<int>();
 }
 
@@ -1719,6 +2117,13 @@ struct CopilotClientOptions {
 
     /// Integrating application identity sent on the `connect` handshake (clientInfo).
     std::optional<CopilotClientInfo> clientInfo;
+
+    /// Client mode (see ClientMode): "coding-agent" (default) or "empty". Empty mode
+    /// requires availableTools on every create/resume and applies minimal defaults.
+    std::string mode = ClientMode::CodingAgent;
+
+    /// Network callbacks registered with `network.setProvider` after connecting.
+    std::optional<NetworkOptions> network;
 };
 
 } // namespace copilot

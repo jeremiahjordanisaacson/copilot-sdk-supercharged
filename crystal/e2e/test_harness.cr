@@ -50,6 +50,31 @@ module CopilotE2E
     end
   end
 
+  # Resolve the Copilot CLI for E2E runs: `COPILOT_CLI_PATH` (CI points it at
+  # the `node_modules/.bin/copilot` shim, which runs directly), then
+  # `@github/copilot/npm-loader.js` (Copilot CLI 1.0.113+, run with node), then
+  # the legacy `index.js` entry points. Returns nil when none is installed.
+  def self.cli_path : String?
+    if env_path = ENV["COPILOT_CLI_PATH"]?
+      return env_path if File.exists?(env_path)
+    end
+
+    modules = File.expand_path("../../nodejs/node_modules/@github", __DIR__)
+    npm_loader = File.join(modules, "copilot", "npm-loader.js")
+    return npm_loader if File.exists?(npm_loader)
+
+    if Dir.exists?(modules)
+      Dir.children(modules).sort.each do |name|
+        next unless name.starts_with?("copilot-") && !name.includes?("language-server")
+        candidate = File.join(modules, name, "index.js")
+        return candidate if File.exists?(candidate)
+      end
+    end
+
+    legacy = File.join(modules, "copilot", "index.js")
+    File.exists?(legacy) ? legacy : nil
+  end
+
   # Start the replay proxy and return a handle.
   def self.start_proxy : ProxyHandle
     # Path from crystal/e2e to repo-root/test/harness/server.ts
@@ -78,6 +103,7 @@ module CopilotE2E
 
     ENV["COPILOT_API_URL"] = url
     puts "[crystal-e2e] Proxy listening at #{url}"
+    puts "[crystal-e2e] Copilot CLI: #{cli_path || "not installed"}"
 
     ProxyHandle.new(url: url, process: process)
   end

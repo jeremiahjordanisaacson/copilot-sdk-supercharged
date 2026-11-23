@@ -11,6 +11,10 @@ classdef CopilotSession < handle
     properties (SetAccess = ?copilot.CopilotClient)
         % Unique session identifier assigned by the server.
         SessionId (1,:) char = ''
+
+        % Called once when the session is detached (releases the client's
+        % callback registrations for this session).
+        CloseCallback = []
     end
 
     properties (Access = private)
@@ -59,10 +63,9 @@ classdef CopilotSession < handle
                 obj
                 msgOpts copilot.MessageOptions
             end
-            params = struct( ...
-                'sessionId', obj.SessionId, ...
-                'message',   msgOpts.toStruct());
-            obj.RpcClient.notify('session/send', params);
+            params = msgOpts.toSendParams();
+            params.sessionId = obj.SessionId;
+            obj.RpcClient.request('session.send', params, 30);
         end
 
         function response = sendAndWait(obj, msgOpts)
@@ -78,10 +81,9 @@ classdef CopilotSession < handle
             % Prepare a blocking future.
             obj.IdleFuture = struct('done', false, 'content', '', 'raw', []);
 
-            params = struct( ...
-                'sessionId', obj.SessionId, ...
-                'message',   msgOpts.toStruct());
-            obj.RpcClient.notify('session/send', params);
+            params = msgOpts.toSendParams();
+            params.sessionId = obj.SessionId;
+            obj.RpcClient.request('session.send', params, 30);
 
             timeout = msgOpts.Timeout;
             if timeout <= 0
@@ -103,14 +105,70 @@ classdef CopilotSession < handle
         end
 
         function abort(obj)
-            %abort  Cancel the active agent turn.
-            obj.RpcClient.notify('session/abort', ...
-                struct('sessionId', obj.SessionId));
+            %abort  Cancel the active agent turn (session.abort).
+            %
+            %   Failures arrive as JSON-RPC errors and are raised.
+            obj.RpcClient.request('session.abort', ...
+                struct('sessionId', obj.SessionId), 15);
         end
 
         function msgs = getMessages(obj)
             %getMessages  Return all messages collected for this session.
             msgs = obj.Messages;
+        end
+
+        function detach(obj)
+            %detach  Detach this connection from the session (session.detach).
+            %
+            %   The session stays on disk; call CopilotClient.resumeSession()
+            %   to reconnect later.  Releases the session's callbacks.
+            try
+                obj.RpcClient.request('session.detach', ...
+                    struct('sessionId', obj.SessionId), 15);
+            catch me
+                obj.release();
+                rethrow(me);
+            end
+            obj.release();
+        end
+
+        function switchAutoTier(obj, tier)
+            %switchAutoTier  Request an Auto routing tier for future turns.
+            %
+            %   session.switchAutoTier('balance');
+            %
+            %   Tier is 'fast', 'efficiency', 'balance' or 'intelligence'
+            %   (see copilot.Types.AutoTier*).
+            arguments
+                obj
+                tier (1,:) char
+            end
+            obj.RpcClient.request('session.model.switchAutoTier', ...
+                struct('sessionId', obj.SessionId, 'autoTier', tier), 15);
+        end
+
+        function snapshot = recheckPolicyHelper(obj)
+            %recheckPolicyHelper  Re-run the enterprise Policy Helper.
+            %
+            %   snapshot = session.recheckPolicyHelper();
+            snapshot = obj.RpcClient.request( ...
+                'session.managedSettings.recheckPolicyHelper', ...
+                struct('sessionId', obj.SessionId), 30);
+        end
+
+        function result = setPermissionMode(obj, mode)
+            %setPermissionMode  Change the permission mode.
+            %
+            %   result = session.setPermissionMode('autopilot');
+            %   if ~result.success && isfield(result, 'reason')
+            %       % result.reason is 'managed_policy' when policy refused it
+            %   end
+            arguments
+                obj
+                mode (1,:) char
+            end
+            result = obj.RpcClient.request('session.permissions.setMode', ...
+                struct('sessionId', obj.SessionId, 'mode', mode), 15);
         end
 
         function disconnect(obj)
@@ -119,8 +177,7 @@ classdef CopilotSession < handle
             %   The session is removed from the client's registry.  Call
             %   CopilotClient.resumeSession() to reconnect later.
             try
-                obj.RpcClient.notify('session/disconnect', ...
-                    struct('sessionId', obj.SessionId));
+                obj.detach();
             catch
                 % Ignore errors during teardown.
             end
@@ -132,6 +189,15 @@ classdef CopilotSession < handle
     end
 
     methods (Access = private)
+        function release(obj)
+            %release  Run the client's close callback once.
+            if ~isempty(obj.CloseCallback)
+                callback = obj.CloseCallback;
+                obj.CloseCallback = [];
+                callback();
+            end
+        end
+
         function onNotification(obj, evt)
             %onNotification  Handle incoming JSON-RPC notifications.
             if ~isa(evt, 'copilot.RpcEventData')
@@ -152,6 +218,14 @@ classdef CopilotSession < handle
             end
 
             method = evt.Method;
+
+            % ---- SDK protocol 4 session events: {sessionId, event} ----
+            % Unknown event types (including tool.shell_output and the
+            % removed tool.execution_partial_result) are passed through.
+            if strcmp(method, 'session.event')
+                obj.routeSessionEvent('session/event', params);
+                return;
+            end
 
             % ---- Tool invocation ----
             if strcmp(method, 'session/tool_call')
@@ -184,7 +258,11 @@ classdef CopilotSession < handle
                     if strcmp(evtType, 'assistant.message')
                         obj.Messages{end+1} = params.event;
                         if ~isempty(obj.IdleFuture)
-                            if isfield(params.event, 'content')
+                            if isfield(params.event, 'data') ...
+                                    && isstruct(params.event.data) ...
+                                    && isfield(params.event.data, 'content')
+                                obj.IdleFuture.content = params.event.data.content;
+                            elseif isfield(params.event, 'content')
                                 obj.IdleFuture.content = params.event.content;
                             end
                             obj.IdleFuture.raw = params.event;

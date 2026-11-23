@@ -31,6 +31,15 @@ Namespace GitHub.Copilot.SDK.VB.E2E
         ''' <summary>Gets the absolute path to the repo root.</summary>
         Public ReadOnly Property RepoRoot As String
 
+        ''' <summary>
+        ''' Executable that launches the Copilot CLI, or Nothing when no CLI was found (the client
+        ''' then falls back to its own lookup). See <see cref="FindCliPath"/> for the lookup order.
+        ''' </summary>
+        Public ReadOnly Property CliPath As String
+
+        ''' <summary>Leading CLI arguments: the quoted script path when the CLI runs with node.</summary>
+        Public ReadOnly Property CliArgs As String()
+
         Public Sub New()
             ' e2e dir is visualbasic/e2e, repo root is 3 levels up
             Dim e2eDir = Path.GetDirectoryName(GetType(TestHarness).Assembly.Location)
@@ -42,7 +51,48 @@ Namespace GitHub.Copilot.SDK.VB.E2E
                 candidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."))
             End If
             RepoRoot = candidate
+
+            Dim cli = FindCliPath(RepoRoot)
+            If cli Is Nothing Then
+                CliPath = Nothing
+                CliArgs = Nothing
+            ElseIf cli.EndsWith(".js", StringComparison.OrdinalIgnoreCase) Then
+                ' JavaScript entry points run with node.
+                CliPath = "node"
+                CliArgs = {$"""{cli}"""}
+            Else
+                ' Anything else (such as the node_modules/.bin/copilot shim) runs directly.
+                CliPath = cli
+                CliArgs = Nothing
+            End If
         End Sub
+
+        ''' <summary>
+        ''' Locates the Copilot CLI. Lookup order:
+        ''' 1. COPILOT_CLI_PATH, when set and the file exists (CI points it at nodejs/node_modules/.bin/copilot).
+        ''' 2. nodejs/node_modules/@github/copilot/npm-loader.js (CLI 1.0.113 and newer).
+        ''' 3. Legacy nodejs/node_modules/@github/copilot-*/index.js and @github/copilot/index.js.
+        ''' Returns Nothing when no CLI is installed.
+        ''' </summary>
+        Public Shared Function FindCliPath(repoRoot As String) As String
+            Dim envPath = Environment.GetEnvironmentVariable("COPILOT_CLI_PATH")
+            If Not String.IsNullOrEmpty(envPath) AndAlso File.Exists(envPath) Then Return envPath
+
+            Dim scope = Path.Combine(repoRoot, "nodejs", "node_modules", "@github")
+            Dim loader = Path.Combine(scope, "copilot", "npm-loader.js")
+            If File.Exists(loader) Then Return loader
+
+            If Directory.Exists(scope) Then
+                For Each platformDir In Directory.GetDirectories(scope, "copilot-*")
+                    Dim index = Path.Combine(platformDir, "index.js")
+                    If File.Exists(index) Then Return index
+                Next
+            End If
+
+            Dim legacy = Path.Combine(scope, "copilot", "index.js")
+            If File.Exists(legacy) Then Return legacy
+            Return Nothing
+        End Function
 
         ''' <summary>
         ''' Starts the replay proxy server and waits for it to be ready.

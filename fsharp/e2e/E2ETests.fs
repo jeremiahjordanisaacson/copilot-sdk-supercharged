@@ -31,13 +31,24 @@ type ProxyFixture() =
 /// E2E tests for the F# Copilot SDK using the shared replay proxy.
 type E2ETests(fixture: ProxyFixture) =
 
-    interface IClassFixture<ProxyFixture>
-
-    let makeClient () =
-        let opts =
+    /// Client options that spawn the discovered CLI against the replay proxy,
+    /// or connect to the proxy URL directly when no CLI is installed.
+    let baseOptions () =
+        match CliDiscovery.findCliPath () with
+        | Some cliPath ->
+            let executable, leadingArgs = CliDiscovery.commandFor cliPath
+            { CopilotClientOptions.defaults with
+                CliPath = Some executable
+                CliArgs = leadingArgs |> List.map (sprintf "\"%s\"")
+                Environment = Some (dict [ "COPILOT_API_URL", fixture.ProxyUrl ]) }
+        | None ->
             { CopilotClientOptions.defaults with
                 CliUrl = Some fixture.CliUrl }
-        new CopilotClient(opts)
+
+    let makeClient () =
+        new CopilotClient(baseOptions ())
+
+    interface IClassFixture<ProxyFixture>
 
     [<Fact>]
     member _.``Session create and disconnect`` () =
@@ -90,8 +101,7 @@ type E2ETests(fixture: ProxyFixture) =
                   Conventions = "posix" }
 
             let opts =
-                { CopilotClientOptions.defaults with
-                    CliUrl = Some fixture.CliUrl
+                { baseOptions () with
                     SessionFs = Some fsConfig }
 
             use client = new CopilotClient(opts)
@@ -496,8 +506,7 @@ type E2ETests(fixture: ProxyFixture) =
                   Conventions = "posix" }
 
             let opts =
-                { CopilotClientOptions.defaults with
-                    CliUrl = Some fixture.CliUrl
+                { baseOptions () with
                     SessionFs = Some fsConfig }
 
             use client = new CopilotClient(opts)

@@ -4,6 +4,7 @@
 module copilot
 
 import json
+import x.json2
 
 // --- version tests ---
 
@@ -13,8 +14,90 @@ fn test_sdk_version_is_set() {
 }
 
 fn test_protocol_version_value() {
-	assert protocol_version == 3
-	assert min_protocol_version == 3
+	assert protocol_version == 4
+	assert min_protocol_version == 4
+}
+
+fn test_verify_protocol_version() {
+	verify_protocol_version('{"protocolVersion":4}') or { assert false, err.msg() }
+	verify_protocol_version('{"protocolVersion":3}') or {
+		assert err.msg().contains('server reports version 3')
+		return
+	}
+	assert false, 'protocol 3 must be rejected'
+}
+
+fn test_verify_protocol_version_missing() {
+	verify_protocol_version('{"message":"pong"}') or {
+		assert err.msg().contains('does not report a protocol version')
+		return
+	}
+	assert false, 'a missing protocol version must be rejected'
+}
+
+// --- protocol 4 session payload tests ---
+
+fn test_group_session_params_resume() {
+	mut flat := map[string]string{}
+	flat['"model"'] = '"m"'
+	flat['streaming'] = 'true'
+	flat['requestPermission'] = 'true'
+	flat['tools'] = '[{"name":"t","idempotent":true}]'
+	flat['hooks'] = 'true'
+	flat['disableResume'] = 'true'
+	flat['trustWorkingDirectory'] = '"session"'
+	flat['mcpServers'] = '{"s":{"command":"x"}}'
+	flat['futureKey'] = '1'
+	grouped := group_session_params(flat, true)
+	assert grouped.root['model'] == '"m"'
+	assert grouped.root['suppressResumeEvent'] == 'true'
+	assert grouped.root['futureKey'] == '1'
+	assert grouped.get('events', 'streaming') == 'true'
+	assert grouped.get('permissions', 'request') == 'true'
+	assert grouped.get('hooks', 'hasHandlers') == 'true'
+	assert grouped.get('tools', 'definitions').contains('"idempotent":true')
+	assert grouped.get('mcp', 'envValueMode') == '"direct"'
+	assert !grouped.has('filesystem', 'trustWorkingDirectory')
+	encoded := grouped.to_json()
+	assert encoded.contains('"events":{"streaming":true}')
+	assert !encoded.contains('"streaming":true,')
+}
+
+fn test_group_session_params_legacy_provider() {
+	config := SessionConfig{
+		model:                       'gpt'
+		provider:                    ProviderConfig{
+			provider_type:     'openai'
+			base_url:          'https://x'
+			api_key_command:   'get-key'
+			max_output_tokens: 100
+		}
+		enable_web_socket_responses: true
+	}
+	grouped := group_session_params(build_session_params(config), false)
+	providers := grouped.get('inference', 'providers')
+	assert providers.contains('"name":"default"')
+	assert providers.contains('"apiKeyCommand":"get-key"')
+	assert !providers.contains('maxOutputTokens')
+	assert grouped.get('inference', 'defaultProvider') == '"default"'
+	assert grouped.get('inference', 'models').contains('"id":"gpt"')
+	capi := grouped.get('github', 'capi')
+	assert capi.contains('"enabled":false')
+	assert capi.contains('"enableWebSocketResponses":true')
+	assert 'provider' !in grouped.root
+	assert 'enableWebSocketResponses' !in grouped.root
+}
+
+fn test_empty_mode_defaults_keep_user_values() {
+	mut flat := map[string]string{}
+	flat['memory'] = '{"enabled":true}'
+	mut grouped := group_session_params(flat, false)
+	grouped.apply_empty_mode_defaults()
+	assert grouped.get('state', 'memory') == '{"enabled":true}'
+	assert grouped.get('state', 'skipEmbeddingRetrieval') == 'true'
+	assert grouped.get('mcp', 'oauthTokenStorage') == '"in-memory"'
+	mode := parse_client_mode('copilot-cli') or { panic(err) }
+	assert mode == .coding_agent
 }
 
 fn test_sdk_name() {
@@ -189,7 +272,7 @@ fn test_tool_to_json_schema() {
 	}
 
 	schema := tool_to_json_schema(&tool)
-	encoded := json.encode(schema)
+	encoded := json2.Any(schema).json_str()
 	assert encoded.contains('"type"')
 	assert encoded.contains('"properties"')
 	assert encoded.contains('"city"')

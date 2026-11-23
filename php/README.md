@@ -64,6 +64,173 @@ $session->destroy();
 $client->stop();
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected by `start()` with an `SDK protocol version mismatch` error.
+
+Existing options keep working: you keep passing the same `SessionConfig` / `ResumeSessionConfig` arguments, and the SDK translates them into the grouped v4 wire payload (for example `streaming` becomes `events.streaming` and `onPermissionRequest` becomes `permissions.request`). A legacy single `provider` (BYOK) is translated into a named `"default"` provider with Copilot API models disabled, matching v1 behavior.
+
+### Named BYOK providers
+
+```php
+use GitHub\Copilot\CapiConfig;
+use GitHub\Copilot\NamedProviderConfig;
+use GitHub\Copilot\ProviderModelConfig;
+use GitHub\Copilot\ResumeSessionConfig;
+
+$gateway = new NamedProviderConfig(
+    name: 'gateway',
+    baseUrl: 'https://models.example.com/v1',
+    type: 'openai',
+    apiKeyCommand: 'print-model-key',
+);
+
+$session = $client->createSession(new SessionConfig(
+    model: 'gateway/chat',
+    providers: [$gateway],
+    models: [new ProviderModelConfig(provider: 'gateway', id: 'chat', modelId: 'gpt-4o', maxOutputTokens: 4096)],
+    capi: new CapiConfig(enabled: false), // BYOK-only catalog
+));
+
+// Route unqualified model names through a connection, then clear it again on resume
+$session = $client->createSession(new SessionConfig(
+    model: 'deployment',
+    providers: [$gateway],
+    defaultProvider: 'gateway',
+    capi: ['enabled' => false],
+));
+$client->resumeSession($session->sessionId, new ResumeSessionConfig(
+    model: 'gpt-5.4',
+    capi: ['enabled' => true],
+    clearDefaultProvider: true,
+));
+```
+
+### Idempotent tools
+
+```php
+$tool = DefineTool::create('lookup_order')
+    ->description('Look up an order')
+    ->idempotent()
+    ->handler(fn ($args) => "Order {$args['id']} shipped")
+    ->build();
+```
+
+### Client turn IDs
+
+```php
+$session->sendAndWait(new MessageOptions(prompt: 'Summarize the diff', clientTurnId: 'turn-42'));
+```
+
+### Client mode
+
+`mode: 'coding-agent'` (the default) keeps today's behavior. `mode: 'empty'` requires every session to set `availableTools` and applies conservative defaults (no telemetry, in-memory OAuth and embedding storage, no cross-session store or memory, no on-demand instruction discovery, repository hooks or host git operations). Values you pass win. `'copilot-cli'` is accepted as an alias of `'coding-agent'`.
+
+```php
+use GitHub\Copilot\ClientMode;
+
+$client = new CopilotClient(new CopilotClientOptions(mode: ClientMode::EMPTY));
+$session = $client->createSession(new SessionConfig(model: 'gpt-5.4', availableTools: ['view']));
+```
+
+### Shell output events
+
+```php
+use GitHub\Copilot\ShellOutputData;
+
+$session->onEvent(ShellOutputData::EVENT_TYPE, function (SessionEvent $event) {
+    $chunk = ShellOutputData::fromArray($event->data);
+    echo $chunk->text; // $chunk->stream is "stdout", "stderr" or null (stdout)
+});
+```
+
+### Shell authentication
+
+Answer credential prompts from shell programs (for example `git` asking for a password). Failures and malformed answers cancel; the answer is never logged.
+
+```php
+use GitHub\Copilot\ShellAuthenticationRequest;
+use GitHub\Copilot\ShellAuthenticationResponse;
+
+$session = $client->createSession(new SessionConfig(
+    onShellAuthenticationRequest: function (ShellAuthenticationRequest $request, array $ctx) {
+        // $request->program, ->prompt, ->inputKind ("secret", "text" or "confirm"), ->command, ->cwd
+        return ShellAuthenticationResponse::accept(fetchSecret($request->program));
+    },
+));
+```
+
+### Memory store
+
+```php
+use GitHub\Copilot\StoredMemory;
+
+$session = $client->createSession(new SessionConfig(
+    storeMemory: function (StoredMemory $memory, array $ctx): void {
+        saveMemory($memory->subject, $memory->fact);
+    },
+));
+```
+
+### Network callbacks
+
+Resolve proxies and answer proxy authentication challenges from your application. Tokens and passwords are never logged.
+
+```php
+use GitHub\Copilot\NetworkAuthenticateBasicRequest;
+use GitHub\Copilot\NetworkConfig;
+use GitHub\Copilot\NetworkResolveProxyRequest;
+use GitHub\Copilot\NetworkScope;
+
+$client = new CopilotClient(new CopilotClientOptions(
+    network: new NetworkConfig(
+        scope: NetworkScope::RUNTIME,
+        resolveProxy: fn (NetworkResolveProxyRequest $r) => str_starts_with($r->url, 'https://internal')
+            ? 'DIRECT'
+            : 'PROXY proxy.example:8080',
+        authenticateBasic: fn (NetworkAuthenticateBasicRequest $r) => $r->previousRejected
+            ? null
+            : ['username' => 'svc', 'password' => getenv('PROXY_PASSWORD')],
+    ),
+));
+```
+
+### Policy helper failures
+
+```php
+use GitHub\Copilot\JsonRpcException;
+
+try {
+    $client->createSession(new SessionConfig(model: 'gpt-5.4'));
+} catch (JsonRpcException $e) {
+    $failure = $e->getPolicyHelperFailure();
+    if ($failure !== null) {
+        error_log("Policy helper failed ({$failure->category}, {$failure->failureMode}): {$failure->message}");
+    }
+    throw $e;
+}
+```
+
+### Permission mode refusal reason
+
+```php
+use GitHub\Copilot\PermissionMode;
+use GitHub\Copilot\PermissionModeRefusalReason;
+
+$result = $session->setPermissionMode(PermissionMode::ALLOW_ALL);
+if ($result->reason === PermissionModeRefusalReason::MANAGED_POLICY) {
+    error_log('Blocked by managed policy');
+}
+```
+
+The v2.6.0 features (client info, Auto routing tier, ask-user variant, GitHub token provider, sandbox bypass, feature flags, session detach, message source, managed settings cache clear, policy helper recheck, model allowlist, OAuth client metadata URL, max output tokens override, structured output, agent and hook directories, working directory trust, transcript recovery, image generation config, Autopilot options, subagent lifecycle hooks and BYOK `apiKeyCommand`) are unchanged and are sent in their v4 groups.
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process runtime hosting is not the default connection: the PHP SDK keeps spawning the CLI (or connecting over TCP with `cliUrl`).
+* PHP is single-threaded, so server callbacks (tools, permissions, shell authentication, memory store and network callbacks) are answered only while the client processes messages: during a request, `sendAndWait()`, or `processMessages()`. A `shellAuthentication.cancel` that arrives while your handler runs is applied when the handler returns, and the prompt then answers `cancel`.
+
 ## Architecture
 
 The SDK follows the same patterns as all other SDKs in this repository (40 languages supported):
@@ -91,7 +258,7 @@ Content-Length: 123\r\n
 {"jsonrpc":"2.0","id":1,"method":"ping","params":{}}
 ```
 
-The SDK protocol version (currently `2`) is verified on startup via the ping response.
+The SDK protocol version (currently `4`) is verified on startup through the `connect` handshake (falling back to `ping` on older servers).
 
 ## API Reference
 
@@ -144,6 +311,7 @@ $client = new CopilotClient(new CopilotClientOptions(
 | `listSessions(): SessionMetadata[]` | List all sessions |
 | `getForegroundSessionId(): ?string` | Get foreground session (TUI mode) |
 | `setForegroundSessionId(string)` | Set foreground session (TUI mode) |
+| `clearManagedSettingsCache()` | Clear cached managed (enterprise policy) settings |
 | `onLifecycle(callable): callable` | Subscribe to all lifecycle events |
 | `onLifecycleEvent(string, callable): callable` | Subscribe to specific lifecycle event |
 | `processMessages(float)` | Process pending server messages |
@@ -173,7 +341,10 @@ $session = $client->createSession(new SessionConfig(
 | `on(callable): callable` | Subscribe to all events |
 | `onEvent(string, callable): callable` | Subscribe to specific event type |
 | `getMessages(): SessionEvent[]` | Get conversation history |
-| `destroy()` | Destroy the session |
+| `setAutoTier(?string): array` | Change the Auto routing preference |
+| `setPermissionMode(string): PermissionModeSetResult` | Change the permission mode |
+| `recheckPolicyHelper(): array` | Re-run the managed-settings policy helper |
+| `destroy()` | Detach from the session (state is kept for resume) |
 | `abort()` | Abort current processing |
 
 #### Session Events

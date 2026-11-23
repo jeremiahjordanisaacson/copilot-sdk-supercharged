@@ -1,12 +1,41 @@
 ## Test harness for E2E tests - manages the replaying CAPI proxy
 
-import std/[osproc, strutils, os, httpclient, json, re]
+import std/[osproc, strutils, os, httpclient, json, re, streams]
 
 type
   CapiProxy* = object
     process: Process
     proxyUrl: string
     running: bool
+
+proc repoRoot(): string =
+  ## Repository root (this file lives in nim/e2e).
+  normalizedPath(currentSourcePath().parentDir() / ".." / "..")
+
+proc findCopilotCli*(): string =
+  ## Locate the Copilot CLI for E2E runs, in order:
+  ## 1. `COPILOT_CLI_PATH` when it points to an existing file
+  ## 2. nodejs/node_modules/@github/copilot/npm-loader.js (run with node)
+  ## 3. legacy nodejs/node_modules/@github/copilot-*/index.js, then
+  ##    nodejs/node_modules/@github/copilot/index.js
+  ## Returns "" when nothing is found.
+  let envPath = getEnv("COPILOT_CLI_PATH")
+  if envPath.len > 0 and fileExists(envPath):
+    return envPath
+  let githubDir = repoRoot() / "nodejs" / "node_modules" / "@github"
+  let loader = githubDir / "copilot" / "npm-loader.js"
+  if fileExists(loader):
+    return loader
+  if dirExists(githubDir):
+    for kind, dir in walkDir(githubDir):
+      if kind in {pcDir, pcLinkToDir} and extractFilename(dir).startsWith("copilot-"):
+        let candidate = dir / "index.js"
+        if fileExists(candidate):
+          return candidate
+  let legacy = githubDir / "copilot" / "index.js"
+  if fileExists(legacy):
+    return legacy
+  ""
 
 proc newCapiProxy*(): CapiProxy =
   result = CapiProxy(process: nil, proxyUrl: "", running: false)
@@ -16,9 +45,8 @@ proc start*(proxy: var CapiProxy): string =
   if proxy.proxyUrl.len > 0:
     return proxy.proxyUrl
 
-  # Path to harness server (from e2e dir, up 3 to repo root)
-  let e2eDir = currentSourcePath().parentDir()
-  let harnessDir = normalizedPath(e2eDir / ".." / ".." / ".." / "test" / "harness")
+  # Path to harness server (from nim/e2e, up 2 to repo root)
+  let harnessDir = repoRoot() / "test" / "harness"
   let serverPath = harnessDir / "server.ts"
 
   # Spawn proxy process
@@ -41,6 +69,10 @@ proc start*(proxy: var CapiProxy): string =
 
   proxy.running = true
   putEnv("COPILOT_API_URL", proxy.proxyUrl)
+  # The client resolves the CLI from COPILOT_CLI_PATH and runs `.js` entry points with node.
+  let cliPath = findCopilotCli()
+  if cliPath.len > 0:
+    putEnv("COPILOT_CLI_PATH", cliPath)
   return proxy.proxyUrl
 
 proc stop*(proxy: var CapiProxy) =

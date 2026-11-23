@@ -20,12 +20,18 @@ classdef CopilotClient < handle
     properties (SetAccess = private)
         % True after start() succeeds and before stop().
         IsRunning (1,1) logical = false
+
+        % Policy Helper failure (copilot.PolicyHelperFailure) attached to the
+        % last failed createSession / resumeSession, or [] when none.
+        LastPolicyHelperFailure = []
     end
 
     properties (Access = private)
         Process          % java.lang.Process
         RpcClient        % copilot.JsonRpcClient
         Sessions         % containers.Map  sessionId -> CopilotSession
+        TokenProviders   % containers.Map  registrationId -> function handle
+        SessionCallbacks % containers.Map  sessionId -> struct of handlers
     end
 
     events
@@ -48,21 +54,37 @@ classdef CopilotClient < handle
             end
             obj.Options  = options;
             obj.Sessions = containers.Map();
+            obj.TokenProviders = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            obj.SessionCallbacks = containers.Map('KeyType', 'char', 'ValueType', 'any');
         end
 
         function start(obj)
             %start  Launch the Copilot CLI process and initialize JSON-RPC.
             %
             %   client.start();
+            %
+            %   The CLI must speak SDK protocol 4 (Copilot CLI 1.0.113 or
+            %   newer); older CLIs are rejected.
             if obj.IsRunning
                 return;
+            end
+
+            if ~any(strcmp(obj.Options.Mode, {'', 'coding-agent', 'copilot-cli', 'empty'}))
+                error('copilot:invalidMode', ...
+                    'Unknown client mode "%s". Use ''coding-agent'' or ''empty''.', ...
+                    obj.Options.Mode);
             end
 
             cliPath = obj.resolveCliPath();
             args    = obj.buildCliArgs();
 
-            % Build the command list for ProcessBuilder.
+            % Build the command list for ProcessBuilder.  A ".js" entry point
+            % (npm-loader.js) runs through node; other paths (the native
+            % binary or the npm .bin shim) run directly.
             cmdList = java.util.ArrayList();
+            if endsWith(lower(cliPath), '.js')
+                cmdList.add(java.lang.String('node'));
+            end
             cmdList.add(java.lang.String(cliPath));
             for i = 1:numel(args)
                 cmdList.add(java.lang.String(args{i}));
@@ -89,29 +111,27 @@ classdef CopilotClient < handle
             obj.Process = pb.start();
 
             obj.RpcClient = copilot.JsonRpcClient(obj.Process);
+            obj.registerRequestHandlers();
             obj.RpcClient.start();
 
-            % Negotiate the protocol version.
+            % SDK protocol 4 handshake: connect (with clientInfo), falling
+            % back to ping for runtimes without connect.  The server must
+            % report exactly protocol version 4.
             try
-                initResult = obj.RpcClient.request('initialize', struct( ...
-                    'protocolVersion', copilot.SdkProtocolVersion.VERSION, ...
-                    'clientInfo', struct( ...
-                        'name',    'copilot-sdk-matlab', ...
-                        'version', '2.5.3')));
-                if isfield(initResult, 'protocolVersion')
-                    if initResult.protocolVersion ~= copilot.SdkProtocolVersion.VERSION
-                        warning('copilot:versionMismatch', ...
-                            'Server protocol version %d differs from SDK version %d.', ...
-                            initResult.protocolVersion, ...
-                            copilot.SdkProtocolVersion.VERSION);
-                    end
-                end
+                serverVersion = obj.negotiateProtocol();
+                obj.verifyProtocolVersion(serverVersion);
             catch me
                 obj.cleanup();
                 rethrow(me);
             end
 
             obj.IsRunning = true;
+
+            % Register network callbacks (network.setProvider).
+            if obj.hasNetworkCallbacks()
+                obj.RpcClient.request('network.setProvider', ...
+                    obj.networkProviderParams(), 10);
+            end
 
             % Set up session filesystem provider if configured
             if isstruct(obj.Options.SessionFs) && isfield(obj.Options.SessionFs, 'InitialCwd')
@@ -161,6 +181,9 @@ classdef CopilotClient < handle
             %createSession  Open a new Copilot session.
             %
             %   session = client.createSession(copilot.SessionConfig('Model','gpt-5'));
+            %
+            %   The flat options are translated to the SDK protocol 4 grouped
+            %   payload (copilot.groupSessionParams) before sending.
             arguments
                 obj
                 config copilot.SessionConfig = copilot.SessionConfig()
@@ -168,6 +191,11 @@ classdef CopilotClient < handle
             obj.assertRunning();
 
             params = config.toStruct();
+            obj.assertModeAllows(params);
+            regId = obj.registerTokenProvider(config);
+            if ~isempty(regId)
+                params.gitHubTokenProviderRegistrationId = regId;
+            end
 
             % Merge trace context into params.
             ctx = obj.getTraceContext();
@@ -176,7 +204,8 @@ classdef CopilotClient < handle
                 params.(ctxFields{i}) = ctx.(ctxFields{i});
             end
 
-            result = obj.RpcClient.request('session.create', params, 30);
+            wire = copilot.groupSessionParams(params, false, obj.isEmptyMode());
+            result = obj.sendSessionRequest('session.create', wire, regId);
 
             sessionId = '';
             if isfield(result, 'sessionId')
@@ -194,13 +223,15 @@ classdef CopilotClient < handle
                     @(p) session.handleExitPlanMode(p));
             end
 
-            obj.Sessions(sessionId) = session;
+            obj.attachSession(session, sessionId, config, regId);
         end
 
         function session = resumeSession(obj, sessionId, config)
             %resumeSession  Reconnect to a previously disconnected session.
             %
             %   session = client.resumeSession('abc-123');
+            %   session = client.resumeSession('abc-123', copilot.SessionConfig( ...
+            %       'DisableResume', true, 'AllowTranscriptRecovery', true));
             arguments
                 obj
                 sessionId (1,:) char
@@ -210,7 +241,26 @@ classdef CopilotClient < handle
 
             params = config.toStruct();
             params.sessionId = sessionId;
-            result = obj.RpcClient.request('session.resume', params, 30);
+            if config.DisableResume
+                params.disableResume = true;
+            end
+            if config.ContinuePendingWork
+                params.continuePendingWork = true;
+            end
+            if config.AllowTranscriptRecovery
+                params.allowTranscriptRecovery = true;
+            end
+            if config.ClearDefaultProvider && isempty(config.DefaultProvider)
+                params.defaultProvider = NaN;  % encoded as JSON null
+            end
+            obj.assertModeAllows(params);
+            regId = obj.registerTokenProvider(config);
+            if ~isempty(regId)
+                params.gitHubTokenProviderRegistrationId = regId;
+            end
+
+            wire = copilot.groupSessionParams(params, true, obj.isEmptyMode());
+            result = obj.sendSessionRequest('session.resume', wire, regId);
 
             sid = sessionId;
             if isfield(result, 'sessionId')
@@ -218,7 +268,15 @@ classdef CopilotClient < handle
             end
 
             session = copilot.CopilotSession(obj.RpcClient, sid, config.Tools);
-            obj.Sessions(sid) = session;
+            obj.attachSession(session, sid, config, regId);
+        end
+
+        function clearManagedSettingsCache(obj)
+            %clearManagedSettingsCache  Clear cached enterprise managed settings.
+            %
+            %   client.clearManagedSettingsCache();   % managedSettings.clearCache
+            obj.assertRunning();
+            obj.RpcClient.request('managedSettings.clearCache', struct(), 15);
         end
 
         function metadata = getSessionMetadata(obj, sessionId)
@@ -375,8 +433,8 @@ classdef CopilotClient < handle
         end
 
         function args = buildCliArgs(obj)
-            %buildCliArgs  Assemble CLI arguments.
-            args = {'--server', '--stdio'};
+            %buildCliArgs  Assemble CLI arguments (headless stdio server).
+            args = {'--headless', '--no-auto-update', '--stdio'};
             if ~isempty(obj.Options.LogLevel)
                 args{end+1} = '--log-level';
                 args{end+1} = obj.Options.LogLevel;
@@ -406,6 +464,303 @@ classdef CopilotClient < handle
             end
         end
 
+        % -------------------------------------------------------------- %
+        %  SDK protocol 4 handshake and session helpers
+        % -------------------------------------------------------------- %
+
+        function version = negotiateProtocol(obj)
+            %negotiateProtocol  connect (with clientInfo), falling back to ping.
+            params = struct();
+            info = obj.clientInfoToWire();
+            if ~isempty(info)
+                params.clientInfo = info;
+            end
+            try
+                result = obj.RpcClient.request('connect', params, 30);
+            catch me
+                lastError = obj.RpcClient.LastError;
+                isUnknown = isstruct(lastError) && ( ...
+                    (isfield(lastError, 'code') && lastError.code == -32601) || ...
+                    (isfield(lastError, 'message') && ...
+                     strcmp(lastError.message, 'Unhandled method connect')));
+                if ~isUnknown
+                    rethrow(me);
+                end
+                result = obj.RpcClient.request('ping', struct('message', 'ping'), 30);
+            end
+            version = [];
+            if isstruct(result) && isfield(result, 'protocolVersion') ...
+                    && ~isempty(result.protocolVersion)
+                version = double(result.protocolVersion);
+            end
+        end
+
+        function verifyProtocolVersion(~, serverVersion)
+            %verifyProtocolVersion  Accept exactly SDK protocol version 4.
+            supported = copilot.SdkProtocolVersion.VERSION;
+            if isempty(serverVersion)
+                error('copilot:protocolMismatch', ...
+                    ['SDK protocol version mismatch: SDK supports version %d, ' ...
+                     'but server does not report a protocol version. ' ...
+                     'Please update your SDK or server to ensure compatibility.'], ...
+                    supported);
+            end
+            if serverVersion < copilot.SdkProtocolVersion.MIN_VERSION ...
+                    || serverVersion > copilot.SdkProtocolVersion.MAX_VERSION
+                error('copilot:protocolMismatch', ...
+                    ['SDK protocol version mismatch: SDK supports version %d, ' ...
+                     'but server reports version %d. ' ...
+                     'Please update your SDK or server to ensure compatibility.'], ...
+                    supported, serverVersion);
+            end
+        end
+
+        function info = clientInfoToWire(obj)
+            %clientInfoToWire  clientInfo for connect; [] when every field is empty.
+            info = [];
+            source = obj.Options.ClientInfo;
+            if ~isstruct(source)
+                return;
+            end
+            names = {'EditorName', 'editorName'; 'EditorVersion', 'editorVersion'; ...
+                     'ExtensionName', 'extensionName'; ...
+                     'ExtensionVersion', 'extensionVersion'};
+            wire = struct();
+            for i = 1:size(names, 1)
+                value = '';
+                if isfield(source, names{i, 1})
+                    value = source.(names{i, 1});
+                elseif isfield(source, names{i, 2})
+                    value = source.(names{i, 2});
+                end
+                if ~isempty(value)
+                    wire.(names{i, 2}) = char(value);
+                end
+            end
+            if ~isempty(fieldnames(wire))
+                info = wire;
+            end
+        end
+
+        function tf = isEmptyMode(obj)
+            tf = strcmp(obj.Options.Mode, 'empty');
+        end
+
+        function assertModeAllows(obj, params)
+            %assertModeAllows  Empty mode requires an explicit tool allowlist.
+            if obj.isEmptyMode() && ~isfield(params, 'availableTools')
+                error('copilot:emptyModeRequiresTools', ...
+                    ['Client mode ''empty'' requires SessionConfig ''AvailableTools'' ' ...
+                     'on every session create and resume.']);
+            end
+        end
+
+        function regId = registerTokenProvider(obj, config)
+            %registerTokenProvider  Register config.GitHubTokenProvider, if any.
+            regId = '';
+            if isempty(config.GitHubTokenProvider)
+                return;
+            end
+            uuid = java.util.UUID.randomUUID();
+            regId = char(uuid.toString());
+            obj.TokenProviders(regId) = config.GitHubTokenProvider;
+        end
+
+        function result = sendSessionRequest(obj, method, params, regId)
+            %sendSessionRequest  Send session.create/resume; keep failure details.
+            obj.LastPolicyHelperFailure = [];
+            try
+                result = obj.RpcClient.request(method, params, 30);
+            catch me
+                obj.LastPolicyHelperFailure = ...
+                    copilot.PolicyHelperFailure.fromRpcError(obj.RpcClient.LastError);
+                if ~isempty(regId) && obj.TokenProviders.isKey(regId)
+                    obj.TokenProviders.remove(regId);
+                end
+                rethrow(me);
+            end
+        end
+
+        function attachSession(obj, session, sessionId, config, regId)
+            %attachSession  Track a session and its callbacks.
+            obj.SessionCallbacks(sessionId) = struct( ...
+                'ShellAuthentication', {config.OnShellAuthenticationRequest}, ...
+                'StoreMemory',         {config.StoreMemory}, ...
+                'SubagentStart',       {config.OnSubagentStart}, ...
+                'SubagentStop',        {config.OnSubagentStop});
+            session.CloseCallback = @() obj.releaseSession(sessionId, regId);
+            obj.Sessions(sessionId) = session;
+        end
+
+        function releaseSession(obj, sessionId, regId)
+            %releaseSession  Drop callback registrations of a detached session.
+            if obj.SessionCallbacks.isKey(sessionId)
+                obj.SessionCallbacks.remove(sessionId);
+            end
+            if ~isempty(regId) && obj.TokenProviders.isKey(regId)
+                obj.TokenProviders.remove(regId);
+            end
+        end
+
+        function handler = sessionCallback(obj, params, name)
+            handler = [];
+            sessionId = fieldOr(params, 'sessionId', '');
+            if ~isempty(sessionId) && obj.SessionCallbacks.isKey(sessionId)
+                callbacks = obj.SessionCallbacks(sessionId);
+                handler = callbacks.(name);
+            end
+        end
+
+        % -------------------------------------------------------------- %
+        %  Server-to-client requests
+        % -------------------------------------------------------------- %
+
+        function registerRequestHandlers(obj)
+            rpc = obj.RpcClient;
+            rpc.onRequest('gitHubToken.getToken', @(p) obj.handleGitHubToken(p));
+            rpc.onRequest('shellAuthentication.request', ...
+                @(p) obj.handleShellAuthentication(p));
+            % Prompts are answered synchronously, so nothing is pending.
+            rpc.onRequest('shellAuthentication.cancel', @(p) struct());
+            rpc.onRequest('memoryStore.store', @(p) obj.handleMemoryStore(p));
+            rpc.onRequest('hooks.invoke', @(p) obj.handleHooksInvoke(p));
+            rpc.onRequest('network.resolveProxy', ...
+                @(p) obj.handleNetwork('resolveProxy', p));
+            rpc.onRequest('network.authenticateNegotiate', ...
+                @(p) obj.handleNetwork('authenticateNegotiate', p));
+            rpc.onRequest('network.authenticateBasic', ...
+                @(p) obj.handleNetwork('authenticateBasic', p));
+        end
+
+        function result = handleGitHubToken(obj, params)
+            %handleGitHubToken  Answer gitHubToken.getToken.
+            regId = fieldOr(params, 'registrationId', '');
+            if isempty(regId) || ~obj.TokenProviders.isKey(regId)
+                error('copilot:noTokenProvider', ...
+                    'No GitHub token provider is registered for "%s".', regId);
+            end
+            provider = obj.TokenProviders(regId);
+            token = provider(params);
+            if isempty(token)
+                result = struct('kind', 'cancelled');
+            elseif ischar(token) || isstring(token)
+                result = struct('kind', 'token', 'accessToken', char(token));
+            else
+                result = token;
+                if ~isfield(result, 'kind')
+                    result.kind = 'token';
+                end
+            end
+        end
+
+        function result = handleShellAuthentication(obj, params)
+            %handleShellAuthentication  Answer shellAuthentication.request.
+            result = struct('action', 'cancel');
+            handler = obj.sessionCallback(params, 'ShellAuthentication');
+            if isempty(handler)
+                return;
+            end
+            reply = handler(params);
+            if ischar(reply) || isstring(reply)
+                result = struct('action', 'accept', 'value', char(reply));
+            elseif isstruct(reply) && isfield(reply, 'action')
+                result = reply;
+            end
+        end
+
+        function result = handleMemoryStore(obj, params)
+            %handleMemoryStore  Answer memoryStore.store (replies null).
+            handler = obj.sessionCallback(params, 'StoreMemory');
+            if isempty(handler)
+                error('copilot:noMemoryStore', 'Memory store owner is unavailable.');
+            end
+            handler(params);
+            result = [];
+        end
+
+        function result = handleHooksInvoke(obj, params)
+            %handleHooksInvoke  Answer hooks.invoke for sub-agent lifecycle hooks.
+            result = struct();
+            switch fieldOr(params, 'hookType', '')
+                case 'subagentStart'
+                    handler = obj.sessionCallback(params, 'SubagentStart');
+                case 'subagentStop'
+                    handler = obj.sessionCallback(params, 'SubagentStop');
+                otherwise
+                    handler = [];
+            end
+            if isempty(handler)
+                return;
+            end
+            output = handler(fieldOr(params, 'input', struct()));
+            if ~isempty(output)
+                result = struct('output', output);
+            end
+        end
+
+        function result = handleNetwork(obj, kind, params)
+            %handleNetwork  Answer network.* callbacks ({} declines).
+            result = struct();
+            network = obj.Options.Network;
+            if ~isstruct(network)
+                return;
+            end
+            switch kind
+                case 'resolveProxy'
+                    if isfield(network, 'ResolveProxy') && ~isempty(network.ResolveProxy)
+                        proxy = network.ResolveProxy(fieldOr(params, 'url', ''));
+                        if ~isempty(proxy)
+                            result = struct('proxy', char(proxy));
+                        end
+                    end
+                case 'authenticateNegotiate'
+                    if isfield(network, 'AuthenticateNegotiate') ...
+                            && ~isempty(network.AuthenticateNegotiate)
+                        token = network.AuthenticateNegotiate(fieldOr(params, 'spn', ''));
+                        if ~isempty(token)
+                            result = struct('token', char(token));
+                        end
+                    end
+                case 'authenticateBasic'
+                    if isfield(network, 'AuthenticateBasic') ...
+                            && ~isempty(network.AuthenticateBasic)
+                        credentials = network.AuthenticateBasic( ...
+                            fieldOr(params, 'proxy', ''), ...
+                            fieldOr(params, 'realm', ''), ...
+                            logical(fieldOr(params, 'previousRejected', false)));
+                        if isstruct(credentials) && ~isempty(fieldnames(credentials))
+                            result = credentials;
+                        end
+                    end
+            end
+        end
+
+        function tf = hasNetworkCallbacks(obj)
+            network = obj.Options.Network;
+            tf = isstruct(network) && ( ...
+                (isfield(network, 'ResolveProxy') && ~isempty(network.ResolveProxy)) || ...
+                (isfield(network, 'AuthenticateNegotiate') && ~isempty(network.AuthenticateNegotiate)) || ...
+                (isfield(network, 'AuthenticateBasic') && ~isempty(network.AuthenticateBasic)));
+        end
+
+        function params = networkProviderParams(obj)
+            %networkProviderParams  network.setProvider params ({} marks a callback).
+            network = obj.Options.Network;
+            params = struct();
+            if isfield(network, 'Scope') && ~isempty(network.Scope)
+                params.scope = char(network.Scope);
+            end
+            if isfield(network, 'ResolveProxy') && ~isempty(network.ResolveProxy)
+                params.resolveProxy = struct();
+            end
+            if isfield(network, 'AuthenticateNegotiate') && ~isempty(network.AuthenticateNegotiate)
+                params.authenticateNegotiate = struct();
+            end
+            if isfield(network, 'AuthenticateBasic') && ~isempty(network.AuthenticateBasic)
+                params.authenticateBasic = struct();
+            end
+        end
+
         function ctx = getTraceContext(obj)
             %getTraceContext  Invoke the OnGetTraceContext provider.
             ctx = struct();
@@ -417,5 +772,13 @@ classdef CopilotClient < handle
                 end
             end
         end
+    end
+end
+
+function value = fieldOr(s, name, default)
+%fieldOr  s.(name) when present and non-empty, otherwise default.
+    value = default;
+    if isstruct(s) && isfield(s, name) && ~isempty(s.(name))
+        value = s.(name);
     end
 end

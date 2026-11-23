@@ -144,11 +144,26 @@ typedef struct {
     const char *defer;               /**< Tool loading policy: "auto" (lazy) or "never" (eager), or NULL */
     copilot_tool_handler_fn handler;
     void *user_data;                 /**< Passed to handler on invocation */
+    bool idempotent;                 /**< Safe to retry: repeated calls with the same arguments have no extra effect (idempotent) */
 } copilot_tool_t;
 
 /* ============================================================================
  * Session event types
  * ============================================================================ */
+
+/** Live shell output event type (tool.shell_output). Not persisted or replayed. */
+#define COPILOT_EVENT_TOOL_SHELL_OUTPUT    "tool.shell_output"
+/** Shell output streams (copilot_shell_output_data_t.stream). */
+#define COPILOT_SHELL_OUTPUT_STREAM_STDOUT "stdout"
+#define COPILOT_SHELL_OUTPUT_STREAM_STDERR "stderr"
+
+/** Parsed data of a tool.shell_output event. Strings are valid only during the callback. */
+typedef struct {
+    const char *tool_call_id;   /**< Tool call that owns this output */
+    const char *text;           /**< New output to append (chunks need not be complete lines) */
+    int64_t sequence;           /**< Zero-based publication sequence across streams for this tool call */
+    const char *stream;         /**< "stdout", "stderr", or NULL (omitted means stdout) */
+} copilot_shell_output_data_t;
 
 /**
  * Session event. The type field determines which data fields are populated.
@@ -164,6 +179,7 @@ typedef struct {
     const char *delta_content;     /**< For assistant.message_delta: incremental content */
     const char *tool_name;         /**< For tool.executing/tool.executed: tool name */
     const char *tool_call_id;      /**< For tool events: tool call ID */
+    const copilot_shell_output_data_t *shell_output; /**< For tool.shell_output: parsed data, else NULL */
 } copilot_session_event_t;
 
 /**
@@ -742,6 +758,191 @@ typedef struct {
 } copilot_autopilot_options_t;
 
 /* ============================================================================
+ * v3.0.0 feature types (SDK protocol 4 parity with @github/copilot-sdk 2.0)
+ * ============================================================================ */
+
+/** Client modes (copilot_client_options_t.mode). NULL means COPILOT_CLIENT_MODE_CODING_AGENT.
+ *  "empty" requires available_tools on every create/resume and applies minimal defaults.
+ *  The legacy value "copilot-cli" is accepted as an alias of "coding-agent". */
+#define COPILOT_CLIENT_MODE_CODING_AGENT "coding-agent"
+#define COPILOT_CLIENT_MODE_EMPTY        "empty"
+
+/** Permission modes (session config permission_mode, copilot_session_set_permission_mode()). */
+#define COPILOT_PERMISSION_MODE_MANUAL    "manual"
+#define COPILOT_PERMISSION_MODE_ASSISTED  "assisted"
+#define COPILOT_PERMISSION_MODE_ALLOW_ALL "allow-all"
+/** Known refusal reason reported when managed policy blocks a permission mode change. */
+#define COPILOT_PERMISSION_MODE_REASON_MANAGED_POLICY "managed_policy"
+
+/** Result of copilot_session_set_permission_mode(). Free with copilot_permission_mode_result_free(). */
+typedef struct {
+    bool success;     /**< Whether the requested mode was applied */
+    char *mode;       /**< Authoritative permission mode after the request, or NULL */
+    char *reason;     /**< Why the mode was refused (for example "managed_policy"), or NULL */
+} copilot_permission_mode_result_t;
+
+/** Named BYOK provider connection (inference.providers[]). */
+typedef struct {
+    const char *name;               /**< Provider name referenced by models (required, must not contain '/') */
+    const char *type;               /**< "openai", "azure", or "anthropic", or NULL */
+    const char *base_url;           /**< API endpoint URL (required) */
+    const char *api_key;            /**< API key, or NULL */
+    const char *api_key_command;    /**< Command whose stdout is the API key (apiKeyCommand), or NULL */
+    const char *bearer_token;       /**< Bearer token, or NULL */
+    const char *wire_api;           /**< "completions" or "responses", or NULL */
+    const char *transport;          /**< "http" or "websockets", or NULL */
+    const char *azure_api_version;  /**< Azure API version (azure.apiVersion), or NULL */
+    const char *model_provider;     /**< Product serving the models (modelProvider): COPILOT_MODEL_PROVIDER_*, or NULL */
+    const char *headers_json;       /**< Extra HTTP headers as a JSON object of strings, or NULL */
+} copilot_named_provider_config_t;
+
+/** BYOK model definition (inference.models[]). Select it with model "<provider>/<id>". */
+typedef struct {
+    const char *provider;           /**< Name of the copilot_named_provider_config_t serving this model (required) */
+    const char *id;                 /**< Provider-local model id (required) */
+    const char *model_id;           /**< Well-known base model for capability lookup (modelId), or NULL */
+    const char *wire_model;         /**< Model name sent to the provider API (wireModel), or NULL */
+    const char *name;               /**< Display name, or NULL */
+    int max_prompt_tokens;          /**< 0 = not set */
+    int max_context_window_tokens;  /**< 0 = not set */
+    int max_output_tokens;          /**< 0 = not set */
+    const char *capabilities_json;  /**< Capability overrides as JSON, or NULL */
+} copilot_provider_model_config_t;
+
+/** Copilot API options (github.capi). */
+typedef struct {
+    bool enabled;                   /**< Enables Copilot API models alongside or instead of BYOK providers */
+    bool has_enabled;               /**< Whether 'enabled' was explicitly set */
+} copilot_capi_config_t;
+
+/** Input kinds of a shell authentication request. */
+#define COPILOT_SHELL_AUTH_INPUT_SECRET  "secret"
+#define COPILOT_SHELL_AUTH_INPUT_TEXT    "text"
+#define COPILOT_SHELL_AUTH_INPUT_CONFIRM "confirm"
+
+/** A password or other answer a shell command run by the agent asks for (shellAuthentication.request).
+ *  The answer goes only to the program that asked; it is not shown to the model. */
+typedef struct {
+    const char *session_id;
+    const char *request_id;   /**< Identifies the request; a later cancellation carries the same ID */
+    const char *program;      /**< Program that asked, such as "sudo", "ssh", or "git" */
+    const char *prompt;       /**< Prompt text the program supplied */
+    const char *input_kind;   /**< COPILOT_SHELL_AUTH_INPUT_* ("secret" input must be masked) */
+    const char *command;      /**< Shell command that triggered the prompt */
+    const char *cwd;          /**< The command's working directory */
+} copilot_shell_authentication_request_t;
+
+typedef enum {
+    COPILOT_SHELL_AUTH_ACCEPT = 0,  /**< Answer with value (answer "confirm" requests with "yes") */
+    COPILOT_SHELL_AUTH_CANCEL,      /**< Decline the prompt */
+} copilot_shell_authentication_action_t;
+
+typedef struct {
+    copilot_shell_authentication_action_t action;
+    char *value;              /**< Heap-allocated answer for ACCEPT; the SDK wipes and frees it */
+} copilot_shell_authentication_response_t;
+
+/**
+ * Shell authentication handler. Fill *out_response and return COPILOT_OK; any
+ * other return value cancels the prompt. Called on the SDK's reader thread.
+ */
+typedef copilot_error_t (*copilot_shell_authentication_handler_fn)(
+    const copilot_shell_authentication_request_t *request,
+    void *user_data,
+    copilot_shell_authentication_response_t *out_response
+);
+
+/** A memory the agent asked to store, after validation, secret filtering and approval (memoryStore.store). */
+typedef struct {
+    const char *session_id;
+    const char *subject;      /**< Short topic the memory is about */
+    const char *fact;         /**< The fact to remember */
+    const char *citations;    /**< Sources supporting the fact */
+    const char *reason;       /**< Why the agent considers the fact worth remembering */
+} copilot_stored_memory_t;
+
+/**
+ * Memory store callback. Persist the memory and return COPILOT_OK; any other
+ * value fails the store request. Called on the SDK's reader thread.
+ */
+typedef copilot_error_t (*copilot_memory_store_handler_fn)(
+    const copilot_stored_memory_t *memory,
+    void *user_data
+);
+
+/** Traffic network callbacks serve (copilot_network_options_t.scope). */
+#define COPILOT_NETWORK_SCOPE_CONNECTION "connection"
+#define COPILOT_NETWORK_SCOPE_RUNTIME    "runtime"
+
+/**
+ * Resolves the proxies for a request target (network.resolveProxy). Return a
+ * heap-allocated PAC-style list such as "PROXY proxy.example:8080; DIRECT" (the
+ * SDK frees it), or NULL to leave the request to the runtime's own proxy resolution.
+ */
+typedef char * (*copilot_network_resolve_proxy_fn)(const char *url, void *user_data);
+
+/**
+ * Supplies a fresh base64 SPNEGO token for a Kerberos service principal
+ * (network.authenticateNegotiate). Return a heap-allocated token (the SDK wipes
+ * and frees it), or NULL when unavailable.
+ */
+typedef char * (*copilot_network_authenticate_negotiate_fn)(const char *spn, void *user_data);
+
+/** A proxy's Basic authentication challenge (network.authenticateBasic). */
+typedef struct {
+    const char *proxy;        /**< Proxy that challenged, as "http://host:port" */
+    const char *realm;        /**< Realm named by the proxy (untrusted), or NULL */
+    bool previous_rejected;   /**< True when the proxy rejected the credentials sent last */
+} copilot_network_basic_auth_request_t;
+
+/** Basic credentials. Both fields are heap-allocated or NULL; the SDK wipes and frees them. */
+typedef struct {
+    char *username;
+    char *password;
+} copilot_network_basic_credentials_t;
+
+/** Answers a proxy Basic challenge. Leave the credentials NULL to supply none. */
+typedef copilot_error_t (*copilot_network_authenticate_basic_fn)(
+    const copilot_network_basic_auth_request_t *request,
+    void *user_data,
+    copilot_network_basic_credentials_t *out_credentials
+);
+
+/**
+ * Network callbacks registered with network.setProvider after the client connects.
+ * Callbacks run on the SDK's reader thread. The SDK never logs tokens or passwords.
+ */
+typedef struct {
+    const char *scope;                                        /**< COPILOT_NETWORK_SCOPE_*, or NULL (runtime default "connection") */
+    copilot_network_resolve_proxy_fn resolve_proxy;           /**< Or NULL */
+    copilot_network_authenticate_negotiate_fn authenticate_negotiate; /**< Or NULL */
+    copilot_network_authenticate_basic_fn authenticate_basic; /**< Or NULL */
+    void *user_data;                                          /**< Passed to every callback */
+} copilot_network_options_t;
+
+/**
+ * Structured Policy Helper failure (PolicyHelperFailure). Reported in the JSON-RPC
+ * error data of a failed session.create/session.resume and on managed-settings
+ * snapshots. Helper-authored text is untrusted: render it as plain text and never
+ * execute it. Free with copilot_policy_helper_failure_free().
+ */
+typedef struct {
+    char *category;                 /**< Stable runtime classification (open set) */
+    char *failure_mode;             /**< failureMode: "ignore" or "failClosed" */
+    char *message;                  /**< Primary plain-text explanation */
+    bool previous_policy_retained;  /**< An earlier helper-derived layer still contributes */
+    char *reason;                   /**< Invocation reason, such as "sessionStart" */
+    char *severity;                 /**< "warning" or "error", or NULL */
+    char *authority;                /**< "device" or "server", or NULL */
+    char *code;                     /**< Helper-defined identifier, or NULL */
+    char *details_json;             /**< JSON array of {message, path?} findings, or NULL */
+    char *diagnostic;               /**< Secondary troubleshooting text, or NULL */
+    char *help_link_url;            /**< helpLink.url, or NULL */
+    char *help_link_label;          /**< helpLink.label, or NULL */
+    char *remediation;              /**< Plain-text recovery guidance (never execute), or NULL */
+} copilot_policy_helper_failure_t;
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -768,6 +969,8 @@ typedef struct {
     copilot_trace_context_provider_fn on_get_trace_context; /**< Trace-context provider for outbound requests, or NULL */
     void *trace_context_user_data;              /**< User data passed to on_get_trace_context */
     const copilot_client_info_t *client_info;   /**< Application identity for the connect handshake (clientInfo), or NULL */
+    const char *mode;                           /**< Client mode: COPILOT_CLIENT_MODE_CODING_AGENT (default when NULL) or COPILOT_CLIENT_MODE_EMPTY */
+    const copilot_network_options_t *network;   /**< Network callbacks (network.setProvider), or NULL. Copied by copilot_client_create(). */
 } copilot_client_options_t;
 
 /**
@@ -901,6 +1104,22 @@ typedef struct {
     const copilot_autopilot_options_t *autopilot; /**< Autopilot options (autopilot), or NULL */
     int max_output_tokens;                  /**< Model capabilities override modelCapabilities.limits.max_output_tokens */
     bool has_max_output_tokens;             /**< Whether max_output_tokens was explicitly set */
+
+    /* --- v3.0.0 session options (SDK protocol 4 parity with @github/copilot-sdk 2.0) --- */
+    bool suppress_resume_event;             /**< Skip the session.resume event and its side effects (suppressResumeEvent). session.resume only. */
+    bool has_suppress_resume_event;         /**< Whether suppress_resume_event was explicitly set */
+    const copilot_named_provider_config_t *providers; /**< Named BYOK provider connections (inference.providers), or NULL */
+    size_t providers_count;                 /**< Number of entries in providers */
+    const copilot_provider_model_config_t *models;    /**< BYOK model definitions (inference.models), or NULL */
+    size_t models_count;                    /**< Number of entries in models */
+    const char *default_provider;           /**< Provider for unqualified model IDs (inference.defaultProvider), or NULL */
+    bool clear_default_provider;            /**< Send defaultProvider: null to clear it (session.resume only; ignored when default_provider is set) */
+    const copilot_capi_config_t *capi;      /**< Copilot API options (github.capi.enabled), or NULL */
+    const char *permission_mode;            /**< Initial permission mode (permissions.mode): COPILOT_PERMISSION_MODE_*, or NULL */
+    copilot_shell_authentication_handler_fn on_shell_authentication_request; /**< Shell authentication handler, or NULL */
+    void *shell_authentication_user_data;   /**< User data passed to on_shell_authentication_request */
+    copilot_memory_store_handler_fn on_memory_store; /**< Memory store callback (memoryStore.store), or NULL */
+    void *memory_store_user_data;           /**< User data passed to on_memory_store */
 } copilot_session_config_t;
 
 /**
@@ -960,6 +1179,7 @@ typedef struct {
     const char **request_headers_values; /**< Values for custom HTTP headers (parallel to keys), or NULL */
     const char *source;                  /**< Message provenance (source): COPILOT_MESSAGE_SOURCE_* or "agent-<id>", or NULL */
     const char *response_schema_json;    /**< JSON Schema for structured output (responseSchema), or NULL. Supersedes response_format. */
+    const char *client_turn_id;          /**< Opaque client-generated turn ID echoed on the turn's events (clientTurnId), or NULL */
 } copilot_message_options_t;
 
 /* ============================================================================
@@ -991,7 +1211,7 @@ void copilot_model_list_free(copilot_model_list_t *list);
 
 typedef struct {
     char *message;
-    int64_t timestamp;
+    int64_t timestamp;         /**< Server time in Unix epoch milliseconds (0 if not reported) */
     int protocol_version;      /**< -1 if not present */
 } copilot_ping_response_t;
 
@@ -1027,7 +1247,7 @@ void copilot_session_list_free(copilot_session_list_t *list);
  * Creates a new Copilot client.
  *
  * @param options  Client configuration. NULL for defaults.
- * @return New client handle, or NULL on allocation failure.
+ * @return New client handle, or NULL on allocation failure or an unknown options->mode.
  */
 copilot_client_t *copilot_client_create(const copilot_client_options_t *options);
 
@@ -1035,7 +1255,9 @@ copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
  * Starts the CLI server and establishes a connection.
  * Spawns the CLI process (unless connecting to external server), sends the
  * `connect` handshake when client_info is set (ignored by older CLIs), and
- * verifies protocol compatibility via ping.
+ * verifies protocol compatibility via ping. The SDK speaks protocol 4 and
+ * requires Copilot CLI 1.0.113 or newer. When network callbacks are configured,
+ * they are registered with network.setProvider before this returns.
  *
  * @return COPILOT_OK on success.
  */
@@ -1190,6 +1412,36 @@ copilot_error_t copilot_client_set_foreground_session_id(
  * @return COPILOT_OK on success.
  */
 copilot_error_t copilot_client_clear_managed_settings_cache(copilot_client_t *client);
+
+/**
+ * Retrieves the structured Policy Helper failure (error.data.policyHelperFailure)
+ * reported when the most recent copilot_client_create_session() or
+ * copilot_client_resume_session() call on this client failed.
+ *
+ * @param client  The client.
+ * @param out     Output: the failure. Free with copilot_policy_helper_failure_free().
+ * @return true when the last failed create/resume reported a Policy Helper failure.
+ */
+bool copilot_client_get_last_policy_helper_failure(
+    copilot_client_t *client,
+    copilot_policy_helper_failure_t *out
+);
+
+/**
+ * Parses a Policy Helper failure from JSON. Accepts the failure object itself or
+ * any object carrying it under `policyHelperFailure`, such as JSON-RPC error data
+ * or the managed-settings snapshot from copilot_session_get_managed_settings().
+ *
+ * @param json  JSON text.
+ * @param out   Output: the failure. Free with copilot_policy_helper_failure_free().
+ * @return true when a failure was found and parsed.
+ */
+bool copilot_policy_helper_failure_parse(const char *json, copilot_policy_helper_failure_t *out);
+
+/**
+ * Frees the strings owned by a Policy Helper failure and zeroes it.
+ */
+void copilot_policy_helper_failure_free(copilot_policy_helper_failure_t *failure);
 
 /* ============================================================================
  * Session API
@@ -1365,7 +1617,7 @@ void copilot_session_free(copilot_session_t *session);
 /**
  * Aborts the currently processing message in this session.
  *
- * @return COPILOT_OK on success.
+ * @return COPILOT_OK on success, COPILOT_ERROR_RPC when the server rejects the request.
  */
 copilot_error_t copilot_session_abort(copilot_session_t *session);
 
@@ -1420,6 +1672,27 @@ copilot_error_t copilot_session_recheck_policy_helper(
     copilot_session_t *session,
     char **out_json
 );
+
+/**
+ * Requests a permission mode for this session (session.permissions.setMode).
+ * When managed policy refuses the change, out->success is false and out->reason
+ * is COPILOT_PERMISSION_MODE_REASON_MANAGED_POLICY.
+ *
+ * @param session  The session.
+ * @param mode     COPILOT_PERMISSION_MODE_* value.
+ * @param out      Output (may be NULL): the result. Free with copilot_permission_mode_result_free().
+ * @return COPILOT_OK when the server answered (check out->success), or an error code.
+ */
+copilot_error_t copilot_session_set_permission_mode(
+    copilot_session_t *session,
+    const char *mode,
+    copilot_permission_mode_result_t *out
+);
+
+/**
+ * Frees the strings owned by a permission mode result and zeroes it.
+ */
+void copilot_permission_mode_result_free(copilot_permission_mode_result_t *result);
 
 #ifdef __cplusplus
 }

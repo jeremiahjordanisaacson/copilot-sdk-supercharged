@@ -6,3 +6,5 @@ public import copilot.session;
 public import copilot.types;
 public import copilot.jsonrpc;
 public import copilot.tools;
+public import copilot.session_params;
+public import copilot.sdk_protocol_version;

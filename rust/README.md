@@ -71,6 +71,143 @@ async fn main() -> Result<(), CopilotError> {
 }
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**: `start()` rejects older CLIs with `CopilotError::ProtocolMismatch`. Existing options keep working. You fill `SessionConfig` and `ResumeSessionConfig` exactly as before, and the SDK converts the flat options into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, `request_permission` becomes `permissions.request`, `hooks: Some(true)` becomes `hooks.hasHandlers`, and `disable_resume` becomes `suppressResumeEvent`). The legacy single `provider` is translated into a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) is now run with `node`.
+
+New in this release:
+
+* **Named BYOK providers**: `providers` (`Vec<NamedProviderConfig>`), `models` (`Vec<ProviderModelConfig>`), `default_provider`, and `capi` (`CapiConfig`) on `SessionConfig` and `ResumeSessionConfig`. Select a registered model as `"<provider>/<id>"`. On resume, `default_provider: Some(None)` sends `null` to clear the default connection.
+* **Idempotent tools**: `ToolDefinition::idempotent` marks a tool as safe to retry. `ToolDefinition` now implements `Default`.
+* **Client turn ID**: `MessageOptions::client_turn_id` is sent as `clientTurnId` on `session.send`.
+* **Client mode**: `CopilotClientOptions::mode` is `ClientMode::CodingAgent` (the default, unchanged behavior) or `ClientMode::Empty`. In empty mode every create and resume must set `available_tools` (otherwise `CopilotError::Configuration`), and safe defaults are applied under your values: experimental mode, telemetry, cross-session store, memory, on-demand instructions, repository hooks, and host Git operations off; in-memory MCP OAuth token and embedding cache storage; embedding retrieval skipped. `"copilot-cli"` parses as an alias of `"coding-agent"`.
+* **Shell output events**: `event_types::TOOL_SHELL_OUTPUT` (`"tool.shell_output"`) and `SessionEvent::shell_output()`, which returns `ToolShellOutputData` (`tool_call_id`, `text`, `sequence`, `stream`). Unknown event types are still delivered unchanged.
+* **Shell authentication**: `on_shell_authentication_request: Option<ShellAuthenticationHandlerFn>` answers `sudo`, `ssh`, and `git` prompts with `ShellAuthenticationResponse::Accept { value }` or `Cancel`. When the runtime cancels a prompt, the SDK drops your pending future.
+* **Memory store**: `store_memory: Option<MemoryStoreHandlerFn>` receives each approved `StoredMemory` (`subject`, `fact`, `citations`, `reason`) instead of the built-in memory backends.
+* **Network callbacks**: `CopilotClientOptions::network: Option<NetworkConfig>` with `ResolveProxyFn`, `AuthenticateNegotiateFn`, and `AuthenticateBasicFn`, registered through `network.setProvider` after connecting. Tokens and passwords are never logged.
+* **Policy helper failure**: `CopilotError::policy_helper_failure()` returns the `PolicyHelperFailure` carried in the error data of a refused `session.create` / `session.resume`; `PolicyHelperFailure::from_data(&snapshot)` reads it from `session.get_managed_settings()`.
+* **Permission mode refusal reason**: `session.set_permission_mode(mode)` returns `PermissionsSetModeResult` with an optional `reason`; `permission_mode_refusal::MANAGED_POLICY` (`"managed_policy"`) marks a managed-policy refusal.
+
+Run a shared service in empty mode with proxy callbacks:
+
+```rust
+let client = CopilotClient::new(CopilotClientOptions {
+    mode: ClientMode::Empty,
+    network: Some(NetworkConfig {
+        scope: Some(NetworkScope::Connection),
+        resolve_proxy: Some(ResolveProxyFn::new(|request: NetworkResolveProxyRequest| async move {
+            Ok(if request.url.contains(".internal.example") {
+                Some("DIRECT".to_string())
+            } else {
+                Some("PROXY proxy.example:8080".to_string())
+            })
+        })),
+        authenticate_basic: Some(AuthenticateBasicFn::new(
+            |request: NetworkAuthenticateBasicRequest| async move {
+                if request.previous_rejected {
+                    return Ok(None);
+                }
+                Ok(Some(BasicCredentials {
+                    username: "svc-proxy".into(),
+                    password: std::env::var("PROXY_PASSWORD").ok(),
+                }))
+            },
+        )),
+        ..Default::default()
+    }),
+    ..Default::default()
+});
+```
+
+Use named providers, an idempotent tool, shell authentication, and an application memory store:
+
+```rust
+let session = client.create_session(SessionConfig {
+    model: Some("gateway/chat".into()),
+    available_tools: Some(vec!["view".into(), "lookup_order".into()]),
+    providers: Some(vec![NamedProviderConfig {
+        name: "gateway".into(),
+        provider_type: Some("openai".into()),
+        base_url: "https://models.example.com/v1".into(),
+        api_key_command: Some("print-gateway-key".into()),
+        ..Default::default()
+    }]),
+    models: Some(vec![ProviderModelConfig {
+        provider: "gateway".into(),
+        id: "chat".into(),
+        wire_model: Some("deployment-1".into()),
+        max_output_tokens: Some(8192),
+        ..Default::default()
+    }]),
+    capi: Some(CapiConfig { enabled: Some(false) }),
+    tools: Some(vec![ToolDefinition {
+        name: "lookup_order".into(),
+        description: Some("Look up an order by ID".into()),
+        idempotent: Some(true),
+        ..Default::default()
+    }]),
+    on_shell_authentication_request: Some(ShellAuthenticationHandlerFn::new(
+        |request: ShellAuthenticationRequest, _session_id: String| async move {
+            match std::env::var("SUDO_PASSWORD") {
+                Ok(value) if request.input_kind != "confirm" => {
+                    Ok(ShellAuthenticationResponse::Accept { value })
+                }
+                _ => Ok(ShellAuthenticationResponse::Cancel),
+            }
+        },
+    )),
+    store_memory: Some(MemoryStoreHandlerFn::new(|memory: StoredMemory| async move {
+        println!("remember [{}]: {}", memory.subject, memory.fact);
+        Ok(())
+    })),
+    ..Default::default()
+}).await?;
+```
+
+Stream shell output, tag a turn, and change the permission mode:
+
+```rust
+let _sub = session.on_event(event_types::TOOL_SHELL_OUTPUT, |event| {
+    if let Some(chunk) = event.shell_output() {
+        print!("{}", chunk.text);
+    }
+}).await;
+
+session.send(MessageOptions {
+    prompt: "Run the test suite".into(),
+    client_turn_id: Some("turn-42".into()),
+    ..Default::default()
+}).await?;
+
+let result = session.set_permission_mode("allow-all").await?;
+if result.refused_by_managed_policy() {
+    println!("Managed policy keeps the session in {} mode", result.mode);
+}
+```
+
+Inspect a policy helper failure, and clear the default provider on resume:
+
+```rust
+if let Err(err) = client.create_session(SessionConfig::default()).await {
+    if let Some(failure) = err.policy_helper_failure() {
+        eprintln!("Policy helper failed ({}): {}", failure.category, failure.message);
+    }
+}
+
+let resumed = client.resume_session(ResumeSessionConfig {
+    session_id: "abc-123".into(),
+    default_provider: Some(None), // sends `inference.defaultProvider: null`
+    disable_resume: Some(true),   // sent as `suppressResumeEvent`
+    ..Default::default()
+}).await?;
+```
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process native runtime hosting is not the default connection. This SDK keeps spawning the CLI (stdio or TCP) or connecting to an external server; the existing `in_process` option is unchanged.
+* Option keys this SDK sent before v3.0.0 that have no protocol 4 equivalent (`rewindEnabled`, `otlpProtocol`, `contentExclusion`, `mcpAuthHandler`) are kept unchanged at the top level of the payload for forward compatibility.
+
 ## Custom Tools
 
 You can register custom tools that the Copilot agent can invoke during a session:
@@ -93,6 +230,7 @@ let tool_def = ToolDefinition {
         },
         "required": ["location"]
     })),
+    ..Default::default()
 };
 
 // Create a handler
@@ -289,6 +427,7 @@ let config = SessionConfig {
 | `client.list_models()` | List available models (cached) |
 | `client.clear_managed_settings_cache()` | Clear cached managed settings |
 | `client.get_state()` | Get current connection state |
+| `client.mode()` | Get the client mode (`ClientMode`) |
 | `client.on_lifecycle(handler)` | Subscribe to lifecycle events |
 
 ### CopilotSession
@@ -308,6 +447,7 @@ let config = SessionConfig {
 | `session.set_auto_tier(tier)` | Change the Auto routing tier (experimental) |
 | `session.get_managed_settings()` | Get managed settings for the session |
 | `session.recheck_policy_helper()` | Re-run the managed-settings policy helper |
+| `session.set_permission_mode(mode)` | Change the permission mode; returns `PermissionsSetModeResult` (experimental) |
 | `session.destroy()` | Detach the session (state stays resumable) |
 | `session.abort()` | Abort current processing |
 | `session.session_id()` | Get session ID |
@@ -330,6 +470,8 @@ let config = SessionConfig {
 | `github_token` | `Option<String>` | `None` | GitHub auth token |
 | `use_logged_in_user` | `Option<bool>` | `None` | Use stored OAuth |
 | `client_info` | `Option<CopilotClientInfo>` | `None` | App identity sent on the `connect` handshake |
+| `mode` | `ClientMode` | `ClientMode::CodingAgent` | Session defaults policy (`CodingAgent` or `Empty`) |
+| `network` | `Option<NetworkConfig>` | `None` | Proxy resolution and proxy authentication callbacks |
 
 ## Connection Modes
 
@@ -372,7 +514,7 @@ let client = CopilotClient::new(CopilotClientOptions {
 
 ## Protocol Version
 
-The SDK verifies protocol compatibility with the server on startup. The current protocol version is **2**. If there is a mismatch, the `start()` call returns a `CopilotError::ProtocolMismatch` error.
+The SDK verifies protocol compatibility with the server on startup. The current SDK protocol version is **4**, which requires Copilot CLI 1.0.113 or newer. If the server reports another version (or none), `start()` returns `CopilotError::ProtocolMismatch` with the message `SDK protocol version mismatch: SDK supports version 4, but server reports version N. Please update your SDK or server to ensure compatibility.`
 
 ## Error Handling
 

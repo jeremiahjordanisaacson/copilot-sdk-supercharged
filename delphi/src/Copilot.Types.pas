@@ -57,6 +57,8 @@ type
     // Defer loading policy: '' (default), 'auto' (lazy) or 'never' (eager).
     // See the ToolDefer* constants below.
     Defer: string;
+    // Safe to retry: repeated calls have no extra effect (wire: idempotent).
+    Idempotent: Boolean;
   end;
 
   // Hook types
@@ -99,11 +101,36 @@ type
   TUserPromptTransformedHandler = reference to procedure(const Input: TUserPromptTransformedHookInput;
     const SessionId: string);
 
+  // Sub-agent lifecycle hooks (hookType "subagentStart" / "subagentStop").
+  TSubagentHookInput = record
+    AgentName: string;
+    AgentDisplayName: string;
+    AgentDescription: string;
+    TranscriptPath: string;
+    // subagentStop only
+    AgentId: string;
+    AgentType: string;
+    StopReason: string;
+    Response: string;
+  end;
+  // Returns additional context prepended to the child prompt ('' = none).
+  TSubagentStartHandler = reference to function(const Input: TSubagentHookInput;
+    const SessionId: string): string;
+  TSubagentStopDecision = record
+    Block: Boolean;
+    Reason: string;
+    ModifiedResponse: string;
+  end;
+  TSubagentStopHandler = reference to function(const Input: TSubagentHookInput;
+    const SessionId: string): TSubagentStopDecision;
+
   TSessionHooks = record
     OnPreToolUse: TPreToolUseHandler;
     OnPostToolUse: TPostToolUseHandler;
     OnPreMcpToolCall: TPreMcpToolCallHandler;
     OnUserPromptTransformed: TUserPromptTransformedHandler;
+    OnSubagentStart: TSubagentStartHandler;
+    OnSubagentStop: TSubagentStopHandler;
   end;
 
   // Session event
@@ -127,11 +154,17 @@ type
   end;
   TSessionLifecycleHandler = reference to procedure(const Event: TSessionLifecycleEvent);
 
-  // Provider config for BYOK
+  // Provider config for BYOK (legacy single provider, sent as the named
+  // provider "default").
   TProviderConfig = record
     ProviderType: string;
     BaseUrl: string;
     ApiKey: string;
+    // Command whose output is the API key (wire: apiKeyCommand).
+    ApiKeyCommand: string;
+    BearerToken: string;
+    WireApi: string;
+    MaxOutputTokens: Integer;
   end;
 
   // MCP server config
@@ -207,6 +240,173 @@ type
     DisplayPrompt: string;
     // Custom HTTP headers for this send's outbound model requests (wire key: requestHeaders)
     RequestHeaders: TDictionary<string, string>;
+    // Who sent the message (upstream MessageSource, wire key: source):
+    // 'user', 'system' or 'agent-<id>'.
+    Source: string;
+    // Opaque caller-chosen id echoed on this turn's events (wire key: clientTurnId).
+    ClientTurnId: string;
+    // JSON schema for structured output (upstream responseSchema). Sent as
+    // responseFormat {type: "json_schema", jsonSchema: {...}}.
+    ResponseSchema: TJSONObject;
+  end;
+
+  // --- SDK protocol 4 / v3.0.0 types (Microsoft Copilot SDK 2.0) ---
+
+  // Optional boolean: obUnset leaves the option out of the wire payload.
+  TOptionalBool = (obUnset, obFalse, obTrue);
+
+  // Integrating application identity sent as clientInfo in the connect
+  // handshake. Empty fields are dropped; nothing is sent when all are empty.
+  TClientInfo = record
+    EditorName: string;
+    EditorVersion: string;
+    ExtensionName: string;
+    ExtensionVersion: string;
+  end;
+
+  // GitHub token provider (answers the gitHubToken.getToken server request).
+  TGitHubTokenRequest = record
+    RegistrationId: string;
+    Host: string;
+    SessionId: string;
+    Reason: string;
+  end;
+  TGitHubTokenResult = record
+    Cancelled: Boolean;
+    AccessToken: string;
+    TokenType: string;
+    ExpiresIn: Integer; // seconds; 0 = not reported
+  end;
+  TGitHubTokenProvider = reference to function(
+    const Request: TGitHubTokenRequest): TGitHubTokenResult;
+
+  // Shell authentication prompts (shellAuthentication.request).
+  TShellAuthenticationRequest = record
+    SessionId: string;
+    RequestId: string;
+    ProgramName: string;
+    Prompt: string;
+    InputKind: string; // 'secret', 'text' or 'confirm'
+    Command: string;
+    Cwd: string;
+  end;
+  TShellAuthenticationResponse = record
+    Accepted: Boolean; // False replies {"action":"cancel"}
+    Value: string;
+  end;
+  TShellAuthenticationHandler = reference to function(
+    const Request: TShellAuthenticationRequest): TShellAuthenticationResponse;
+
+  // Memory store callback (memoryStore.store).
+  TStoredMemory = record
+    SessionId: string;
+    Subject: string;
+    Fact: string;
+    CitationsJson: string;
+    Reason: string;
+  end;
+  TMemoryStoreHandler = reference to procedure(const Memory: TStoredMemory);
+
+  // Network callbacks (network.setProvider). Return '' to decline.
+  TProxyResolver = reference to function(const Url: string): string;
+  TNegotiateAuthenticator = reference to function(const Spn: string): string;
+  TBasicCredentials = record
+    Username: string;
+    Password: string;
+  end;
+  TBasicAuthenticator = reference to function(const Proxy, Realm: string;
+    PreviousRejected: Boolean): TBasicCredentials;
+  TNetworkOptions = record
+    Scope: string; // 'connection' or 'runtime'
+    ResolveProxy: TProxyResolver;
+    AuthenticateNegotiate: TNegotiateAuthenticator;
+    AuthenticateBasic: TBasicAuthenticator;
+  end;
+
+  // Command sandbox (permissions.sandbox). AllowBypass lets the agent ask to
+  // run a single command outside the sandbox through the permission flow.
+  TSandboxConfig = record
+    Enabled: Boolean;
+    AllowBypass: Boolean;
+    AddCurrentWorkingDirectory: TOptionalBool;
+    UserPolicyJson: string;
+  end;
+
+  // Image generation (tools.imageGeneration).
+  TImageGenerationConfig = record
+    Enabled: TOptionalBool;
+    Watermark: TOptionalBool;
+    SaveToDisk: TOptionalBool;
+  end;
+
+  // Autopilot continuation (execution.autopilot). MaxContinues = 0 keeps
+  // the runtime default.
+  TAutopilotConfig = record
+    ContinuationEnabled: TOptionalBool;
+    MaxContinues: Integer;
+  end;
+
+  // Named BYOK provider (inference.providers[]).
+  TNamedProviderConfig = record
+    Name: string;
+    ProviderType: string; // 'openai', 'azure', 'anthropic'
+    BaseUrl: string;
+    ApiKey: string;
+    ApiKeyCommand: string; // command whose output is the API key
+    BearerToken: string;
+    WireApi: string;       // 'completions' or 'responses'
+    Transport: string;     // 'http' or 'websockets'
+    AzureJson: string;
+    HeadersJson: string;
+    ModelProvider: string;
+  end;
+
+  // Model served by a named provider (inference.models[]). Select it as the
+  // session model with "provider/id".
+  TProviderModelConfig = record
+    Provider: string;
+    Id: string;
+    ModelId: string;
+    WireModel: string;
+    Name: string;
+    MaxPromptTokens: Integer;
+    MaxContextWindowTokens: Integer;
+    MaxOutputTokens: Integer;
+    CapabilitiesJson: string;
+  end;
+
+  // Structured Policy Helper failure (PolicyHelperFailure), read from
+  // error.data.policyHelperFailure when session.create/resume fails.
+  TPolicyHelperFailure = record
+    Present: Boolean;
+    Category: string;
+    FailureMode: string;
+    Message: string;
+    PreviousPolicyRetained: Boolean;
+    Reason: string;
+    Severity: string;
+    Authority: string;
+    Code: string;
+    DetailsJson: string;
+    Diagnostic: string;
+    HelpLinkUrl: string;
+    HelpLinkLabel: string;
+    Remediation: string;
+  end;
+
+  // Permission-mode change result (PermissionsSetModeResult).
+  TPermissionModeResult = record
+    Success: Boolean;
+    Mode: string;
+    Reason: string; // e.g. 'managed_policy' when policy refused the change
+  end;
+
+  // Data of a tool.shell_output event.
+  TShellOutputEventData = record
+    ToolCallId: string;
+    Text: string;
+    Sequence: Integer;
+    Stream: string; // 'stdout', 'stderr' or '' when omitted
   end;
 
   // BYOK bearer token provider: mint a per-session bearer token on demand.
@@ -285,6 +485,39 @@ type
     InProcess: Boolean;
     ExperimentalMode: Boolean;
     ContentExclusion: Boolean;
+    // --- SDK protocol 4 / v3.0.0 session options ---
+    // Working directory of the session (wire: workingDirectory).
+    WorkingDirectory: string;
+    // Tool allowlist (wire: availableTools). Required in client mode 'empty'.
+    AvailableTools: TArray<string>;
+    // Ask-user tool variant: 'legacy' or 'elicitation'.
+    AskUserVariant: string;
+    // Callback minting GitHub tokens (gitHubToken.getToken). Mutually
+    // exclusive with GithubToken.
+    GitHubTokenProvider: TGitHubTokenProvider;
+    Sandbox: TSandboxConfig;
+    // Feature flag overrides (wire: featureFlags).
+    FeatureFlags: TDictionary<string, Boolean>;
+    // Model allowlist (wire: allowedModels).
+    AllowedModels: TArray<string>;
+    // OAuth client id metadata document URL for MCP servers.
+    AuthClientIdMetadataUrl: string;
+    // Model capabilities override limits.max_output_tokens (0 = unset).
+    MaxOutputTokens: Integer;
+    AgentDirectories: TArray<string>;
+    HookDirectories: TArray<string>;
+    // Grant directory trust at creation: 'session' or 'user' (create only).
+    TrustWorkingDirectory: string;
+    ImageGeneration: TImageGenerationConfig;
+    Autopilot: TAutopilotConfig;
+    // Named BYOK providers and the models they serve.
+    Providers: TArray<TNamedProviderConfig>;
+    Models: TArray<TProviderModelConfig>;
+    DefaultProvider: string;
+    // Copilot API models: obFalse disables them (BYOK only).
+    CapiEnabled: TOptionalBool;
+    OnShellAuthenticationRequest: TShellAuthenticationHandler;
+    StoreMemory: TMemoryStoreHandler;
   end;
 
   // Resume session config
@@ -301,6 +534,17 @@ type
     ExcludedTools: TArray<string>;
     IncludeSubAgentStreamingEvents: Boolean;
     InstructionDirectories: TArray<string>;
+    // Options shared with CreateSession (providers, sandbox, callbacks, ...).
+    // The fields above take precedence over the same fields in Options.
+    Options: TSessionConfig;
+    // Do not emit a session.resume event (wire: suppressResumeEvent).
+    DisableResume: Boolean;
+    // Continue work that was pending when the session was saved.
+    ContinuePendingWork: Boolean;
+    // Rebuild a damaged session from its transcript.
+    AllowTranscriptRecovery: Boolean;
+    // Send an explicit null defaultProvider to clear it.
+    ClearDefaultProvider: Boolean;
   end;
 
   // Session metadata
@@ -350,6 +594,13 @@ type
     RequestHandler: TCopilotRequestHandler;
     // BYOK bearer token provider (per-session token minting).
     BearerTokenProvider: TBearerTokenProvider;
+    // Integrating application identity sent as clientInfo on connect.
+    ClientInfo: TClientInfo;
+    // Client mode: 'coding-agent' (default when empty), 'empty', or the
+    // legacy alias 'copilot-cli'.
+    Mode: string;
+    // Proxy / authentication callbacks (network.setProvider).
+    Network: TNetworkOptions;
   end;
 
   // Unsubscribe token
@@ -378,6 +629,39 @@ const
   GitHubUrl = 'GitHubUrl';
   GitHubFile = 'GitHubFile';
   GitHubSnippet = 'GitHubSnippet';
+
+  // --- SDK protocol 4 / v3.0.0 constants ---
+
+  // Client modes (TCopilotClientOptions.Mode). 'copilot-cli' is a legacy
+  // alias of 'coding-agent'.
+  ClientModeCodingAgent = 'coding-agent';
+  ClientModeCopilotCli = 'copilot-cli';
+  ClientModeEmpty = 'empty';
+
+  // Auto routing tiers for TCopilotSession.SwitchAutoTier.
+  AutoTierFast = 'fast';
+  AutoTierEfficiency = 'efficiency';
+  AutoTierBalance = 'balance';
+  AutoTierIntelligence = 'intelligence';
+
+  // Ask-user tool variants (TSessionConfig.AskUserVariant).
+  AskUserVariantLegacy = 'legacy';
+  AskUserVariantElicitation = 'elicitation';
+
+  // Message sources (MessageSource) for TMessageOptions.Source; agent
+  // sources use 'agent-<id>'.
+  MessageSourceUser = 'user';
+  MessageSourceSystem = 'system';
+
+  // Working-directory trust grants (TSessionConfig.TrustWorkingDirectory).
+  WorkingDirectoryTrustSession = 'session';
+  WorkingDirectoryTrustUser = 'user';
+
+  // Streamed shell output event (replaces tool.execution_partial_result).
+  EventToolShellOutput = 'tool.shell_output';
+
+  // Permission-mode refusal reason (TPermissionModeResult.Reason).
+  PermissionModeReasonManagedPolicy = 'managed_policy';
 
   // Helper functions for tool results
   function ToolSuccess(const Text: string): TToolResultObject;

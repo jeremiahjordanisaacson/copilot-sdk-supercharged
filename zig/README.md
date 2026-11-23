@@ -7,7 +7,7 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 ## Requirements
 
 - **Zig** 0.14.0 or later
-- **Copilot CLI** installed and on PATH (or specify `cli_path`)
+- **Copilot CLI** 1.0.113 or newer, installed and on PATH (or specify `cli_path`; `.js` entry points such as `@github/copilot/npm-loader.js` are run with `node`)
 - **GitHub authentication** (OAuth token, `gh` CLI auth, or `GITHUB_TOKEN` environment variable)
 
 ## Building
@@ -76,6 +76,176 @@ pub fn main() !void {
 }
 ```
 
+## What's New in v3.0.0
+
+The Zig SDK now speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected at `start` with `SdkError.ProtocolMismatch` (the reason is logged under the `copilot_sdk` log scope).
+
+**Existing options keep working.** The SDK still builds the same flat session options and translates them into the grouped protocol 4 payload right before `session.create` and `session.resume` (for example `streaming` becomes `events.streaming` and `excluded_tools` becomes `tools.excludedTools`). The legacy single `provider` is sent as a named `"default"` provider with Copilot API models disabled, exactly as before. Failures of `session.abort`, `session.delete`, and `session.setForeground` surface as `SdkError.JsonRpcError`; `client.lastRpcError()` returns the code and message.
+
+This release also routes server requests and `session.event` notifications to sessions, sends options that were previously ignored (`tools`, `provider`, `mcp_servers_json`, `commands_json`, `github_token`, `system_prompt` as an appended `systemMessage`, and more), and answers `external_tool.requested` events with the handlers registered through `session.registerTool`.
+
+### Client options: client info, client mode, network callbacks
+
+```zig
+fn resolveProxy(_: std.mem.Allocator, url: []const u8) anyerror!?[]const u8 {
+    return if (std.mem.startsWith(u8, url, "https://internal.")) "PROXY proxy.corp:8080" else null;
+}
+
+var client = copilot.CopilotClient.init(allocator, .{
+    // Sent as `clientInfo` on the `connect` handshake (empty fields are dropped)
+    .client_info = .{ .editor_name = "my-editor", .editor_version = "1.2.0" },
+    // .coding_agent (default) or .empty: minimal defaults, and every session must set available_tools
+    .mode = .coding_agent,
+    // Registered with `network.setProvider` after connecting
+    .network = .{ .scope = copilot.NetworkScope.connection, .resolve_proxy = resolveProxy },
+});
+```
+
+`NetworkOptions` also accepts `authenticate_negotiate` (returns a SPNEGO token) and `authenticate_basic` (returns `NetworkBasicCredentials`). `ClientMode.parse("copilot-cli")` accepts the legacy alias of `"coding-agent"`.
+
+### Session options
+
+```zig
+const session = try client.createSession(.{
+    .ask_user_variant = copilot.AskUserVariant.elicitation,
+    .sandbox_config = .{ .enabled = true, .allow_bypass = true },
+    .feature_flags_json = "{\"my_flag\":true}",
+    .allowed_models = &.{ "gpt-5", "claude-sonnet-4.5" },
+    .auth_client_id_metadata_url = "https://example.com/oauth/client.json",
+    .agent_directories = &.{"./agents"},
+    .hook_directories = &.{"./hooks"},
+    .working_directory = "/repo",
+    .trust_working_directory = copilot.TrustWorkingDirectory.session, // session.create only
+    .image_generation = .{ .enabled = true, .save_to_disk = false },
+    .autopilot = .{ .continuation_enabled = true, .max_continues = 3 },
+    .max_output_tokens = 4096, // inference.capabilities.limits.max_output_tokens
+    .auto_tier = copilot.AutoTier.fast,
+    .permission_mode = copilot.PermissionMode.assisted,
+});
+
+// Resume-only options
+const resumed = try client.resumeSession(session_id, .{
+    .allow_transcript_recovery = true,
+    .suppress_resume_event = true,
+    .clear_default_provider = true, // sends defaultProvider: null
+});
+```
+
+### GitHub token provider
+
+```zig
+fn githubToken(_: std.mem.Allocator, args: copilot.GitHubTokenProviderArgs) anyerror!copilot.GitHubTokenResult {
+    std.debug.print("token for {s} ({s})\n", .{ args.host, args.reason }); // reason: "initial" or "refresh"
+    return .{ .token = .{ .access_token = "gho_from_your_secret_store", .expires_in = 3600 } };
+}
+
+const session = try client.createSession(.{ .github_token_provider = githubToken });
+```
+
+The SDK registers the provider under a generated ID, answers `gitHubToken.getToken`, and drops the registration when the session detaches or is freed. It cannot be combined with `github_token` (`SdkError.InvalidConfig`).
+
+### Named BYOK providers
+
+```zig
+const session = try client.createSession(.{
+    .model = "ollama/llama3", // "<provider>/<id>"
+    .providers = &.{.{ .name = "ollama", .base_url = "http://localhost:11434/v1", .api_key_command = "my-key-helper" }},
+    .models = &.{.{ .provider = "ollama", .id = "llama3", .max_output_tokens = 2048 }},
+    .default_provider = "ollama",
+    .capi = .{ .enabled = false },
+});
+```
+
+`ProviderConfig.api_key_command` also works with the legacy single `provider`.
+
+### Tools, messages, and events
+
+```zig
+fn lookup(invocation: copilot.ToolInvocation) anyerror!copilot.ToolResult {
+    _ = invocation.arguments_json;
+    return .{ .text_result_for_llm = "{\"status\":\"open\"}" };
+}
+
+const session = try client.createSession(.{
+    .tools = &.{.{ .name = "lookup", .description = "Look up a ticket", .idempotent = true }},
+});
+try session.registerTool(.{ .name = "lookup" }, lookup);
+
+const source = try copilot.MessageSource.agent(allocator, "reviewer"); // "agent-reviewer"
+defer allocator.free(source);
+_ = try session.send(.{
+    .prompt = "List the open tickets as JSON",
+    .source = source,
+    .client_turn_id = "turn-42",
+    .response_schema_json = "{\"type\":\"object\",\"properties\":{\"tickets\":{\"type\":\"array\"}}}",
+});
+
+// Live shell output (`tool.shell_output`)
+_ = session.onEvent(copilot.EVENT_TOOL_SHELL_OUTPUT, struct {
+    fn handler(event: copilot.SessionEvent) void {
+        if (event.shell_output) |out| std.debug.print("[{s}] {s}", .{ out.stream orelse "stdout", out.text });
+    }
+}.handler);
+```
+
+`response_schema_json` is sent as `responseFormat: {type: "json_schema", jsonSchema: {name: "response", strict: true, schema}}`.
+
+### Shell authentication, memory store, and sub-agent hooks
+
+```zig
+fn answerShell(_: std.mem.Allocator, req: copilot.ShellAuthenticationRequest) anyerror!copilot.ShellAuthenticationResponse {
+    if (std.mem.eql(u8, req.input_kind, copilot.ShellAuthenticationInputKind.confirm)) return .{ .accept = "yes" };
+    return .cancel;
+}
+
+fn storeMemory(memory: copilot.StoredMemory) anyerror!void {
+    std.debug.print("remember {s}: {s}\n", .{ memory.subject, memory.fact });
+}
+
+fn onHook(_: std.mem.Allocator, hook_type: []const u8, _: copilot.types.JsonValue, _: []const u8) anyerror!?copilot.types.JsonValue {
+    if (std.mem.eql(u8, hook_type, copilot.HookType.subagent_start)) std.debug.print("sub-agent starting\n", .{});
+    return null;
+}
+
+const session = try client.createSession(.{
+    .on_shell_authentication = answerShell, // sends interaction.requestShellAuthentication
+    .on_memory_store = storeMemory, // sends state.hasMemoryStore
+    .on_hook = onHook, // subagentStart / subagentStop arrive through hooks.invoke
+});
+```
+
+### Session and client methods
+
+```zig
+_ = try session.setAutoTier(copilot.AutoTier.balance); // session.model.switchAutoTier
+const mode = try session.setPermissionMode(copilot.PermissionMode.allow_all);
+if (!mode.success) std.debug.print("refused: {?s}\n", .{mode.reason}); // "managed_policy"
+_ = try session.recheckPolicyHelper(); // session.managedSettings.recheckPolicyHelper
+try client.clearManagedSettingsCache(); // managedSettings.clearCache
+try session.detach(); // session.detach: releases the session, keeps it resumable
+
+// Policy Helper failures reported by a failed session.create / session.resume
+const blocked = client.createSession(.{}) catch |err| {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    if (client.lastPolicyHelperFailure(arena.allocator())) |failure| {
+        std.debug.print("{s}: {s}\n", .{ failure.category, failure.message });
+    }
+    return err;
+};
+_ = blocked;
+```
+
+`types.PolicyHelperFailure.fromJson` also reads the failure from a `session.getManagedSettings()` snapshot.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: the SDK keeps spawning the CLI. The existing `in_process` option is unchanged.
+- The transport is synchronous: server requests (GitHub token, shell authentication, memory store, hooks, network callbacks) and session events are handled only while the client is blocked in a request or in `sendAndWait`. JSON values returned by client and session methods stay valid until the next request on the client.
+- `cli_url` (connecting to an already running server) is not implemented yet; `start` returns `SdkError.NotConnected`.
+- Permission and user-input handlers registered on a session are stored but not yet answered over protocol 4; the runtime applies the session's permission mode instead (`permission_mode`, `setPermissionMode`).
+
 ## Custom Tools
 
 Register tools that the Copilot agent can invoke:
@@ -100,7 +270,7 @@ try session.registerTool(weather_tool, weatherHandler);
 
 ## Permission Handling
 
-Register a handler to approve or deny permission requests from the agent:
+Register a handler to approve or deny permission requests from the agent (see Known limitations: protocol 4 does not deliver these requests to the Zig SDK yet; use `permission_mode` / `setPermissionMode`):
 
 ```zig
 session.registerPermissionHandler(struct {
@@ -115,7 +285,7 @@ session.registerPermissionHandler(struct {
 
 ## User Input Handling
 
-Enable the `ask_user` tool by registering a user input handler:
+Enable the `ask_user` tool by registering a user input handler (see Known limitations: not yet answered over protocol 4):
 
 ```zig
 session.registerUserInputHandler(struct {
@@ -165,6 +335,7 @@ sub.unsubscribe();
 | `tool.execution_start` | Tool execution started |
 | `tool.execution_complete` | Tool execution finished |
 | `tool.execution_progress` | Tool execution progress |
+| `tool.shell_output` | Live shell output (`event.shell_output`: tool call ID, text, sequence, stream); not persisted |
 | `abort` | Session aborted |
 
 ### Session Idle Timeout
@@ -230,6 +401,10 @@ var session = try client.createSession(.{
 | `client.getAuthStatus()` | Get authentication status |
 | `client.listModels()` | List available models |
 | `client.getSessionMetadata(id)` | Get session metadata |
+| `client.setForegroundSessionId(id)` | Set the foreground session |
+| `client.clearManagedSettingsCache()` | Clear cached managed settings (`managedSettings.clearCache`) |
+| `client.lastRpcError()` | JSON-RPC error of the last failed request |
+| `client.lastPolicyHelperFailure(arena)` | Policy Helper failure from the last failed request's error data |
 | `client.getState()` | Get current connection state |
 | `client.onLifecycle(handler)` | Subscribe to lifecycle events |
 
@@ -245,8 +420,13 @@ var session = try client.createSession(.{
 | `session.registerPermissionHandler(h)` | Register permission handler |
 | `session.registerUserInputHandler(h)` | Register user input handler |
 | `session.getMessages()` | Get session history |
-| `session.destroy()` | Destroy the session |
+| `session.detach()` | Release the session (`session.detach`); it stays resumable |
+| `session.destroy()` | Alias of `detach()` |
 | `session.abort()` | Abort current processing |
+| `session.setAutoTier(tier)` | Change the Auto routing tier (`session.model.switchAutoTier`) |
+| `session.setPermissionMode(mode)` | Set the permission mode; returns `PermissionModeResult` |
+| `session.getManagedSettings()` | Effective managed settings snapshot |
+| `session.recheckPolicyHelper()` | Re-run the managed-settings Policy Helper |
 | `session.getId()` | Get session ID |
 | `session.getWorkspacePath()` | Get workspace path |
 
@@ -267,6 +447,9 @@ var session = try client.createSession(.{
 | `use_logged_in_user` | `?bool` | `null` | Use stored OAuth |
 | `session_idle_timeout_seconds` | `?u32` | `null` | Auto-cleanup timeout |
 | `session_fs` | `?SessionFsConfig` | `null` | Session filesystem config |
+| `client_info` | `?ClientInfo` | `null` | Integration identity sent on `connect` |
+| `mode` | `ClientMode` | `.coding_agent` | `.empty` applies minimal session defaults |
+| `network` | `?NetworkOptions` | `null` | Proxy and authentication callbacks |
 
 ## Connection Modes
 
@@ -303,10 +486,14 @@ All fallible operations return `SdkError!T`. Error variants:
 - `SdkError.NotConnected` -- Client not connected
 - `SdkError.ProcessSpawn` -- Failed to start CLI process
 - `SdkError.AllocationFailed` -- Memory allocation failed
+- `SdkError.RequestFailed` -- The server answered `success: false`
+- `SdkError.InvalidConfig` -- Invalid options (for example `github_token` together with `github_token_provider`)
+
+After `SdkError.JsonRpcError`, `client.lastRpcError()` returns the error code, message, and data.
 
 ## Protocol Version
 
-The SDK verifies protocol compatibility with the server on startup. The current protocol version is **2**.
+The SDK verifies protocol compatibility with the server on startup. The current protocol version is **4** (Copilot CLI 1.0.113 or newer).
 
 ## Recent Features (v2.4–v2.5)
 

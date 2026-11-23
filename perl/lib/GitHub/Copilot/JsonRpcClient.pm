@@ -170,10 +170,12 @@ sub request {
 
     if (exists $resp->{error}) {
         my $err = $resp->{error};
-        croak sprintf(
-            "JSON-RPC Error %d: %s",
-            $err->{code}    // -1,
-            $err->{message} // 'Unknown error',
+        # Structured error (code / message / data) that stringifies as
+        # "JSON-RPC Error <code>: <message>", so pattern matches keep working.
+        die GitHub::Copilot::JsonRpcError->new(
+            code    => $err->{code},
+            message => $err->{message},
+            data    => $err->{data},
         );
     }
 
@@ -382,6 +384,44 @@ sub _dispatch_incoming {
         }
         return;
     }
+}
+
+# --------------------------------------------------------------------------
+# GitHub::Copilot::JsonRpcError - raised by request() for JSON-RPC error
+# responses. Stringifies as "JSON-RPC Error <code>: <message>" (so existing
+# pattern matches keep working) and exposes code, message and data.
+# --------------------------------------------------------------------------
+package GitHub::Copilot::JsonRpcError;
+
+use overload
+    '""'     => sub { $_[0]->{text} },
+    'bool'   => sub { 1 },
+    fallback => 1;
+
+sub new {
+    my ($class, %args) = @_;
+    my $code    = $args{code}    // -1;
+    my $message = $args{message} // 'Unknown error';
+    return bless {
+        code    => $code,
+        message => $message,
+        data    => $args{data},
+        text    => sprintf('JSON-RPC Error %d: %s', $code, $message),
+    }, $class;
+}
+
+sub code    { return $_[0]->{code} }
+sub message { return $_[0]->{message} }
+sub data    { return $_[0]->{data} }
+
+# Structured Policy Helper failure attached to a failed session.create or
+# session.resume (error.data.policyHelperFailure), or undef.
+sub policy_helper_failure {
+    my ($self) = @_;
+    my $data = $self->{data};
+    return undef unless ref($data) eq 'HASH' && ref($data->{policyHelperFailure}) eq 'HASH';
+    require GitHub::Copilot::Types;
+    return GitHub::Copilot::Types::PolicyHelperFailure->from_hashref($data->{policyHelperFailure});
 }
 
 1;

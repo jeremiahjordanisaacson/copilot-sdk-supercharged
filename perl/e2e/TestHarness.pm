@@ -72,7 +72,41 @@ sub start {
     $self->{process_pid} = $pid;
     $self->{stdout_fh}   = $out;
 
+    # Current CLIs resolve the Copilot API endpoint from /copilot_internal/user
+    # (served by the proxy through COPILOT_DEBUG_GITHUB_API_URL), so register the
+    # replay user for every token the tests authenticate with.
+    my %seen;
+    for my $token (grep { defined && length && !$seen{$_}++ }
+                   ('fake-token-for-e2e-tests', $ENV{GH_TOKEN}, $ENV{GITHUB_TOKEN})) {
+        $self->set_copilot_user_by_token($token);
+    }
+
     return $self->{proxy_url};
+}
+
+# Register the replay user answered by the proxy's /copilot_internal/user endpoint.
+sub set_copilot_user_by_token {
+    my ($self, $token) = @_;
+    die "Proxy not started" unless $self->{proxy_url};
+
+    my $body = encode_json({
+        token    => $token,
+        response => {
+            login        => 'e2e-test-user',
+            id           => 12345,
+            copilot_plan => 'individual_pro',
+            endpoints    => {
+                api       => $self->{proxy_url},
+                telemetry => 'https://sdk-hydro-collector.example.com',
+            },
+            analytics_tracking_id => 'e2e-test-tracking-id',
+        },
+    });
+    my $resp = HTTP::Tiny->new->post("$self->{proxy_url}/copilot-user-config", {
+        content => $body,
+        headers => { 'Content-Type' => 'application/json' },
+    });
+    die "Copilot user config failed: $resp->{status}" unless $resp->{success};
 }
 
 sub stop {
@@ -113,7 +147,11 @@ sub url {
 sub get_proxy_env {
     my ($self) = @_;
     my %env = %ENV;
+    # Signing keys would make the CLI sign requests the replay proxy cannot verify.
+    delete @env{qw(COPILOT_HMAC_KEY CAPI_HMAC_KEY)};
     $env{COPILOT_API_URL} = $self->{proxy_url} if $self->{proxy_url};
+    # Route GitHub API calls (including /copilot_internal/user) to the replay proxy.
+    $env{COPILOT_DEBUG_GITHUB_API_URL} = $self->{proxy_url} if $self->{proxy_url};
     $env{GH_TOKEN} = 'fake-token-for-e2e-tests';
     $env{GITHUB_TOKEN} = 'fake-token-for-e2e-tests';
 

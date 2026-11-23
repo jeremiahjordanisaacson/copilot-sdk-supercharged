@@ -14,7 +14,8 @@
     proxy_url/1,
     configure/3,
     http_get/2,
-    http_post/3
+    http_post/3,
+    cli_path/0
 ]).
 
 -record(proxy, {
@@ -65,6 +66,29 @@ stop_proxy(#proxy{port = Port}) ->
 
 %% @doc Return the proxy URL.
 proxy_url(#proxy{url = Url}) -> Url.
+
+%% @doc Resolve the Copilot CLI used by E2E runs, in order: COPILOT_CLI_PATH
+%% (when the file exists; CI points it at nodejs/node_modules/.bin/copilot),
+%% the CLI 1.0.113+ nodejs/node_modules/@github/copilot/npm-loader.js, then the
+%% legacy @github/copilot-*/index.js and @github/copilot/index.js entry points.
+%% copilot_client runs `.js` paths with node and any other path directly.
+cli_path() ->
+    GithubDir = filename:absname(filename:join(["..", "..", "nodejs", "node_modules", "@github"])),
+    FromEnv = case os:getenv("COPILOT_CLI_PATH") of
+        false -> [];
+        ""    -> [];
+        Path  -> [Path]
+    end,
+    Legacy = lists:sort(filelib:wildcard(filename:join([GithubDir, "copilot-*", "index.js"]))),
+    Candidates = FromEnv
+        ++ [filename:join([GithubDir, "copilot", "npm-loader.js"])]
+        ++ Legacy
+        ++ [filename:join([GithubDir, "copilot", "index.js"])],
+    case [Candidate || Candidate <- Candidates, filelib:is_regular(Candidate)] of
+        [Found | _] -> Found;
+        []          -> error({copilot_cli_not_found,
+                              "Set COPILOT_CLI_PATH or run 'npm install' in the nodejs directory"})
+    end.
 
 %% @doc Configure the proxy for a specific test snapshot.
 configure(#proxy{url = Url}, FilePath, WorkDir) ->

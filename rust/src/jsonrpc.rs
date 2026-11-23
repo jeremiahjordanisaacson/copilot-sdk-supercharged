@@ -407,9 +407,10 @@ impl JsonRpcClient {
                 // Incoming request from the server (e.g., tool.call)
                 let method = raw.method.unwrap();
                 let params = raw.params.unwrap_or(Value::Object(Default::default()));
-                let id_str = match &raw.id {
-                    Some(Value::String(s)) => s.clone(),
-                    Some(Value::Number(n)) => n.to_string(),
+                // Echo the request ID exactly as received (number or string): JSON-RPC
+                // peers match responses by the original ID value.
+                let id_value = match &raw.id {
+                    Some(id @ Value::String(_)) | Some(id @ Value::Number(_)) => id.clone(),
                     _ => continue,
                 };
 
@@ -424,12 +425,12 @@ impl JsonRpcClient {
                         let response = match result {
                             Ok(value) => serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "id": id_str,
+                                "id": id_value,
                                 "result": value
                             }),
                             Err(e) => serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "id": id_str,
+                                "id": id_value,
                                 "error": {
                                     "code": -32603,
                                     "message": e.to_string()
@@ -449,7 +450,7 @@ impl JsonRpcClient {
                     // No handler registered - send method not found error
                     let response = serde_json::json!({
                         "jsonrpc": "2.0",
-                        "id": id_str,
+                        "id": id_value,
                         "error": {
                             "code": -32601,
                             "message": format!("Method not found: {}", method)

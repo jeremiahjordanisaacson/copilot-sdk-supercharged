@@ -54,6 +54,197 @@ session.destroy
 client.stop
 ```
 
+## What's New in v3.0.0
+
+SDK protocol 4 support (the upstream SDK 2.0 wire format). **Requires Copilot CLI 1.0.113 or
+newer**: `start` rejects older CLIs with
+`SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+
+Existing options keep working. You still pass the flat `SessionConfig` / `ResumeSessionConfig`
+options; right before `session.create` / `session.resume` the client groups them into the
+protocol 4 payload (`streaming` becomes `events.streaming`, `skill_directories` becomes
+`skills.directories`, and so on). A legacy `provider` is sent as a `"default"` named provider
+with `inference.defaultProvider = "default"` and Copilot API models disabled
+(`github.capi.enabled = false`). A plain-string `system_message` is sent as
+`{mode: "append", content: ...}`, `destroy` now sends `session.detach` (falling back to
+`session.destroy`), messages go to `session.send`, events arrive through `session.event`, and
+server requests are answered in their own fibers.
+
+```crystal
+require "copilot_sdk"
+
+client = CopilotSDK::CopilotClient.new(CopilotSDK::CopilotClientOptions.new(
+  # Client info: sent as `clientInfo` on the `connect` handshake.
+  client_info: CopilotSDK::ClientInfo.new(editor_name: "acme-portal", editor_version: "2.4.0"),
+  # Client mode: ClientMode::CODING_AGENT (default) or ClientMode::EMPTY.
+  mode: CopilotSDK::ClientMode::CODING_AGENT,
+  # Network callbacks: `network.setProvider` is called after connecting.
+  network: CopilotSDK::NetworkConfig.new(
+    resolve_proxy: ->(url : String) { url.includes?("corp.example") ? "PROXY proxy.corp.example:8080" : nil },
+  ),
+))
+client.start
+
+hooks = CopilotSDK::SessionHooks.new(
+  on_subagent_start: ->(input : CopilotSDK::SubagentStartHookInput, session_id : String) {
+    CopilotSDK::SubagentStartHookOutput.new(additional_context: "Focus for #{input.agent_name}").as(CopilotSDK::SubagentStartHookOutput?)
+  },
+)
+
+session = client.create_session(CopilotSDK::SessionConfig.new(
+  # Named BYOK providers: select a registered model with "<provider>/<id>".
+  model: "local/qwen3",
+  providers: [CopilotSDK::NamedProviderConfig.new("local", "http://localhost:11434/v1",
+    type: "openai", api_key_command: "op read op://dev/llm/api-key")],
+  models: [CopilotSDK::ProviderModelConfig.new("local", "qwen3", max_output_tokens: 8192_i64)],
+  default_provider: "local",
+  capi: CopilotSDK::CapiSessionOptions.new(enabled: false),
+  # Idempotent tools: `idempotent` is sent in tools.definitions[].
+  tools: [CopilotSDK::ToolDefinition.new("lookup_ticket", "Look up a ticket", idempotent: true)],
+  # Max output tokens override (`limits.max_output_tokens`).
+  model_capabilities: CopilotSDK::ModelCapabilitiesOverride.new(
+    limits: CopilotSDK::ModelLimitsOverride.new(max_output_tokens: 8192_i64)).to_h,
+  # Memory store: answers `memoryStore.store` (sends state.hasMemoryStore).
+  memory_config: CopilotSDK::MemoryConfiguration.new(
+    store_memory: ->(memory : CopilotSDK::StoredMemory) { puts "remember #{memory.fact}"; nil }),
+  working_directory: "/repo",
+  name: "ticket-triage",
+  ask_user_variant: CopilotSDK::AskUserVariant::ELICITATION,
+  sandbox_config: CopilotSDK::SandboxConfig.new(enabled: true, allow_bypass: true),
+  feature_flags: {"someRuntimeFlag" => true},
+  allowed_models: ["local/qwen3", "gpt-5"],
+  auth_client_id_metadata_url: "https://example.com/oauth/client.json",
+  agent_directories: ["./.github/agents"],
+  hook_directories: ["./.github/hooks"],
+  trust_working_directory: CopilotSDK::WorkingDirectoryTrust::SESSION,
+  image_generation: CopilotSDK::ImageGenerationConfig.new(enabled: true, save_to_disk: true),
+  autopilot: CopilotSDK::AutopilotOptions.new(continuation_enabled: true, max_continues: 5),
+  # Subagent lifecycle hooks (`subagentStart` / `subagentStop`).
+  hooks: hooks,
+  # Shell authentication: answers `shellAuthentication.request` prompts.
+  on_shell_authentication_request: ->(request : CopilotSDK::ShellAuthenticationRequest) {
+    request.input_kind == "confirm" ? CopilotSDK::ShellAuthenticationResponse.accept("yes") : CopilotSDK::ShellAuthenticationResponse.cancel
+  },
+))
+
+# Shell output events (`tool.shell_output`).
+session.on_shell_output { |chunk| print chunk.text; nil }
+
+# Client turn ID, message source, and structured output.
+answer = session.send_and_wait(CopilotSDK::MessageOptions.new(
+  prompt: "Summarize open tickets",
+  source: CopilotSDK::MessageSource.agent("triage"),
+  response_schema: JSON.parse(%({"type":"object","properties":{"count":{"type":"integer"}}})),
+  client_turn_id: "turn-42",
+))
+
+# Permission mode refusal reason.
+result = session.set_permission_mode("allow-all")
+if !result.success && result.reason == CopilotSDK::PermissionModeRefusalReason::MANAGED_POLICY
+  puts "Managed policy keeps the current permission mode"
+end
+
+session.detach # session.detach: the on-disk state is kept
+
+begin
+  resumed = client.resume_session(CopilotSDK::ResumeSessionConfig.new(
+    session.session_id,
+    suppress_resume_event: true,
+    allow_transcript_recovery: true,
+    clear_default_provider: true,
+  ))
+  resumed.detach
+rescue ex : CopilotSDK::CopilotError
+  puts ex.message
+end
+
+client.clear_managed_settings_cache # managedSettings.clearCache
+client.stop
+```
+
+GitHub token provider (answers `gitHubToken.getToken`; mutually exclusive with `github_token`),
+Auto routing tier (the session model must be `auto`), and the managed-settings Policy Helper:
+
+```crystal
+session = client.create_session(CopilotSDK::SessionConfig.new(
+  model: "auto",
+  github_token_provider: ->(request : CopilotSDK::GitHubTokenRequest) {
+    CopilotSDK::GitHubTokenResult.token(access_token: mint_token(request.host), expires_in: 7200)
+  },
+))
+session.switch_auto_tier(CopilotSDK::AutoTier::EFFICIENCY) # session.model.switchAutoTier
+session.recheck_policy_helper # session.managedSettings.recheckPolicyHelper
+```
+
+A Policy Helper failure during `create_session` / `resume_session` is available from the raised
+`CopilotSDK::JsonRpcError` (`error.data.policyHelperFailure`):
+
+```crystal
+begin
+  client.create_session(CopilotSDK::SessionConfig.new)
+rescue ex : CopilotSDK::JsonRpcError
+  if failure = ex.policy_helper_failure
+    puts "#{failure.category}: #{failure.message}"
+  end
+end
+```
+
+Empty client mode: every session must set `available_tools` (`create_session` raises
+otherwise), and the empty-mode defaults (no experimental mode, telemetry, persistent MCP tokens,
+embeddings, cross-session store, memory, on-demand instructions, repository hooks, or host git
+operations) are applied under your own values:
+
+```crystal
+minimal = CopilotSDK::CopilotClient.new(CopilotSDK::CopilotClientOptions.new(
+  mode: CopilotSDK::ClientMode::EMPTY))
+session = minimal.create_session(CopilotSDK::SessionConfig.new(available_tools: ["view", "grep"]))
+```
+
+New in this release:
+
+- **Protocol 4 grouped payloads** (`CopilotSDK.group_session_params`), with
+  `ResumeSessionConfig#suppress_resume_event` (alias `disable_resume`) and
+  `allow_transcript_recovery` kept top level.
+- **Named BYOK providers**: `providers`, `models`, `default_provider` (or
+  `clear_default_provider: true` on resume), `capi` (which also carries the legacy
+  `enable_web_socket_responses` option); legacy `provider` (`ProviderConfig`, including
+  `api_key_command`).
+- **Client mode**, **client info**, **network callbacks** (`NetworkConfig`), **shell
+  authentication** (cancelled prompts resolve to cancel), **memory store**
+  (`MemoryConfiguration#store_memory`), **shell output events**
+  (`SessionEventTypes::TOOL_SHELL_OUTPUT`, `ToolShellOutputData`, `on_shell_output`),
+  **idempotent tools** (`ToolDefinition#idempotent`, `ToolBuilder#idempotent`), **client turn
+  ID**, **policy helper failure** (`JsonRpcError#policy_helper_failure`, `PolicyHelperFailure`),
+  and **permission mode refusal reason** (`PermissionModeSetResult#reason`,
+  `PermissionModeRefusalReason::MANAGED_POLICY`).
+- **v2.6.0 parity**: `switch_auto_tier`, `ask_user_variant`, `github_token_provider`,
+  `SandboxConfig#allow_bypass`, `feature_flags`, `detach`, `MessageSource`,
+  `clear_managed_settings_cache`, `recheck_policy_helper`, `allowed_models`,
+  `auth_client_id_metadata_url`, `ModelLimitsOverride#max_output_tokens`
+  (`max_output_tokens`), `response_schema`, `agent_directories` / `hook_directories`,
+  `trust_working_directory` (`"session"` or `"user"`, create only),
+  `allow_transcript_recovery`, `ImageGenerationConfig#save_to_disk`,
+  `AutopilotOptions#max_continues`, and `SessionHooks` with `on_subagent_start` /
+  `on_subagent_stop` (other hooks via `SessionHooks#on(HookType, &block)`).
+- `experimental_mode` is now sent as `experiments.enableExperimentalMode`, and
+  `available_tools` is a new `SessionConfig` option.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is an
+  experimental upstream surface that depends on the runtime's in-process hosting library; it
+  is not available in this SDK.
+- In-process native runtime hosting is not available: the client spawns the CLI over stdio or
+  connects to `cli_url`. The `in_process` option is accepted but has no effect.
+- Tool calls, permission prompts and elicitation are not yet wired to the protocol 4 server
+  requests (`tool.call`, `permission.request`): tools registered on the session are sent with
+  each message rather than at session creation, and `elicitation_handler`,
+  `mcp_auth_handler`, `commands`, `instructions` (a plain string, which collides with the
+  protocol 4 `instructions` group), `agent_mode`, `response_format` and `request_headers` on
+  `SessionConfig` are passed through unchanged as top-level keys.
+- `github_token` on `CopilotClientOptions` is not yet passed to the spawned CLI; use the
+  session-level `github_token` or `github_token_provider`.
+
 ## Connecting to an External Server
 
 ```crystal
@@ -142,20 +333,26 @@ The SDK uses Crystal's built-in concurrency model:
 | `#get_auth_status` | Get authentication status |
 | `#list_models` | List available models |
 | `#list_sessions` | List active sessions |
+| `#clear_managed_settings_cache` | Clear cached managed settings (`managedSettings.clearCache`) |
 
 ### CopilotSession
 
 | Method | Description |
 |--------|-------------|
-| `#send(options)` | Send a message |
+| `#send(options)` | Send a message (`session.send`) |
 | `#send_and_wait(options)` | Send and wait for the final response |
 | `#on(&block)` | Subscribe to all events |
 | `#on(type, &block)` | Subscribe to a specific event type |
+| `#on_shell_output(&block)` | Subscribe to `tool.shell_output` events |
 | `#off(id)` | Unsubscribe a handler |
 | `#add_tool(defn, &handler)` | Register a tool |
 | `#define_tool(name, &block)` | Register a tool using the builder DSL |
 | `#on_permission(&block)` | Set the permission handler |
-| `#destroy` | Destroy the session |
+| `#switch_auto_tier(tier)` | Change the Auto routing tier (`session.model.switchAutoTier`) |
+| `#recheck_policy_helper` | Re-run the Policy Helper (`session.managedSettings.recheckPolicyHelper`) |
+| `#set_permission_mode(mode)` | Set the permission mode (`session.permissions.setMode`) |
+| `#detach` | Release the session, keeping its state (`session.detach`) |
+| `#destroy` | Best-effort `detach` |
 
 ### Session Events
 
@@ -165,7 +362,9 @@ The SDK uses Crystal's built-in concurrency model:
 | `assistant.message_delta` | Streaming text delta |
 | `assistant.reasoning` | Final reasoning content |
 | `assistant.reasoning_delta` | Streaming reasoning delta |
-| `turn.end` | Turn completed |
+| `session.idle` | Turn completed (`send_and_wait` returns) |
+| `tool.shell_output` | Live shell output of a running tool |
+| `turn.end` | Turn completed (legacy) |
 | `session.compaction_start` | Session compaction began |
 | `session.compaction_complete` | Session compaction finished |
 

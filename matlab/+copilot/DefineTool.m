@@ -28,6 +28,10 @@ classdef DefineTool
 
         % When true, the SDK will not request permission before execution.
         SkipPermission (1,1) logical = false
+
+        % When true, repeated calls have no extra effect, so the runtime may
+        % retry the tool safely (wire: idempotent).
+        Idempotent (1,1) logical = false
     end
 
     methods
@@ -41,6 +45,7 @@ classdef DefineTool
             p.addParameter('Handler',              obj.Handler);
             p.addParameter('OverridesBuiltInTool', obj.OverridesBuiltInTool);
             p.addParameter('SkipPermission',       obj.SkipPermission);
+            p.addParameter('Idempotent',           obj.Idempotent);
             p.parse(varargin{:});
 
             obj.Name                = p.Results.Name;
@@ -49,6 +54,7 @@ classdef DefineTool
             obj.Handler             = p.Results.Handler;
             obj.OverridesBuiltInTool = p.Results.OverridesBuiltInTool;
             obj.SkipPermission      = p.Results.SkipPermission;
+            obj.Idempotent          = p.Results.Idempotent;
         end
 
         function s = toStruct(obj)
@@ -61,6 +67,9 @@ classdef DefineTool
             end
             if obj.SkipPermission
                 s.skipPermission = true;
+            end
+            if obj.Idempotent
+                s.idempotent = true;
             end
         end
     end

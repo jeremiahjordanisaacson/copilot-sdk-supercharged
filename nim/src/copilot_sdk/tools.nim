@@ -35,13 +35,15 @@ proc toJsonSchema*(params: seq[ToolParameter]): JsonNode =
 # ---------------------------------------------------------------------------
 
 proc newTool*(name, description: string; params: seq[ToolParameter];
-              handler: ToolHandler): Tool =
+              handler: ToolHandler; idempotent = false): Tool =
   ## Create a Tool with the given name, description, parameters, and handler.
+  ## Set `idempotent` when repeating a call with the same arguments is safe.
   Tool(
     name: name,
     description: description,
     parameters: params,
     handler: handler,
+    idempotent: idempotent,
   )
 
 proc newToolParameter*(name, `type`, description: string;
@@ -80,6 +82,8 @@ proc toRegistrationJson*(tool: Tool): JsonNode =
     "description": tool.description,
     "parameters": toJsonSchema(tool.parameters),
   }
+  if tool.idempotent:
+    result["idempotent"] = %true
 
 proc toolsToJson*(tools: seq[Tool]): JsonNode =
   ## Serialize a list of tools to a JSON array for registration.

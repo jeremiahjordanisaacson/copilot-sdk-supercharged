@@ -93,7 +93,37 @@ classdef TestClient < matlab.unittest.TestCase
 
         function testProtocolVersion(testCase)
             %testProtocolVersion  Protocol version matches expectations.
-            testCase.verifyEqual(copilot.SdkProtocolVersion.VERSION, 3);
+            testCase.verifyEqual(copilot.SdkProtocolVersion.VERSION, 4);
+            testCase.verifyEqual(copilot.SdkProtocolVersion.MIN_VERSION, 4);
+            testCase.verifyEqual(copilot.SdkProtocolVersion.MAX_VERSION, 4);
+        end
+
+        function testGroupSessionParams(testCase)
+            %testGroupSessionParams  Flat options become SDK protocol 4 groups.
+            flat = struct('model', 'm', 'streaming', true, ...
+                'requestPermission', true, 'hooks', true, ...
+                'disableResume', true, 'trustWorkingDirectory', 'session', ...
+                'skills', {{'a'}}, 'custom', 1);
+            flat.tools = {struct('name', 't')};
+            grouped = copilot.groupSessionParams(flat, true);
+            testCase.verifyEqual(grouped.model, 'm');
+            testCase.verifyTrue(grouped.suppressResumeEvent);
+            testCase.verifyTrue(grouped.events.streaming);
+            testCase.verifyTrue(grouped.permissions.request);
+            testCase.verifyTrue(grouped.hooks.hasHandlers);
+            testCase.verifyEqual(grouped.tools.definitions{1}.name, 't');
+            testCase.verifyEqual(grouped.custom, 1);
+            testCase.verifyFalse(isfield(grouped, 'streaming'));
+            testCase.verifyFalse(isfield(grouped, 'skills'));
+            testCase.verifyFalse(isfield(grouped, 'filesystem'));
+
+            legacy = copilot.groupSessionParams(struct('model', 'm', ...
+                'provider', struct('type', 'openai', 'baseUrl', 'http://x', ...
+                                   'maxOutputTokens', 100)), false);
+            testCase.verifyEqual(legacy.inference.defaultProvider, 'default');
+            testCase.verifyEqual(legacy.inference.providers{1}.name, 'default');
+            testCase.verifyEqual(legacy.inference.models{1}.maxOutputTokens, 100);
+            testCase.verifyFalse(legacy.github.capi.enabled);
         end
 
         function testMessageOptions(testCase)

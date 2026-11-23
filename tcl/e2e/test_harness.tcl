@@ -13,6 +13,8 @@ namespace eval ::e2e::harness {
     variable proxy_pid ""
     variable proxy_url ""
     variable proxy_chan ""
+    # Directory of this harness (captured while the file is being sourced)
+    variable harness_dir [file dirname [file normalize [info script]]]
 }
 
 # Start the replay proxy and return the listening URL.
@@ -56,6 +58,29 @@ proc ::e2e::harness::stop_proxy {} {
 proc ::e2e::harness::url {} {
     variable proxy_url
     return $proxy_url
+}
+
+# Locate the Copilot CLI for E2E tests: COPILOT_CLI_PATH (when the file exists),
+# then the CLI 1.0.113+ npm-loader.js entry point, then the legacy index.js entry
+# points under nodejs/node_modules/@github. The client runs a .js path with node
+# and executes any other path (such as node_modules/.bin/copilot) directly.
+proc ::e2e::harness::cli_path {} {
+    variable harness_dir
+    if {[info exists ::env(COPILOT_CLI_PATH)] && [file exists $::env(COPILOT_CLI_PATH)]} {
+        return $::env(COPILOT_CLI_PATH)
+    }
+    set github_dir [file normalize [file join $harness_dir .. .. nodejs node_modules @github]]
+    set candidates [list [file join $github_dir copilot npm-loader.js]]
+    foreach legacy [lsort [glob -nocomplain -directory $github_dir copilot-*]] {
+        lappend candidates [file join $legacy index.js]
+    }
+    lappend candidates [file join $github_dir copilot index.js]
+    foreach candidate $candidates {
+        if {[file exists $candidate]} {
+            return $candidate
+        }
+    }
+    error "Copilot CLI not found for tests. Run 'npm install' in the nodejs directory."
 }
 
 # Configure the proxy for a specific test snapshot.

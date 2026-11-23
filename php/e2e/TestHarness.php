@@ -93,11 +93,64 @@ class TestHarness
                 }
             }
 
+            // Current CLIs resolve the Copilot API endpoint from /copilot_internal/user
+            // (served by the proxy through COPILOT_DEBUG_GITHUB_API_URL), so register the
+            // replay user for every token the tests authenticate with.
+            $tokens = array_unique(array_filter([
+                getenv('GH_TOKEN') ?: null,
+                getenv('GITHUB_TOKEN') ?: null,
+                'fake-test-token',
+            ]));
+            foreach ($tokens as $token) {
+                $this->setCopilotUserByToken($token);
+            }
+
             return $this->proxyUrl;
         }
 
         $this->kill();
         throw new \RuntimeException("Unexpected proxy output: $line");
+    }
+
+    /**
+     * Register the replay user answered by the proxy's /copilot_internal/user endpoint.
+     *
+     * @param string $token The GitHub token the CLI authenticates with
+     * @throws \RuntimeException If the registration fails
+     */
+    public function setCopilotUserByToken(string $token): void
+    {
+        if ($this->proxyUrl === null) {
+            throw new \RuntimeException('Proxy not started');
+        }
+
+        $payload = json_encode([
+            'token' => $token,
+            'response' => [
+                'login' => 'e2e-test-user',
+                'id' => 12345,
+                'copilot_plan' => 'individual_pro',
+                'endpoints' => [
+                    'api' => $this->proxyUrl,
+                    'telemetry' => 'https://sdk-hydro-collector.example.com',
+                ],
+                'analytics_tracking_id' => 'e2e-test-tracking-id',
+            ],
+        ]);
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => $payload,
+                'timeout' => 10,
+            ],
+        ]);
+
+        $result = @file_get_contents("{$this->proxyUrl}/copilot-user-config", false, $context);
+        if ($result === false) {
+            throw new \RuntimeException('Failed to register the replay Copilot user');
+        }
     }
 
     /**

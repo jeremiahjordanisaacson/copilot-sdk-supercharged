@@ -18,6 +18,7 @@ with Copilot.Session;        use Copilot.Session;
 with Copilot.Tools;          use Copilot.Tools;
 with Copilot.Version;
 with Copilot.JSON_RPC;       use Copilot.JSON_RPC;
+with Copilot.Wire;
 
 procedure Test_Client is
 
@@ -90,11 +91,56 @@ procedure Test_Client is
       Put_Line ("[Test_Version]");
       Assert (Copilot.Version.SDK_Version = "2.0.2",
               "SDK_Version is 2.0.2");
-      Assert (Copilot.Version.Protocol_Version = 3,
-              "Protocol_Version is 3");
-      Assert (Copilot.Version.Min_Protocol = 2,
-              "Min_Protocol is 2");
+      Assert (Copilot.Version.Protocol_Version = 4,
+              "Protocol_Version is 4");
+      Assert (Copilot.Version.Min_Protocol = 4
+                and then Copilot.Version.Max_Protocol = 4,
+              "Handshake accepts exactly protocol 4");
    end Test_Version;
+
+   --  ---------------------------------------------------------------
+   --  Test: flat session payloads become SDK protocol 4 groups
+   --  ---------------------------------------------------------------
+   procedure Test_Group_Session_Params is
+      use Copilot.Wire;
+      Grouped : constant String :=
+        Group_Session_Params
+          ("{""model"":""m"",""streaming"":true,""requestPermission"":true,"
+           & """tools"":[{""name"":""t""}],""hooks"":true,"
+           & """disableResume"":true,""custom"":1}",
+           Is_Resume => True);
+      Legacy  : constant String :=
+        Group_Session_Params
+          ("{""model"":""m"",""provider"":{""type"":""openai"","
+           & """baseUrl"":""http://x"",""maxOutputTokens"":100}}",
+           Is_Resume => False);
+   begin
+      Put_Line ("[Test_Group_Session_Params]");
+      Assert (String_Member (Grouped, "model") = "m", "model stays at the root");
+      Assert (Bool_Member (Grouped, "suppressResumeEvent"),
+              "disableResume becomes suppressResumeEvent");
+      Assert (Bool_Member (Member (Grouped, "events"), "streaming"),
+              "streaming moves to events.streaming");
+      Assert (Bool_Member (Member (Grouped, "permissions"), "request"),
+              "requestPermission moves to permissions.request");
+      Assert (Member (Member (Grouped, "tools"), "definitions")
+                = "[{""name"":""t""}]",
+              "tools moves to tools.definitions");
+      Assert (Bool_Member (Member (Grouped, "hooks"), "hasHandlers"),
+              "hooks becomes hooks.hasHandlers");
+      Assert (Member (Grouped, "custom") = "1", "unknown keys stay at the root");
+      Assert (Member (Grouped, "streaming") = "", "flat keys are removed");
+      Assert (String_Member (Member (Legacy, "inference"), "defaultProvider")
+                = "default",
+              "legacy provider becomes the default named provider");
+      Assert (Member (Member (Legacy, "github"), "capi")
+                = "{""enabled"":false}",
+              "legacy provider disables CAPI models");
+      Assert (Member (Member (Legacy, "inference"), "models")
+                = "[{""provider"":""default"",""id"":""m"","
+                  & """maxOutputTokens"":100}]",
+              "legacy model limits move to inference.models");
+   end Test_Group_Session_Params;
 
    --  ---------------------------------------------------------------
    --  Test: tool definition helpers
@@ -194,13 +240,14 @@ procedure Test_Client is
    begin
       Put_Line ("[Test_Exceptions]");
       --  Simply verify that the exceptions can be named.
-      declare
-         pragma Unreferenced (Copilot_Error, Connection_Error,
-                              Protocol_Error, Session_Error,
-                              Timeout_Error, Tool_Error,
-                              Authentication_Error);
       begin
-         Assert (True, "All exception types are accessible");
+         raise Session_Error;
+      exception
+         when Copilot_Error | Connection_Error | Protocol_Error
+            | Timeout_Error | Tool_Error | Authentication_Error =>
+            Assert (False, "All exception types are accessible");
+         when Session_Error =>
+            Assert (True, "All exception types are accessible");
       end;
    end Test_Exceptions;
 
@@ -212,6 +259,7 @@ begin
    Test_Client_Create;
    Test_Default_Session_Config;
    Test_Version;
+   Test_Group_Session_Params;
    Test_Tool_Helpers;
    Test_Tools_To_Json;
    Test_Type_Conversions;

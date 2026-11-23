@@ -76,6 +76,20 @@ export GITHUB_COMMIT_ATTACHMENT, GITHUB_REPOSITORY_ATTACHMENT
 export GITHUB_PULL_REQUEST_ATTACHMENT, GITHUB_ISSUE_ATTACHMENT
 export OTLP_PROTOCOL_GRPC, OTLP_PROTOCOL_HTTP
 
+# v2.6.0 / v3.0.0 (SDK protocol 4) features
+export SDK_PROTOCOL_VERSION, group_session_params
+export ClientInfo, NetworkConfig, SandboxConfig, ImageGenerationConfig, AutopilotOptions
+export ProviderConfig, NamedProviderConfig, ProviderModelConfig, GitHubTokenProviderArgs
+export ShellAuthenticationRequest, StoredMemory, ShellOutputEventData
+export PermissionModeSetResult, PolicyHelperFailure
+export CLIENT_MODE_CODING_AGENT, CLIENT_MODE_EMPTY
+export EVENT_TOOL_SHELL_OUTPUT, EVENT_TOOL_EXECUTION_PARTIAL_RESULT, EVENT_EXTERNAL_TOOL_REQUESTED
+export PERMISSION_MODE_REFUSAL_MANAGED_POLICY
+export MESSAGE_SOURCE_USER, MESSAGE_SOURCE_SYSTEM, message_source_agent
+export detach_session, switch_auto_tier, get_managed_settings, recheck_policy_helper
+export set_permission_mode, clear_managed_settings_cache, policy_helper_failure
+export shell_output_event_data
+
 # Enum values & constants used by tests and consumers
 export DISCONNECTED, CONNECTING, CONNECTED, CONNECTION_ERROR
 export LOG_NONE, LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_DEBUG, LOG_ALL

@@ -90,6 +90,14 @@
 ;; JSON-RPC Client
 ;; ============================================================================
 
+;; Defined below the record; the reader loop in `start!` dispatches through it.
+(declare handle-incoming)
+
+(def null-result
+  "Return this from a request handler to reply with a JSON `null` result
+  (a handler returning nil replies with an empty object)."
+  ::null)
+
 (defprotocol IJsonRpcClient
   "Protocol for a JSON-RPC 2.0 client."
   (start! [this] "Start the background reader loop.")
@@ -239,7 +247,10 @@
               (write-message! out-stream write-lock
                               {:jsonrpc "2.0"
                                :id      (:id msg)
-                               :result  (or result {})}))
+                               :result  (cond
+                                          (= result null-result) nil
+                                          (nil? result)          {}
+                                          :else                  result)}))
             (catch Exception e
               (write-message! out-stream write-lock
                               {:jsonrpc "2.0"

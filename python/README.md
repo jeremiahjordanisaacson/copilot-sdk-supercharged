@@ -1498,55 +1498,237 @@ async with await client.create_session(
     ...
 ```
 
+## What's New in v3.0.0
+
+v3.0.0 is a major release. The core SDK now tracks Microsoft Copilot SDK 2.0, which negotiates **SDK protocol 4** and requires **Copilot CLI runtime 1.0.113 or newer** (v2.5.3 used protocol 3). Upgrade the SDK and the runtime together: an older runtime fails connection negotiation.
+
+### Breaking changes
+
+Code written for v2.5.x needs a migration pass. The [v2 breaking changes guide](../docs/v2-breaking-changes.md) lists every rename; these are the main ones:
+
+- **Explicit client mode:** `CopilotClient(mode=...)` no longer has a default. Pass `mode="coding-agent"` for CLI-like tools and defaults, or `mode="empty"` for multi-user services that enable each capability explicitly. Replace any `"copilot-cli"` value with `"coding-agent"`.
+- **Runtime connections, in-process by default:** the `connection=` keyword is now `runtime=`. `RuntimeConnection.for_stdio()` becomes `for_spawned_stdio()`, the old spawning `for_tcp()` becomes `for_spawned_tcp()`, `for_uri(url)` becomes the attached `for_tcp(host, port)`, and `for_inprocess()` plus the new `for_default()` complete the set. Without `runtime`, the SDK loads the native runtime into your process; pass `RuntimeConnection.for_spawned_stdio()` or set `COPILOT_SDK_DEFAULT_CONNECTION=stdio` to keep a child process. The client-level `env` and `working_directory` move onto spawned connections, next to `path` and `args`.
+- **Grouped client options:** `log_level` and `telemetry` move into `observability={...}` (`log_level` now defaults to `None`, leaving the runtime default in place); `github_token`, `use_logged_in_user`, and `on_github_telemetry` become `github={"token": ..., "use_logged_in_user": ..., "on_telemetry": ...}`; `on_list_models` (now returning the generated `Model` type instead of `ModelInfo`) and `request_handler` move into `models={...}`; `builtin_plugin_directories` becomes `plugins={"builtin_directories": [...]}`; `base_directory` and `session_idle_timeout_seconds` move onto owned `runtime` connections; `enable_remote_sessions` is removed. New `extensions` and `installations` groups hold the extension launch provider and the installation confirmation handler.
+- **Grouped session options:** `create_session()` and `resume_session()` take nested keyword dictionaries: `inference`, `tools`, `permissions`, `interaction`, `events`, `agents`, `skills`, `mcp`, `github`, `filesystem`, `execution`, `instructions`, `hooks`, `git`, `state`, `plugins`, `canvases`, `extensions`, `experiments`, and `policy`. `CreateSessionOptions` and `ResumeSessionOptions` type them for reuse with `**options`. `model`, `working_directory`, `system_message`, `config_directory`, and `enable_config_discovery` stay at the root.
+- **Named BYOK providers:** the singular `provider` option is removed. Declare connections in `inference["providers"]`, optional model definitions in `inference["models"]` (selected as `provider/id`), and an optional pass-through connection in `inference["default_provider"]`. Set `github={"capi": {"enabled": False}}` for a BYOK-only catalog; adding a provider no longer turns off Copilot API models.
+- **Python-specific:** `copilot.generated` moved to the private `copilot._generated` package, so import generated types from `copilot`, `copilot.rpc`, or `copilot.session_events`, and construct generated dataclasses with keyword arguments. `ping()` returns a `PingResult` (read `result.message`), and `GetAuthStatusResponse` uses `is_authenticated`, `auth_type`, and `status_message`.
+
+A v3.0.0 client and session with the restructured options:
+
+```python
+import os
+
+from copilot import CopilotClient, RuntimeConnection
+from copilot.session import PermissionHandler
+
+client = CopilotClient(
+    mode="coding-agent",
+    runtime=RuntimeConnection.for_spawned_stdio(),  # omit to host the runtime in-process
+    observability={"log_level": "debug"},
+    github={"token": os.environ["COPILOT_GITHUB_TOKEN"]},
+)
+
+session = await client.create_session(
+    model="gateway/chat",
+    permissions={"on_request": PermissionHandler.approve_all},
+    inference={
+        "reasoning_effort": "medium",
+        "providers": [
+            {
+                "name": "gateway",
+                "type": "openai",
+                "base_url": "https://models.example.com/v1",
+                "api_key": os.environ["MODEL_API_KEY"],
+            }
+        ],
+        "models": [{"provider": "gateway", "id": "chat", "wire_model": "my-deployment"}],
+    },
+    github={"capi": {"enabled": False}},
+    events={"streaming": True},
+)
+```
+
+### Package identity
+
+- The PyPI distribution keeps its name: install `copilot-sdk-supercharged>=3`, and the import package is still `copilot`. Code ported from the upstream Microsoft Copilot SDK keeps its `import copilot` statements unchanged; only the distribution you install differs.
+- Published wheels pin the runtime version they were built against; `python -m copilot download-runtime --in-process` pre-stages it (see [Runtime](#runtime)).
+
+### New Microsoft Copilot SDK 2.0 features
+
+**Idempotent tool definitions:** declare that repeating a call with the same arguments has no further effect, so the runtime can safely repeat a call whose outcome was lost. Permission checks are unchanged.
+
+```python
+from pydantic import BaseModel, Field
+
+from copilot import define_tool
+
+
+class LookupIssueParams(BaseModel):
+    id: str = Field(description="Issue identifier")
+
+
+@define_tool(description="Fetch issue details", idempotent=True)
+async def lookup_issue(params: LookupIssueParams) -> str:
+    return await fetch_issue(params.id)
+```
+
+**Client turn IDs:** `client_turn_id` on `send()` and `send_and_wait()` labels the turn. The runtime copies it into `_meta["com.github.copilot/turnId"]` on every MCP `tools/call` made for that turn (including sub-agents) and echoes it on the turn's `user.message` event.
+
+```python
+await session.send("Triage the new issues", client_turn_id="turn-42")
+```
+
+**Shell authentication handler:** `interaction["on_shell_authentication_request"]` answers `sudo -A`, `ssh`, and `git` prompts from commands the agent runs. The answer goes only to the program that asked; the model never sees it. See [Shell password prompts](../docs/features/shell-password-prompts.md).
+
+```python
+from copilot import (
+    ShellAuthenticationInvocation,
+    ShellAuthenticationRequest,
+    ShellAuthenticationResponse,
+)
+from copilot.session import PermissionHandler
+
+
+async def on_shell_authentication_request(
+    request: ShellAuthenticationRequest, invocation: ShellAuthenticationInvocation
+) -> ShellAuthenticationResponse:
+    value = await prompt_user(
+        f"{request['program']} asks: {request['prompt']}",
+        masked=request["inputKind"] == "secret",
+        cancelled=invocation["cancelled"],
+    )
+    if value is None:
+        return {"action": "cancel"}
+    return {"action": "accept", "value": value}
+
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    interaction={"on_shell_authentication_request": on_shell_authentication_request},
+)
+```
+
+**Memory store callback (experimental):** `state["memory"]["store_memory"]` keeps the memories the agent saves in your own storage instead of the built-in backends. While it is set, the runtime retrieves no memories, so supply recall yourself (for example through `system_message`) and pass the callback again on every resume.
+
+```python
+from copilot import StoredMemory
+from copilot.session import PermissionHandler
+
+
+async def store_memory(memory: StoredMemory) -> None:
+    await memories.insert(memory["subject"], memory["fact"], memory["citations"])
+
+
+session = await client.create_session(
+    permissions={"on_request": PermissionHandler.approve_all},
+    state={"memory": {"enabled": True, "store_memory": store_memory}},
+)
+```
+
+**Network callbacks (experimental):** the client `network` option lets your app choose the runtime's proxies (`resolve_proxy`) and answer proxy Negotiate (`authenticate_negotiate`) and Basic (`authenticate_basic`) challenges. See [Network callbacks](#network-callbacks-experimental) for the full contract.
+
+```python
+from copilot import (
+    CopilotClient,
+    NetworkAuthenticateBasicRequest,
+    NetworkAuthenticateBasicResult,
+    NetworkResolveProxyRequest,
+)
+
+
+async def resolve_proxy(request: NetworkResolveProxyRequest) -> str | None:
+    return await lookup_proxy(request.url)
+
+
+async def authenticate_basic(
+    request: NetworkAuthenticateBasicRequest,
+) -> NetworkAuthenticateBasicResult | None:
+    credentials = await ask_for_proxy_credentials(request.proxy, request.realm)
+    if credentials is None:
+        return None
+    username, password = credentials
+    return NetworkAuthenticateBasicResult(username=username, password=password)
+
+
+client = CopilotClient(
+    mode="coding-agent",
+    network={"resolve_proxy": resolve_proxy, "authenticate_basic": authenticate_basic},
+)
+```
+
+**Structured Policy Helper failures:** managed-settings snapshots carry `policy_helper_failure` (with `category`, `severity`, `message`, and optional `remediation` and `help_link`) plus `policy_helper_capabilities`. When `recheck` is supported, `session.rpc.managed_settings.recheck_policy_helper()` runs a fresh helper evaluation. Applicable create and resume failures report the same failure in their JSON-RPC error data.
+
+```python
+snapshot = await session.rpc.managed_settings.get()
+capabilities = snapshot.policy_helper_capabilities
+if snapshot.policy_helper_failure and capabilities and capabilities.recheck:
+    refreshed = await session.rpc.managed_settings.recheck_policy_helper()
+    failure = refreshed.policy_helper_failure
+    print(failure.message if failure else "Policy Helper recovered")
+```
+
+**Permission-mode refusal reason:** when managed policy refuses a permission mode, the result reports `reason == "managed_policy"` with the authoritative `mode`. The same result is available as `session.permission_mode_result` for a `permissions["mode"]` applied at create or resume.
+
+```python
+from copilot.rpc import PermissionsSetModeRequest
+from copilot.session_events import PermissionMode
+
+result = await session.rpc.permissions.set_mode(
+    PermissionsSetModeRequest(mode=PermissionMode.ALLOW_ALL)
+)
+if not result.success and result.reason == "managed_policy":
+    print(f"Managed policy kept the session in {result.mode.value} mode")
+```
+
 ## Recent Features (v2.4–v2.5)
 
-The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#api-reference), [in-process (FFI) transport](#in-process-ffi-transport), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Options are keyword arguments to `create_session(...)` unless noted.
+The recent CLI syncs added a wave of session controls. A few already have their own sections above ([reasoning effort](#api-reference), [in-process (FFI) transport](#in-process-ffi-transport), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry)), so this section is a compact roundup of the rest, written with the v3.0.0 grouped option names. Options are keyword arguments to `create_session(...)` unless noted; a dotted name such as `tools.search` is the `"search"` key of the `tools=` dictionary.
 
 **v2.5**
 
-- **Tool search** — `tool_search: ToolSearchConfig` (`{"enabled": ..., "defer_threshold": ...}`). Let the model discover tools on demand via the built-in `tool_search_tool` instead of preloading every definition.
-- **Session rewind** — `session.rpc.history.list_rewind_points()`, `preview_rewind(...)`, and `rewind(...)`. Opt in to file capture with `enable_file_change_tracking=True`.
-- **Content exclusion** — `session.rpc.content_exclusion.check_paths(...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
-- **Additional directories** — `additional_directories: list[str]`. Extra workspace roots the agent may access beyond the working directory.
-- **Disabled MCP servers** — `disabled_mcp_servers: list[str]`.
-- **GitHub MCP tool config** — `github_mcp_tool_config: GitHubMcpToolConfig`.
-- **Canvas provider** — `canvas_provider: CanvasProviderIdentity`.
-- **Custom agents local-only** — `custom_agents_local_only: bool`.
-- **User-prompt-transformed hook** — `on_user_prompt_transformed` in the `hooks` mapping.
-- **Permission decision context** — `decision_context` on an attributed permission result.
-- **Plugin directories** — `plugin_directories: list[str]`.
-- **Experimental mode** — `enable_experimental_mode: bool`.
+- **Tool search:** `tools.search: ToolSearchConfig` (`{"enabled": ..., "defer_threshold": ...}`). Let the model discover tools on demand via the built-in `tool_search_tool` instead of preloading every definition.
+- **Session rewind:** `session.rpc.history.list_rewind_points()`, `preview_rewind(...)`, and `rewind(...)`. Opt in to file capture with `filesystem={"track_file_changes": True}`.
+- **Content exclusion:** `session.rpc.content_exclusion.check_paths(...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories:** `filesystem.additional_directories: list[str]`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers:** `mcp.disabled_servers: list[str]`.
+- **GitHub MCP tool config:** `github.mcp: GitHubMcpToolConfig`.
+- **Canvas provider:** `canvases.provider: CanvasProviderIdentity`.
+- **Custom agents local-only:** `agents.local_discovery_only: bool`.
+- **User-prompt-transformed hook:** `on_user_prompt_transformed` in the `hooks={"handlers": ...}` mapping.
+- **Permission decision context:** `decision_context` on an attributed permission result.
+- **Plugin directories:** `plugins.directories: list[str]`.
+- **Experimental mode:** `experiments.enable_experimental_mode: bool`.
 
 **v2.4**
 
-- **BYOK bearer-token provider** — `provider["bearer_token_provider"]`, a sync/async callable returning a token (see [Custom Providers](#custom-providers)).
-- **MCP OAuth handler** — `on_mcp_auth_request: McpAuthHandler`.
-- **Session citations** — `enable_citations: bool`.
-- **Excluded built-in agents** — `excluded_builtin_agents: list[str]`.
-- **Session spending limits** — `session_limits: SessionLimitsConfig` (caps such as `max_ai_credits`).
-- **Pre-MCP-tool-call hook** — `on_pre_mcp_tool_call` in the `hooks` mapping.
-- **HTTP request handler** — `request_handler` on `CopilotClient` (a `CopilotRequestHandler`).
-- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
-- **Experiment assignments** — `exp_assignments`.
+- **BYOK bearer-token provider:** `"bearer_token_provider"` on an `inference["providers"]` entry (`NamedProviderConfig`), a sync or async callable returning a token (see [Custom Providers](#custom-providers)).
+- **MCP OAuth handler:** `mcp.on_auth_request: McpAuthHandler`.
+- **Session citations:** `inference.enable_citations: bool`.
+- **Excluded built-in agents:** `agents.excluded_builtin_agents: list[str]`.
+- **Session spending limits:** `execution.limits: SessionLimitsConfig` (caps such as `max_ai_credits`).
+- **Pre-MCP-tool-call hook:** `on_pre_mcp_tool_call` in the `hooks={"handlers": ...}` mapping.
+- **HTTP request handler:** `models={"request_handler": ...}` on `CopilotClient` (a `CopilotRequestHandler`).
+- **GitHub attachments:** `AttachmentGitHubCommit`, `AttachmentGitHubRepository` (from `copilot.session_events`).
+- **Experiment assignments:** `experiments.assignments`.
 
 **Reasoning effort and tool search:**
 
 ```python
 async with await client.create_session(
     model="claude-sonnet-4.6",
-    reasoning_effort="high",
-    tool_search={"enabled": True, "defer_threshold": 30},
-    additional_directories=["/repo/shared", "/repo/docs"],
+    inference={"reasoning_effort": "high"},
+    tools={"search": {"enabled": True, "defer_threshold": 30}},
+    filesystem={"additional_directories": ["/repo/shared", "/repo/docs"]},
 ) as session:
     ...
 ```
 
-**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+**Session rewind:** roll a session back to an earlier user turn, optionally restoring files:
 
 ```python
 from copilot import rpc
 
-async with await client.create_session(enable_file_change_tracking=True) as session:
+async with await client.create_session(filesystem={"track_file_changes": True}) as session:
     await session.send_and_wait("Refactor utils.py")
 
     result = await session.rpc.history.list_rewind_points()
@@ -1559,7 +1741,7 @@ async with await client.create_session(enable_file_change_tracking=True) as sess
         )
 ```
 
-**Content exclusion** — check paths against the session's policy:
+**Content exclusion:** check paths against the session's policy:
 
 ```python
 from copilot import rpc
@@ -1571,18 +1753,29 @@ result = await session.rpc.content_exclusion.check_paths(
 )
 ```
 
-**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+**BYOK bearer-token provider:** supply tokens dynamically (never serialized; the runtime calls back before each request):
 
 ```python
-async def get_token(args):
+from copilot import ProviderTokenArgs
+
+
+async def get_token(args: ProviderTokenArgs) -> str:
     return await acquire_access_token()
+
 
 async with await client.create_session(
     model="gpt-4",
-    provider={
-        "type": "openai",
-        "base_url": "https://my-api.example.com/v1",
-        "bearer_token_provider": get_token,
+    github={"capi": {"enabled": False}},
+    inference={
+        "default_provider": "byok",
+        "providers": [
+            {
+                "name": "byok",
+                "type": "openai",
+                "base_url": "https://my-api.example.com/v1",
+                "bearer_token_provider": get_token,
+            }
+        ],
     },
 ) as session:
     ...

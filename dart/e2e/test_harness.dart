@@ -86,7 +86,63 @@ class TestHarness {
     }
 
     print('TestHarness: proxy started at $_proxyUrl');
+    await _registerDefaultCopilotUsers();
     return _proxyUrl!;
+  }
+
+  /// Registers the replay user answered by the proxy's
+  /// `/copilot_internal/user` endpoint for [token]. Current CLIs resolve the
+  /// Copilot API endpoint from this user (through
+  /// `COPILOT_DEBUG_GITHUB_API_URL`), so every token the tests use must be
+  /// known.
+  Future<void> setCopilotUserByToken(String token) async {
+    if (_proxyUrl == null) {
+      throw StateError('Proxy not started');
+    }
+
+    final client = HttpClient();
+    try {
+      final request =
+          await client.postUrl(Uri.parse('$_proxyUrl/copilot-user-config'));
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'token': token,
+        'response': {
+          'login': 'e2e-test-user',
+          'id': 12345,
+          'copilot_plan': 'individual_pro',
+          'endpoints': {
+            'api': _proxyUrl,
+            'telemetry': 'https://sdk-hydro-collector.example.com',
+          },
+          'analytics_tracking_id': 'e2e-test-tracking-id',
+        },
+      }));
+      final response = await request.close();
+      await response.drain<void>();
+      if (response.statusCode != 200) {
+        throw StateError(
+            'Proxy copilot user config failed (${response.statusCode})');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Registers the tokens the E2E clients authenticate with (see
+  /// [getTestEnv]).
+  Future<void> _registerDefaultCopilotUsers() async {
+    final tokens = <String>{
+      for (final token in [
+        Platform.environment['GH_TOKEN'],
+        Platform.environment['GITHUB_TOKEN'],
+        'fake-test-token',
+      ])
+        if (token != null && token.isNotEmpty) token,
+    };
+    for (final token in tokens) {
+      await setCopilotUserByToken(token);
+    }
   }
 
   /// Configure the proxy for a specific test snapshot.
@@ -166,6 +222,11 @@ class TestHarness {
   }
 
   /// Resolve the path to the Copilot CLI executable.
+  ///
+  /// Lookup order: `COPILOT_CLI_PATH` (when the file exists), the CLI 1.0.113+
+  /// `@github/copilot/npm-loader.js` (run with node), then the legacy
+  /// `index.js` entry points. Paths without a `.js` suffix (for example the
+  /// `node_modules/.bin/copilot` shim) are spawned directly.
   String getCliPath() {
     final envPath = Platform.environment['COPILOT_CLI_PATH'];
     if (envPath != null && envPath.isNotEmpty && File(envPath).existsSync()) {
@@ -175,8 +236,15 @@ class TestHarness {
     final sep = Platform.pathSeparator;
     final githubModules =
         Directory('$_repoRoot${sep}nodejs${sep}node_modules${sep}@github');
-    // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-    // package (e.g. @github/copilot-linux-x64); prefer it when present.
+
+    final npmLoader = File('${githubModules.path}${sep}copilot'
+        '${sep}npm-loader.js');
+    if (npmLoader.existsSync()) {
+      return npmLoader.absolute.path;
+    }
+
+    // CLI 1.0.64-1 through 1.0.112 ship a runnable index.js in a
+    // platform-specific package (e.g. @github/copilot-linux-x64).
     if (githubModules.existsSync()) {
       for (final entry in githubModules.listSync()) {
         if (entry is Directory) {
@@ -206,8 +274,15 @@ class TestHarness {
   /// Environment variables for the CLI process, routing traffic through the proxy.
   Map<String, String> getTestEnv(String workDir) {
     final env = Map<String, String>.from(Platform.environment);
+    // Signing keys would make the CLI sign requests the replay proxy cannot
+    // verify.
+    env.remove('COPILOT_HMAC_KEY');
+    env.remove('CAPI_HMAC_KEY');
     env['COPILOT_API_URL'] = _proxyUrl ?? '';
+    // Route GitHub API calls (including /copilot_internal/user) to the proxy.
+    env['COPILOT_DEBUG_GITHUB_API_URL'] = _proxyUrl ?? '';
     env['COPILOT_HOME'] = workDir;
+    env['GH_CONFIG_DIR'] = workDir;
     env['XDG_CONFIG_HOME'] = workDir;
     env['XDG_STATE_HOME'] = workDir;
     env['GH_TOKEN'] = env['GH_TOKEN'] ?? 'fake-test-token';

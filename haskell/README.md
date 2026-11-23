@@ -30,6 +30,7 @@ The SDK follows the same patterns as all other SDKs in this repository (see the 
 | `Copilot.Types` | All data types with Aeson JSON instances. |
 | `Copilot.DefineTool` | Helper functions for defining tools. |
 | `Copilot.SdkProtocolVersion` | Protocol version constant (must match server). |
+| `Copilot.SessionParams` | Translates session options into the grouped SDK protocol 4 payload. |
 
 ## Installation
 
@@ -76,7 +77,7 @@ main = do
 
   -- Send a message and wait for response
   response <- sendAndWait session
-    (MessageOptions "What is 2+2?" Nothing Nothing)
+    (defaultMessageOptions "What is 2+2?")
     Nothing  -- default 60s timeout
 
   -- Clean up
@@ -85,6 +86,231 @@ main = do
   _ <- stopClient client
   pure ()
 ```
+
+## What's New in v3.0.0
+
+**SDK protocol 4.** The SDK now speaks SDK protocol 4 (`sdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. `startClient` sends the `connect` handshake (falling back to `ping` on servers without it) and rejects older CLIs with `SDK protocol version mismatch: SDK supports version 4, but server reports version N. Please update your SDK or server to ensure compatibility.`
+
+**Existing options keep working.** Keep filling the same `SessionConfig` and `ResumeSessionConfig` fields. Right before `session.create` and `session.resume`, the client translates the flat options into the protocol 4 option groups (`inference`, `tools`, `permissions`, `events`, ...) with `Copilot.SessionParams.groupSessionParams`. A legacy `scProvider` becomes the named `default` provider (with Copilot models disabled), `scEnableWebSocketResponses` moves into `github.capi`, and `scExperimentalMode` is sent as `experiments.enableExperimentalMode`. Other behavior changes:
+
+- `destroySession` now detaches with `session.detach`; session state stays on disk so the session can be resumed.
+- `send` no longer sends the legacy `moResponseFormat`; use `moResponseSchema` for structured output.
+- Failed `session.create` / `session.resume` requests throw `RequestFailed` (a `CopilotClientError`, now exported) carrying the server's `JsonRpcError`.
+- `defaultMessageOptions` builds a `MessageOptions` with only the prompt set.
+
+### New client options and methods
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+import Copilot.Client
+import Copilot.Types
+
+main :: IO ()
+main = do
+  client <- newCopilotClient defaultClientOptions
+    { ccoClientInfo = Just defaultClientInfo
+        { cciEditorName = Just "my-editor", cciEditorVersion = Just "1.2.0" }
+    , ccoMode       = ClientModeCodingAgent  -- or ClientModeEmpty
+    , ccoNetwork    = Just defaultNetworkOptions
+        { noScope        = Just "connection"
+        , noResolveProxy = Just $ \_url -> pure (Just "PROXY proxy.example.com:8080; DIRECT")
+        , noAuthenticateBasic = Just $ \req ->
+            pure $ if nbarPreviousRejected req
+              then Nothing
+              else Just (NetworkBasicCredentials "proxy-user" "proxy-password")
+        }
+    }
+  startClient client
+  clearManagedSettingsCache client  -- managedSettings.clearCache
+  _ <- stopClient client
+  pure ()
+```
+
+- **Client info handshake** (`ccoClientInfo`): sent as `clientInfo` on `connect`; empty fields are dropped and nothing is sent when every field is empty.
+- **Client mode** (`ccoMode`): `ClientModeCodingAgent` (the default, wire name `coding-agent`) keeps today's behavior. `ClientModeEmpty` requires `scAvailableTools` / `rscAvailableTools` on every create and resume, and applies conservative defaults beneath your own options (no experimental mode, telemetry, repository hooks, host git operations, or cross-session memory; in-memory OAuth and embedding storage). `parseClientMode` accepts `copilot-cli` as an alias of `coding-agent`.
+- **Network callbacks** (`ccoNetwork`): `noResolveProxy`, `noAuthenticateNegotiate`, and `noAuthenticateBasic` are registered with `network.setProvider` after connecting and answer `network.resolveProxy`, `network.authenticateNegotiate`, and `network.authenticateBasic`. Tokens and passwords are never logged.
+- **Managed settings cache clear**: `clearManagedSettingsCache`.
+
+### New session options
+
+```haskell
+import qualified Data.Map.Strict as Map
+
+session <- createSession client defaultSessionConfig
+  { scAskUserVariant          = Just askUserVariantElicitation
+  , scSandbox                 = Just defaultSandboxConfig { sbcEnabled = True, sbcAllowBypass = Just True }
+  , scFeatureFlags            = Just (Map.fromList [("my_feature", True)])
+  , scAllowedModels           = Just ["gpt-4.1", "claude-sonnet-4.5"]
+  , scAuthClientIdMetadataUrl = Just "https://example.com/oauth/client-metadata.json"
+  , scModelCapabilities       = Just (modelCapabilitiesWithLimits
+                                  defaultModelLimitsOverride { mloMaxOutputTokens = Just 4096 })
+  , scAgentDirectories        = Just ["./agents"]
+  , scHookDirectories         = Just ["./hooks"]
+  , scTrustWorkingDirectory   = Just trustWorkingDirectorySession  -- create only
+  , scImageGeneration         = Just defaultImageGenerationConfig
+                                  { igcEnabled = Just True, igcSaveToDisk = Just True }
+  , scAutopilot               = Just defaultAutopilotConfig
+                                  { apcContinuationEnabled = Just True, apcMaxContinues = Just 5 }
+  }
+```
+
+| Option | Sent as |
+|--------|---------|
+| `scAskUserVariant` (`askUserVariantLegacy`, `askUserVariantElicitation`) | `interaction.askUserVariant` |
+| `scSandbox` (`sbcAllowBypass` lets the agent ask to run a command outside the sandbox) | `permissions.sandbox` |
+| `scFeatureFlags` | `experiments.flags` |
+| `scAllowedModels` | `policy.allowedModels` |
+| `scAuthClientIdMetadataUrl` | `mcp.authClientIdMetadataUrl` |
+| `scModelCapabilities` with `modelCapabilitiesWithLimits` | `inference.capabilities` (`limits.max_output_tokens`) |
+| `scAgentDirectories`, `scHookDirectories` | `agents.directories`, `hooks.directories` |
+| `scTrustWorkingDirectory` (`trustWorkingDirectorySession`, `trustWorkingDirectoryUser`) | `filesystem.trustWorkingDirectory` |
+| `scImageGeneration` | `tools.imageGeneration` |
+| `scAutopilot` | `execution.autopilot` |
+| `rscAllowTranscriptRecovery` (resume only) | root `allowTranscriptRecovery` |
+
+**GitHub token provider.** Supply GitHub tokens on demand instead of a static `scGitHubToken` (the two are mutually exclusive). The SDK registers the provider under a fresh registration ID, answers `gitHubToken.getToken`, and drops the registration when the session is released:
+
+```haskell
+import qualified Data.Text as T
+import System.Environment (lookupEnv)
+
+session <- createSession client defaultSessionConfig
+  { scGitHubTokenProvider = Just $ \args -> do
+      -- gtpaHost args and gtpaReason args describe the request
+      mToken <- lookupEnv "MY_GITHUB_TOKEN"
+      pure $ case mToken of
+        Just token -> GitHubTokenGranted GitHubTokenGrant
+          { gtgAccessToken = T.pack token, gtgTokenType = Nothing, gtgExpiresIn = 3600 }
+        Nothing -> GitHubTokenCancelled
+  }
+```
+
+**Shell authentication and memory store.** Answer `sudo`, `ssh`, or `git` prompts raised by shell commands (the answer is never shown to the model), and keep memories the agent asks to store:
+
+```haskell
+import qualified Data.Text.IO as TIO
+
+session <- createSession client defaultSessionConfig
+  { scOnShellAuthenticationRequest = Just $ \req ->
+      pure $ if sarProgram req == "git" && sarInputKind req == "confirm"
+        then ShellAuthenticationAccept "yes"
+        else ShellAuthenticationCancel
+  , scOnStoreMemory = Just $ \memory ->
+      TIO.appendFile "memories.txt" (stmSubject memory <> ": " <> stmFact memory <> "\n")
+  }
+```
+
+**Sub-agent lifecycle hooks** (`subagentStart` / `subagentStop` through `hooks.invoke`):
+
+```haskell
+session <- createSession client defaultSessionConfig
+  { scHooks = Just defaultSessionHooks
+      { shOnSubagentStart = Just $ \input _inv -> do
+          putStrLn ("Sub-agent starting: " ++ T.unpack (ssaAgentName input))
+          pure (Just (SubagentStartHookOutput (Just "Keep answers short.")))
+      , shOnSubagentStop = Just $ \input _inv -> do
+          putStrLn ("Sub-agent stopped: " ++ T.unpack (sstStopReason input))
+          pure Nothing
+      }
+  }
+```
+
+**Named BYOK providers and API key commands.** Register several provider connections and models, then select a model with `provider/id`. `npcApiKeyCommand` (and `pcApiKeyCommand` on the legacy `ProviderConfig`) runs a command for a fresh API key before each request:
+
+```haskell
+session <- createSession client defaultSessionConfig
+  { scProviders = Just
+      [ (defaultNamedProviderConfig "local" "http://localhost:11434/v1")
+          { npcType = Just "openai", npcModelProvider = Just modelProviderOllama }
+      , (defaultNamedProviderConfig "openai" "https://api.openai.com/v1")
+          { npcType = Just "openai", npcApiKeyCommand = Just "op read op://dev/openai/api-key" }
+      ]
+  , scModels          = Just [ defaultProviderModelConfig "local" "llama3.2" ]
+  , scDefaultProvider = Just "local"
+  , scModel           = Just "local/llama3.2"
+  , scCapi            = Just defaultCapiConfig { capiEnabled = Just False }
+  }
+
+-- Legacy single provider with an API key command
+legacy <- createSession client defaultSessionConfig
+  { scProvider = Just (defaultProviderConfig "https://api.openai.com/v1")
+      { pcType = Just "openai", pcApiKeyCommand = Just "op read op://dev/openai/api-key" }
+  , scModel    = Just "gpt-4.1"
+  }
+
+-- On resume, rscClearDefaultProvider sends an explicit null default provider
+resumed <- resumeSession client (sessionId session) defaultResumeSessionConfig
+  { rscAllowTranscriptRecovery = Just True
+  , rscClearDefaultProvider    = True
+  }
+```
+
+**Idempotent tools.** Mark tools that are safe to retry with the same arguments:
+
+```haskell
+lookupTool :: Tool
+lookupTool = (defineTool "lookup_order" (Just "Read-only order lookup") Nothing $ \_args _inv ->
+                pure (ToolResultText "shipped"))
+  { toolIdempotent = Just True }
+```
+
+**Message source, client turn ID, and structured output:**
+
+```haskell
+import Data.Aeson (object, (.=))
+import Data.Text (Text)
+
+let schema = object
+      [ "type"       .= ("object" :: Text)
+      , "properties" .= object [ "answer" .= object [ "type" .= ("integer" :: Text) ] ]
+      , "required"   .= (["answer"] :: [Text])
+      ]
+mEvt <- sendAndWait session (defaultMessageOptions "What is 6 * 7?")
+  { moSource         = Just messageSourceSystem  -- or messageSourceUser, messageSourceAgent "reviewer"
+  , moClientTurnId   = Just "turn-42"
+  , moResponseSchema = Just schema  -- responseFormat {type: "json_schema", ...}
+  } Nothing
+```
+
+**Session controls:**
+
+```haskell
+import Control.Monad (when)
+
+_ <- switchAutoTier session (Just autoTierFast)  -- session.model.switchAutoTier
+_ <- recheckPolicyHelper session                 -- session.managedSettings.recheckPolicyHelper
+result <- setPermissionMode session "allow-all"  -- session.permissions.setMode ("manual", "assisted", "allow-all")
+when (pmrReason result == Just permissionModeRefusalManagedPolicy) $
+  putStrLn "Blocked by managed policy"
+detachSession session                            -- session.detach
+```
+
+**Shell output events and Policy Helper failures:**
+
+```haskell
+import Control.Exception (try)
+import qualified Data.Aeson as Aeson
+
+_ <- onSessionEvent session $ \evt ->
+  when (seType evt == sessionEventToolShellOutput) $
+    case Aeson.fromJSON (seData evt) of
+      Aeson.Success out -> TIO.putStr (sodText out)  -- sodStream: stdout / stderr
+      Aeson.Error _     -> pure ()
+
+created <- try (createSession client defaultSessionConfig)
+case created of
+  Left err -> case policyHelperFailure err of
+    Just failure -> TIO.putStrLn ("Blocked by policy: " <> phfMessage failure)
+    Nothing      -> putStrLn ("Create failed: " ++ show err)
+  Right _ -> pure ()
+```
+
+## Known Limitations
+
+- **Runtime-supervised AHP host** (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- **In-process native runtime hosting** is not the default connection: the Haskell SDK keeps spawning the CLI over stdio. `ccoInProcess` is kept as-is.
+- **Shell authentication cancellation**: `shellAuthentication.cancel` is acknowledged, but a handler that is already running is not interrupted; the runtime ignores answers to cancelled requests.
 
 ## Defining Custom Tools
 
@@ -183,21 +409,25 @@ session <- createSession client defaultSessionConfig
 
 ## Image Generation
 
-Request image responses using `moResponseFormat` and `moImageOptions`:
+Enable the image generation tool with `scImageGeneration`, and pass per-message
+image options with `moImageOptions`:
 
 ```haskell
-response <- sendAndWait session MessageOptions
-    { moPrompt         = "Generate a sunset over mountains"
-    , moAttachments    = Nothing
-    , moMode           = Nothing
-    , moResponseFormat = Just ResponseFormatImage
-    , moImageOptions   = Just ImageOptions
+session <- createSession client defaultSessionConfig
+  { scImageGeneration = Just defaultImageGenerationConfig
+      { igcEnabled = Just True, igcSaveToDisk = Just True }
+  }
+response <- sendAndWait session (defaultMessageOptions "Generate a sunset over mountains")
+    { moImageOptions = Just ImageOptions
         { imageOptionsSize    = Just "1024x1024"
         , imageOptionsQuality = Just "hd"
         , imageOptionsStyle   = Just "natural"
         }
-    } 60000
+    } (Just 60000000)
 ```
+
+`moResponseFormat` is kept for source compatibility but is no longer sent with
+SDK protocol 4.
 
 ## Event Handling
 
@@ -376,19 +606,25 @@ Content-Length: 123\r\n
 
 | Method | Description |
 |--------|-------------|
-| `ping` | Health check, returns protocol version |
+| `connect` | Handshake (with optional `clientInfo`), returns protocol version |
+| `ping` | Health check, returns protocol version (handshake fallback) |
 | `status.get` | Get CLI version and protocol info |
 | `auth.getStatus` | Get authentication status |
 | `models.list` | List available models |
-| `session.create` | Create a new session |
-| `session.resume` | Resume an existing session |
+| `network.setProvider` | Register network callbacks (`ccoNetwork`) |
+| `managedSettings.clearCache` | Clear cached managed settings |
+| `session.create` | Create a new session (grouped protocol 4 options) |
+| `session.resume` | Resume an existing session (grouped protocol 4 options) |
 | `session.send` | Send a message to a session |
-| `session.destroy` | Destroy a session |
+| `session.detach` | Detach from a session (`destroySession`, `detachSession`) |
 | `session.delete` | Permanently delete a session |
 | `session.list` | List all sessions |
 | `session.getMessages` | Get session history |
 | `session.abort` | Abort current processing |
 | `session.getLastId` | Get the last session ID |
+| `session.model.switchAutoTier` | Change the Auto routing tier |
+| `session.managedSettings.recheckPolicyHelper` | Re-run the policy helper |
+| `session.permissions.setMode` | Set the permission mode |
 
 ### Server-to-Client Requests
 
@@ -397,7 +633,12 @@ Content-Length: 123\r\n
 | `tool.call` | Execute a registered tool |
 | `permission.request` | Request permission for an operation |
 | `userInput.request` | Request user input |
-| `hooks.invoke` | Invoke a session hook |
+| `hooks.invoke` | Invoke a session hook (including `subagentStart` / `subagentStop`) |
+| `exitPlanMode.request` | Ask to leave plan mode |
+| `gitHubToken.getToken` | Ask a GitHub token provider for a token |
+| `shellAuthentication.request` / `shellAuthentication.cancel` | Answer (or cancel) a shell authentication prompt |
+| `memoryStore.store` | Store a memory |
+| `network.resolveProxy`, `network.authenticateNegotiate`, `network.authenticateBasic` | Network callbacks |
 
 ### Server-to-Client Notifications
 
@@ -420,8 +661,10 @@ cabal run copilot-basic-example
 
 ## Protocol Version
 
-The SDK protocol version is `2`. This must match the server version.
-The client verifies this on startup via a ping request.
+The SDK protocol version is `4` (`Copilot.SdkProtocolVersion.sdkProtocolVersion`),
+which requires Copilot CLI 1.0.113 or newer. On startup the client sends the
+`connect` handshake (falling back to `ping` on servers without it) and rejects
+servers that report a different version.
 
 ## Thread Safety
 

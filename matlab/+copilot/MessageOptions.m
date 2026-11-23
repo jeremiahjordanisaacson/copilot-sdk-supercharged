@@ -16,6 +16,17 @@ classdef MessageOptions
         % Alternate prompt shown in the UI (wire: displayPrompt).
         DisplayPrompt (1,:) char = ''
 
+        % Message source (upstream MessageSource): 'user', 'system' or
+        % 'agent-<id>' (wire: source).
+        Source (1,:) char = ''
+
+        % Opaque caller-chosen id echoed on this turn's events (wire: clientTurnId).
+        ClientTurnId (1,:) char = ''
+
+        % JSON schema (struct) for structured output (upstream responseSchema).
+        % Sent as responseFormat {type: 'json_schema', jsonSchema: {...}}.
+        ResponseSchema = []
+
         % Timeout in seconds for sendAndWait (0 = no limit).
         Timeout (1,1) double = 120
     end
@@ -27,17 +38,35 @@ classdef MessageOptions
             p.addParameter('RequestHeaders', containers.Map());
             p.addParameter('AgentMode',      obj.AgentMode);
             p.addParameter('DisplayPrompt',  obj.DisplayPrompt);
+            p.addParameter('Source',         obj.Source);
+            p.addParameter('ClientTurnId',   obj.ClientTurnId);
+            p.addParameter('ResponseSchema', []);
             p.addParameter('Timeout',        obj.Timeout);
             p.parse(varargin{:});
             obj.Prompt         = p.Results.Prompt;
             obj.RequestHeaders = p.Results.RequestHeaders;
             obj.AgentMode      = p.Results.AgentMode;
             obj.DisplayPrompt  = p.Results.DisplayPrompt;
+            obj.Source         = p.Results.Source;
+            obj.ClientTurnId   = p.Results.ClientTurnId;
+            obj.ResponseSchema = p.Results.ResponseSchema;
             obj.Timeout        = p.Results.Timeout;
         end
 
         function s = toStruct(obj)
             s = struct('content', obj.Prompt);
+            s = obj.addOptional(s);
+        end
+
+        function s = toSendParams(obj)
+            %toSendParams  session.send parameters (SDK protocol 4).
+            s = struct('prompt', obj.Prompt);
+            s = obj.addOptional(s);
+        end
+    end
+
+    methods (Access = private)
+        function s = addOptional(obj, s)
             if ~isempty(obj.AgentMode)
                 s.agentMode = obj.AgentMode;
             end
@@ -46,6 +75,20 @@ classdef MessageOptions
             end
             if isa(obj.RequestHeaders, 'containers.Map') && obj.RequestHeaders.Count > 0
                 s.requestHeaders = obj.RequestHeaders;
+            end
+            if ~isempty(obj.Source)
+                s.source = obj.Source;
+            end
+            if ~isempty(obj.ClientTurnId)
+                s.clientTurnId = obj.ClientTurnId;
+            end
+            if ~isempty(obj.ResponseSchema)
+                s.responseFormat = struct( ...
+                    'type', 'json_schema', ...
+                    'jsonSchema', struct( ...
+                        'name',   'response', ...
+                        'strict', true, ...
+                        'schema', obj.ResponseSchema));
             end
         end
     end

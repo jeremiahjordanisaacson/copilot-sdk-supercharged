@@ -76,3 +76,24 @@ val get_auth_status : t -> Yojson.Safe.t Lwt.t
 
 val set_session_fs_provider : t -> Types.session_fs_config -> Yojson.Safe.t Lwt.t
 (** [set_session_fs_provider t config] registers a session filesystem provider. *)
+
+(** {1 v2.6.0 / v3.0.0 (SDK protocol 4)} *)
+
+val disconnect_session : t -> Session.t -> unit Lwt.t
+(** [disconnect_session t session] sends [session.detach] and stops routing
+    server requests to the session. Its state on disk is kept, so it can be
+    resumed later. *)
+
+val clear_managed_settings_cache : t -> unit Lwt.t
+(** [clear_managed_settings_cache t] calls [managedSettings.clearCache]. *)
+
+val policy_helper_failure : exn -> Types.policy_helper_failure option
+(** [policy_helper_failure exn] reads [error.data.policyHelperFailure] from a
+    [Jsonrpc.Jsonrpc_error] raised by [session.create] / [session.resume]. *)
+
+val negotiated_protocol_version : t -> int option
+(** [negotiated_protocol_version t] is the protocol version reported by the
+    server during {!start} (always 4 once started). *)
+
+val mode : t -> string
+(** [mode t] is the client mode in effect: ["coding-agent"] or ["empty"]. *)

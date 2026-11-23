@@ -97,7 +97,10 @@ class TestHarness {
     }
 
     /**
-     * Resolves the CLI executable path.
+     * Resolves the CLI executable path: {@code COPILOT_CLI_PATH} when it points at an existing file,
+     * then the CLI 1.0.113+ {@code npm-loader.js} (run with node), then the legacy {@code index.js}
+     * layouts. Paths without a {@code .js} suffix (such as {@code node_modules/.bin/copilot}) are
+     * spawned directly.
      */
     String getCliPath() {
         String envPath = System.getenv('COPILOT_CLI_PATH')
@@ -106,8 +109,14 @@ class TestHarness {
         }
 
         File repoRoot = findRepoRoot()
+        // CLI 1.0.113+ ships npm-loader.js, which runs the platform-specific native binary.
+        File npmLoader = new File(repoRoot, 'nodejs/node_modules/@github/copilot/npm-loader.js')
+        if (npmLoader.exists()) {
+            return npmLoader.absolutePath
+        }
+
         File githubModules = new File(repoRoot, 'nodejs/node_modules/@github')
-        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // Legacy layouts: as of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
         // package (e.g. @github/copilot-linux-x64); prefer it when present.
         File platformCli = githubModules.listFiles()?.findAll {
             it.directory && it.name.startsWith('copilot-') && !it.name.contains('language-server')

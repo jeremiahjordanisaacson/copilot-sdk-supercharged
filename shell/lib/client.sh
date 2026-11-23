@@ -24,6 +24,28 @@ COPILOT_CLIENT_INFO_APPLICATION_NAME=""
 COPILOT_CLIENT_INFO_APPLICATION_VERSION=""
 COPILOT_CLIENT_INFO_INTEGRATION_NAME=""
 COPILOT_CLIENT_INFO_INTEGRATION_VERSION=""
+# Client mode: "coding-agent" (default, CLI-like coding tools and defaults) or "empty".
+# Empty mode is enforced by the SDK: every create/resume must set COPILOT_AVAILABLE_TOOLS,
+# and restrictive defaults (no experimental mode, telemetry, embedding retrieval, cross-session
+# store, memory, on-demand instruction discovery, repository hooks, or host git operations;
+# in-memory OAuth and embedding storage) are applied under explicit options.
+# "copilot-cli" is accepted as an alias of "coding-agent".
+COPILOT_CLIENT_MODE="coding-agent"
+# Network callbacks (function names). When any is set, copilot_client_start registers them
+# with network.setProvider after the protocol handshake. Never log tokens or passwords.
+#   my_resolve_proxy <request_json>          request: {"url"}
+#       → echo a PAC-style proxy list (e.g. "PROXY proxy.example:8080; DIRECT"), or nothing
+#   my_authenticate_negotiate <request_json> request: {"spn"}
+#       → echo a base64 SPNEGO token (without the "Negotiate " prefix), or nothing
+#   my_authenticate_basic <request_json>     request: {"proxy","realm","previousRejected"}
+#       → echo {"username":"...","password":"..."}, or nothing
+# COPILOT_NETWORK_SCOPE: "connection" (default) or "runtime".
+COPILOT_NETWORK_SCOPE=""
+COPILOT_NETWORK_RESOLVE_PROXY=""
+COPILOT_NETWORK_AUTHENTICATE_NEGOTIATE=""
+COPILOT_NETWORK_AUTHENTICATE_BASIC=""
+# PolicyHelperFailure (JSON object) carried by the last failed create/resume, or empty.
+COPILOT_POLICY_HELPER_FAILURE=""
 
 # --- Session Config Variables ---
 # Set these before calling copilot_client_create_session to include in the payload.
@@ -172,8 +194,51 @@ COPILOT_ALLOW_TRANSCRIPT_RECOVERY=""
 COPILOT_IMAGE_GENERATION=""
 # Autopilot options (JSON object string, e.g. from copilot_autopilot_options)
 COPILOT_AUTOPILOT=""
-# BYOK provider config (JSON object string, e.g. from copilot_provider_config)
+# BYOK provider config (JSON object string, e.g. from copilot_provider_config). Sent as the
+# named "default" connection (inference.providers) with Copilot API models disabled, which
+# preserves the v1 single-provider behavior on SDK protocol 4.
 COPILOT_PROVIDER=""
+
+# --- v3.0.0 (SDK protocol 4) Session Config ---
+# Unless noted, these apply to both copilot_client_create_session and
+# copilot_client_resume_session. Unset (empty) values are not sent.
+# Named BYOK provider connections (JSON array string of NamedProviderConfig objects, e.g. built
+# with copilot_named_provider_config). Select a registered model with "<provider>/<id>".
+COPILOT_PROVIDERS=""
+# BYOK model definitions (JSON array string of ProviderModelConfig objects, e.g. built with
+# copilot_provider_model_config)
+COPILOT_MODELS=""
+# Default connection for unqualified model aliases (string). The literal "null" sends JSON
+# null, which clears a saved default provider on resume.
+COPILOT_DEFAULT_PROVIDER=""
+# Built-in Copilot API options (JSON object string, e.g. '{"enabled":false}' for a
+# BYOK-only catalog). Merged with COPILOT_AUTO_TIER / COPILOT_ENABLE_WEB_SOCKET_RESPONSES.
+COPILOT_CAPI=""
+# Custom tool definitions (JSON array string of tool definitions, normally built with
+# copilot_register_tool, which also registers the handler that answers the tool's calls)
+COPILOT_TOOLS=""
+# Shell authentication handler function name. When set, create/resume request shell
+# authentication and shellAuthentication.request is answered by:
+#   my_shell_auth_handler <request_json>
+#       request: {"sessionId","requestId","program","prompt","inputKind","command","cwd"}
+#                (inputKind: "secret" | "text" | "confirm"; answer "yes" to confirm)
+#       → echo {"action":"accept","value":"..."} or {"action":"cancel"}
+# Any other output, or a failing handler, cancels the prompt. Never log the answer.
+COPILOT_SHELL_AUTHENTICATION_HANDLER=""
+# Memory store handler function name. When set, create/resume declare an app memory store and
+# memoryStore.store requests are answered by:
+#   my_memory_store <memory_json>   memory: {"sessionId","subject","fact","citations","reason"}
+#       → exit 0 once the memory is stored (a non-zero exit fails the store_memory tool call)
+COPILOT_MEMORY_STORE_HANDLER=""
+# Permission handler function name. When set, create/resume request permission prompts, which
+# arrive as permission.requested events during send_and_wait and are answered by:
+#   my_permission_handler <permission_request_json>
+#       request: {"kind":"shell"|"write"|"read"|"mcp"|"url"|"custom-tool"|..., "toolCallId", ...}
+#       → echo a decision (see copilot_permission_decision_json), for example "approve",
+#         "deny", or {"kind":"reject","feedback":"..."}
+# Without a handler the runtime denies operations that need approval, including custom tools
+# not registered with skip_permission (see copilot_approve_all / copilot_deny_all).
+COPILOT_PERMISSION_HANDLER=""
 
 # --- GitHub Token Provider Registry (client-level) ---
 # Newline-separated "registration_id|function_name|session_id" records used to answer
@@ -307,6 +372,11 @@ copilot_client_start() {
         return 0
     fi
 
+    if [[ "$(_copilot_client_mode)" == "invalid" ]]; then
+        echo "ERROR: Invalid COPILOT_CLIENT_MODE \"${COPILOT_CLIENT_MODE}\": expected \"coding-agent\" or \"empty\"" >&2
+        return 1
+    fi
+
     COPILOT_CLIENT_STATE="connecting"
     COPILOT_CLIENT_CLI_PATH="$cli_path"
     COPILOT_CLIENT_LOG_LEVEL="$log_level"
@@ -331,6 +401,13 @@ copilot_client_start() {
 
     # Verify protocol version
     if ! _copilot_client_verify_protocol_version; then
+        COPILOT_CLIENT_STATE="error"
+        copilot_jsonrpc_stop
+        return 1
+    fi
+
+    # Register network callbacks (network.setProvider) if any are configured
+    if ! _copilot_client_register_network_provider; then
         COPILOT_CLIENT_STATE="error"
         copilot_jsonrpc_stop
         return 1
@@ -405,6 +482,7 @@ copilot_client_create_session() {
     local system_message="${2:-}"
 
     _copilot_client_ensure_connected || return 1
+    _copilot_client_require_available_tools || return 1
 
     local params='{}'
     if [[ -n "$model" ]] && [[ -n "$system_message" ]]; then
@@ -588,8 +666,20 @@ copilot_client_create_session() {
         params=$(echo "$params" | jq -c --arg rid "$gh_registration_id" '. + {"gitHubTokenProviderRegistrationId":$rid}')
     fi
 
-    if ! copilot_jsonrpc_request "session.create" "$params"; then
+    # Translate the flat options to the SDK protocol 4 grouped payload
+    local wire_params
+    if ! wire_params=$(_copilot_client_session_wire_params "$params" false); then
+        echo "ERROR: Failed to build session.create params" >&2
+        if [[ -n "$gh_registration_id" ]]; then
+            _copilot_github_token_provider_unregister "$gh_registration_id"
+        fi
+        return 1
+    fi
+
+    COPILOT_POLICY_HELPER_FAILURE=""
+    if ! copilot_jsonrpc_request "session.create" "$wire_params"; then
         echo "ERROR: Failed to create session" >&2
+        _copilot_client_capture_policy_helper_failure
         if [[ -n "$gh_registration_id" ]]; then
             _copilot_github_token_provider_unregister "$gh_registration_id"
         fi
@@ -634,6 +724,8 @@ copilot_client_resume_session() {
         return 1
     fi
 
+    _copilot_client_require_available_tools || return 1
+
     local params
     if [[ -n "$model" ]]; then
         params=$(jq -c -n \
@@ -645,6 +737,12 @@ copilot_client_resume_session() {
     fi
 
     # Append optional session config fields for resume
+    if [[ -n "$COPILOT_EXCLUDED_TOOLS" ]]; then
+        params=$(echo "$params" | jq -c --argjson et "$COPILOT_EXCLUDED_TOOLS" '. + {"excludedTools":$et}')
+    fi
+    if [[ -n "$COPILOT_AVAILABLE_TOOLS" ]]; then
+        params=$(echo "$params" | jq -c --argjson at "$COPILOT_AVAILABLE_TOOLS" '. + {"availableTools":$at}')
+    fi
     if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
         params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
     fi
@@ -674,8 +772,20 @@ copilot_client_resume_session() {
         params=$(echo "$params" | jq -c --arg rid "$gh_registration_id" '. + {"gitHubTokenProviderRegistrationId":$rid}')
     fi
 
-    if ! copilot_jsonrpc_request "session.resume" "$params"; then
+    # Translate the flat options to the SDK protocol 4 grouped payload
+    local wire_params
+    if ! wire_params=$(_copilot_client_session_wire_params "$params" true); then
+        echo "ERROR: Failed to build session.resume params" >&2
+        if [[ -n "$gh_registration_id" ]]; then
+            _copilot_github_token_provider_unregister "$gh_registration_id"
+        fi
+        return 1
+    fi
+
+    COPILOT_POLICY_HELPER_FAILURE=""
+    if ! copilot_jsonrpc_request "session.resume" "$wire_params"; then
         echo "ERROR: Failed to resume session $session_id" >&2
+        _copilot_client_capture_policy_helper_failure
         if [[ -n "$gh_registration_id" ]]; then
             _copilot_github_token_provider_unregister "$gh_registration_id"
         fi
@@ -975,12 +1085,12 @@ _copilot_client_verify_protocol_version() {
     server_version=$(copilot_jsonrpc_get_result_field '.protocolVersion')
 
     if [[ -z "$server_version" ]] || [[ "$server_version" == "null" ]]; then
-        echo "ERROR: SDK protocol version mismatch: SDK expects version $expected_version, but server does not report a protocol version. Please update your server to ensure compatibility." >&2
+        echo "ERROR: SDK protocol version mismatch: SDK supports version $expected_version, but server does not report a protocol version. Please update your server to ensure compatibility." >&2
         return 1
     fi
 
     if [[ "$server_version" != "$expected_version" ]]; then
-        echo "ERROR: SDK protocol version mismatch: SDK expects version $expected_version, but server reports version $server_version. Please update your SDK or server to ensure compatibility." >&2
+        echo "ERROR: SDK protocol version mismatch: SDK supports version $expected_version, but server reports version $server_version. Please update your SDK or server to ensure compatibility." >&2
         return 1
     fi
 
@@ -1030,8 +1140,12 @@ _copilot_client_send_connect() {
 _copilot_client_add_common_session_options() {
     local params="$1"
 
-    # CAPI transport options: the runtime only accepts enableWebSocketResponses inside "capi".
-    local capi='{}'
+    # CAPI options (moved under github.capi on the wire): COPILOT_CAPI members plus the auto
+    # routing tier and the WebSocket transport toggle.
+    local capi="${COPILOT_CAPI:-}"
+    if [[ -z "$capi" ]]; then
+        capi='{}'
+    fi
     if [[ -n "${COPILOT_AUTO_TIER:-}" ]]; then
         capi=$(echo "$capi" | jq -c --arg at "$COPILOT_AUTO_TIER" '. + {"autoTier":$at}') || return 1
     fi
@@ -1086,7 +1200,293 @@ _copilot_client_add_common_session_options() {
         params=$(echo "$params" | jq -c '. + {"hooks":true}') || return 1
     fi
 
+    # --- v3.0.0 (SDK protocol 4) options ---
+    if [[ -n "${COPILOT_TOOLS:-}" ]]; then
+        params=$(echo "$params" | jq -c --argjson tl "$COPILOT_TOOLS" '. + {"tools":$tl}') || return 1
+    fi
+    if [[ -n "${COPILOT_PROVIDERS:-}" ]]; then
+        params=$(echo "$params" | jq -c --argjson pv "$COPILOT_PROVIDERS" '. + {"providers":$pv}') || return 1
+    fi
+    if [[ -n "${COPILOT_MODELS:-}" ]]; then
+        params=$(echo "$params" | jq -c --argjson md "$COPILOT_MODELS" '. + {"models":$md}') || return 1
+    fi
+    if [[ "${COPILOT_DEFAULT_PROVIDER:-}" == "null" ]]; then
+        params=$(echo "$params" | jq -c '. + {"defaultProvider":null}') || return 1
+    elif [[ -n "${COPILOT_DEFAULT_PROVIDER:-}" ]]; then
+        params=$(echo "$params" | jq -c --arg dp "$COPILOT_DEFAULT_PROVIDER" '. + {"defaultProvider":$dp}') || return 1
+    fi
+    if [[ -n "${COPILOT_SHELL_AUTHENTICATION_HANDLER:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"requestShellAuthentication":true}') || return 1
+    fi
+    if [[ -n "${COPILOT_MEMORY_STORE_HANDLER:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"hasMemoryStore":true}') || return 1
+    fi
+    if [[ -n "${COPILOT_PERMISSION_HANDLER:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"requestPermission":true}') || return 1
+    fi
+
     echo "$params"
+}
+
+# --- SDK protocol 4 session payload translation ---
+
+# jq program converting a flat session.create / session.resume payload to the SDK protocol 4
+# grouped shape. Root keys (sessionId, model, systemMessage, workingDirectory, ...) and unknown
+# keys stay at the top level; known flat keys move into their option group (for example
+# "streaming" becomes events.streaming and "hooks": true becomes hooks.hasHandlers). Objects
+# already keyed by a group name are merged with their explicit members winning, null values are
+# skipped (except a null defaultProvider, which clears the saved default on resume), empty
+# groups are not emitted, configDir becomes configDirectory, and disableResume becomes
+# suppressResumeEvent on resume. A legacy single "provider" becomes the named "default"
+# connection with Copilot API models disabled, unless named providers, a default provider, or
+# capi.enabled are set explicitly. Requires: --argjson resume true|false
+_COPILOT_SESSION_GROUPING_JQ='
+def option_groups: ["inference","tools","permissions","interaction","events","agents","skills",
+    "mcp","github","filesystem","execution","instructions","hooks","git","state","plugins",
+    "canvases","extensions","experiments","policy"];
+def flat_paths: {
+    "reasoningEffort":["inference","reasoningEffort"],
+    "reasoningSummary":["inference","reasoningSummary"], "contextTier":["inference","contextTier"],
+    "allowMultipleToolCalls":["inference","allowMultipleToolCalls"],
+    "enableCitations":["inference","enableCitations"],
+    "modelCapabilities":["inference","capabilities"], "verbosity":["inference","verbosity"],
+    "providers":["inference","providers"], "models":["inference","models"],
+    "defaultProvider":["inference","defaultProvider"], "tools":["tools","definitions"],
+    "availableTools":["tools","availableTools"], "excludedTools":["tools","excludedTools"],
+    "toolSearch":["tools","search"], "largeOutput":["tools","largeOutput"],
+    "imageGeneration":["tools","imageGeneration"],
+    "manageScheduleEnabled":["tools","manageScheduleEnabled"], "webSearch":["tools","webSearch"],
+    "shell":["tools","shell"], "maxInlineBinaryBytes":["tools","maxInlineBinaryBytes"],
+    "requestPermission":["permissions","request"], "sandboxConfig":["permissions","sandbox"],
+    "sandbox":["permissions","sandbox"], "permissionMode":["permissions","mode"],
+    "sandboxConfigSource":["permissions","sandboxSource"], "commands":["interaction","commands"],
+    "askUserVariant":["interaction","askUserVariant"],
+    "requestUserInput":["interaction","requestUserInput"],
+    "requestElicitation":["interaction","requestElicitation"],
+    "requestShellAuthentication":["interaction","requestShellAuthentication"],
+    "requestExitPlanMode":["interaction","requestExitPlanMode"],
+    "requestAutoModeSwitch":["interaction","requestAutoModeSwitch"],
+    "requestAutoModeRecovery":["interaction","requestAutoModeRecovery"],
+    "streaming":["events","streaming"],
+    "includeSubAgentStreamingEvents":["events","includeSubAgentStreamingEvents"],
+    "customAgents":["agents","definitions"], "defaultAgent":["agents","default"],
+    "agent":["agents","selected"], "includedBuiltinAgents":["agents","includedBuiltinAgents"],
+    "excludedBuiltinAgents":["agents","excludedBuiltinAgents"],
+    "customAgentsLocalOnly":["agents","localDiscoveryOnly"],
+    "agentDirectories":["agents","directories"], "skillDirectories":["skills","directories"],
+    "enableSkills":["skills","enabled"],
+    "includedBuiltinSkills":["skills","includedBuiltinSkills"],
+    "disabledSkills":["skills","disabledSkills"], "hasSkillProvider":["skills","hasProvider"],
+    "ignoredSkillsLocations":["skills","ignoredLocations"], "mcpServers":["mcp","servers"],
+    "disabledMcpServers":["mcp","disabledServers"], "requestMcpApps":["mcp","enableApps"],
+    "enableMcpApps":["mcp","enableApps"], "mcpOAuthTokenStorage":["mcp","oauthTokenStorage"],
+    "authClientIdMetadataUrl":["mcp","authClientIdMetadataUrl"],
+    "envValueMode":["mcp","envValueMode"], "managedMcpServers":["mcp","managedServers"],
+    "allowAllMcpServerInstructions":["mcp","allowAllServerInstructions"],
+    "gitHubToken":["github","token"],
+    "gitHubTokenProviderRegistrationId":["github","tokenProviderRegistrationId"],
+    "githubMcpToolConfig":["github","mcp"], "capi":["github","capi"],
+    "enableSessionTelemetry":["github","telemetryEnabled"],
+    "enableManagedSettings":["github","fetchManagedSettings"],
+    "interactiveUser":["github","interactiveUser"],
+    "enableGitHubTelemetryForwarding":["github","telemetryForwarding"],
+    "authInfo":["github","authInfo"], "copilotUrl":["github","copilotUrl"],
+    "additionalDirectories":["filesystem","additionalDirectories"],
+    "enableFileChangeTracking":["filesystem","trackFileChanges"],
+    "trustWorkingDirectory":["filesystem","trustWorkingDirectory"],
+    "sessionLimits":["execution","limits"], "autopilot":["execution","autopilot"],
+    "autopilotContinuation":["execution","autopilotContinuation"],
+    "instructionDirectories":["instructions","directories"],
+    "organizationCustomInstructions":["instructions","organizationText"],
+    "enableOnDemandInstructionDiscovery":["instructions","onDemandDiscovery"],
+    "skipCustomInstructions":["instructions","skipCustomInstructions"],
+    "refreshCustomInstructions":["instructions","refreshCustomInstructions"],
+    "hooks":["hooks","hasHandlers"], "hookDirectories":["hooks","directories"],
+    "enableFileHooks":["hooks","enableRepositoryHooks"],
+    "coauthorEnabled":["git","coauthorEnabled"],
+    "enableHostGitOperations":["git","enableHostGitOperations"],
+    "infiniteSessions":["state","infiniteSessions"], "memory":["state","memory"],
+    "hasMemoryStore":["state","hasMemoryStore"],
+    "enableSessionStore":["state","enableCrossSessionStore"],
+    "skipEmbeddingRetrieval":["state","skipEmbeddingRetrieval"],
+    "embeddingCacheStorage":["state","embeddingCacheStorage"],
+    "pluginDirectories":["plugins","directories"], "installedPlugins":["plugins","installed"],
+    "canvases":["canvases","definitions"], "canvasProvider":["canvases","provider"],
+    "requestCanvasRenderer":["canvases","requestRenderer"], "openCanvases":["canvases","open"],
+    "requestExtensions":["extensions","enabled"], "extensionSdkPath":["extensions","sdkPath"],
+    "extensionInfo":["extensions","identity"],
+    "enableExperimentalMode":["experiments","enableExperimentalMode"],
+    "isExperimentalMode":["experiments","enableExperimentalMode"],
+    "featureFlags":["experiments","flags"], "expAssignments":["experiments","assignments"],
+    "featureFlagConfiguration":["experiments","configuration"],
+    "allowedModels":["policy","allowedModels"], "managedSettings":["policy","managedSettings"],
+    "excludedManagedSettings":["policy","excludedManagedSettings"],
+    "enforceManagedModelDefaults":["policy","enforceManagedModelDefaults"]
+};
+def legacy_model_keys: ["modelId","wireModel","maxPromptTokens","maxContextWindowTokens",
+    "maxOutputTokens","capabilities"];
+def is_legacy_model_key: . as $k | any(legacy_model_keys[]; . == $k);
+. as $flat
+| flat_paths as $paths
+| reduce (to_entries[] | select(.value != null or .key == "defaultProvider")) as $e
+    ({"root": {}, "groups": {}, "explicit": {}};
+    if $e.key == "provider" then .
+    elif any(option_groups[]; . == $e.key) and (($e.value | type) == "object") then
+        .explicit[$e.key] = $e.value
+    elif $e.key == "configDir" then
+        (if $flat.configDirectory == null then .root.configDirectory = $e.value else . end)
+    elif $e.key == "disableResume" then
+        (if $resume and $flat.suppressResumeEvent == null
+         then .root.suppressResumeEvent = $e.value else . end)
+    elif $resume and ($e.key == "trustWorkingDirectory" or $e.key == "refreshCustomInstructions")
+    then .
+    elif ($resume | not) and $e.key == "openCanvases" then .
+    elif $paths[$e.key] != null then .groups[$paths[$e.key][0]][$paths[$e.key][1]] = $e.value
+    else .root[$e.key] = $e.value
+    end)
+| reduce (.explicit | to_entries[]) as $g (.;
+    reduce ($g.value | to_entries[]
+            | select(.value != null or ($g.key == "inference" and .key == "defaultProvider")))
+        as $m (.; .groups[$g.key][$m.key] = $m.value))
+| if (($flat.provider | type) == "object") and (($flat.provider | length) > 0)
+     and .groups.inference.providers == null
+     and ((.groups.inference // {}) | has("defaultProvider") | not)
+     and .groups.github.capi.enabled == null
+  then
+    ($flat.provider | with_entries(select(.value != null))) as $p
+    | ($p | with_entries(select((.key | is_legacy_model_key) | not)) | del(.name)) as $connection
+    | ($p | with_entries(select(.key | is_legacy_model_key))) as $model_fields
+    | .groups.inference.providers = [{"name": "default"} + $connection]
+    | .groups.inference.defaultProvider = "default"
+    | (if ($model_fields | length) > 0 and $flat.model != null
+          and .groups.inference.models == null
+       then .groups.inference.models = [{"provider": "default", "id": $flat.model} + $model_fields]
+       else . end)
+    | .groups.github.capi = ((.groups.github.capi // {}) + {"enabled": false})
+  else . end
+| if .groups.mcp.servers != null and .groups.mcp.envValueMode == null
+  then .groups.mcp.envValueMode = "direct" else . end
+| .root + (.groups | with_entries(select((.value | type) == "object" and (.value | length) > 0)))
+'
+
+# Defaults applied (under explicit options) to every session of an "empty" mode client.
+_COPILOT_EMPTY_MODE_DEFAULTS_JQ='
+reduce ([["experiments", "enableExperimentalMode", false], ["github", "telemetryEnabled", false],
+         ["mcp", "oauthTokenStorage", "in-memory"], ["state", "skipEmbeddingRetrieval", true],
+         ["state", "embeddingCacheStorage", "in-memory"],
+         ["state", "enableCrossSessionStore", false], ["state", "memory", {"enabled": false}],
+         ["instructions", "onDemandDiscovery", false],
+         ["hooks", "enableRepositoryHooks", false],
+         ["git", "enableHostGitOperations", false]][]) as $d (.;
+    if .[$d[0]][$d[1]] == null then .[$d[0]][$d[1]] = $d[2] else . end)
+'
+
+# Convert a flat session.create / session.resume payload to the SDK protocol 4 grouped shape.
+#
+# Arguments:
+#   $1 - The flat params JSON object
+#   $2 - "true" for session.resume (drops create-only members); default "false"
+#
+# Outputs the grouped params JSON object. Returns 1 if the input is not a JSON object.
+_copilot_group_session_params() {
+    local flat="$1"
+    local is_resume="${2:-false}"
+
+    echo "$flat" | jq -c --argjson resume "$(_copilot_json_bool "$is_resume")" \
+        "$_COPILOT_SESSION_GROUPING_JQ"
+}
+
+# Build the session.create / session.resume wire params: the grouped payload, plus the
+# empty-mode defaults when COPILOT_CLIENT_MODE is "empty".
+#
+# Arguments:
+#   $1 - The flat params JSON object
+#   $2 - "true" for session.resume; default "false"
+#
+# Outputs the wire params JSON object.
+_copilot_client_session_wire_params() {
+    local flat="$1"
+    local is_resume="${2:-false}"
+
+    local grouped
+    grouped=$(_copilot_group_session_params "$flat" "$is_resume") || return 1
+    if [[ "$(_copilot_client_mode)" == "empty" ]]; then
+        grouped=$(echo "$grouped" | jq -c "$_COPILOT_EMPTY_MODE_DEFAULTS_JQ") || return 1
+    fi
+    echo "$grouped"
+}
+
+# Normalize COPILOT_CLIENT_MODE: echoes "coding-agent", "empty", or "invalid".
+_copilot_client_mode() {
+    case "${COPILOT_CLIENT_MODE:-}" in
+        ""|"coding-agent"|"copilot-cli") echo "coding-agent" ;;
+        "empty") echo "empty" ;;
+        *) echo "invalid" ;;
+    esac
+}
+
+# In "empty" client mode every create/resume must declare its tool allowlist.
+# Returns 0 when allowed, 1 (with an error) otherwise.
+_copilot_client_require_available_tools() {
+    if [[ "$(_copilot_client_mode)" == "empty" ]] && [[ -z "${COPILOT_AVAILABLE_TOOLS:-}" ]]; then
+        echo "ERROR: Client mode \"empty\" requires COPILOT_AVAILABLE_TOOLS on every create and resume" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Register the configured network callbacks with network.setProvider.
+# Skipped when no COPILOT_NETWORK_* callback is set. Returns 0 on success/skip, 1 on failure.
+_copilot_client_register_network_provider() {
+    local params='{}'
+    if [[ -n "${COPILOT_NETWORK_RESOLVE_PROXY:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"resolveProxy":{}}') || return 1
+    fi
+    if [[ -n "${COPILOT_NETWORK_AUTHENTICATE_NEGOTIATE:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"authenticateNegotiate":{}}') || return 1
+    fi
+    if [[ -n "${COPILOT_NETWORK_AUTHENTICATE_BASIC:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"authenticateBasic":{}}') || return 1
+    fi
+    if [[ "$params" == "{}" ]]; then
+        return 0
+    fi
+    if [[ -n "${COPILOT_NETWORK_SCOPE:-}" ]]; then
+        params=$(echo "$params" | jq -c --arg scope "$COPILOT_NETWORK_SCOPE" '. + {"scope":$scope}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "network.setProvider" "$params"; then
+        echo "ERROR: Failed to register network callbacks (network.setProvider)" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Extract a PolicyHelperFailure object from a JSON-RPC error (data.policyHelperFailure) or a
+# managed settings snapshot (policyHelperFailure). Outputs nothing when none is present.
+#
+# Arguments:
+#   $1 - JSON object (for example $COPILOT_JSONRPC_LAST_ERROR)
+#
+# Usage:
+#   failure=$(copilot_policy_helper_failure "$COPILOT_JSONRPC_LAST_ERROR")
+#   echo "$failure" | jq -r '.message'
+copilot_policy_helper_failure() {
+    local json="${1:-}"
+    if [[ -z "$json" ]]; then
+        return 0
+    fi
+    echo "$json" | jq -c 'first(((.data | objects | .policyHelperFailure), .policyHelperFailure) | objects)' 2>/dev/null || true
+}
+
+# Record the PolicyHelperFailure carried by the last JSON-RPC error (if any) in
+# COPILOT_POLICY_HELPER_FAILURE and report its message on stderr.
+_copilot_client_capture_policy_helper_failure() {
+    COPILOT_POLICY_HELPER_FAILURE=$(copilot_policy_helper_failure "${COPILOT_JSONRPC_LAST_ERROR:-}")
+    if [[ -n "$COPILOT_POLICY_HELPER_FAILURE" ]]; then
+        echo "ERROR: Policy helper failure: $(echo "$COPILOT_POLICY_HELPER_FAILURE" | jq -r '.message // "unknown"')" >&2
+    fi
+    return 0
 }
 
 # --- GitHub token provider registry helpers ---

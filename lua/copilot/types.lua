@@ -55,6 +55,7 @@ M.SessionEventType = {
     TOOL_EXECUTION_PARTIAL_RESULT = "tool.execution_partial_result",
     TOOL_EXECUTION_PROGRESS       = "tool.execution_progress",
     TOOL_EXECUTION_START          = "tool.execution_start",
+    TOOL_SHELL_OUTPUT             = "tool.shell_output",
     TOOL_USER_REQUESTED           = "tool.user_requested",
     USER_MESSAGE                  = "user.message",
 }
@@ -121,7 +122,7 @@ function M.ToolBinaryResult(fields)
 end
 
 --- Create a Tool table.
--- @param fields table with keys: name, description, parameters, handler
+-- @param fields table with keys: name, description, parameters, handler, idempotent
 -- @return table Tool
 function M.Tool(fields)
     fields = fields or {}
@@ -130,6 +131,7 @@ function M.Tool(fields)
         description = fields.description or "",
         parameters  = fields.parameters,    -- optional table (JSON Schema)
         handler     = fields.handler,       -- function(invocation) -> ToolResult, err
+        idempotent  = fields.idempotent,    -- optional boolean, repeating a call has no additional effect
     }
 end
 
@@ -167,6 +169,9 @@ function M.ClientOptions(fields)
         requestHandler             = fields.requestHandler,            -- optional CopilotRequestHandler, intercepts outbound LLM requests
         bearerTokenProvider        = fields.bearerTokenProvider,       -- optional function(ProviderTokenArgs) -> string, BYOK bearer token
         clientInfo                 = fields.clientInfo,                -- optional ClientInfo, application identity sent on the connect handshake
+        onGetTraceContext          = fields.onGetTraceContext,         -- optional function() -> { traceparent, tracestate }
+        mode                       = fields.mode,                      -- optional string (ClientMode), "coding-agent" (default) or "empty"
+        network                    = fields.network,                   -- optional NetworkConfig, host network callbacks
     }
 end
 
@@ -374,6 +379,14 @@ function M.SessionConfig(fields)
         refreshCustomInstructions       = fields.refreshCustomInstructions,       -- boolean, refresh custom instructions (create only)
         imageGeneration                 = fields.imageGeneration,                 -- ImageGenerationConfig table
         autopilot                       = fields.autopilot,                       -- AutopilotOptions table
+        -- v3.0.0 (SDK protocol 4) options
+        providers                       = fields.providers,                       -- array of NamedProviderConfig, named BYOK connections
+        models                          = fields.models,                          -- array of ProviderModelConfig, select with "provider/id"
+        defaultProvider                 = fields.defaultProvider,                 -- string, provider serving unqualified model names
+        capi                            = fields.capi,                            -- CapiConfig table, e.g. { enabled = false }
+        onShellAuthenticationRequest    = fields.onShellAuthenticationRequest,    -- function(ShellAuthenticationRequest, ctx) -> ShellAuthenticationResponse
+        storeMemory                     = fields.storeMemory,                     -- function(StoredMemory, ctx), memory store callback
+        permissionMode                  = fields.permissionMode,                  -- string (PermissionMode)
     }
 end
 
@@ -427,11 +440,20 @@ function M.ResumeSessionConfig(fields)
         allowTranscriptRecovery         = fields.allowTranscriptRecovery,         -- boolean, recover from the transcript (resume only)
         imageGeneration                 = fields.imageGeneration,                 -- ImageGenerationConfig table
         autopilot                       = fields.autopilot,                       -- AutopilotOptions table
+        -- v3.0.0 (SDK protocol 4) options
+        providers                       = fields.providers,                       -- array of NamedProviderConfig
+        models                          = fields.models,                          -- array of ProviderModelConfig
+        defaultProvider                 = fields.defaultProvider,                 -- string
+        clearDefaultProvider            = fields.clearDefaultProvider,            -- boolean, send defaultProvider = null to clear it
+        capi                            = fields.capi,                            -- CapiConfig table
+        onShellAuthenticationRequest    = fields.onShellAuthenticationRequest,    -- function(ShellAuthenticationRequest, ctx)
+        storeMemory                     = fields.storeMemory,                     -- function(StoredMemory, ctx)
+        permissionMode                  = fields.permissionMode,                  -- string (PermissionMode)
     }
 end
 
 --- Create a MessageOptions table.
--- @param fields table with keys: prompt, attachments, mode, agentMode, displayPrompt, responseFormat, imageOptions, requestHeaders, source, responseSchema
+-- @param fields table with keys: prompt, attachments, mode, agentMode, displayPrompt, responseFormat, imageOptions, requestHeaders, source, responseSchema, clientTurnId
 -- @return table MessageOptions
 function M.MessageOptions(fields)
     fields = fields or {}
@@ -446,6 +468,7 @@ function M.MessageOptions(fields)
         requestHeaders = fields.requestHeaders,   -- optional table of string->string, custom HTTP headers
         source         = fields.source,           -- optional string (MessageSource), "user", "system" or "agent-<id>"
         responseSchema = fields.responseSchema,   -- optional table, JSON Schema for structured output (overrides responseFormat)
+        clientTurnId   = fields.clientTurnId,     -- optional string, opaque turn id echoed on the turn's events
     }
 end
 
@@ -879,5 +902,370 @@ M.GitHubAttachment = {
     GITHUB_FILE            = "GitHubFile",
     GITHUB_SNIPPET         = "GitHubSnippet",
 }
+
+-- ---------------------------------------------------------------------------
+-- v2.6.0 feature types (parity with @github/copilot-sdk)
+-- ---------------------------------------------------------------------------
+
+--- Create a ClientInfo table: identity of the integrating application, sent on
+-- the connect handshake (as editorName / editorVersion / extensionName /
+-- extensionVersion) so the runtime attributes its telemetry to it.
+-- @param fields table with keys: applicationName, applicationVersion, integrationName, integrationVersion
+-- @return table ClientInfo
+function M.ClientInfo(fields)
+    fields = fields or {}
+    return {
+        applicationName    = fields.applicationName,
+        applicationVersion = fields.applicationVersion,
+        integrationName    = fields.integrationName,
+        integrationVersion = fields.integrationVersion,
+    }
+end
+
+--- Convert a ClientInfo table to its wire shape.
+-- @param info table|nil ClientInfo
+-- @return table|nil Wire table with only non-empty fields, or nil when all are empty
+function M.client_info_to_wire(info)
+    if type(info) ~= "table" then return nil end
+    local wire, any = {}, false
+    local mapping = {
+        { "applicationName", "editorName" },
+        { "applicationVersion", "editorVersion" },
+        { "integrationName", "extensionName" },
+        { "integrationVersion", "extensionVersion" },
+    }
+    for _, pair in ipairs(mapping) do
+        local value = info[pair[1]]
+        if type(value) == "string" and value ~= "" then
+            wire[pair[2]] = value
+            any = true
+        end
+    end
+    if any then return wire end
+    return nil
+end
+
+--- Auto routing preference used when the session model is "auto" (experimental).
+M.AutoTier = {
+    EFFICIENCY   = "efficiency",
+    BALANCE      = "balance",
+    INTELLIGENCE = "intelligence",
+    FAST         = "fast",
+}
+
+--- Wire shape used for ask-user prompts.
+M.AskUserVariant = {
+    LEGACY      = "legacy",
+    ELICITATION = "elicitation",
+}
+
+--- Scope of the working-directory trust granted at session creation.
+M.WorkingDirectoryTrust = {
+    SESSION = "session",
+    USER    = "user",
+}
+
+--- BYOK provider families accepted by ProviderConfig.modelProvider.
+M.ModelProvider = {
+    OPENAI        = "openai",
+    ANTHROPIC     = "anthropic",
+    AZURE_OPENAI  = "azure_openai",
+    OLLAMA        = "ollama",
+    LM_STUDIO     = "lm_studio",
+    FOUNDRY_LOCAL = "foundry_local",
+    LLAMA_CPP     = "llama_cpp",
+}
+
+--- Message provenance for MessageOptions.source.
+M.MessageSource = {
+    USER   = "user",
+    SYSTEM = "system",
+}
+
+--- Build the "agent-<id>" message source.
+-- @param agent_id string
+-- @return string
+function M.MessageSource.agent(agent_id)
+    return "agent-" .. tostring(agent_id)
+end
+
+--- Result helpers for a session gitHubTokenProvider, which receives
+-- { host, sessionId, reason } and returns one of these tables.
+M.GitHubTokenResult = {}
+
+--- A token result. expiresIn is the remaining lifetime in seconds.
+function M.GitHubTokenResult.token(access_token, expires_in, token_type)
+    return { kind = "token", accessToken = access_token, expiresIn = expires_in, tokenType = token_type }
+end
+
+--- A cancellation result.
+function M.GitHubTokenResult.cancelled()
+    return { kind = "cancelled" }
+end
+
+--- Create a SandboxConfig table. allowBypass opts in to letting the agent request
+-- that an individual command run outside the sandbox through the normal permission flow.
+-- @param fields table with keys: enabled, userPolicy, addCurrentWorkingDirectory,
+--   sandboxMcpServers, sandboxLspServers, sandboxExtensions, allowBypass
+-- @return table SandboxConfig
+function M.SandboxConfig(fields)
+    fields = fields or {}
+    return {
+        enabled                    = fields.enabled and true or false,
+        userPolicy                 = fields.userPolicy,
+        addCurrentWorkingDirectory = fields.addCurrentWorkingDirectory,
+        sandboxMcpServers          = fields.sandboxMcpServers,
+        sandboxLspServers          = fields.sandboxLspServers,
+        sandboxExtensions          = fields.sandboxExtensions,
+        allowBypass                = fields.allowBypass,
+    }
+end
+
+--- Create an ImageGenerationConfig table (session-level image generation).
+-- @param fields table with keys: enabled, watermark, saveToDisk
+-- @return table ImageGenerationConfig
+function M.ImageGenerationConfig(fields)
+    fields = fields or {}
+    return {
+        enabled    = fields.enabled,
+        watermark  = fields.watermark,
+        saveToDisk = fields.saveToDisk,
+    }
+end
+
+--- Create an AutopilotOptions table (runtime-owned Autopilot continuation options).
+-- @param fields table with keys: continuationEnabled, maxContinues
+-- @return table AutopilotOptions
+function M.AutopilotOptions(fields)
+    fields = fields or {}
+    return {
+        continuationEnabled = fields.continuationEnabled,
+        maxContinues        = fields.maxContinues,
+    }
+end
+
+--- Create limit overrides for SessionConfig.modelCapabilities. The wire keys are
+-- snake_case: max_prompt_tokens, max_output_tokens, max_context_window_tokens.
+-- @param fields table with keys: maxPromptTokens, maxOutputTokens, maxContextWindowTokens
+-- @return table
+function M.ModelLimitsOverride(fields)
+    fields = fields or {}
+    return {
+        max_prompt_tokens         = fields.maxPromptTokens,
+        max_output_tokens         = fields.maxOutputTokens,
+        max_context_window_tokens = fields.maxContextWindowTokens,
+    }
+end
+
+--- Create per-property model capability overrides (SessionConfig.modelCapabilities).
+-- @param fields table with keys: supports, limits (see ModelLimitsOverride)
+-- @return table
+function M.ModelCapabilitiesOverride(fields)
+    fields = fields or {}
+    return {
+        supports = fields.supports,
+        limits   = fields.limits,
+    }
+end
+
+-- ---------------------------------------------------------------------------
+-- v3.0.0 feature types (SDK protocol 4, parity with the Microsoft Copilot SDK 2.0)
+-- ---------------------------------------------------------------------------
+
+--- Client mode (ClientOptions.mode). "coding-agent" (the default) keeps the
+-- CLI-like coding tools and defaults. "empty" requires every session to set
+-- availableTools and applies conservative session defaults (no telemetry,
+-- in-memory OAuth and embedding storage, no cross-session store or memory, no
+-- on-demand instruction discovery, repository hooks or host git operations).
+-- "copilot-cli" is a legacy alias of "coding-agent".
+M.ClientMode = {
+    CODING_AGENT = "coding-agent",
+    EMPTY        = "empty",
+    COPILOT_CLI  = "copilot-cli",
+}
+
+--- Create a NamedProviderConfig table (SessionConfig.providers). Select a
+-- registered model with "provider/id" or set defaultProvider to route unqualified
+-- model names through the connection.
+-- @param fields table with keys: name, type, baseUrl, apiKey, apiKeyCommand,
+--   bearerToken, wireApi, transport, azure, headers, modelProvider
+-- @return table NamedProviderConfig
+function M.NamedProviderConfig(fields)
+    fields = fields or {}
+    return {
+        name          = fields.name,
+        type          = fields.type,
+        baseUrl       = fields.baseUrl,
+        apiKey        = fields.apiKey,
+        apiKeyCommand = fields.apiKeyCommand,
+        bearerToken   = fields.bearerToken,
+        wireApi       = fields.wireApi,
+        transport     = fields.transport,
+        azure         = fields.azure,          -- optional table, e.g. { apiVersion = "2024-10-21" }
+        headers       = fields.headers,
+        modelProvider = fields.modelProvider,
+    }
+end
+
+--- Create a ProviderModelConfig table (SessionConfig.models). The canonical
+-- selection id is "provider/id"; modelId is the known base model and wireModel
+-- the name sent to the provider API (both default to id).
+-- @param fields table with keys: provider, id, modelId, wireModel, name,
+--   maxPromptTokens, maxContextWindowTokens, maxOutputTokens, capabilities
+-- @return table ProviderModelConfig
+function M.ProviderModelConfig(fields)
+    fields = fields or {}
+    return {
+        provider               = fields.provider,
+        id                     = fields.id,
+        modelId                = fields.modelId,
+        wireModel              = fields.wireModel,
+        name                   = fields.name,
+        maxPromptTokens        = fields.maxPromptTokens,
+        maxContextWindowTokens = fields.maxContextWindowTokens,
+        maxOutputTokens        = fields.maxOutputTokens,
+        capabilities           = fields.capabilities,
+    }
+end
+
+--- Create a CapiConfig table (SessionConfig.capi). Set enabled = false for a
+-- BYOK-only model catalog.
+-- @param fields table with key: enabled
+-- @return table CapiConfig
+function M.CapiConfig(fields)
+    fields = fields or {}
+    return { enabled = fields.enabled }
+end
+
+--- Parse the data of a live "tool.shell_output" event
+-- (SessionEventType.TOOL_SHELL_OUTPUT).
+-- @param data table Event data
+-- @return table { toolCallId, text, sequence, stream } where stream is
+--   "stdout", "stderr" or nil (stdout)
+function M.ShellOutputData(data)
+    data = data or {}
+    local stream = data.stream
+    if type(stream) ~= "string" then stream = nil end
+    return {
+        toolCallId = data.toolCallId,
+        text       = data.text or "",
+        sequence   = data.sequence or 0,
+        stream     = stream,
+    }
+end
+
+--- Input kinds of a shell authentication request.
+M.ShellAuthenticationInputKind = {
+    SECRET  = "secret",
+    TEXT    = "text",
+    CONFIRM = "confirm",
+}
+
+--- Answers to a shell authentication request (SessionConfig.onShellAuthenticationRequest).
+M.ShellAuthenticationResponse = {}
+
+--- Accept the prompt with a value.
+function M.ShellAuthenticationResponse.accept(value)
+    return { action = "accept", value = value }
+end
+
+--- Cancel the prompt.
+function M.ShellAuthenticationResponse.cancel()
+    return { action = "cancel" }
+end
+
+--- Traffic served by the NetworkConfig callbacks.
+M.NetworkScope = {
+    CONNECTION = "connection",
+    RUNTIME    = "runtime",
+}
+
+--- Create a NetworkConfig table (ClientOptions.network). Each callback is
+-- optional: resolveProxy({ url }) returns a PAC-style proxy list string (or nil to
+-- keep the runtime's own resolution); authenticateNegotiate({ spn }) returns a
+-- base64 SPNEGO token or nil; authenticateBasic({ proxy, realm, previousRejected })
+-- returns { username, password } or nil. Tokens and passwords are never logged.
+-- @param fields table with keys: scope, resolveProxy, authenticateNegotiate, authenticateBasic
+-- @return table NetworkConfig
+function M.NetworkConfig(fields)
+    fields = fields or {}
+    return {
+        scope                 = fields.scope,
+        resolveProxy          = fields.resolveProxy,
+        authenticateNegotiate = fields.authenticateNegotiate,
+        authenticateBasic     = fields.authenticateBasic,
+    }
+end
+
+--- Parse a structured Policy Helper failure.
+-- Helper-authored text is untrusted: render it as plain text and never execute it.
+-- @param data table Wire PolicyHelperFailure
+-- @return table { category, failureMode, message, previousPolicyRetained, reason,
+--   authority, code, details, diagnostic, helpLink, remediation, severity }
+function M.PolicyHelperFailure(data)
+    data = data or {}
+    local function opt(value)
+        if value == nil or value == require("cjson").null then return nil end
+        return value
+    end
+    return {
+        category               = opt(data.category),
+        failureMode            = opt(data.failureMode),
+        message                = opt(data.message),
+        previousPolicyRetained = data.previousPolicyRetained == true,
+        reason                 = opt(data.reason),
+        authority              = opt(data.authority),
+        code                   = opt(data.code),
+        details                = opt(data.details),
+        diagnostic             = opt(data.diagnostic),
+        helpLink               = opt(data.helpLink),
+        remediation            = opt(data.remediation),
+        severity               = opt(data.severity),
+    }
+end
+
+--- Extract the Policy Helper failure from a JSON-RPC error table (the third value
+-- returned by create_session / resume_session when they fail).
+-- @param rpc_error table|nil { code, message, data }
+-- @return table|nil PolicyHelperFailure
+function M.policy_helper_failure(rpc_error)
+    if type(rpc_error) ~= "table" or type(rpc_error.data) ~= "table" then
+        return nil
+    end
+    local failure = rpc_error.data.policyHelperFailure
+    if type(failure) ~= "table" then
+        return nil
+    end
+    return M.PolicyHelperFailure(failure)
+end
+
+--- Session permission modes (SessionConfig.permissionMode, session:set_permission_mode).
+M.PermissionMode = {
+    MANUAL    = "manual",
+    ASSISTED  = "assisted",
+    ALLOW_ALL = "allow-all",
+}
+
+--- Known reasons a permission-mode change was refused.
+M.PermissionModeRefusalReason = {
+    MANAGED_POLICY = "managed_policy",
+}
+
+--- Parse the result of session:set_permission_mode().
+-- @param data table Wire result
+-- @return table { success, mode, reason } where reason explains a refusal when
+--   known (PermissionModeRefusalReason.MANAGED_POLICY)
+function M.PermissionModeSetResult(data)
+    data = data or {}
+    local reason = data.reason
+    if type(reason) ~= "string" then reason = nil end
+    local mode = data.mode
+    if type(mode) ~= "string" then mode = nil end
+    return {
+        success = data.success == true,
+        mode    = mode,
+        reason  = reason,
+    }
+end
 
 return M

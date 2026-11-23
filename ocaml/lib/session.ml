@@ -27,6 +27,8 @@ type t = {
   mutable exit_plan_mode_handler : exit_plan_mode_handler option;
   mutable trace_context_provider : (unit -> Types.trace_context) option;
   mutable idle : bool;
+  (* Pending shell authentication prompts, keyed by request id. *)
+  pending_shell_auth : (string, unit Lwt.u) Hashtbl.t;
 }
 
 (* ========================================================================== *)
@@ -44,6 +46,7 @@ let create ~rpc ~session_id ~config =
     ; exit_plan_mode_handler = None
     ; trace_context_provider = None
     ; idle = false
+    ; pending_shell_auth = Hashtbl.create 4
     }
   in
   (* Register JSON-RPC handlers for tool calls and permissions *)
@@ -128,10 +131,21 @@ let dispatch_event (t : t) (event : Types.session_event) : unit Lwt.t =
 let setup_notifications (t : t) : unit =
   Jsonrpc.set_notification_handler t.rpc
     (fun method_ params ->
-      if method_ = "session/event" then
-        match Types.session_event_of_yojson params with
+      if method_ = "session.event" || method_ = "session/event" then begin
+        (* Protocol 4 wraps the event as {sessionId, event}; older payloads
+           carry the event itself. *)
+        let event_json =
+          match params with
+          | `Assoc fields ->
+            (match List.assoc_opt "event" fields with
+             | Some event -> (match event with `Assoc _ -> event | _ -> params)
+             | None -> params)
+          | _ -> params
+        in
+        match Types.session_event_of_yojson event_json with
         | Ok event -> dispatch_event t event
         | Error _ -> Lwt.return_unit
+      end
       else Lwt.return_unit)
 
 (* ========================================================================== *)
@@ -162,15 +176,17 @@ let inject_trace_context (t : t) (params : Yojson.Safe.t) : Yojson.Safe.t =
      with _ -> params)
 
 let send (t : t) (msg : Types.message_options) : unit Lwt.t =
-  let params =
-    `Assoc
-      [ ("sessionId", `String t.session_id)
-      ; ("message", Types.message_options_to_yojson msg)
-      ]
+  (* session.send takes the message fields (prompt, source, responseFormat,
+     clientTurnId, ...) next to the session id. *)
+  let message_fields =
+    match Types.message_options_to_yojson msg with
+    | `Assoc fields -> fields
+    | _ -> []
   in
+  let params = `Assoc (("sessionId", `String t.session_id) :: message_fields) in
   let params = inject_trace_context t params in
   let open Lwt.Syntax in
-  let* _result = Jsonrpc.send_request t.rpc "session/send" params in
+  let* _result = Jsonrpc.send_request t.rpc "session.send" params in
   Lwt.return_unit
 
 let send_and_wait ?(timeout = 60.0) (t : t) (msg : Types.message_options)
@@ -219,3 +235,79 @@ let destroy (t : t) : unit Lwt.t =
   Lwt.return_unit
 
 let is_idle (t : t) : bool = t.idle
+
+(* ========================================================================== *)
+(* v2.6.0 / v3.0.0 session RPCs and host callbacks                            *)
+(* ========================================================================== *)
+
+let request_with_session (t : t) (method_ : string) (extra : (string * Yojson.Safe.t) list)
+    : Yojson.Safe.t Lwt.t =
+  Jsonrpc.send_request t.rpc method_ (`Assoc (("sessionId", `String t.session_id) :: extra))
+
+let switch_auto_tier (t : t) (auto_tier : string option) : Yojson.Safe.t Lwt.t =
+  let tier = match auto_tier with Some value -> `String value | None -> `Null in
+  request_with_session t "session.model.switchAutoTier" [ ("autoTier", tier) ]
+
+let detach (t : t) : unit Lwt.t =
+  let open Lwt.Syntax in
+  let* _result = request_with_session t "session.detach" [] in
+  Hashtbl.iter (fun _request_id cancel -> Lwt.wakeup_later cancel ()) t.pending_shell_auth;
+  Hashtbl.reset t.pending_shell_auth;
+  Lwt.return_unit
+
+let get_managed_settings (t : t) : Yojson.Safe.t Lwt.t =
+  request_with_session t "session.managedSettings.get" []
+
+let recheck_policy_helper (t : t) : Yojson.Safe.t Lwt.t =
+  request_with_session t "session.managedSettings.recheckPolicyHelper" []
+
+let set_permission_mode (t : t) (mode : string) : Types.permission_mode_set_result Lwt.t =
+  let open Lwt.Syntax in
+  let* result = request_with_session t "session.permissions.setMode" [ ("mode", `String mode) ] in
+  Lwt.return (Types.permission_mode_set_result_of_yojson result)
+
+let handle_hooks_invoke (t : t) (hook_type : string) (input : Yojson.Safe.t)
+    : Yojson.Safe.t option Lwt.t =
+  let handler =
+    match hook_type with
+    | "subagentStart" -> t.config.Types.on_subagent_start
+    | "subagentStop" -> t.config.Types.on_subagent_stop
+    | _ -> None
+  in
+  match handler with
+  | Some hook -> hook input
+  | None -> Lwt.return_none
+
+let handle_shell_authentication (t : t) (request : Types.shell_authentication_request)
+    : Types.shell_authentication_response Lwt.t =
+  let open Lwt.Syntax in
+  let request_id = request.Types.sar_request_id in
+  match t.config.Types.on_shell_authentication_request with
+  | None -> Lwt.return Types.Shell_auth_cancel
+  | Some _ when Hashtbl.mem t.pending_shell_auth request_id ->
+    Lwt.return Types.Shell_auth_cancel
+  | Some handler ->
+    let cancelled, cancel = Lwt.wait () in
+    Hashtbl.replace t.pending_shell_auth request_id cancel;
+    let answer =
+      Lwt.catch (fun () -> handler request) (fun _exn -> Lwt.return Types.Shell_auth_cancel)
+    in
+    let on_cancel =
+      let* () = cancelled in
+      Lwt.return Types.Shell_auth_cancel
+    in
+    let* response = Lwt.pick [ answer; on_cancel ] in
+    Hashtbl.remove t.pending_shell_auth request_id;
+    Lwt.return response
+
+let cancel_shell_authentication (t : t) (request_id : string) : unit =
+  match Hashtbl.find_opt t.pending_shell_auth request_id with
+  | Some cancel ->
+    Hashtbl.remove t.pending_shell_auth request_id;
+    Lwt.wakeup_later cancel ()
+  | None -> ()
+
+let handle_memory_store (t : t) (memory : Types.stored_memory) : unit Lwt.t =
+  match t.config.Types.on_store_memory with
+  | Some store -> store memory
+  | None -> Lwt.fail_with "No memory store is registered for this session"

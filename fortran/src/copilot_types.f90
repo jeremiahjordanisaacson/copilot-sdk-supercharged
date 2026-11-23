@@ -5,6 +5,7 @@
 !> Derived types for the Copilot SDK.
 !! Defines options, configuration, metadata, events, tools, and permissions.
 module copilot_types
+  use copilot_json
   implicit none
   private
 
@@ -41,6 +42,25 @@ module copilot_types
   public :: MESSAGE_SOURCE_USER, MESSAGE_SOURCE_SYSTEM, message_source_agent
   public :: AUTO_TIER_EFFICIENCY, AUTO_TIER_BALANCE, AUTO_TIER_INTELLIGENCE, AUTO_TIER_FAST
   public :: ASK_USER_VARIANT_LEGACY, ASK_USER_VARIANT_ELICITATION
+  public :: WORKING_DIRECTORY_TRUST_SESSION, WORKING_DIRECTORY_TRUST_USER
+  ! --- v3.0.0 surface (SDK protocol 4, parity with @github/copilot-sdk 2.0) ---
+  public :: named_provider_config, provider_model_config
+  public :: CLIENT_MODE_CODING_AGENT, CLIENT_MODE_EMPTY, CLIENT_MODE_COPILOT_CLI
+  public :: normalize_client_mode
+  public :: EVENT_TOOL_SHELL_OUTPUT, tool_shell_output_data, parse_tool_shell_output
+  public :: shell_authentication_request, shell_authentication_result
+  public :: shell_authentication_handler_interface
+  public :: SHELL_AUTH_INPUT_SECRET, SHELL_AUTH_INPUT_TEXT, SHELL_AUTH_INPUT_CONFIRM
+  public :: stored_memory, store_memory_handler_interface
+  public :: network_options, network_basic_auth_request, network_basic_credentials
+  public :: network_resolve_proxy_interface, network_authenticate_negotiate_interface
+  public :: network_authenticate_basic_interface
+  public :: NETWORK_SCOPE_CONNECTION, NETWORK_SCOPE_RUNTIME
+  public :: policy_helper_failure, parse_policy_helper_failure
+  public :: PERMISSION_MODE_MANUAL, PERMISSION_MODE_ASSISTED, PERMISSION_MODE_ALLOW_ALL
+  public :: PERMISSION_MODE_REFUSAL_MANAGED_POLICY, permission_mode_set_result
+  public :: COPILOT_IOSTAT_RPC_ERROR, COPILOT_IOSTAT_PROTOCOL_MISMATCH
+  public :: COPILOT_IOSTAT_INVALID_CONFIG
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -89,9 +109,77 @@ module copilot_types
   character(len=*), parameter :: ASK_USER_VARIANT_LEGACY      = 'legacy'
   character(len=*), parameter :: ASK_USER_VARIANT_ELICITATION = 'elicitation'
 
+  !> Working directory trust grants for session_config%trust_working_directory (create only).
+  character(len=*), parameter :: WORKING_DIRECTORY_TRUST_SESSION = 'session'
+  character(len=*), parameter :: WORKING_DIRECTORY_TRUST_USER    = 'user'
+
+  !> Client modes for copilot_client_options%mode. 'copilot-cli' is a legacy alias of
+  !! 'coding-agent' (the default). 'empty' requires session_config%available_tools.
+  character(len=*), parameter :: CLIENT_MODE_CODING_AGENT = 'coding-agent'
+  character(len=*), parameter :: CLIENT_MODE_EMPTY        = 'empty'
+  character(len=*), parameter :: CLIENT_MODE_COPILOT_CLI  = 'copilot-cli'
+
+  !> Streaming shell output event type (see parse_tool_shell_output).
+  character(len=*), parameter :: EVENT_TOOL_SHELL_OUTPUT = 'tool.shell_output'
+
+  !> Input kinds of a shellAuthentication.request.
+  character(len=*), parameter :: SHELL_AUTH_INPUT_SECRET  = 'secret'
+  character(len=*), parameter :: SHELL_AUTH_INPUT_TEXT    = 'text'
+  character(len=*), parameter :: SHELL_AUTH_INPUT_CONFIRM = 'confirm'
+
+  !> Scopes for network_options%scope.
+  character(len=*), parameter :: NETWORK_SCOPE_CONNECTION = 'connection'
+  character(len=*), parameter :: NETWORK_SCOPE_RUNTIME    = 'runtime'
+
+  !> Permission modes for session%set_permission_mode and the known refusal reason.
+  character(len=*), parameter :: PERMISSION_MODE_MANUAL    = 'manual'
+  character(len=*), parameter :: PERMISSION_MODE_ASSISTED  = 'assisted'
+  character(len=*), parameter :: PERMISSION_MODE_ALLOW_ALL = 'allow-all'
+  character(len=*), parameter :: PERMISSION_MODE_REFUSAL_MANAGED_POLICY = 'managed_policy'
+
+  !> iostat values reported by SDK calls (distinct from Fortran I/O status codes).
+  integer, parameter :: COPILOT_IOSTAT_RPC_ERROR         = -101
+  integer, parameter :: COPILOT_IOSTAT_PROTOCOL_MISMATCH = -102
+  integer, parameter :: COPILOT_IOSTAT_INVALID_CONFIG    = -103
+
   type :: copilot_connection_state
     integer :: value = COPILOT_STATE_DISCONNECTED
   end type copilot_connection_state
+
+  ! --------------------------------------------------------------------------
+  ! Client identity sent as clientInfo on the connect handshake
+  ! --------------------------------------------------------------------------
+  type :: copilot_client_info
+    character(len=:), allocatable :: editor_name
+    character(len=:), allocatable :: editor_version
+    character(len=:), allocatable :: extension_name
+    character(len=:), allocatable :: extension_version
+  end type copilot_client_info
+
+  ! --------------------------------------------------------------------------
+  ! Network callbacks (network.setProvider)
+  ! --------------------------------------------------------------------------
+  !> A proxy's Basic authentication challenge (network.authenticateBasic).
+  type :: network_basic_auth_request
+    character(len=:), allocatable :: proxy
+    character(len=:), allocatable :: realm
+    logical :: previous_rejected = .false.
+  end type network_basic_auth_request
+
+  !> Credentials answering a Basic challenge; leave unallocated when none are available.
+  type :: network_basic_credentials
+    character(len=:), allocatable :: username
+    character(len=:), allocatable :: password
+  end type network_basic_credentials
+
+  !> Host network callbacks. Only the associated callbacks are registered.
+  type :: network_options
+    !> NETWORK_SCOPE_CONNECTION or NETWORK_SCOPE_RUNTIME (omitted when unallocated).
+    character(len=:), allocatable :: scope
+    procedure(network_resolve_proxy_interface), pointer, nopass :: resolve_proxy => null()
+    procedure(network_authenticate_negotiate_interface), pointer, nopass :: authenticate_negotiate => null()
+    procedure(network_authenticate_basic_interface), pointer, nopass :: authenticate_basic => null()
+  end type network_options
 
   ! --------------------------------------------------------------------------
   ! Client options
@@ -117,6 +205,12 @@ module copilot_types
     procedure(copilot_request_handler_interface), pointer, nopass :: request_handler => null()
     !> BYOK bearer token provider (per-session token minting).
     procedure(bearer_token_provider_interface), pointer, nopass :: bearer_token_provider => null()
+    !> Client identity sent as clientInfo on the connect handshake (empty fields are dropped).
+    type(copilot_client_info) :: client_info
+    !> Client mode: CLIENT_MODE_CODING_AGENT (default when unallocated) or CLIENT_MODE_EMPTY.
+    character(len=:), allocatable :: mode
+    !> Host network callbacks, registered with network.setProvider after connecting.
+    type(network_options) :: network
   contains
     procedure :: set_defaults => client_options_set_defaults
   end type copilot_client_options
@@ -186,6 +280,216 @@ module copilot_types
   type :: provider_token_args
     character(len=:), allocatable :: session_id
   end type provider_token_args
+
+  ! --------------------------------------------------------------------------
+  ! GitHub token provider (gitHubToken.getToken)
+  ! --------------------------------------------------------------------------
+  !> Arguments passed to session_config%github_token_provider.
+  type :: github_token_provider_args
+    !> Effective GitHub host the token is for.
+    character(len=:), allocatable :: host
+    character(len=:), allocatable :: session_id
+    !> Why the runtime requests a credential.
+    character(len=:), allocatable :: reason
+  end type github_token_provider_args
+
+  !> Token returned by a GitHub token provider. Set cancelled to decline.
+  type :: github_token_result
+    logical :: cancelled = .false.
+    character(len=:), allocatable :: access_token
+    !> OAuth token type (bearer when unallocated).
+    character(len=:), allocatable :: token_type
+    !> Remaining lifetime in seconds; must exceed one hour.
+    integer :: expires_in = 28800
+  end type github_token_result
+
+  ! --------------------------------------------------------------------------
+  ! Sub-agent lifecycle hooks (hooks.invoke subagentStart / subagentStop)
+  ! --------------------------------------------------------------------------
+  type :: subagent_start_input
+    character(len=:), allocatable :: session_id
+    !> Working directory (wire: cwd).
+    character(len=:), allocatable :: working_directory
+    character(len=:), allocatable :: transcript_path
+    character(len=:), allocatable :: agent_name
+    character(len=:), allocatable :: agent_display_name
+    character(len=:), allocatable :: agent_description
+    character(len=:), allocatable :: agent_id
+    character(len=:), allocatable :: agent_type
+    character(len=:), allocatable :: parent_agent_id
+    !> The complete hook input as a JSON object string.
+    character(len=:), allocatable :: input_json
+  end type subagent_start_input
+
+  type, extends(subagent_start_input) :: subagent_stop_input
+    character(len=:), allocatable :: stop_reason
+    !> The child's last assistant message.
+    character(len=:), allocatable :: response
+  end type subagent_stop_input
+
+  !> Context prepended to the child's initial prompt.
+  type :: subagent_start_output
+    character(len=:), allocatable :: additional_context
+  end type subagent_start_output
+
+  !> decision 'block' with a reason continues the child; modified_response rewrites its answer.
+  type :: subagent_stop_output
+    character(len=:), allocatable :: decision
+    character(len=:), allocatable :: reason
+    character(len=:), allocatable :: modified_response
+  end type subagent_stop_output
+
+  ! --------------------------------------------------------------------------
+  ! Sandbox, image generation, autopilot, and model limit options
+  ! --------------------------------------------------------------------------
+  !> Sandbox configuration (wire: sandboxConfig -> permissions.sandbox).
+  type :: sandbox_config
+    logical :: enabled = .true.
+    !> Let the agent ask the host to approve a run outside the sandbox (wire: allowBypass).
+    logical :: allow_bypass = .false.
+    !> Optional user policy fragment as a JSON object string (wire: userPolicy).
+    character(len=:), allocatable :: user_policy_json
+  end type sandbox_config
+
+  !> Image generation options (wire: imageGeneration); unallocated members are omitted.
+  type :: image_generation_config
+    logical, allocatable :: enabled
+    logical, allocatable :: watermark
+    logical, allocatable :: save_to_disk
+  end type image_generation_config
+
+  !> Autopilot continuation options (wire: autopilot); unallocated members are omitted.
+  type :: autopilot_options
+    logical, allocatable :: continuation_enabled
+    integer, allocatable :: max_continues
+  end type autopilot_options
+
+  !> Model limit overrides sent as modelCapabilities.limits; zero means unset.
+  type :: model_limits_override
+    integer :: max_prompt_tokens = 0
+    integer :: max_context_window_tokens = 0
+    integer :: max_output_tokens = 0
+  end type model_limits_override
+
+  ! --------------------------------------------------------------------------
+  ! BYOK providers
+  ! --------------------------------------------------------------------------
+  !> Legacy single BYOK provider (wire: provider, translated to a named "default" provider).
+  type :: byok_provider_config
+    !> Provider type, e.g. 'openai', 'azure', 'anthropic' (wire: type).
+    character(len=:), allocatable :: provider_type
+    character(len=:), allocatable :: base_url
+    character(len=:), allocatable :: api_key
+    !> Command whose output is used as the API key (wire: apiKeyCommand).
+    character(len=:), allocatable :: api_key_command
+    character(len=:), allocatable :: bearer_token
+    character(len=:), allocatable :: wire_api
+    character(len=:), allocatable :: azure_api_version
+    !> Extra HTTP headers as a JSON object string.
+    character(len=:), allocatable :: headers_json
+    character(len=:), allocatable :: model_id
+    character(len=:), allocatable :: wire_model
+    integer :: max_prompt_tokens = 0
+    integer :: max_output_tokens = 0
+  end type byok_provider_config
+
+  !> Named BYOK provider (wire: providers[] -> inference.providers).
+  type :: named_provider_config
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: provider_type
+    character(len=:), allocatable :: base_url
+    character(len=:), allocatable :: api_key
+    character(len=:), allocatable :: api_key_command
+    character(len=:), allocatable :: bearer_token
+    character(len=:), allocatable :: wire_api
+    character(len=:), allocatable :: transport
+    character(len=:), allocatable :: azure_api_version
+    character(len=:), allocatable :: headers_json
+    character(len=:), allocatable :: model_provider
+  end type named_provider_config
+
+  !> A model served by a named provider (wire: models[]); select it as 'provider/id'.
+  type :: provider_model_config
+    character(len=:), allocatable :: provider
+    character(len=:), allocatable :: id
+    character(len=:), allocatable :: model_id
+    character(len=:), allocatable :: wire_model
+    character(len=:), allocatable :: name
+    integer :: max_prompt_tokens = 0
+    integer :: max_context_window_tokens = 0
+    integer :: max_output_tokens = 0
+    !> Capability overrides as a JSON object string.
+    character(len=:), allocatable :: capabilities_json
+  end type provider_model_config
+
+  ! --------------------------------------------------------------------------
+  ! Shell authentication, memory store, and shell output
+  ! --------------------------------------------------------------------------
+  !> A shell command's interactive authentication prompt (shellAuthentication.request).
+  type :: shell_authentication_request
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: request_id
+    character(len=:), allocatable :: program
+    character(len=:), allocatable :: prompt
+    !> SHELL_AUTH_INPUT_SECRET, SHELL_AUTH_INPUT_TEXT, or SHELL_AUTH_INPUT_CONFIRM.
+    character(len=:), allocatable :: input_kind
+    character(len=:), allocatable :: command
+    character(len=:), allocatable :: cwd
+  end type shell_authentication_request
+
+  !> Answer to a shell authentication prompt: accepted with a value, or cancelled.
+  type :: shell_authentication_result
+    logical :: accepted = .false.
+    character(len=:), allocatable :: value
+  end type shell_authentication_result
+
+  !> A fact the agent asks the host to remember (memoryStore.store).
+  type :: stored_memory
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: subject
+    character(len=:), allocatable :: fact
+    character(len=:), allocatable :: citations
+    character(len=:), allocatable :: reason
+  end type stored_memory
+
+  !> Data of a tool.shell_output event.
+  type :: tool_shell_output_data
+    character(len=:), allocatable :: tool_call_id
+    character(len=:), allocatable :: text
+    integer :: sequence = 0
+    !> 'stdout' or 'stderr'; unallocated when the runtime omits it.
+    character(len=:), allocatable :: stream
+  end type tool_shell_output_data
+
+  ! --------------------------------------------------------------------------
+  ! Managed policy
+  ! --------------------------------------------------------------------------
+  !> Policy Helper failure reported in error data (error.data.policyHelperFailure).
+  !! Helper-authored text is untrusted: render it as plain text only.
+  type :: policy_helper_failure
+    character(len=:), allocatable :: category
+    character(len=:), allocatable :: failure_mode
+    character(len=:), allocatable :: message
+    logical :: previous_policy_retained = .false.
+    character(len=:), allocatable :: reason
+    character(len=:), allocatable :: authority
+    character(len=:), allocatable :: code
+    !> Field-specific findings as a JSON array string.
+    character(len=:), allocatable :: details_json
+    character(len=:), allocatable :: diagnostic
+    !> Help link object ({url, label}) as a JSON object string.
+    character(len=:), allocatable :: help_link_json
+    character(len=:), allocatable :: remediation
+    character(len=:), allocatable :: severity
+  end type policy_helper_failure
+
+  !> Result of session%set_permission_mode.
+  type :: permission_mode_set_result
+    logical :: success = .false.
+    character(len=:), allocatable :: mode
+    !> Why the mode was refused, when known (PERMISSION_MODE_REFUSAL_MANAGED_POLICY).
+    character(len=:), allocatable :: reason
+  end type permission_mode_set_result
 
   ! --------------------------------------------------------------------------
   ! Session configuration
@@ -259,6 +563,60 @@ module copilot_types
     logical :: content_exclusion = .false.
     !> User-prompt-transformed hook; when set, session.create signals userPromptTransformed=true.
     procedure(post_tool_use_hook_interface), pointer, nopass :: on_user_prompt_transformed => null()
+    ! --- v2.6.0 session options (parity with @github/copilot-sdk) ---
+    !> Auto routing preference for the 'auto' model (AUTO_TIER_* constants; wire: capi.autoTier).
+    character(len=:), allocatable :: auto_tier
+    !> Ask-user tool variant (ASK_USER_VARIANT_* constants; wire: askUserVariant).
+    character(len=:), allocatable :: ask_user_variant
+    !> GitHub token provider. The SDK registers it under a generated registration id and
+    !! answers gitHubToken.getToken. Mutually exclusive with github_token.
+    procedure(github_token_provider_interface), pointer, nopass :: github_token_provider => null()
+    !> Sandbox configuration (wire: sandboxConfig).
+    type(sandbox_config), allocatable :: sandbox
+    !> Feature flag overrides as a JSON object string, e.g. '{"MY_FLAG":true}' (wire: featureFlags).
+    character(len=:), allocatable :: feature_flags_json
+    !> Exact model ids the host allows (wire: allowedModels).
+    character(len=:), allocatable :: allowed_models(:)
+    !> OAuth client id metadata document URL for MCP authorization (wire: authClientIdMetadataUrl).
+    character(len=:), allocatable :: auth_client_id_metadata_url
+    !> Model limit overrides merged into modelCapabilities.limits.
+    type(model_limits_override) :: model_limits
+    !> Extra agent definition directories (wire: agentDirectories).
+    character(len=:), allocatable :: agent_directories(:)
+    !> Extra hook definition directories (wire: hookDirectories).
+    character(len=:), allocatable :: hook_directories(:)
+    !> Create-only directory trust grant (WORKING_DIRECTORY_TRUST_* constants).
+    character(len=:), allocatable :: trust_working_directory
+    !> Resume-only: allow recovery of a damaged transcript (wire: allowTranscriptRecovery).
+    logical, allocatable :: allow_transcript_recovery
+    !> Image generation options (wire: imageGeneration).
+    type(image_generation_config), allocatable :: image_generation
+    !> Autopilot continuation options (wire: autopilot).
+    type(autopilot_options), allocatable :: autopilot
+    !> Legacy single BYOK provider (wire: provider).
+    type(byok_provider_config), allocatable :: provider
+    !> Sub-agent lifecycle hooks, invoked through hooks.invoke.
+    procedure(subagent_start_hook_interface), pointer, nopass :: on_subagent_start => null()
+    procedure(subagent_stop_hook_interface), pointer, nopass :: on_subagent_stop => null()
+    ! --- v3.0.0 session options (SDK protocol 4) ---
+    !> Named BYOK providers (wire: providers).
+    type(named_provider_config), allocatable :: providers(:)
+    !> Models served by named providers (wire: models).
+    type(provider_model_config), allocatable :: models(:)
+    !> Default named provider (wire: defaultProvider).
+    character(len=:), allocatable :: default_provider
+    !> Resume-only: clear a previously set default provider (sends defaultProvider: null).
+    logical :: clear_default_provider = .false.
+    !> Enable or disable Copilot API models independently of BYOK (wire: capi.enabled).
+    logical, allocatable :: capi_enabled
+    !> Tools the session may use (wire: availableTools; required in client mode 'empty').
+    character(len=:), allocatable :: available_tools(:)
+    !> Resume-only: do not emit the session.resume event (wire: suppressResumeEvent).
+    logical :: suppress_resume_event = .false.
+    !> Shell authentication prompt handler (enables interaction.requestShellAuthentication).
+    procedure(shell_authentication_handler_interface), pointer, nopass :: on_shell_authentication_request => null()
+    !> Memory store callback (enables state.hasMemoryStore).
+    procedure(store_memory_handler_interface), pointer, nopass :: on_store_memory => null()
   end type session_config
 
   ! --------------------------------------------------------------------------
@@ -299,6 +657,13 @@ module copilot_types
     character(len=:), allocatable :: display_prompt
     !> Custom HTTP headers for this send as a JSON object string (wire key: requestHeaders)
     character(len=:), allocatable :: request_headers_json
+    !> Message provenance: MESSAGE_SOURCE_USER, MESSAGE_SOURCE_SYSTEM, or
+    !! message_source_agent(id) (wire key: source)
+    character(len=:), allocatable :: source
+    !> JSON schema (object string) for structured output (wire key: responseFormat)
+    character(len=:), allocatable :: response_schema_json
+    !> Opaque caller-chosen turn identifier (wire key: clientTurnId)
+    character(len=:), allocatable :: client_turn_id
   end type send_options
 
   ! --------------------------------------------------------------------------
@@ -337,6 +702,8 @@ module copilot_types
     character(len=:), allocatable :: input_schema_json
     !> Defer loading policy: 'auto' (lazy) or 'never' (eager). See TOOL_DEFER_* constants.
     character(len=:), allocatable :: defer
+    !> The tool is safe to retry: repeated calls with the same arguments have no extra effect.
+    logical :: idempotent = .false.
     procedure(tool_callback_interface), pointer, nopass :: callback => null()
   end type copilot_tool
 
@@ -428,6 +795,59 @@ module copilot_types
       character(len=*), intent(in) :: server_name, tool_name, tool_args, session_id
       character(len=:), allocatable :: decision
     end function pre_mcp_tool_call_hook_interface
+
+    !> GitHub token provider: return a token for args%host, or set cancelled.
+    function github_token_provider_interface(args) result(token)
+      import :: github_token_provider_args, github_token_result
+      type(github_token_provider_args), intent(in) :: args
+      type(github_token_result) :: token
+    end function github_token_provider_interface
+
+    !> Sub-agent start hook: optionally return context for the child's first prompt.
+    function subagent_start_hook_interface(input) result(output)
+      import :: subagent_start_input, subagent_start_output
+      type(subagent_start_input), intent(in) :: input
+      type(subagent_start_output) :: output
+    end function subagent_start_hook_interface
+
+    !> Sub-agent stop hook: optionally block (continue the child) or rewrite its response.
+    function subagent_stop_hook_interface(input) result(output)
+      import :: subagent_stop_input, subagent_stop_output
+      type(subagent_stop_input), intent(in) :: input
+      type(subagent_stop_output) :: output
+    end function subagent_stop_hook_interface
+
+    !> Shell authentication handler: accept with a value or cancel.
+    function shell_authentication_handler_interface(request) result(response)
+      import :: shell_authentication_request, shell_authentication_result
+      type(shell_authentication_request), intent(in) :: request
+      type(shell_authentication_result) :: response
+    end function shell_authentication_handler_interface
+
+    !> Memory store callback: persist a fact the agent wants remembered.
+    subroutine store_memory_handler_interface(memory)
+      import :: stored_memory
+      type(stored_memory), intent(in) :: memory
+    end subroutine store_memory_handler_interface
+
+    !> Proxy resolution: return the proxy URL for url, or '' to connect directly.
+    function network_resolve_proxy_interface(url) result(proxy)
+      character(len=*), intent(in) :: url
+      character(len=:), allocatable :: proxy
+    end function network_resolve_proxy_interface
+
+    !> Negotiate (Kerberos/NTLM) proxy authentication: return a token for spn, or ''.
+    function network_authenticate_negotiate_interface(spn) result(token)
+      character(len=*), intent(in) :: spn
+      character(len=:), allocatable :: token
+    end function network_authenticate_negotiate_interface
+
+    !> Basic proxy authentication: return credentials, or leave them unallocated.
+    function network_authenticate_basic_interface(request) result(credentials)
+      import :: network_basic_auth_request, network_basic_credentials
+      type(network_basic_auth_request), intent(in) :: request
+      type(network_basic_credentials) :: credentials
+    end function network_authenticate_basic_interface
   end interface
 
 contains
@@ -445,5 +865,88 @@ contains
     self%auto_start = .true.
     self%use_stdio  = .true.
   end subroutine client_options_set_defaults
+
+  !> Message source for a message sent on behalf of a sub-agent ('agent-<id>').
+  function message_source_agent(agent_id) result(source)
+    character(len=*), intent(in) :: agent_id
+    character(len=:), allocatable :: source
+
+    source = 'agent-' // trim(agent_id)
+  end function message_source_agent
+
+  !> Normalize a client mode: unset and the legacy 'copilot-cli' alias become 'coding-agent'.
+  !! Returns '' for an unknown mode.
+  function normalize_client_mode(mode) result(normalized)
+    character(len=*), intent(in) :: mode
+    character(len=:), allocatable :: normalized
+
+    if (len_trim(mode) == 0 .or. mode == CLIENT_MODE_CODING_AGENT .or. &
+        mode == CLIENT_MODE_COPILOT_CLI) then
+      normalized = CLIENT_MODE_CODING_AGENT
+    else if (mode == CLIENT_MODE_EMPTY) then
+      normalized = CLIENT_MODE_EMPTY
+    else
+      normalized = ''
+    end if
+  end function normalize_client_mode
+
+  !> Read the tool.shell_output data from a session.event notification or a bare event object.
+  subroutine parse_tool_shell_output(event_json, output, found)
+    character(len=*), intent(in) :: event_json
+    type(tool_shell_output_data), intent(out) :: output
+    logical, intent(out) :: found
+    character(len=:), allocatable :: event, raw, text
+    logical :: is_set
+
+    found = .false.
+    call json_get_path(event_json, 'params.event', event, is_set)
+    if (.not. is_set) event = event_json
+    if (json_get_string(event, 'type') /= EVENT_TOOL_SHELL_OUTPUT) return
+    call json_get_raw(event, 'data', raw, is_set)
+    if (.not. is_set) return
+    output%tool_call_id = json_get_string(raw, 'toolCallId')
+    output%text = json_get_string(raw, 'text')
+    call json_get_integer(raw, 'sequence', output%sequence, is_set)
+    text = json_get_string(raw, 'stream', is_set)
+    if (is_set) output%stream = text
+    found = .true.
+  end subroutine parse_tool_shell_output
+
+  !> Read the Policy Helper failure from a managed settings snapshot (policyHelperFailure),
+  !! a JSON-RPC error object (data.policyHelperFailure), or a full error response
+  !! (error.data.policyHelperFailure).
+  subroutine parse_policy_helper_failure(error_json, failure, found)
+    character(len=*), intent(in) :: error_json
+    type(policy_helper_failure), intent(out) :: failure
+    logical, intent(out) :: found
+    character(len=:), allocatable :: raw, text
+    logical :: is_set
+
+    call json_get_raw(error_json, 'policyHelperFailure', raw, found)
+    if (.not. found) call json_get_path(error_json, 'data.policyHelperFailure', raw, found)
+    if (.not. found) call json_get_path(error_json, 'error.data.policyHelperFailure', raw, found)
+    if (found) found = json_is_object(raw)
+    if (.not. found) return
+
+    failure%category = json_get_string(raw, 'category')
+    failure%failure_mode = json_get_string(raw, 'failureMode')
+    failure%message = json_get_string(raw, 'message')
+    failure%previous_policy_retained = json_get_logical(raw, 'previousPolicyRetained', .false.)
+    failure%reason = json_get_string(raw, 'reason')
+    text = json_get_string(raw, 'authority', is_set)
+    if (is_set) failure%authority = text
+    text = json_get_string(raw, 'code', is_set)
+    if (is_set) failure%code = text
+    call json_get_raw(raw, 'details', text, is_set)
+    if (is_set) failure%details_json = text
+    text = json_get_string(raw, 'diagnostic', is_set)
+    if (is_set) failure%diagnostic = text
+    call json_get_raw(raw, 'helpLink', text, is_set)
+    if (is_set) failure%help_link_json = text
+    text = json_get_string(raw, 'remediation', is_set)
+    if (is_set) failure%remediation = text
+    text = json_get_string(raw, 'severity', is_set)
+    if (is_set) failure%severity = text
+  end subroutine parse_policy_helper_failure
 
 end module copilot_types

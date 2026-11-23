@@ -43,7 +43,7 @@ static void test_session_create_disconnect() {
     assert(ok && "Failed to configure proxy for session_create_disconnect");
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     // Point the SDK at our replay proxy instead of the real CAPI
@@ -89,7 +89,7 @@ static void test_send_message() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -135,7 +135,7 @@ static void test_session_fs_config() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     // Configure sessionFs
@@ -181,7 +181,7 @@ static void test_multi_turn_conversation() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -225,7 +225,7 @@ static void test_session_resume() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -264,7 +264,7 @@ static void test_session_list() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -299,7 +299,7 @@ static void test_session_metadata() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -335,7 +335,7 @@ static void test_session_delete() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -372,7 +372,7 @@ static void test_model_list() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -406,7 +406,7 @@ static void test_ping() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -439,7 +439,7 @@ static void test_auth_status() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -470,7 +470,7 @@ static void test_client_lifecycle() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     // Start → getState → getStatus → stop cycle
@@ -505,7 +505,7 @@ static void test_foreground_session() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -545,7 +545,7 @@ static void test_tools() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -586,7 +586,7 @@ static void test_streaming() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -633,7 +633,7 @@ static void test_system_message_customization() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -673,7 +673,7 @@ static void test_session_fs_provider() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::SessionFsConfig fsConfig;
@@ -717,7 +717,7 @@ static void test_mcp_servers_config() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -754,7 +754,7 @@ static void test_skills_config() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);
@@ -794,7 +794,7 @@ static void test_compaction() {
 #endif
 
     copilot::CopilotClientOptions opts;
-    opts.cliPath = "copilot";
+    opts.cliPath = harness.cliPath();
     opts.cwd = harness.getRepoRoot();
 
     copilot::CopilotClient client(opts);

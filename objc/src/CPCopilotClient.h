@@ -37,7 +37,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithOptions:(nullable CPCopilotClientOptions *)options;
 
 /// Starts the CLI server process and establishes a connection.
-/// Spawns the CLI process and verifies protocol compatibility via ping.
+/// Spawns the CLI process, sends the `connect` handshake when `clientInfo` is set, verifies
+/// SDK protocol 4 (Copilot CLI 1.0.113 or newer) via ping, and registers network callbacks.
 - (void)startWithCompletion:(void (^)(NSError * _Nullable error))completion;
 
 /// Stops the client, terminates all sessions, and kills the CLI process.
@@ -45,6 +46,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Creates a new conversation session.
 /// If the client is not started and `autoStart` is YES, starts the client first.
+/// When session.create fails because of managed policy, the error's userInfo carries a
+/// `CPPolicyHelperFailure` under `CPPolicyHelperFailureErrorKey`.
 - (void)createSession:(nullable CPSessionConfig *)config
            completion:(void (^)(CPCopilotSession * _Nullable session,
                                 NSError * _Nullable error))completion;
@@ -100,6 +103,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// Deletes a session from the server.
 - (void)deleteSession:(NSString *)sessionId
            completion:(void (^)(NSError * _Nullable error))completion;
+
+/// Clears the runtime's cached managed settings (`managedSettings.clearCache`) so the next
+/// session fetches them again.
+- (void)clearManagedSettingsCacheWithCompletion:(void (^)(NSError * _Nullable error))completion;
 
 @end
 

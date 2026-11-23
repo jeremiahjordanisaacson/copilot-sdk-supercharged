@@ -28,7 +28,9 @@ endif()
 # -------------------------------------------------------------------
 add_library(copilot_sdk_fortran
   src/copilot_version.f90
+  src/copilot_json.f90
   src/copilot_types.f90
+  src/copilot_session_wire.f90
   src/copilot_jsonrpc.f90
   src/copilot_session.f90
   src/copilot_tools.f90

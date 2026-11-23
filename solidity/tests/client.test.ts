@@ -15,6 +15,7 @@ import {
     createSecurityCheckTool,
     createSolidityTools,
 } from "../src/index.js";
+import { groupSessionParams } from "../src/sessionParams.js";
 
 // ---------------------------------------------------------------------------
 // Tool creation tests
@@ -248,6 +249,94 @@ describe("v2.6.0 upstream-sync surface", () => {
                 gitHubTokenProvider: () => ({ kind: "cancelled" as const }),
             }),
         ).rejects.toThrow(/mutually exclusive/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.0 / SDK protocol 4
+// ---------------------------------------------------------------------------
+
+describe("SDK protocol 4", () => {
+    it("groups flat session params and translates the legacy provider", () => {
+        const tool = { name: "lint", description: "Lint a contract" };
+        expect(
+            groupSessionParams(
+                {
+                    model: "m",
+                    streaming: true,
+                    requestPermission: true,
+                    tools: [tool],
+                    hooks: true,
+                    disableResume: true,
+                    name: "create-only",
+                },
+                true,
+            ),
+        ).toEqual({
+            model: "m",
+            events: { streaming: true },
+            permissions: { request: true },
+            tools: { definitions: [tool] },
+            hooks: { hasHandlers: true },
+            suppressResumeEvent: true,
+        });
+
+        expect(
+            groupSessionParams(
+                {
+                    model: "gpt-4o",
+                    provider: {
+                        type: "openai",
+                        baseUrl: "http://localhost:11434/v1",
+                        apiKeyCommand: "op read key",
+                        maxOutputTokens: 4096,
+                    },
+                    capi: { autoTier: "fast" },
+                    mcpServers: { fs: { command: "fs-server" } },
+                    allowTranscriptRecovery: true,
+                },
+                false,
+            ),
+        ).toEqual({
+            model: "gpt-4o",
+            inference: {
+                providers: [
+                    {
+                        name: "default",
+                        type: "openai",
+                        baseUrl: "http://localhost:11434/v1",
+                        apiKeyCommand: "op read key",
+                    },
+                ],
+                defaultProvider: "default",
+                models: [{ provider: "default", id: "gpt-4o", maxOutputTokens: 4096 }],
+            },
+            github: { capi: { autoTier: "fast", enabled: false } },
+            mcp: { servers: { fs: { command: "fs-server" } }, envValueMode: "direct" },
+        });
+    });
+
+    it("rejects a server that does not report protocol version 4", async () => {
+        const client = new CopilotSolidityClient();
+        vi.spyOn(client.client, "start").mockResolvedValue();
+        vi.spyOn(client.client, "ping").mockResolvedValue({
+            message: "pong",
+            timestamp: "2026-11-22T00:00:00.000Z",
+            protocolVersion: 3,
+        });
+        const stop = vi.spyOn(client.client, "stop").mockResolvedValue([]);
+
+        await expect(client.start()).rejects.toThrow(
+            "SDK protocol version mismatch: SDK supports version 4, but server reports version 3",
+        );
+        expect(stop).toHaveBeenCalled();
+    });
+
+    it("treats copilot-cli as coding-agent and enforces availableTools in empty mode", async () => {
+        expect(new CopilotSolidityClient({ mode: "copilot-cli" }).mode).toBe("coding-agent");
+
+        const empty = new CopilotSolidityClient({ mode: "empty", copilotHome: "/tmp/solidity-sdk" });
+        await expect(empty.createRawSession({ model: "m" })).rejects.toThrow(/availableTools/);
     });
 });
 

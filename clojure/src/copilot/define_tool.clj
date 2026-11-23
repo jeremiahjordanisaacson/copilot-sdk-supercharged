@@ -73,22 +73,27 @@
     `description` - description shown to the LLM
     `parameters`  - JSON Schema map for the tool's parameters (or nil)
     `handler-fn`  - (fn [args invocation]) -> any
+    `opts`        - optional map; {:idempotent true} marks the tool as safe to
+                    retry (sent as `idempotent` in the tool definition)
 
   Returns a tool map suitable for `copilot.client/create-session!` :tools."
   ([name description handler-fn]
    (define-tool name description nil handler-fn))
   ([name description parameters handler-fn]
-   {:name        name
-    :description (or description "")
-    :parameters  parameters
-    :handler     (fn [args invocation]
-                   (try
-                     (normalize-result (handler-fn args invocation))
-                     (catch Exception e
-                       {:textResultForLlm "Invoking this tool produced an error. Detailed information is not available."
-                        :resultType       "failure"
-                        :error            (.getMessage e)
-                        :toolTelemetry    {}})))}))
+   (define-tool name description parameters handler-fn nil))
+  ([name description parameters handler-fn opts]
+   (cond-> {:name        name
+            :description (or description "")
+            :parameters  parameters
+            :handler     (fn [args invocation]
+                           (try
+                             (normalize-result (handler-fn args invocation))
+                             (catch Exception e
+                               {:textResultForLlm "Invoking this tool produced an error. Detailed information is not available."
+                                :resultType       "failure"
+                                :error            (.getMessage e)
+                                :toolTelemetry    {}})))}
+     (some? (:idempotent opts)) (assoc :idempotent (:idempotent opts)))))
 
 ;; ============================================================================
 ;; deftool macro

@@ -62,8 +62,10 @@ module Copilot
 
   # A tool definition. +handler+ is a callable (Proc/lambda/method) that receives
   # (arguments, invocation) and returns a result (String, Hash, or ToolResult).
+  # Set +idempotent+ to true when repeating a call with the same arguments has no
+  # additional effect, so the runtime may safely retry it.
   Tool = Struct.new(
-    :name, :description, :parameters, :handler,
+    :name, :description, :parameters, :handler, :idempotent,
     keyword_init: true
   ) do
     # @return [Hash] wire-format representation sent to the server
@@ -71,6 +73,7 @@ module Copilot
       h = { name: name }
       h[:description] = description if description
       h[:parameters] = parameters if parameters
+      h[:idempotent] = idempotent unless idempotent.nil?
       h
     end
   end
@@ -303,6 +306,9 @@ module Copilot
     :interactive_user, :excluded_managed_settings, :enforce_managed_model_defaults,
     :trust_working_directory, :refresh_custom_instructions,
     :image_generation, :autopilot,
+    # v3.0.0 (SDK protocol 4) options
+    :providers, :models, :default_provider, :capi,
+    :on_shell_authentication_request, :store_memory, :permission_mode,
     keyword_init: true
   )
 
@@ -327,6 +333,10 @@ module Copilot
     :interactive_user, :excluded_managed_settings, :enforce_managed_model_defaults,
     :allow_transcript_recovery,
     :image_generation, :autopilot,
+    # v3.0.0 (SDK protocol 4) options; an explicit +default_provider: nil+ clears the
+    # session's default provider
+    :providers, :models, :default_provider, :capi,
+    :on_shell_authentication_request, :store_memory, :permission_mode,
     keyword_init: true
   )
 
@@ -349,10 +359,11 @@ module Copilot
   # Options for sending a message.
   #
   # +source+ is the message provenance (see {MessageSource}); +response_schema+ is a
-  # JSON Schema Hash requesting structured output for this run.
+  # JSON Schema Hash requesting structured output for this run; +client_turn_id+ is an
+  # opaque caller-chosen identifier echoed on the turn's events.
   MessageOptions = Struct.new(
     :prompt, :attachments, :mode, :response_format, :image_options, :request_headers,
-    :agent_mode, :display_prompt, :source, :response_schema,
+    :agent_mode, :display_prompt, :source, :response_schema, :client_turn_id,
     keyword_init: true
   )
 
@@ -532,6 +543,7 @@ module Copilot
     TOOL_EXECUTION_PARTIAL      = "tool.execution_partial_result"
     TOOL_EXECUTION_PROGRESS     = "tool.execution_progress"
     TOOL_EXECUTION_COMPLETE     = "tool.execution_complete"
+    TOOL_SHELL_OUTPUT           = "tool.shell_output"
     SKILL_INVOKED               = "skill.invoked"
     SUBAGENT_STARTED            = "subagent.started"
     SUBAGENT_COMPLETED          = "subagent.completed"
@@ -638,6 +650,7 @@ module Copilot
     :request_handler,
     :on_get_trace_context,
     :client_info,
+    :mode, :network,
     keyword_init: true
   )
 
@@ -849,6 +862,228 @@ module Copilot
   ) do
     def to_wire
       to_h.compact
+    end
+  end
+
+  # --- v3.0.0 feature types (SDK protocol 4, parity with the Microsoft Copilot SDK 2.0) ---
+
+  # Client mode (+mode:+ client option). "coding-agent" (the default) keeps the CLI-like
+  # coding tools and defaults. "empty" requires every session to set +available_tools+
+  # and applies conservative session defaults (no telemetry, in-memory OAuth and
+  # embedding storage, no cross-session store or memory, no on-demand instruction
+  # discovery, repository hooks or host git operations). "copilot-cli" is accepted as a
+  # legacy alias of "coding-agent".
+  module ClientMode
+    CODING_AGENT = "coding-agent"
+    EMPTY        = "empty"
+    COPILOT_CLI  = "copilot-cli"
+  end
+
+  # A named BYOK provider connection (+providers:+ session option). Select a registered
+  # model with "provider/id" (see {ProviderModelConfig}) or set +default_provider:+ to
+  # route unqualified model names through this connection.
+  NamedProviderConfig = Struct.new(
+    :name, :type, :base_url, :api_key, :api_key_command, :bearer_token,
+    :wire_api, :transport, :azure, :headers, :model_provider,
+    keyword_init: true
+  ) do
+    def to_wire
+      h = { name: name }
+      h[:type] = type if type
+      h[:baseUrl] = base_url if base_url
+      h[:apiKey] = api_key if api_key
+      h[:apiKeyCommand] = api_key_command if api_key_command
+      h[:bearerToken] = bearer_token if bearer_token
+      h[:wireApi] = wire_api if wire_api
+      h[:transport] = transport if transport
+      if azure
+        az = azure.transform_keys(&:to_sym)
+        api_version = az[:api_version] || az[:apiVersion]
+        h[:azure] = { apiVersion: api_version } if api_version
+      end
+      h[:headers] = headers if headers
+      h[:modelProvider] = model_provider if model_provider
+      h
+    end
+  end
+
+  # A model registered under a named provider (+models:+ session option). The canonical
+  # selection id is "provider/id"; +model_id+ is the known base model and +wire_model+
+  # the name sent to the provider API (both default to +id+).
+  ProviderModelConfig = Struct.new(
+    :provider, :id, :model_id, :wire_model, :name,
+    :max_prompt_tokens, :max_context_window_tokens, :max_output_tokens, :capabilities,
+    keyword_init: true
+  ) do
+    def to_wire
+      h = { provider: provider, id: id }
+      h[:modelId] = model_id if model_id
+      h[:wireModel] = wire_model if wire_model
+      h[:name] = name if name
+      h[:maxPromptTokens] = max_prompt_tokens if max_prompt_tokens
+      h[:maxContextWindowTokens] = max_context_window_tokens if max_context_window_tokens
+      h[:maxOutputTokens] = max_output_tokens if max_output_tokens
+      h[:capabilities] = (capabilities.respond_to?(:to_wire) ? capabilities.to_wire : capabilities) if capabilities
+      h
+    end
+  end
+
+  # Copilot API (CAPI) routing policy (+capi:+ session option). Set +enabled+ to false
+  # for a BYOK-only model catalog.
+  CapiConfig = Struct.new(:enabled, keyword_init: true) do
+    def to_wire
+      { enabled: enabled }.compact
+    end
+  end
+
+  # Stream of a {ShellOutputData} chunk; omitted on the wire means stdout.
+  module ShellOutputStream
+    STDOUT = "stdout"
+    STDERR = "stderr"
+  end
+
+  # Data of a live "tool.shell_output" event ({SessionEventType::TOOL_SHELL_OUTPUT}).
+  # +sequence+ orders chunks across both streams of one tool call.
+  ShellOutputData = Struct.new(:tool_call_id, :text, :sequence, :stream, keyword_init: true) do
+    def self.from_hash(h)
+      new(
+        tool_call_id: h["toolCallId"],
+        text: h["text"],
+        sequence: h["sequence"],
+        stream: h["stream"]
+      )
+    end
+  end
+
+  # Input kinds of a {ShellAuthenticationRequest}.
+  module ShellAuthenticationInputKind
+    SECRET  = "secret"
+    TEXT    = "text"
+    CONFIRM = "confirm"
+  end
+
+  # A shell program asking for credentials (+on_shell_authentication_request:+ handler).
+  ShellAuthenticationRequest = Struct.new(
+    :session_id, :request_id, :program, :prompt, :input_kind, :command, :cwd,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        session_id: h["sessionId"],
+        request_id: h["requestId"],
+        program: h["program"],
+        prompt: h["prompt"],
+        input_kind: h["inputKind"],
+        command: h["command"].is_a?(String) ? h["command"] : "",
+        cwd: h["cwd"].is_a?(String) ? h["cwd"] : ""
+      )
+    end
+  end
+
+  # Answer to a {ShellAuthenticationRequest}: +action+ "accept" with a String +value+, or
+  # "cancel". Handlers may also return a plain Hash or nil (cancel).
+  ShellAuthenticationResponse = Struct.new(:action, :value, keyword_init: true) do
+    def self.accept(value)
+      new(action: "accept", value: value)
+    end
+
+    def self.cancel
+      new(action: "cancel")
+    end
+  end
+
+  # A memory the agent asked to store (+store_memory:+ session callback).
+  StoredMemory = Struct.new(:session_id, :subject, :fact, :citations, :reason, keyword_init: true) do
+    def self.from_hash(h)
+      new(
+        session_id: h["sessionId"],
+        subject: h["subject"],
+        fact: h["fact"],
+        citations: h["citations"],
+        reason: h["reason"]
+      )
+    end
+  end
+
+  # Traffic served by the {NetworkConfig} callbacks.
+  module NetworkScope
+    CONNECTION = "connection"
+    RUNTIME    = "runtime"
+  end
+
+  # Host network callbacks (+network:+ client option). Each callback is optional:
+  # +resolve_proxy+ receives a {NetworkResolveProxyRequest} and returns a PAC-style proxy
+  # list String (or nil to keep the runtime's own resolution); +authenticate_negotiate+
+  # receives a {NetworkAuthenticateNegotiateRequest} and returns a base64 SPNEGO token
+  # String or nil; +authenticate_basic+ receives a {NetworkAuthenticateBasicRequest} and
+  # returns +{ username:, password: }+ or nil. Tokens and passwords are never logged.
+  NetworkConfig = Struct.new(
+    :scope, :resolve_proxy, :authenticate_negotiate, :authenticate_basic,
+    keyword_init: true
+  ) do
+    # @return [Boolean] true when at least one callback is set
+    def any_callback?
+      !!(resolve_proxy || authenticate_negotiate || authenticate_basic)
+    end
+  end
+
+  # Request target passed to {NetworkConfig#resolve_proxy}.
+  NetworkResolveProxyRequest = Struct.new(:url, keyword_init: true)
+
+  # Kerberos service principal passed to {NetworkConfig#authenticate_negotiate}.
+  NetworkAuthenticateNegotiateRequest = Struct.new(:spn, keyword_init: true)
+
+  # Proxy Basic challenge passed to {NetworkConfig#authenticate_basic}.
+  NetworkAuthenticateBasicRequest = Struct.new(:proxy, :realm, :previous_rejected, keyword_init: true)
+
+  # Structured Policy Helper failure. Attached to a failed session.create / session.resume
+  # as +error.data.policyHelperFailure+ (see {JsonRpcError#policy_helper_failure}).
+  # Helper-authored text is untrusted: render it as plain text and never execute it.
+  PolicyHelperFailure = Struct.new(
+    :category, :failure_mode, :message, :previous_policy_retained, :reason,
+    :authority, :code, :details, :diagnostic, :help_link, :remediation, :severity,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        category: h["category"],
+        failure_mode: h["failureMode"],
+        message: h["message"],
+        previous_policy_retained: h["previousPolicyRetained"] ? true : false,
+        reason: h["reason"],
+        authority: h["authority"],
+        code: h["code"],
+        details: h["details"],
+        diagnostic: h["diagnostic"],
+        help_link: h["helpLink"],
+        remediation: h["remediation"],
+        severity: h["severity"]
+      )
+    end
+  end
+
+  # Session permission modes (+permission_mode:+ option, {CopilotSession#set_permission_mode}).
+  module PermissionMode
+    MANUAL    = "manual"
+    ASSISTED  = "assisted"
+    ALLOW_ALL = "allow-all"
+  end
+
+  # Known reasons a permission-mode change was refused.
+  module PermissionModeRefusalReason
+    MANAGED_POLICY = "managed_policy"
+  end
+
+  # Result of {CopilotSession#set_permission_mode}. +reason+ explains a refusal when known
+  # (see {PermissionModeRefusalReason}, currently "managed_policy").
+  PermissionModeSetResult = Struct.new(:success, :mode, :reason, keyword_init: true) do
+    def self.from_hash(h)
+      new(success: h["success"] ? true : false, mode: h["mode"], reason: h["reason"])
+    end
+
+    # @return [Boolean] true when managed (enterprise) policy refused the mode
+    def refused_by_managed_policy?
+      reason == PermissionModeRefusalReason::MANAGED_POLICY
     end
   end
 end

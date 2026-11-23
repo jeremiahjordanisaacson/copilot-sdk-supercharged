@@ -7,4 +7,5 @@ lib/GitHub/Copilot/DefineTool.pm
 lib/GitHub/Copilot/JsonRpcClient.pm
 lib/GitHub/Copilot/SdkProtocolVersion.pm
 lib/GitHub/Copilot/Session.pm
+lib/GitHub/Copilot/SessionParams.pm
 lib/GitHub/Copilot/Types.pm

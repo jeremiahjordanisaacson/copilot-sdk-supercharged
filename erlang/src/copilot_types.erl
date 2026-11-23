@@ -38,7 +38,21 @@
     model_capabilities/1,
     model_limits/1,
     github_token_result/1,
-    response_format_json_schema/1
+    response_format_json_schema/1,
+    %% v3.0.0 (SDK protocol 4) helpers
+    client_mode/1,
+    parse_client_mode/1,
+    named_provider_config/1,
+    provider_model_config/1,
+    tool_definition/1,
+    shell_output/1,
+    shell_authentication_request/1,
+    shell_authentication_response/1,
+    stored_memory/1,
+    network_set_provider_params/1,
+    policy_helper_failure/1,
+    permission_mode_refusal/1,
+    permissions_set_mode_result/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -296,6 +310,7 @@ session_event_type(tool_execution_complete)       -> <<"tool.execution_complete"
 session_event_type(tool_execution_partial_result) -> <<"tool.execution_partial_result">>;
 session_event_type(tool_execution_progress)       -> <<"tool.execution_progress">>;
 session_event_type(tool_execution_start)          -> <<"tool.execution_start">>;
+session_event_type(tool_shell_output)             -> <<"tool.shell_output">>;
 session_event_type(tool_user_requested)           -> <<"tool.user_requested">>;
 session_event_type(user_message)                  -> <<"user.message">>;
 session_event_type(command_execute)               -> <<"command.execute">>;
@@ -525,7 +540,18 @@ provider_config(Opts) ->
         {api_key,         <<"apiKey">>},
         {bearer_token,    <<"bearerToken">>},
         {model_provider,  <<"modelProvider">>},
-        {api_key_command, <<"apiKeyCommand">>}
+        {api_key_command, <<"apiKeyCommand">>},
+        {transport,       <<"transport">>},
+        {azure,           <<"azure">>},
+        {headers,         <<"headers">>},
+        %% Model-specific fields: on SDK protocol 4 these move to an
+        %% `inference.models` entry for the session model.
+        {model_id,                  <<"modelId">>},
+        {wire_model,                <<"wireModel">>},
+        {max_prompt_tokens,         <<"maxPromptTokens">>},
+        {max_context_window_tokens, <<"maxContextWindowTokens">>},
+        {max_output_tokens,         <<"maxOutputTokens">>},
+        {capabilities,              <<"capabilities">>}
     ]).
 
 %% @doc Build a modelCapabilities override wire map; a `limits` map is
@@ -573,6 +599,205 @@ response_format_json_schema(Schema) ->
             <<"strict">> => true,
             <<"schema">> => Schema
         }
+    }.
+
+%% ---------------------------------------------------------------------------
+%% v3.0.0 helpers (SDK protocol 4 / Microsoft Copilot SDK 2.0 parity)
+%% ---------------------------------------------------------------------------
+
+%% @doc Client mode wire names: `coding_agent` => <<"coding-agent">> (the
+%% default) and `empty` => <<"empty">>.
+-spec client_mode(coding_agent | empty) -> binary().
+client_mode(coding_agent) -> <<"coding-agent">>;
+client_mode(empty)        -> <<"empty">>.
+
+%% @doc Parse the `mode` client option. Accepts atoms, binaries or strings;
+%% the legacy name "copilot-cli" is an alias of "coding-agent".
+-spec parse_client_mode(term()) -> {ok, coding_agent | empty} | {error, term()}.
+parse_client_mode(undefined)          -> {ok, coding_agent};
+parse_client_mode(coding_agent)       -> {ok, coding_agent};
+parse_client_mode(copilot_cli)        -> {ok, coding_agent};
+parse_client_mode(empty)              -> {ok, empty};
+parse_client_mode(<<"coding-agent">>) -> {ok, coding_agent};
+parse_client_mode(<<"copilot-cli">>)  -> {ok, coding_agent};
+parse_client_mode(<<"empty">>)        -> {ok, empty};
+parse_client_mode(Mode) when is_list(Mode) ->
+    parse_client_mode(unicode:characters_to_binary(Mode));
+parse_client_mode(Other) ->
+    {error, {invalid_client_mode, Other}}.
+
+%% @doc Build a named BYOK provider connection (`inference.providers[]`):
+%% #{name, type, base_url, api_key, api_key_command, bearer_token, wire_api,
+%% transport, azure, headers, model_provider}. A list converts every entry.
+-spec named_provider_config(map() | [map()]) -> map() | [map()].
+named_provider_config(Providers) when is_list(Providers) ->
+    [named_provider_config(Provider) || Provider <- Providers];
+named_provider_config(Opts) ->
+    to_wire(Opts, [
+        {name,            <<"name">>},
+        {type,            <<"type">>},
+        {base_url,        <<"baseUrl">>},
+        {api_key,         <<"apiKey">>},
+        {api_key_command, <<"apiKeyCommand">>},
+        {bearer_token,    <<"bearerToken">>},
+        {wire_api,        <<"wireApi">>},
+        {transport,       <<"transport">>},
+        {azure,           <<"azure">>},
+        {headers,         <<"headers">>},
+        {model_provider,  <<"modelProvider">>}
+    ]).
+
+%% @doc Build a provider model definition (`inference.models[]`): #{provider,
+%% id, model_id, wire_model, name, max_prompt_tokens, max_context_window_tokens,
+%% max_output_tokens, capabilities}. Select it as <<"Provider/Id">>.
+-spec provider_model_config(map() | [map()]) -> map() | [map()].
+provider_model_config(Models) when is_list(Models) ->
+    [provider_model_config(Model) || Model <- Models];
+provider_model_config(Opts) ->
+    to_wire(Opts, [
+        {provider,                  <<"provider">>},
+        {id,                        <<"id">>},
+        {model_id,                  <<"modelId">>},
+        {wire_model,                <<"wireModel">>},
+        {name,                      <<"name">>},
+        {max_prompt_tokens,         <<"maxPromptTokens">>},
+        {max_context_window_tokens, <<"maxContextWindowTokens">>},
+        {max_output_tokens,         <<"maxOutputTokens">>},
+        {capabilities,              <<"capabilities">>}
+    ]).
+
+%% @doc Wire declaration of a tool (`tools.definitions[]`): the client-side
+%% handler is dropped; `idempotent` marks a tool as safe to retry.
+-spec tool_definition(map()) -> map().
+tool_definition(Tool) ->
+    Wire = to_wire(maps:without([<<"handler">>, handler], Tool), [
+        {name,                    <<"name">>},
+        {title,                   <<"title">>},
+        {description,             <<"description">>},
+        {parameters,              <<"parameters">>},
+        {overrides_built_in_tool, <<"overridesBuiltInTool">>},
+        {skip_permission,         <<"skipPermission">>},
+        {defer,                   <<"defer">>},
+        {metadata,                <<"metadata">>},
+        {is_terminal,             <<"isTerminal">>},
+        {namespace,               <<"namespace">>},
+        {idempotent,              <<"idempotent">>}
+    ]),
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Wire).
+
+%% @doc Decode the data of a `tool.shell_output` event into
+%% #{tool_call_id, text, sequence, stream}; `stream` is <<"stdout">>
+%% (also when omitted), <<"stderr">> or <<"terminal">>.
+-spec shell_output(map()) -> map().
+shell_output(Data) ->
+    #{
+        tool_call_id => maps:get(<<"toolCallId">>, Data, <<>>),
+        text         => maps:get(<<"text">>, Data, <<>>),
+        sequence     => maps:get(<<"sequence">>, Data, 0),
+        stream       => maps:get(<<"stream">>, Data, undefined)
+    }.
+
+%% @doc Decode a `shellAuthentication.request` into the map passed to the
+%% `on_shell_authentication_request` handler: #{session_id, request_id,
+%% program, prompt, input_kind, command, cwd}. `input_kind` is <<"secret">>,
+%% <<"text">> or <<"confirm">>.
+-spec shell_authentication_request(map()) -> map().
+shell_authentication_request(Params) ->
+    #{
+        session_id => maps:get(<<"sessionId">>, Params, <<>>),
+        request_id => maps:get(<<"requestId">>, Params, <<>>),
+        program    => maps:get(<<"program">>, Params, <<>>),
+        prompt     => maps:get(<<"prompt">>, Params, <<>>),
+        input_kind => maps:get(<<"inputKind">>, Params, <<>>),
+        command    => maps:get(<<"command">>, Params, <<>>),
+        cwd        => maps:get(<<"cwd">>, Params, <<>>)
+    }.
+
+%% @doc Encode a shell authentication answer: `{accept, Value}` =>
+%% #{action => accept, value}; anything else (`cancel`) declines the prompt.
+%% Wire-shaped maps pass through.
+-spec shell_authentication_response(term()) -> map().
+shell_authentication_response({accept, Value}) ->
+    #{<<"action">> => <<"accept">>, <<"value">> => to_binary(Value)};
+shell_authentication_response(#{<<"action">> := _} = Wire) ->
+    Wire;
+shell_authentication_response(_Cancel) ->
+    #{<<"action">> => <<"cancel">>}.
+
+%% @doc Decode a `memoryStore.store` request into the map passed to the
+%% `store_memory` callback: #{session_id, subject, fact, citations, reason}.
+-spec stored_memory(map()) -> map().
+stored_memory(Params) ->
+    #{
+        session_id => maps:get(<<"sessionId">>, Params, <<>>),
+        subject    => maps:get(<<"subject">>, Params, <<>>),
+        fact       => maps:get(<<"fact">>, Params, <<>>),
+        citations  => maps:get(<<"citations">>, Params, <<>>),
+        reason     => maps:get(<<"reason">>, Params, <<>>)
+    }.
+
+%% @doc Build the `network.setProvider` params from the `network` client
+%% option: an empty object marks each registered callback (resolve_proxy,
+%% authenticate_negotiate, authenticate_basic); `scope` is `connection` or
+%% `runtime`.
+-spec network_set_provider_params(map() | undefined) -> map().
+network_set_provider_params(Network) when is_map(Network) ->
+    Markers = lists:foldl(fun({Key, JsonKey}, Acc) ->
+        case maps:get(Key, Network, undefined) of
+            Callback when is_function(Callback, 1) -> Acc#{JsonKey => #{}};
+            _                                      -> Acc
+        end
+    end, #{}, [
+        {resolve_proxy,          <<"resolveProxy">>},
+        {authenticate_negotiate, <<"authenticateNegotiate">>},
+        {authenticate_basic,     <<"authenticateBasic">>}
+    ]),
+    case maps:get(scope, Network, undefined) of
+        undefined -> Markers;
+        Scope     -> Markers#{<<"scope">> => to_binary(Scope)}
+    end;
+network_set_provider_params(_) ->
+    #{}.
+
+%% @doc Extract the structured policy helper failure (`policyHelperFailure`)
+%% from a failed session.create / session.resume error, its `data`, or a
+%% managed settings snapshot. Returns #{category, failure_mode, message,
+%% previous_policy_retained, reason, authority, code, details, diagnostic,
+%% help_link} or `undefined`.
+-spec policy_helper_failure(term()) -> map() | undefined.
+policy_helper_failure({error, Error}) ->
+    policy_helper_failure(Error);
+policy_helper_failure(#{<<"data">> := Data}) when is_map(Data) ->
+    policy_helper_failure(Data);
+policy_helper_failure(#{<<"policyHelperFailure">> := Failure}) when is_map(Failure) ->
+    #{
+        category                 => maps:get(<<"category">>, Failure, <<>>),
+        failure_mode             => maps:get(<<"failureMode">>, Failure, <<>>),
+        message                  => maps:get(<<"message">>, Failure, <<>>),
+        previous_policy_retained => maps:get(<<"previousPolicyRetained">>, Failure, false),
+        reason                   => maps:get(<<"reason">>, Failure, <<>>),
+        authority                => maps:get(<<"authority">>, Failure, undefined),
+        code                     => maps:get(<<"code">>, Failure, undefined),
+        details                  => maps:get(<<"details">>, Failure, undefined),
+        diagnostic               => maps:get(<<"diagnostic">>, Failure, undefined),
+        help_link                => maps:get(<<"helpLink">>, Failure, undefined)
+    };
+policy_helper_failure(_) ->
+    undefined.
+
+%% @doc Known refusal reasons of `session.permissions.setMode`.
+-spec permission_mode_refusal(managed_policy) -> binary().
+permission_mode_refusal(managed_policy) -> <<"managed_policy">>.
+
+%% @doc Decode a `session.permissions.setMode` result into #{success, mode,
+%% reason}; `reason` is <<"managed_policy">> when managed policy refused the
+%% requested mode, otherwise `undefined`.
+-spec permissions_set_mode_result(map()) -> map().
+permissions_set_mode_result(Result) when is_map(Result) ->
+    #{
+        success => maps:get(<<"success">>, Result, false),
+        mode    => maps:get(<<"mode">>, Result, undefined),
+        reason  => maps:get(<<"reason">>, Result, undefined)
     }.
 
 %% Convert known atom keys to their wire keys (dropping undefined values);

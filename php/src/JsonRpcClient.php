@@ -501,10 +501,11 @@ class JsonRpcClient
             // A `null` handler result serializes to JSON `null`. For sessionFs.*
             // write operations that is the REQUIRED success value — the CLI decodes
             // any non-null object as a SessionFsError and fails with
-            // "missing field `code`". Only substitute an empty object for
-            // non-sessionFs handlers, which expect an object result.
-            if ($result === null && !str_starts_with($method, 'sessionFs.')) {
-                $result = [];
+            // "missing field `code`". memoryStore.store also answers JSON null.
+            // Only substitute an empty object for the other handlers, which expect
+            // an object result.
+            if ($result === null && !str_starts_with($method, 'sessionFs.') && $method !== 'memoryStore.store') {
+                $result = new \stdClass();
             }
             $this->sendResponse($id, $result);
         } catch (JsonRpcException $e) {
@@ -572,5 +573,15 @@ class JsonRpcException extends \RuntimeException
     public function getData(): mixed
     {
         return $this->data;
+    }
+
+    /**
+     * Structured Policy Helper failure attached to a failed session.create or
+     * session.resume (`error.data.policyHelperFailure`), or null.
+     */
+    public function getPolicyHelperFailure(): ?PolicyHelperFailure
+    {
+        $failure = is_array($this->data) ? ($this->data['policyHelperFailure'] ?? null) : null;
+        return is_array($failure) ? PolicyHelperFailure::fromArray($failure) : null;
     }
 }

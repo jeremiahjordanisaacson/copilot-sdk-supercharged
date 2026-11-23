@@ -12,6 +12,9 @@ import 'package:test/test.dart';
 
 import 'test_harness.dart';
 
+/// The replay snapshots were recorded with this model.
+const testModel = 'claude-sonnet-4.5';
+
 void main() {
   late TestHarness harness;
   late String workDir;
@@ -61,7 +64,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull, reason: 'createSession returned null');
       expect(session.sessionId, isNotEmpty,
           reason: 'session ID should not be empty');
@@ -87,7 +90,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
 
       final response = await session.sendAndWait(
@@ -176,7 +179,7 @@ void main() {
 
     try {
       await client.start();
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
 
       final response1 = await session.sendAndWait(
@@ -217,7 +220,7 @@ void main() {
 
     try {
       await client.start();
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       final savedSessionId = session.sessionId;
       expect(savedSessionId, isNotEmpty);
 
@@ -230,7 +233,8 @@ void main() {
       await session.destroy();
 
       // Resume the session on the same client (same CLI process)
-      final resumed = await client.resumeSession(savedSessionId);
+      final resumed = await client.resumeSession(
+          savedSessionId, const ResumeSessionConfig(model: testModel));
       expect(resumed, isNotNull,
           reason: 'resumed session should not be null');
       expect(resumed.sessionId, equals(savedSessionId));
@@ -260,8 +264,8 @@ void main() {
     try {
       await client.start();
 
-      final session1 = await client.createSession();
-      final session2 = await client.createSession();
+      final session1 = await client.createSession(const SessionConfig(model: testModel));
+      final session2 = await client.createSession(const SessionConfig(model: testModel));
       expect(session1, isNotNull);
       expect(session2, isNotNull);
 
@@ -292,7 +296,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
 
       final metadata = await client.getSessionMetadata(session.sessionId);
@@ -320,7 +324,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
       final sessionId = session.sessionId;
 
@@ -437,7 +441,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
 
       try {
@@ -483,7 +487,7 @@ void main() {
       );
 
       final session = await client.createSession(
-        SessionConfig(tools: [tool]),
+        SessionConfig(model: testModel, tools: [tool]),
       );
       expect(session, isNotNull);
       expect(session.sessionId, isNotEmpty);
@@ -515,7 +519,7 @@ void main() {
       await client.start();
 
       final session = await client.createSession(
-        SessionConfig(streaming: true),
+        const SessionConfig(model: testModel, streaming: true),
       );
       expect(session, isNotNull);
 
@@ -558,7 +562,10 @@ void main() {
       await client.start();
 
       final session = await client.createSession(
-        SessionConfig(systemMessage: 'You are a helpful test assistant.'),
+        const SessionConfig(
+          model: testModel,
+          systemMessage: 'You are a helpful test assistant.',
+        ),
       );
       expect(session, isNotNull);
       expect(session.sessionId, isNotEmpty);
@@ -601,7 +608,7 @@ void main() {
     try {
       await client.start();
 
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
       expect(session.sessionId, isNotEmpty);
 
@@ -633,7 +640,7 @@ void main() {
       );
 
       final session = await client.createSession(
-        SessionConfig(mcpServers: {'test-server': mcpServer}),
+        SessionConfig(model: testModel, mcpServers: {'test-server': mcpServer}),
       );
       expect(session, isNotNull);
       expect(session.sessionId, isNotEmpty);
@@ -660,7 +667,8 @@ void main() {
       await client.start();
 
       final session = await client.createSession(
-        SessionConfig(
+        const SessionConfig(
+          model: testModel,
           skillDirectories: ['/fake/skills/dir'],
           disabledSkills: ['some-disabled-skill'],
         ),
@@ -688,7 +696,7 @@ void main() {
 
     try {
       await client.start();
-      final session = await client.createSession();
+      final session = await client.createSession(const SessionConfig(model: testModel));
       expect(session, isNotNull);
 
       // Send two messages using the multi-turn snapshot

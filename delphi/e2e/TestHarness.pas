@@ -26,8 +26,18 @@ type
     function Start: string;
     procedure Stop;
     procedure Configure(const FilePath, WorkDir: string);
+    { Copilot CLI entry point for the E2E tests, in lookup order:
+      1. COPILOT_CLI_PATH when set and the file exists (CI points it at
+         nodejs/node_modules/.bin/copilot, which runs directly);
+      2. nodejs/node_modules/@github/copilot/npm-loader.js (CLI 1.0.113+,
+         run with node by the SDK because of the .js suffix);
+      3. legacy nodejs/node_modules/@github/copilot-*/index.js and
+         nodejs/node_modules/@github/copilot/index.js.
+      Returns '' when nothing is found. }
+    function FindCliPath: string;
     property ProxyUrl: string read FProxyUrl;
     property RepoRoot: string read FRepoRoot;
+    property CliPath: string read FindCliPath;
   end;
 
 implementation
@@ -94,6 +104,42 @@ begin
   Result := ExpandFileName(
     IncludeTrailingPathDelimiter(GetCurrentDir) + '..' +
     DirectorySeparator + '..' + DirectorySeparator + '..');
+end;
+
+function TCapiProxy.FindCliPath: string;
+var
+  Modules: string;
+  Search: TSearchRec;
+begin
+  Result := GetEnvironmentVariable('COPILOT_CLI_PATH');
+  if (Result <> '') and FileExists(Result) then
+    Exit;
+
+  Modules := IncludeTrailingPathDelimiter(FRepoRoot) + 'nodejs' +
+    DirectorySeparator + 'node_modules' + DirectorySeparator + '@github' +
+    DirectorySeparator;
+
+  Result := Modules + 'copilot' + DirectorySeparator + 'npm-loader.js';
+  if FileExists(Result) then
+    Exit;
+
+  // Legacy layout: @github/copilot-<platform>/index.js
+  if FindFirst(Modules + 'copilot-*', faDirectory, Search) = 0 then
+  begin
+    try
+      repeat
+        Result := Modules + Search.Name + DirectorySeparator + 'index.js';
+        if ((Search.Attr and faDirectory) <> 0) and FileExists(Result) then
+          Exit;
+      until FindNext(Search) <> 0;
+    finally
+      FindClose(Search);
+    end;
+  end;
+
+  Result := Modules + 'copilot' + DirectorySeparator + 'index.js';
+  if not FileExists(Result) then
+    Result := '';
 end;
 
 function TCapiProxy.Start: string;

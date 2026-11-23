@@ -13,7 +13,7 @@ uses
   Winapi.Windows,
   {$ENDIF}
   Copilot.Types, Copilot.JsonRpc, Copilot.Session,
-  Copilot.SdkProtocolVersion;
+  Copilot.SdkProtocolVersion, Copilot.SessionParams;
 
 type
   TConnectionState = (csDisconnected, csConnecting, csConnected, csError);
@@ -27,6 +27,9 @@ type
     FSessionsLock: TCriticalSection;
     FLifecycleHandlers: TList<TSessionLifecycleHandler>;
     FLifecycleLock: TCriticalSection;
+    FTokenProviders: TDictionary<string, TGitHubTokenProvider>;
+    FTokenLock: TCriticalSection;
+    FLastPolicyHelperFailure: TPolicyHelperFailure;
     {$IFDEF MSWINDOWS}
     FProcessInfo: TProcessInformation;
     FChildStdinRead, FChildStdinWrite: THandle;
@@ -47,10 +50,30 @@ type
       const Params: TJSONValue): TJSONValue;
     function HandleHooksInvoke(const Method: string;
       const Params: TJSONValue): TJSONValue;
+    function HandleGitHubToken(const Method: string;
+      const Params: TJSONValue): TJSONValue;
+    function HandleShellAuthentication(const Method: string;
+      const Params: TJSONValue): TJSONValue;
+    function HandleMemoryStore(const Method: string;
+      const Params: TJSONValue): TJSONValue;
+    function HandleNetwork(const Method: string;
+      const Params: TJSONValue): TJSONValue;
     function FindSession(const ASessionId: string): TCopilotSession;
     function BuildToolsArray(const ATools: TArray<TTool>): TJSONArray;
     function GetCliArgs: TArray<string>;
     function PermissionDecisionToString(D: TPermissionDecision): string;
+    // SDK protocol 4 helpers
+    function NegotiateProtocolVersion: Integer;
+    function BuildClientInfo: TJSONObject;
+    function IsEmptyMode: Boolean;
+    function BuildFlatParams(const Config: TSessionConfig;
+      const RegistrationId: string): TJSONObject;
+    function RegisterTokenProvider(const Provider: TGitHubTokenProvider): string;
+    procedure UnregisterTokenProvider(const RegistrationId: string);
+    function SendSessionRequest(const Method: string; Flat: TJSONObject;
+      IsResume: Boolean; const RegistrationId: string): TJSONValue;
+    procedure AttachSessionCallbacks(Session: TCopilotSession;
+      const Config: TSessionConfig; const RegistrationId: string);
   public
     constructor Create; overload;
     constructor Create(const AOptions: TCopilotClientOptions); overload;
@@ -103,9 +126,17 @@ type
     // Subscribe to session lifecycle events
     function OnLifecycle(Handler: TSessionLifecycleHandler): TUnsubscribeProc;
 
+    // Clear the runtime's cached enterprise managed settings
+    // (managedSettings.clearCache).
+    procedure ClearManagedSettingsCache;
+
     // Get connection state
     property State: TConnectionState read FState;
     property Options: TCopilotClientOptions read FOptions;
+    // Policy Helper failure attached to the last failed CreateSession or
+    // ResumeSession (error.data.policyHelperFailure); Present = False if none.
+    property LastPolicyHelperFailure: TPolicyHelperFailure
+      read FLastPolicyHelperFailure;
   end;
 
 implementation
@@ -114,7 +145,95 @@ uses
   System.IOUtils;
 
 const
-  MIN_PROTOCOL_VERSION = 3;
+  // SDK protocol 4 only (Copilot CLI 1.0.113 or newer).
+  MIN_PROTOCOL_VERSION = 4;
+  MAX_PROTOCOL_VERSION = 4;
+
+// Parse JSON text options (objects, arrays, literals); fall back to a string.
+function JsonOrString(const Text: string): TJSONValue;
+begin
+  Result := TJSONObject.ParseJSONValue(Text);
+  if not Assigned(Result) then
+    Result := TJSONString.Create(Text);
+end;
+
+function StringArray(const Items: TArray<string>): TJSONArray;
+begin
+  Result := TJSONArray.Create;
+  for var Item in Items do
+    Result.Add(Item);
+end;
+
+procedure AddOptionalBool(Obj: TJSONObject; const Key: string;
+  Value: TOptionalBool);
+begin
+  case Value of
+    obFalse: Obj.AddPair(Key, TJSONBool.Create(False));
+    obTrue: Obj.AddPair(Key, TJSONBool.Create(True));
+  end;
+end;
+
+function HasAnyHook(const Hooks: TSessionHooks): Boolean;
+begin
+  Result := Assigned(Hooks.OnPreToolUse) or Assigned(Hooks.OnPostToolUse) or
+    Assigned(Hooks.OnPreMcpToolCall) or Assigned(Hooks.OnUserPromptTransformed) or
+    Assigned(Hooks.OnSubagentStart) or Assigned(Hooks.OnSubagentStop);
+end;
+
+function ReadSubagentInput(Input: TJSONObject): TSubagentHookInput;
+begin
+  Result := Default(TSubagentHookInput);
+  Result.AgentName := Input.GetValue<string>('agentName', '');
+  Result.AgentDisplayName := Input.GetValue<string>('agentDisplayName', '');
+  Result.AgentDescription := Input.GetValue<string>('agentDescription', '');
+  Result.TranscriptPath := Input.GetValue<string>('transcriptPath', '');
+  Result.AgentId := Input.GetValue<string>('agentId', '');
+  Result.AgentType := Input.GetValue<string>('agentType', '');
+  Result.StopReason := Input.GetValue<string>('stopReason', '');
+  Result.Response := Input.GetValue<string>('response', '');
+end;
+
+// Decode error.data.policyHelperFailure from a JSON-RPC error object.
+function ParsePolicyHelperFailure(const ErrorJson: string): TPolicyHelperFailure;
+var
+  Parsed, DataVal, FailureVal, HelpVal: TJSONValue;
+  F: TJSONObject;
+begin
+  Result := Default(TPolicyHelperFailure);
+  Parsed := TJSONObject.ParseJSONValue(ErrorJson);
+  try
+    if not (Parsed is TJSONObject) then
+      Exit;
+    DataVal := TJSONObject(Parsed).GetValue('data');
+    if not (DataVal is TJSONObject) then
+      Exit;
+    FailureVal := TJSONObject(DataVal).GetValue('policyHelperFailure');
+    if not (FailureVal is TJSONObject) then
+      Exit;
+    F := TJSONObject(FailureVal);
+    Result.Present := True;
+    Result.Category := F.GetValue<string>('category', '');
+    Result.FailureMode := F.GetValue<string>('failureMode', '');
+    Result.Message := F.GetValue<string>('message', '');
+    Result.PreviousPolicyRetained := F.GetValue<Boolean>('previousPolicyRetained', False);
+    Result.Reason := F.GetValue<string>('reason', '');
+    Result.Severity := F.GetValue<string>('severity', '');
+    Result.Authority := F.GetValue<string>('authority', '');
+    Result.Code := F.GetValue<string>('code', '');
+    if Assigned(F.GetValue('details')) then
+      Result.DetailsJson := F.GetValue('details').ToJSON;
+    Result.Diagnostic := F.GetValue<string>('diagnostic', '');
+    Result.Remediation := F.GetValue<string>('remediation', '');
+    HelpVal := F.GetValue('helpLink');
+    if HelpVal is TJSONObject then
+    begin
+      Result.HelpLinkUrl := TJSONObject(HelpVal).GetValue<string>('url', '');
+      Result.HelpLinkLabel := TJSONObject(HelpVal).GetValue<string>('label', '');
+    end;
+  finally
+    Parsed.Free;
+  end;
+end;
 
 { TCopilotClient }
 
@@ -133,11 +252,15 @@ begin
   FSessionsLock := TCriticalSection.Create;
   FLifecycleHandlers := TList<TSessionLifecycleHandler>.Create;
   FLifecycleLock := TCriticalSection.Create;
+  FTokenProviders := TDictionary<string, TGitHubTokenProvider>.Create;
+  FTokenLock := TCriticalSection.Create;
 end;
 
 destructor TCopilotClient.Destroy;
 begin
   Stop;
+  FTokenLock.Free;
+  FTokenProviders.Free;
   FLifecycleLock.Free;
   FLifecycleHandlers.Free;
   FSessionsLock.Free;
@@ -194,7 +317,12 @@ begin
   SI.dwFlags := STARTF_USESTDHANDLES;
 
   Args := GetCliArgs;
-  CmdLine := CliPath;
+  // A ".js" entry point (npm-loader.js) runs through node; any other path
+  // (native binary or launcher) runs directly. Quote paths with spaces.
+  if SameText(ExtractFileExt(CliPath), '.js') then
+    CmdLine := 'node "' + CliPath + '"'
+  else
+    CmdLine := '"' + CliPath + '"';
   for var Arg in Args do
     CmdLine := CmdLine + ' ' + Arg;
 
@@ -259,12 +387,65 @@ begin
     begin
       Result := HandleHooksInvoke(Method, Params);
     end);
+
+  // SDK protocol 4 host callbacks
+  FRpc.OnRequest('gitHubToken.getToken',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleGitHubToken(Method, Params);
+    end);
+
+  FRpc.OnRequest('shellAuthentication.request',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleShellAuthentication(Method, Params);
+    end);
+
+  // Prompts are answered synchronously, so there is nothing to cancel.
+  FRpc.OnRequest('shellAuthentication.cancel',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := TJSONObject.Create;
+    end);
+
+  FRpc.OnRequest('memoryStore.store',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleMemoryStore(Method, Params);
+    end);
+
+  FRpc.OnRequest('network.resolveProxy',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleNetwork(Method, Params);
+    end);
+
+  FRpc.OnRequest('network.authenticateNegotiate',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleNetwork(Method, Params);
+    end);
+
+  FRpc.OnRequest('network.authenticateBasic',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleNetwork(Method, Params);
+    end);
 end;
 
 procedure TCopilotClient.Start;
+var
+  Mode: string;
+  ServerVersion: Integer;
+  NetParams: TJSONObject;
 begin
   if FState = csConnected then
     Exit;
+
+  Mode := FOptions.Mode;
+  if (Mode <> '') and (Mode <> ClientModeCodingAgent) and
+    (Mode <> ClientModeCopilotCli) and (Mode <> ClientModeEmpty) then
+    raise Exception.CreateFmt('Unknown client mode "%s"', [Mode]);
 
   FState := csConnecting;
   try
@@ -278,13 +459,41 @@ begin
     RegisterRpcHandlers;
     FRpc.Start;
 
-    // Verify protocol version
-    var PingResult := Ping;
-    var ServerVersion := StrToIntDef(PingResult.ProtocolVersion, 0);
-    if ServerVersion < MIN_PROTOCOL_VERSION then
+    // SDK protocol 4 handshake: connect (with clientInfo), falling back to
+    // ping for runtimes without connect. Exactly version 4 is accepted.
+    ServerVersion := NegotiateProtocolVersion;
+    if ServerVersion < 0 then
       raise Exception.CreateFmt(
-        'Protocol version mismatch: server=%s, minimum=%d',
-        [PingResult.ProtocolVersion, MIN_PROTOCOL_VERSION]);
+        'SDK protocol version mismatch: SDK supports version %d, but server ' +
+        'does not report a protocol version. Please update your SDK or server ' +
+        'to ensure compatibility.', [MAX_PROTOCOL_VERSION]);
+    if (ServerVersion < MIN_PROTOCOL_VERSION) or
+      (ServerVersion > MAX_PROTOCOL_VERSION) then
+      raise Exception.CreateFmt(
+        'SDK protocol version mismatch: SDK supports version %d, but server ' +
+        'reports version %d. Please update your SDK or server to ensure ' +
+        'compatibility.', [MAX_PROTOCOL_VERSION, ServerVersion]);
+
+    // Register network callbacks (network.setProvider).
+    if Assigned(FOptions.Network.ResolveProxy) or
+      Assigned(FOptions.Network.AuthenticateNegotiate) or
+      Assigned(FOptions.Network.AuthenticateBasic) then
+    begin
+      NetParams := TJSONObject.Create;
+      try
+        if FOptions.Network.Scope <> '' then
+          NetParams.AddPair('scope', FOptions.Network.Scope);
+        if Assigned(FOptions.Network.ResolveProxy) then
+          NetParams.AddPair('resolveProxy', TJSONObject.Create);
+        if Assigned(FOptions.Network.AuthenticateNegotiate) then
+          NetParams.AddPair('authenticateNegotiate', TJSONObject.Create);
+        if Assigned(FOptions.Network.AuthenticateBasic) then
+          NetParams.AddPair('authenticateBasic', TJSONObject.Create);
+        FRpc.SendRequest('network.setProvider', NetParams).Free;
+      finally
+        NetParams.Free;
+      end;
+    end;
 
     // Set up session filesystem provider if configured
     if FOptions.SessionFs.InitialCwd <> '' then
@@ -378,10 +587,481 @@ begin
     ToolObj.AddPair('description', Tool.Description);
     if Tool.Defer <> '' then
       ToolObj.AddPair('defer', Tool.Defer);
+    if Tool.Idempotent then
+      ToolObj.AddPair('idempotent', TJSONBool.Create(True));
     if Assigned(Tool.Parameters) then
       ToolObj.AddPair('parameters', Tool.Parameters.Clone as TJSONObject);
     Result.AddElement(ToolObj);
   end;
+end;
+
+function TCopilotClient.IsEmptyMode: Boolean;
+begin
+  Result := FOptions.Mode = ClientModeEmpty;
+end;
+
+function TCopilotClient.BuildClientInfo: TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  if FOptions.ClientInfo.EditorName <> '' then
+    Result.AddPair('editorName', FOptions.ClientInfo.EditorName);
+  if FOptions.ClientInfo.EditorVersion <> '' then
+    Result.AddPair('editorVersion', FOptions.ClientInfo.EditorVersion);
+  if FOptions.ClientInfo.ExtensionName <> '' then
+    Result.AddPair('extensionName', FOptions.ClientInfo.ExtensionName);
+  if FOptions.ClientInfo.ExtensionVersion <> '' then
+    Result.AddPair('extensionVersion', FOptions.ClientInfo.ExtensionVersion);
+  if Result.Count = 0 then
+    FreeAndNil(Result);
+end;
+
+function TCopilotClient.NegotiateProtocolVersion: Integer;
+var
+  Params, PingParams, Info: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  ResultVal := nil;
+  Params := TJSONObject.Create;
+  try
+    Info := BuildClientInfo;
+    if Assigned(Info) then
+      Params.AddPair('clientInfo', Info);
+    try
+      ResultVal := FRpc.SendRequest('connect', Params);
+    except
+      on E: EJsonRpcError do
+      begin
+        // Runtime without connect: fall back to ping.
+        if (E.Code <> -32601) and
+          (Pos('Unhandled method connect', E.ErrorJson) = 0) then
+          raise;
+        PingParams := TJSONObject.Create;
+        try
+          PingParams.AddPair('message', 'ping');
+          ResultVal := FRpc.SendRequest('ping', PingParams);
+        finally
+          PingParams.Free;
+        end;
+      end;
+    end;
+  finally
+    Params.Free;
+  end;
+
+  try
+    Result := -1;
+    if ResultVal is TJSONObject then
+      Result := TJSONObject(ResultVal).GetValue<Integer>('protocolVersion', -1);
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+function TCopilotClient.RegisterTokenProvider(
+  const Provider: TGitHubTokenProvider): string;
+var
+  Guid: TGUID;
+begin
+  Result := '';
+  if not Assigned(Provider) then
+    Exit;
+  CreateGUID(Guid);
+  // RFC 4122 form without braces.
+  Result := LowerCase(Copy(GUIDToString(Guid), 2, 36));
+  FTokenLock.Enter;
+  try
+    FTokenProviders.AddOrSetValue(Result, Provider);
+  finally
+    FTokenLock.Leave;
+  end;
+end;
+
+procedure TCopilotClient.UnregisterTokenProvider(const RegistrationId: string);
+begin
+  if RegistrationId = '' then
+    Exit;
+  FTokenLock.Enter;
+  try
+    FTokenProviders.Remove(RegistrationId);
+  finally
+    FTokenLock.Leave;
+  end;
+end;
+
+// Build the flat (v1-style) session payload. SendSessionRequest converts it
+// to the SDK protocol 4 grouped payload (GroupSessionParams) before sending.
+function TCopilotClient.BuildFlatParams(const Config: TSessionConfig;
+  const RegistrationId: string): TJSONObject;
+var
+  Params: TJSONObject;
+begin
+  Params := TJSONObject.Create;
+  try
+    if Config.Model <> '' then
+      Params.AddPair('model', Config.Model);
+    Params.AddPair('streaming', TJSONBool.Create(Config.Streaming));
+    Params.AddPair('sdkProtocolVersion', SDK_PROTOCOL_VERSION);
+
+    if Length(Config.Tools) > 0 then
+      Params.AddPair('tools', BuildToolsArray(Config.Tools));
+
+    if Length(Config.SkillDirectories) > 0 then
+      Params.AddPair('skillDirectories', StringArray(Config.SkillDirectories));
+
+    if Length(Config.DisabledSkills) > 0 then
+      Params.AddPair('disabledSkills', StringArray(Config.DisabledSkills));
+
+    if Length(Config.ExcludedTools) > 0 then
+      Params.AddPair('excludedTools', StringArray(Config.ExcludedTools));
+
+    if Config.IncludeSubAgentStreamingEvents then
+      Params.AddPair('includeSubAgentStreamingEvents', TJSONBool.Create(True));
+
+    // Free-form "instructions" has no protocol 4 equivalent; the translator
+    // drops it. Use InstructionDirectories instead.
+    if Length(Config.Instructions) > 0 then
+      Params.AddPair('instructions', StringArray(Config.Instructions));
+
+    if Length(Config.InstructionDirectories) > 0 then
+      Params.AddPair('instructionDirectories',
+        StringArray(Config.InstructionDirectories));
+
+    if Config.EnableConfigDiscovery then
+      Params.AddPair('enableConfigDiscovery', TJSONBool.Create(True));
+
+    if Config.GithubToken <> '' then
+      Params.AddPair('gitHubToken', Config.GithubToken);
+
+    if FOptions.SessionIdleTimeoutSeconds > 0 then
+      Params.AddPair('sessionIdleTimeoutSeconds',
+        TJSONNumber.Create(FOptions.SessionIdleTimeoutSeconds));
+
+    if FOptions.SessionFs.WorkspaceRoot <> '' then
+    begin
+      var FsObj := TJSONObject.Create;
+      FsObj.AddPair('workspaceRoot', FOptions.SessionFs.WorkspaceRoot);
+      FsObj.AddPair('stateRoot', FOptions.SessionFs.StateRoot);
+      if FOptions.SessionFs.PathStyle <> '' then
+        FsObj.AddPair('pathStyle', FOptions.SessionFs.PathStyle);
+      Params.AddPair('sessionFs', FsObj);
+    end;
+
+    // --- Upstream-sync session config passthroughs (camelCase wire keys) ---
+    if Config.EnableCitations then
+      Params.AddPair('enableCitations', TJSONBool.Create(True));
+
+    if Length(Config.ExcludedBuiltinAgents) > 0 then
+      Params.AddPair('excludedBuiltinAgents',
+        StringArray(Config.ExcludedBuiltinAgents));
+
+    if Config.SessionLimits.MaxAiCredits > 0 then
+    begin
+      var LimitsObj := TJSONObject.Create;
+      LimitsObj.AddPair('maxAiCredits',
+        TJSONNumber.Create(Config.SessionLimits.MaxAiCredits));
+      Params.AddPair('sessionLimits', LimitsObj);
+    end;
+
+    if Config.Memory.Enabled then
+    begin
+      var MemObj := TJSONObject.Create;
+      MemObj.AddPair('enabled', TJSONBool.Create(True));
+      Params.AddPair('memory', MemObj);
+    end;
+
+    if Config.OtlpProtocol <> '' then
+      Params.AddPair('otlpProtocol', Config.OtlpProtocol);
+
+    if Config.EnableWebSocketResponses then
+      Params.AddPair('enableWebSocketResponses', TJSONBool.Create(True));
+
+    if Assigned(Config.ExpAssignments) and (Config.ExpAssignments.Count > 0) then
+    begin
+      var ExpObj := TJSONObject.Create;
+      for var ExpPair in Config.ExpAssignments do
+        ExpObj.AddPair(ExpPair.Key, ExpPair.Value);
+      Params.AddPair('expAssignments', ExpObj);
+    end;
+
+    // --- Newly-synced session config passthroughs (camelCase wire keys) ---
+    if Config.RewindEnabled then
+      Params.AddPair('rewindEnabled', TJSONBool.Create(True));
+
+    if Length(Config.AdditionalDirectories) > 0 then
+      Params.AddPair('additionalDirectories',
+        StringArray(Config.AdditionalDirectories));
+
+    if Length(Config.DisabledMcpServers) > 0 then
+      Params.AddPair('disabledMcpServers', StringArray(Config.DisabledMcpServers));
+
+    // JSON text options are sent as JSON values (objects stay objects).
+    if Config.GithubMcpToolConfig <> '' then
+      Params.AddPair('githubMcpToolConfig', JsonOrString(Config.GithubMcpToolConfig));
+
+    if Config.CanvasProvider <> '' then
+      Params.AddPair('canvasProvider', JsonOrString(Config.CanvasProvider));
+
+    if Config.CustomAgentsLocalOnly then
+      Params.AddPair('customAgentsLocalOnly', TJSONBool.Create(True));
+
+    if Config.DecisionContext <> '' then
+      Params.AddPair('decisionContext', JsonOrString(Config.DecisionContext));
+
+    // User-prompt-transformed hook: signal the runtime that a handler is registered.
+    if Assigned(Config.Hooks.OnUserPromptTransformed) then
+      Params.AddPair('userPromptTransformed', TJSONBool.Create(True));
+
+    if Length(Config.BuiltinPluginDirectories) > 0 then
+      Params.AddPair('builtinPluginDirectories',
+        StringArray(Config.BuiltinPluginDirectories));
+
+    if Config.ArgsSchema <> '' then
+      Params.AddPair('argsSchema', JsonOrString(Config.ArgsSchema));
+
+    if Config.ReasoningEffort <> '' then
+      Params.AddPair('reasoningEffort', Config.ReasoningEffort);
+
+    if Config.ToolSearch <> '' then
+      Params.AddPair('toolSearch', JsonOrString(Config.ToolSearch));
+
+    if Config.InProcess then
+      Params.AddPair('inProcess', TJSONBool.Create(True));
+
+    if Config.ExperimentalMode then
+      Params.AddPair('experimentalMode', TJSONBool.Create(True));
+
+    if Config.ContentExclusion then
+      Params.AddPair('contentExclusion', TJSONBool.Create(True));
+
+    // MCP OAuth host token handler: signal the runtime that a handler is registered.
+    if Assigned(Config.OnMcpAuthRequest) then
+      Params.AddPair('mcpAuthHandler', TJSONBool.Create(True));
+
+    // --- SDK protocol 4 / v3.0.0 options ---
+    if Config.WorkingDirectory <> '' then
+      Params.AddPair('workingDirectory', Config.WorkingDirectory);
+
+    if Length(Config.AvailableTools) > 0 then
+      Params.AddPair('availableTools', StringArray(Config.AvailableTools));
+
+    if Config.AskUserVariant <> '' then
+      Params.AddPair('askUserVariant', Config.AskUserVariant);
+
+    if RegistrationId <> '' then
+      Params.AddPair('gitHubTokenProviderRegistrationId', RegistrationId);
+
+    if Config.Sandbox.Enabled then
+    begin
+      var SandboxObj := TJSONObject.Create;
+      SandboxObj.AddPair('enabled', TJSONBool.Create(True));
+      if Config.Sandbox.AllowBypass then
+        SandboxObj.AddPair('allowBypass', TJSONBool.Create(True));
+      AddOptionalBool(SandboxObj, 'addCurrentWorkingDirectory',
+        Config.Sandbox.AddCurrentWorkingDirectory);
+      if Config.Sandbox.UserPolicyJson <> '' then
+        SandboxObj.AddPair('userPolicy', JsonOrString(Config.Sandbox.UserPolicyJson));
+      Params.AddPair('sandbox', SandboxObj);
+    end;
+
+    if Assigned(Config.FeatureFlags) and (Config.FeatureFlags.Count > 0) then
+    begin
+      var FlagsObj := TJSONObject.Create;
+      for var Flag in Config.FeatureFlags do
+        FlagsObj.AddPair(Flag.Key, TJSONBool.Create(Flag.Value));
+      Params.AddPair('featureFlags', FlagsObj);
+    end;
+
+    if Length(Config.AllowedModels) > 0 then
+      Params.AddPair('allowedModels', StringArray(Config.AllowedModels));
+
+    if Config.AuthClientIdMetadataUrl <> '' then
+      Params.AddPair('authClientIdMetadataUrl', Config.AuthClientIdMetadataUrl);
+
+    if Config.MaxOutputTokens > 0 then
+    begin
+      // The capabilities limits object uses snake_case wire keys.
+      var LimitsCaps := TJSONObject.Create;
+      LimitsCaps.AddPair('max_output_tokens',
+        TJSONNumber.Create(Config.MaxOutputTokens));
+      var CapsObj := TJSONObject.Create;
+      CapsObj.AddPair('limits', LimitsCaps);
+      Params.AddPair('modelCapabilities', CapsObj);
+    end;
+
+    if Length(Config.AgentDirectories) > 0 then
+      Params.AddPair('agentDirectories', StringArray(Config.AgentDirectories));
+
+    if Length(Config.HookDirectories) > 0 then
+      Params.AddPair('hookDirectories', StringArray(Config.HookDirectories));
+
+    if Config.TrustWorkingDirectory <> '' then
+      Params.AddPair('trustWorkingDirectory', Config.TrustWorkingDirectory);
+
+    var ImageObj := TJSONObject.Create;
+    AddOptionalBool(ImageObj, 'enabled', Config.ImageGeneration.Enabled);
+    AddOptionalBool(ImageObj, 'watermark', Config.ImageGeneration.Watermark);
+    AddOptionalBool(ImageObj, 'saveToDisk', Config.ImageGeneration.SaveToDisk);
+    if ImageObj.Count > 0 then
+      Params.AddPair('imageGeneration', ImageObj)
+    else
+      ImageObj.Free;
+
+    var AutopilotObj := TJSONObject.Create;
+    AddOptionalBool(AutopilotObj, 'continuationEnabled',
+      Config.Autopilot.ContinuationEnabled);
+    if Config.Autopilot.MaxContinues > 0 then
+      AutopilotObj.AddPair('maxContinues',
+        TJSONNumber.Create(Config.Autopilot.MaxContinues));
+    if AutopilotObj.Count > 0 then
+      Params.AddPair('autopilot', AutopilotObj)
+    else
+      AutopilotObj.Free;
+
+    // Hook handlers run through hooks.invoke (hooks.hasHandlers).
+    if HasAnyHook(Config.Hooks) then
+      Params.AddPair('hooks', TJSONBool.Create(True));
+
+    // Legacy single BYOK provider, sent as the named provider "default".
+    if Config.Provider.BaseUrl <> '' then
+    begin
+      var ProviderObj := TJSONObject.Create;
+      if Config.Provider.ProviderType <> '' then
+        ProviderObj.AddPair('type', Config.Provider.ProviderType);
+      ProviderObj.AddPair('baseUrl', Config.Provider.BaseUrl);
+      if Config.Provider.ApiKey <> '' then
+        ProviderObj.AddPair('apiKey', Config.Provider.ApiKey);
+      if Config.Provider.ApiKeyCommand <> '' then
+        ProviderObj.AddPair('apiKeyCommand', Config.Provider.ApiKeyCommand);
+      if Config.Provider.BearerToken <> '' then
+        ProviderObj.AddPair('bearerToken', Config.Provider.BearerToken);
+      if Config.Provider.WireApi <> '' then
+        ProviderObj.AddPair('wireApi', Config.Provider.WireApi);
+      if Config.Provider.MaxOutputTokens > 0 then
+        ProviderObj.AddPair('maxOutputTokens',
+          TJSONNumber.Create(Config.Provider.MaxOutputTokens));
+      Params.AddPair('provider', ProviderObj);
+    end;
+
+    if Length(Config.Providers) > 0 then
+    begin
+      var ProvidersArr := TJSONArray.Create;
+      for var P in Config.Providers do
+      begin
+        var PObj := TJSONObject.Create;
+        PObj.AddPair('name', P.Name);
+        if P.ProviderType <> '' then
+          PObj.AddPair('type', P.ProviderType);
+        PObj.AddPair('baseUrl', P.BaseUrl);
+        if P.ApiKey <> '' then
+          PObj.AddPair('apiKey', P.ApiKey);
+        if P.ApiKeyCommand <> '' then
+          PObj.AddPair('apiKeyCommand', P.ApiKeyCommand);
+        if P.BearerToken <> '' then
+          PObj.AddPair('bearerToken', P.BearerToken);
+        if P.WireApi <> '' then
+          PObj.AddPair('wireApi', P.WireApi);
+        if P.Transport <> '' then
+          PObj.AddPair('transport', P.Transport);
+        if P.AzureJson <> '' then
+          PObj.AddPair('azure', JsonOrString(P.AzureJson));
+        if P.HeadersJson <> '' then
+          PObj.AddPair('headers', JsonOrString(P.HeadersJson));
+        if P.ModelProvider <> '' then
+          PObj.AddPair('modelProvider', P.ModelProvider);
+        ProvidersArr.AddElement(PObj);
+      end;
+      Params.AddPair('providers', ProvidersArr);
+    end;
+
+    if Length(Config.Models) > 0 then
+    begin
+      var ModelsArr := TJSONArray.Create;
+      for var M in Config.Models do
+      begin
+        var MObj := TJSONObject.Create;
+        MObj.AddPair('provider', M.Provider);
+        MObj.AddPair('id', M.Id);
+        if M.ModelId <> '' then
+          MObj.AddPair('modelId', M.ModelId);
+        if M.WireModel <> '' then
+          MObj.AddPair('wireModel', M.WireModel);
+        if M.Name <> '' then
+          MObj.AddPair('name', M.Name);
+        if M.MaxPromptTokens > 0 then
+          MObj.AddPair('maxPromptTokens', TJSONNumber.Create(M.MaxPromptTokens));
+        if M.MaxContextWindowTokens > 0 then
+          MObj.AddPair('maxContextWindowTokens',
+            TJSONNumber.Create(M.MaxContextWindowTokens));
+        if M.MaxOutputTokens > 0 then
+          MObj.AddPair('maxOutputTokens', TJSONNumber.Create(M.MaxOutputTokens));
+        if M.CapabilitiesJson <> '' then
+          MObj.AddPair('capabilities', JsonOrString(M.CapabilitiesJson));
+        ModelsArr.AddElement(MObj);
+      end;
+      Params.AddPair('models', ModelsArr);
+    end;
+
+    if Config.DefaultProvider <> '' then
+      Params.AddPair('defaultProvider', Config.DefaultProvider);
+
+    if Config.CapiEnabled <> obUnset then
+    begin
+      var CapiObj := TJSONObject.Create;
+      CapiObj.AddPair('enabled', TJSONBool.Create(Config.CapiEnabled = obTrue));
+      Params.AddPair('capi', CapiObj);
+    end;
+
+    if Assigned(Config.OnShellAuthenticationRequest) then
+      Params.AddPair('requestShellAuthentication', TJSONBool.Create(True));
+
+    if Assigned(Config.StoreMemory) then
+      Params.AddPair('hasMemoryStore', TJSONBool.Create(True));
+  except
+    Params.Free;
+    raise;
+  end;
+  Result := Params;
+end;
+
+function TCopilotClient.SendSessionRequest(const Method: string;
+  Flat: TJSONObject; IsResume: Boolean; const RegistrationId: string): TJSONValue;
+var
+  Wire: TJSONObject;
+begin
+  FLastPolicyHelperFailure := Default(TPolicyHelperFailure);
+  // Translate the flat payload to the SDK protocol 4 grouped shape.
+  Wire := GroupSessionParams(Flat, IsResume, IsEmptyMode);
+  try
+    try
+      Result := FRpc.SendRequest(Method, Wire);
+    except
+      on E: Exception do
+      begin
+        if E is EJsonRpcError then
+          FLastPolicyHelperFailure :=
+            ParsePolicyHelperFailure(EJsonRpcError(E).ErrorJson);
+        UnregisterTokenProvider(RegistrationId);
+        raise;
+      end;
+    end;
+  finally
+    Wire.Free;
+  end;
+end;
+
+procedure TCopilotClient.AttachSessionCallbacks(Session: TCopilotSession;
+  const Config: TSessionConfig; const RegistrationId: string);
+var
+  RegId: string;
+begin
+  RegId := RegistrationId;
+  Session.OnShellAuthenticationRequest := Config.OnShellAuthenticationRequest;
+  Session.StoreMemory := Config.StoreMemory;
+  if RegId <> '' then
+    Session.OnDetach := procedure
+      begin
+        Self.UnregisterTokenProvider(RegId);
+      end;
 end;
 
 function TCopilotClient.CreateSession: TCopilotSession;
@@ -391,169 +1071,25 @@ end;
 
 function TCopilotClient.CreateSession(const Config: TSessionConfig): TCopilotSession;
 var
-  Params: TJSONObject;
+  Flat: TJSONObject;
   ResultVal: TJSONValue;
-  SessionId: string;
+  SessionId, RegistrationId: string;
   Session: TCopilotSession;
 begin
-  Params := TJSONObject.Create;
+  if IsEmptyMode and (Length(Config.AvailableTools) = 0) then
+    raise Exception.Create('Client mode "empty" requires AvailableTools on ' +
+      'every session create and resume');
+  if Assigned(Config.GitHubTokenProvider) and (Config.GithubToken <> '') then
+    raise Exception.Create('GithubToken and GitHubTokenProvider are mutually exclusive');
 
-  if Config.Model <> '' then
-    Params.AddPair('model', Config.Model);
-  Params.AddPair('streaming', TJSONBool.Create(Config.Streaming));
-  Params.AddPair('sdkProtocolVersion', SDK_PROTOCOL_VERSION);
-
-  if Length(Config.Tools) > 0 then
-    Params.AddPair('tools', BuildToolsArray(Config.Tools));
-
-  if Length(Config.SkillDirectories) > 0 then
-  begin
-    var SkillArr := TJSONArray.Create;
-    for var Dir in Config.SkillDirectories do
-      SkillArr.Add(Dir);
-    Params.AddPair('skillDirectories', SkillArr);
+  RegistrationId := RegisterTokenProvider(Config.GitHubTokenProvider);
+  Flat := BuildFlatParams(Config, RegistrationId);
+  try
+    ResultVal := SendSessionRequest('session.create', Flat, False, RegistrationId);
+  finally
+    Flat.Free;
   end;
 
-  if Length(Config.DisabledSkills) > 0 then
-  begin
-    var DisArr := TJSONArray.Create;
-    for var S in Config.DisabledSkills do
-      DisArr.Add(S);
-    Params.AddPair('disabledSkills', DisArr);
-  end;
-
-  if Config.IncludeSubAgentStreamingEvents then
-    Params.AddPair('includeSubAgentStreamingEvents', TJSONBool.Create(True));
-
-  if Length(Config.Instructions) > 0 then
-  begin
-    var InstArr := TJSONArray.Create;
-    for var Inst in Config.Instructions do
-      InstArr.Add(Inst);
-    Params.AddPair('instructions', InstArr);
-  end;
-
-  if FOptions.SessionIdleTimeoutSeconds > 0 then
-    Params.AddPair('sessionIdleTimeoutSeconds',
-      TJSONNumber.Create(FOptions.SessionIdleTimeoutSeconds));
-
-  if FOptions.SessionFs.WorkspaceRoot <> '' then
-  begin
-    var FsObj := TJSONObject.Create;
-    FsObj.AddPair('workspaceRoot', FOptions.SessionFs.WorkspaceRoot);
-    FsObj.AddPair('stateRoot', FOptions.SessionFs.StateRoot);
-    if FOptions.SessionFs.PathStyle <> '' then
-      FsObj.AddPair('pathStyle', FOptions.SessionFs.PathStyle);
-    Params.AddPair('sessionFs', FsObj);
-  end;
-
-  // --- Upstream-sync session config passthroughs (camelCase wire keys) ---
-  if Config.EnableCitations then
-    Params.AddPair('enableCitations', TJSONBool.Create(True));
-
-  if Length(Config.ExcludedBuiltinAgents) > 0 then
-  begin
-    var AgentsArr := TJSONArray.Create;
-    for var A in Config.ExcludedBuiltinAgents do
-      AgentsArr.Add(A);
-    Params.AddPair('excludedBuiltinAgents', AgentsArr);
-  end;
-
-  if Config.SessionLimits.MaxAiCredits > 0 then
-  begin
-    var LimitsObj := TJSONObject.Create;
-    LimitsObj.AddPair('maxAiCredits', TJSONNumber.Create(Config.SessionLimits.MaxAiCredits));
-    Params.AddPair('sessionLimits', LimitsObj);
-  end;
-
-  if Config.Memory.Enabled then
-  begin
-    var MemObj := TJSONObject.Create;
-    MemObj.AddPair('enabled', TJSONBool.Create(True));
-    Params.AddPair('memory', MemObj);
-  end;
-
-  if Config.OtlpProtocol <> '' then
-    Params.AddPair('otlpProtocol', Config.OtlpProtocol);
-
-  if Config.EnableWebSocketResponses then
-    Params.AddPair('enableWebSocketResponses', TJSONBool.Create(True));
-
-  if Assigned(Config.ExpAssignments) and (Config.ExpAssignments.Count > 0) then
-  begin
-    var ExpObj := TJSONObject.Create;
-    for var ExpPair in Config.ExpAssignments do
-      ExpObj.AddPair(ExpPair.Key, ExpPair.Value);
-    Params.AddPair('expAssignments', ExpObj);
-  end;
-
-  // --- Newly-synced session config passthroughs (camelCase wire keys) ---
-  if Config.RewindEnabled then
-    Params.AddPair('rewindEnabled', TJSONBool.Create(True));
-
-  if Length(Config.AdditionalDirectories) > 0 then
-  begin
-    var DirsArr := TJSONArray.Create;
-    for var D in Config.AdditionalDirectories do
-      DirsArr.Add(D);
-    Params.AddPair('additionalDirectories', DirsArr);
-  end;
-
-  if Length(Config.DisabledMcpServers) > 0 then
-  begin
-    var McpArr := TJSONArray.Create;
-    for var M in Config.DisabledMcpServers do
-      McpArr.Add(M);
-    Params.AddPair('disabledMcpServers', McpArr);
-  end;
-
-  if Config.GithubMcpToolConfig <> '' then
-    Params.AddPair('githubMcpToolConfig', Config.GithubMcpToolConfig);
-
-  if Config.CanvasProvider <> '' then
-    Params.AddPair('canvasProvider', Config.CanvasProvider);
-
-  if Config.CustomAgentsLocalOnly then
-    Params.AddPair('customAgentsLocalOnly', TJSONBool.Create(True));
-
-  if Config.DecisionContext <> '' then
-    Params.AddPair('decisionContext', Config.DecisionContext);
-
-  // User-prompt-transformed hook: signal the runtime that a handler is registered.
-  if Assigned(Config.Hooks.OnUserPromptTransformed) then
-    Params.AddPair('userPromptTransformed', TJSONBool.Create(True));
-
-  if Length(Config.BuiltinPluginDirectories) > 0 then
-  begin
-    var PluginArr := TJSONArray.Create;
-    for var P in Config.BuiltinPluginDirectories do
-      PluginArr.Add(P);
-    Params.AddPair('builtinPluginDirectories', PluginArr);
-  end;
-
-  if Config.ArgsSchema <> '' then
-    Params.AddPair('argsSchema', Config.ArgsSchema);
-
-  if Config.ReasoningEffort <> '' then
-    Params.AddPair('reasoningEffort', Config.ReasoningEffort);
-
-  if Config.ToolSearch <> '' then
-    Params.AddPair('toolSearch', Config.ToolSearch);
-
-  if Config.InProcess then
-    Params.AddPair('inProcess', TJSONBool.Create(True));
-
-  if Config.ExperimentalMode then
-    Params.AddPair('experimentalMode', TJSONBool.Create(True));
-
-  if Config.ContentExclusion then
-    Params.AddPair('contentExclusion', TJSONBool.Create(True));
-
-  // MCP OAuth host token handler: signal the runtime that a handler is registered.
-  if Assigned(Config.OnMcpAuthRequest) then
-    Params.AddPair('mcpAuthHandler', TJSONBool.Create(True));
-
-  ResultVal := FRpc.SendRequest('session.create', Params);
   try
     if not (ResultVal is TJSONObject) then
       raise Exception.Create('Invalid response from session.create');
@@ -570,6 +1106,7 @@ begin
   Session.OnPermissionRequest := Config.OnPermissionRequest;
   Session.OnUserInputRequest := Config.OnUserInputRequest;
   Session.Hooks := Config.Hooks;
+  AttachSessionCallbacks(Session, Config, RegistrationId);
 
   FSessionsLock.Enter;
   try
@@ -584,29 +1121,61 @@ end;
 function TCopilotClient.ResumeSession(
   const Config: TResumeSessionConfig): TCopilotSession;
 var
-  Params: TJSONObject;
-  ResultVal: TJSONValue;
+  Shared: TSessionConfig;
+  Flat: TJSONObject;
+  RegistrationId: string;
   Session: TCopilotSession;
 begin
-  Params := TJSONObject.Create;
-  Params.AddPair('sessionId', Config.SessionId);
-  Params.AddPair('sdkProtocolVersion', SDK_PROTOCOL_VERSION);
-
+  // Resume fields take precedence over the shared create options.
+  Shared := Config.Options;
   if Config.Model <> '' then
-    Params.AddPair('model', Config.Model);
-  Params.AddPair('streaming', TJSONBool.Create(Config.Streaming));
-
+    Shared.Model := Config.Model;
+  Shared.Streaming := Config.Streaming;
   if Length(Config.Tools) > 0 then
-    Params.AddPair('tools', BuildToolsArray(Config.Tools));
+    Shared.Tools := Config.Tools;
+  if Length(Config.ExcludedTools) > 0 then
+    Shared.ExcludedTools := Config.ExcludedTools;
+  if Config.IncludeSubAgentStreamingEvents then
+    Shared.IncludeSubAgentStreamingEvents := True;
+  if Length(Config.InstructionDirectories) > 0 then
+    Shared.InstructionDirectories := Config.InstructionDirectories;
+  if Assigned(Config.OnPermissionRequest) then
+    Shared.OnPermissionRequest := Config.OnPermissionRequest;
+  if Assigned(Config.OnUserInputRequest) then
+    Shared.OnUserInputRequest := Config.OnUserInputRequest;
+  if HasAnyHook(Config.Hooks) then
+    Shared.Hooks := Config.Hooks;
 
-  ResultVal := FRpc.SendRequest('session.resume', Params);
-  ResultVal.Free;
+  if IsEmptyMode and (Length(Shared.AvailableTools) = 0) then
+    raise Exception.Create('Client mode "empty" requires AvailableTools on ' +
+      'every session create and resume');
+  if Assigned(Shared.GitHubTokenProvider) and (Shared.GithubToken <> '') then
+    raise Exception.Create('GithubToken and GitHubTokenProvider are mutually exclusive');
 
-  Session := TCopilotSession.Create(Config.SessionId, FRpc, Config.Streaming);
-  Session.Tools := Config.Tools;
-  Session.OnPermissionRequest := Config.OnPermissionRequest;
-  Session.OnUserInputRequest := Config.OnUserInputRequest;
-  Session.Hooks := Config.Hooks;
+  RegistrationId := RegisterTokenProvider(Shared.GitHubTokenProvider);
+  Flat := BuildFlatParams(Shared, RegistrationId);
+  try
+    Flat.AddPair('sessionId', Config.SessionId);
+    if Config.DisableResume then
+      Flat.AddPair('disableResume', TJSONBool.Create(True));
+    if Config.ContinuePendingWork then
+      Flat.AddPair('continuePendingWork', TJSONBool.Create(True));
+    if Config.AllowTranscriptRecovery then
+      Flat.AddPair('allowTranscriptRecovery', TJSONBool.Create(True));
+    // Explicit null clears the default provider on resume.
+    if Config.ClearDefaultProvider and (Shared.DefaultProvider = '') then
+      Flat.AddPair('defaultProvider', TJSONNull.Create);
+    SendSessionRequest('session.resume', Flat, True, RegistrationId).Free;
+  finally
+    Flat.Free;
+  end;
+
+  Session := TCopilotSession.Create(Config.SessionId, FRpc, Shared.Streaming);
+  Session.Tools := Shared.Tools;
+  Session.OnPermissionRequest := Shared.OnPermissionRequest;
+  Session.OnUserInputRequest := Shared.OnUserInputRequest;
+  Session.Hooks := Shared.Hooks;
+  AttachSessionCallbacks(Session, Shared, RegistrationId);
 
   FSessionsLock.Enter;
   try
@@ -618,6 +1187,17 @@ begin
   Result := Session;
 end;
 
+procedure TCopilotClient.ClearManagedSettingsCache;
+var
+  Params: TJSONObject;
+begin
+  Params := TJSONObject.Create;
+  try
+    FRpc.SendRequest('managedSettings.clearCache', Params).Free;
+  finally
+    Params.Free;
+  end;
+end;
 function TCopilotClient.GetSessionMetadata(
   const ASessionId: string): TSessionMetadata;
 var
@@ -819,12 +1399,19 @@ begin
   Obj := TJSONObject(Params);
 
   SessionId := Obj.GetValue<string>('sessionId', '');
-  EventType := Obj.GetValue<string>('type', '');
+
+  // SDK protocol 4 sends {sessionId, event: {type, data, ...}}; older
+  // runtimes put type and data at the top level.
+  var EventObj := Obj;
+  var EventVal := Obj.GetValue('event');
+  if EventVal is TJSONObject then
+    EventObj := TJSONObject(EventVal);
+  EventType := EventObj.GetValue<string>('type', '');
 
   Session := FindSession(SessionId);
   if Assigned(Session) then
   begin
-    var DataVal := Obj.GetValue('data');
+    var DataVal := EventObj.GetValue('data');
     var Data: TJSONObject := nil;
     if Assigned(DataVal) and (DataVal is TJSONObject) then
       Data := TJSONObject(DataVal);
@@ -972,50 +1559,222 @@ end;
 function TCopilotClient.HandleHooksInvoke(const Method: string;
   const Params: TJSONValue): TJSONValue;
 var
-  Obj: TJSONObject;
+  Obj, InputObj, Output: TJSONObject;
   HookName, SessionId: string;
   Session: TCopilotSession;
+  InputVal: TJSONValue;
 begin
   Obj := Params as TJSONObject;
-  HookName := Obj.GetValue<string>('hookName', '');
+  // SDK protocol 4 sends {sessionId, hookType, input}; older runtimes sent
+  // hookName with the input fields at the top level.
+  HookName := Obj.GetValue<string>('hookType', Obj.GetValue<string>('hookName', ''));
   SessionId := Obj.GetValue<string>('sessionId', '');
+  InputVal := Obj.GetValue('input');
+  if InputVal is TJSONObject then
+    InputObj := TJSONObject(InputVal)
+  else
+    InputObj := Obj;
 
+  Result := TJSONObject.Create;
   Session := FindSession(SessionId);
   if not Assigned(Session) then
-  begin
-    Result := TJSONObject.Create;
     Exit;
-  end;
 
+  Output := nil;
   if (HookName = 'preToolUse') and Assigned(Session.Hooks.OnPreToolUse) then
   begin
     var Input: TPreToolUseHookInput;
-    Input.ToolName := Obj.GetValue<string>('toolName', '');
-    var ArgsVal := Obj.GetValue('toolArgs');
+    Input.ToolName := InputObj.GetValue<string>('toolName', '');
+    var ArgsVal := InputObj.GetValue('toolArgs');
     if Assigned(ArgsVal) and (ArgsVal is TJSONObject) then
       Input.ToolArgs := TJSONObject(ArgsVal)
     else
       Input.ToolArgs := nil;
 
-    var Output := Session.Hooks.OnPreToolUse(Input, SessionId);
-    var ResObj := TJSONObject.Create;
-    ResObj.AddPair('permissionDecision', Output.PermissionDecision);
-    Result := ResObj;
+    var PreOutput := Session.Hooks.OnPreToolUse(Input, SessionId);
+    Output := TJSONObject.Create;
+    if PreOutput.PermissionDecision <> '' then
+      Output.AddPair('permissionDecision', PreOutput.PermissionDecision);
   end
   else if (HookName = 'postToolUse') and Assigned(Session.Hooks.OnPostToolUse) then
   begin
     var Input: TPostToolUseHookInput;
-    Input.ToolName := Obj.GetValue<string>('toolName', '');
-    Input.ToolResult := Obj.GetValue<string>('toolResult', '');
+    Input.ToolName := InputObj.GetValue<string>('toolName', '');
+    Input.ToolResult := InputObj.GetValue<string>('toolResult', '');
 
-    var Output := Session.Hooks.OnPostToolUse(Input, SessionId);
-    var ResObj := TJSONObject.Create;
-    if Output.OverrideResult <> '' then
-      ResObj.AddPair('overrideResult', Output.OverrideResult);
-    Result := ResObj;
+    var PostOutput := Session.Hooks.OnPostToolUse(Input, SessionId);
+    Output := TJSONObject.Create;
+    if PostOutput.OverrideResult <> '' then
+      Output.AddPair('overrideResult', PostOutput.OverrideResult);
+  end
+  else if (HookName = 'subagentStart') and Assigned(Session.Hooks.OnSubagentStart) then
+  begin
+    var Context := Session.Hooks.OnSubagentStart(ReadSubagentInput(InputObj), SessionId);
+    Output := TJSONObject.Create;
+    if Context <> '' then
+      Output.AddPair('additionalContext', Context);
+  end
+  else if (HookName = 'subagentStop') and Assigned(Session.Hooks.OnSubagentStop) then
+  begin
+    var Decision := Session.Hooks.OnSubagentStop(ReadSubagentInput(InputObj), SessionId);
+    Output := TJSONObject.Create;
+    if Decision.Block and (Decision.Reason <> '') then
+    begin
+      Output.AddPair('decision', 'block');
+      Output.AddPair('reason', Decision.Reason);
+    end;
+    if Decision.ModifiedResponse <> '' then
+      Output.AddPair('modifiedResponse', Decision.ModifiedResponse);
+  end;
+
+  // Hook results travel as {"output": {...}}; no output means no change.
+  if Assigned(Output) then
+  begin
+    if Output.Count > 0 then
+      TJSONObject(Result).AddPair('output', Output)
+    else
+      Output.Free;
+  end;
+end;
+
+function TCopilotClient.HandleGitHubToken(const Method: string;
+  const Params: TJSONValue): TJSONValue;
+var
+  Obj, ResObj: TJSONObject;
+  Request: TGitHubTokenRequest;
+  Provider: TGitHubTokenProvider;
+  Token: TGitHubTokenResult;
+begin
+  Obj := Params as TJSONObject;
+  Request.RegistrationId := Obj.GetValue<string>('registrationId', '');
+  Request.Host := Obj.GetValue<string>('host', '');
+  Request.SessionId := Obj.GetValue<string>('sessionId', '');
+  Request.Reason := Obj.GetValue<string>('reason', '');
+
+  FTokenLock.Enter;
+  try
+    if not FTokenProviders.TryGetValue(Request.RegistrationId, Provider) then
+      Provider := nil;
+  finally
+    FTokenLock.Leave;
+  end;
+  if not Assigned(Provider) then
+    raise Exception.Create('No GitHub token provider is registered for ' +
+      Request.RegistrationId);
+
+  Token := Provider(Request);
+  ResObj := TJSONObject.Create;
+  if Token.Cancelled or (Token.AccessToken = '') then
+    ResObj.AddPair('kind', 'cancelled')
+  else
+  begin
+    ResObj.AddPair('kind', 'token');
+    ResObj.AddPair('accessToken', Token.AccessToken);
+    if Token.TokenType <> '' then
+      ResObj.AddPair('tokenType', Token.TokenType);
+    if Token.ExpiresIn > 0 then
+      ResObj.AddPair('expiresIn', TJSONNumber.Create(Token.ExpiresIn));
+  end;
+  Result := ResObj;
+end;
+
+function TCopilotClient.HandleShellAuthentication(const Method: string;
+  const Params: TJSONValue): TJSONValue;
+var
+  Obj, ResObj: TJSONObject;
+  Request: TShellAuthenticationRequest;
+  Reply: TShellAuthenticationResponse;
+  Session: TCopilotSession;
+begin
+  Obj := Params as TJSONObject;
+  Request.SessionId := Obj.GetValue<string>('sessionId', '');
+  Request.RequestId := Obj.GetValue<string>('requestId', '');
+  Request.ProgramName := Obj.GetValue<string>('program', '');
+  Request.Prompt := Obj.GetValue<string>('prompt', '');
+  Request.InputKind := Obj.GetValue<string>('inputKind', '');
+  Request.Command := Obj.GetValue<string>('command', '');
+  Request.Cwd := Obj.GetValue<string>('cwd', '');
+
+  ResObj := TJSONObject.Create;
+  Session := FindSession(Request.SessionId);
+  if Assigned(Session) and Session.HandleShellAuthentication(Request, Reply) and
+    Reply.Accepted then
+  begin
+    ResObj.AddPair('action', 'accept');
+    ResObj.AddPair('value', Reply.Value);
   end
   else
-    Result := TJSONObject.Create;
+    ResObj.AddPair('action', 'cancel');
+  Result := ResObj;
+end;
+
+function TCopilotClient.HandleMemoryStore(const Method: string;
+  const Params: TJSONValue): TJSONValue;
+var
+  Obj: TJSONObject;
+  Memory: TStoredMemory;
+  Session: TCopilotSession;
+  CitationsVal: TJSONValue;
+begin
+  Obj := Params as TJSONObject;
+  Memory.SessionId := Obj.GetValue<string>('sessionId', '');
+  Memory.Subject := Obj.GetValue<string>('subject', '');
+  Memory.Fact := Obj.GetValue<string>('fact', '');
+  Memory.Reason := Obj.GetValue<string>('reason', '');
+  CitationsVal := Obj.GetValue('citations');
+  if Assigned(CitationsVal) then
+    Memory.CitationsJson := CitationsVal.ToJSON
+  else
+    Memory.CitationsJson := '';
+
+  Session := FindSession(Memory.SessionId);
+  if not (Assigned(Session) and Session.HandleStoreMemory(Memory)) then
+    raise Exception.Create('Memory store owner is unavailable');
+  Result := TJSONNull.Create;
+end;
+
+function TCopilotClient.HandleNetwork(const Method: string;
+  const Params: TJSONValue): TJSONValue;
+var
+  Obj, ResObj: TJSONObject;
+  Answer: string;
+  Resolver: TProxyResolver;
+  Negotiator: TNegotiateAuthenticator;
+  BasicAuth: TBasicAuthenticator;
+  Credentials: TBasicCredentials;
+begin
+  Obj := Params as TJSONObject;
+  ResObj := TJSONObject.Create;
+  Resolver := FOptions.Network.ResolveProxy;
+  Negotiator := FOptions.Network.AuthenticateNegotiate;
+  BasicAuth := FOptions.Network.AuthenticateBasic;
+
+  // An empty reply declines; the runtime falls back to its defaults.
+  // Tokens and passwords are never logged.
+  if (Method = 'network.resolveProxy') and Assigned(Resolver) then
+  begin
+    Answer := Resolver(Obj.GetValue<string>('url', ''));
+    if Answer <> '' then
+      ResObj.AddPair('proxy', Answer);
+  end
+  else if (Method = 'network.authenticateNegotiate') and Assigned(Negotiator) then
+  begin
+    Answer := Negotiator(Obj.GetValue<string>('spn', ''));
+    if Answer <> '' then
+      ResObj.AddPair('token', Answer);
+  end
+  else if (Method = 'network.authenticateBasic') and Assigned(BasicAuth) then
+  begin
+    Credentials := BasicAuth(Obj.GetValue<string>('proxy', ''),
+      Obj.GetValue<string>('realm', ''),
+      Obj.GetValue<Boolean>('previousRejected', False));
+    if Credentials.Username <> '' then
+    begin
+      ResObj.AddPair('username', Credentials.Username);
+      ResObj.AddPair('password', Credentials.Password);
+    end;
+  end;
+  Result := ResObj;
 end;
 
 end.

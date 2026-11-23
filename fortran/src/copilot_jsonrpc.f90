@@ -6,6 +6,7 @@
 !! Reads and writes Content-Length-framed JSON-RPC messages over stdio pipes.
 module copilot_jsonrpc
   use iso_fortran_env, only: int32, int64, error_unit
+  use copilot_json, only: json_get_raw, json_get_string, json_get_integer, json_quote
   implicit none
   private
 
@@ -16,9 +17,16 @@ module copilot_jsonrpc
   public :: jsonrpc_extract_method, jsonrpc_extract_result
   public :: jsonrpc_extract_error, jsonrpc_is_response
   public :: jsonrpc_is_notification, jsonrpc_is_request
+  public :: jsonrpc_extract_raw_id, jsonrpc_build_response, jsonrpc_build_error_response
+  public :: jsonrpc_response_error, jsonrpc_error_code, jsonrpc_error_message
+  public :: JSONRPC_METHOD_NOT_FOUND, JSONRPC_INTERNAL_ERROR
 
   integer, parameter :: MAX_MSG_LEN = 1048576  ! 1 MB
   integer, parameter :: HEADER_BUF  = 256
+
+  !> Standard JSON-RPC error codes used when answering server requests.
+  integer, parameter :: JSONRPC_METHOD_NOT_FOUND = -32601
+  integer, parameter :: JSONRPC_INTERNAL_ERROR   = -32603
 
   !> JSON-RPC client state
   type :: jsonrpc_client
@@ -29,6 +37,8 @@ module copilot_jsonrpc
   contains
     procedure :: send_request    => jrpc_send_request
     procedure :: send_notification => jrpc_send_notification
+    procedure :: send_response   => jrpc_send_response
+    procedure :: send_error_response => jrpc_send_error_response
     procedure :: read_message    => jrpc_read_message
     procedure :: get_next_id     => jrpc_get_next_id
   end type jsonrpc_client
@@ -157,6 +167,53 @@ contains
     call client%send_notification(method, params_json, iostat)
   end subroutine jsonrpc_send_notification
 
+  !> Build a JSON-RPC 2.0 success response. id_json is the raw request id ('7' or '"abc"').
+  function jsonrpc_build_response(id_json, result_json) result(msg)
+    character(len=*), intent(in) :: id_json
+    character(len=*), intent(in) :: result_json
+    character(len=:), allocatable :: msg
+
+    if (len_trim(result_json) > 0) then
+      msg = '{"jsonrpc":"2.0","id":' // trim(id_json) // ',"result":' // trim(result_json) // '}'
+    else
+      msg = '{"jsonrpc":"2.0","id":' // trim(id_json) // ',"result":null}'
+    end if
+  end function jsonrpc_build_response
+
+  !> Build a JSON-RPC 2.0 error response.
+  function jsonrpc_build_error_response(id_json, code, message) result(msg)
+    character(len=*), intent(in) :: id_json
+    integer, intent(in) :: code
+    character(len=*), intent(in) :: message
+    character(len=:), allocatable :: msg
+    character(len=20) :: code_str
+
+    write(code_str, '(I0)') code
+    msg = '{"jsonrpc":"2.0","id":' // trim(id_json) // ',"error":{"code":' // trim(code_str) // &
+          ',"message":' // json_quote(message) // '}}'
+  end function jsonrpc_build_error_response
+
+  !> Answer a server-to-client request with a result.
+  subroutine jrpc_send_response(self, id_json, result_json, iostat)
+    class(jsonrpc_client), intent(inout) :: self
+    character(len=*), intent(in) :: id_json
+    character(len=*), intent(in) :: result_json
+    integer, intent(out) :: iostat
+
+    call write_framed_message(self%stdout_unit, jsonrpc_build_response(id_json, result_json), iostat)
+  end subroutine jrpc_send_response
+
+  !> Answer a server-to-client request with an error.
+  subroutine jrpc_send_error_response(self, id_json, code, message, iostat)
+    class(jsonrpc_client), intent(inout) :: self
+    character(len=*), intent(in) :: id_json
+    integer, intent(in) :: code
+    character(len=*), intent(in) :: message
+    integer, intent(out) :: iostat
+
+    call write_framed_message(self%stdout_unit, jsonrpc_build_error_response(id_json, code, message), iostat)
+  end subroutine jrpc_send_error_response
+
   ! --------------------------------------------------------------------------
   ! Read
   ! --------------------------------------------------------------------------
@@ -260,6 +317,43 @@ contains
     is_req = (index(json, '"method":') > 0) .and. (index(json, '"id":') > 0) &
              .and. (index(json, '"result":') == 0)
   end function jsonrpc_is_request
+
+  !> Raw JSON text of the top-level "id" member ('' when absent).
+  function jsonrpc_extract_raw_id(json) result(id_json)
+    character(len=*), intent(in) :: json
+    character(len=:), allocatable :: id_json
+    logical :: found
+
+    call json_get_raw(json, 'id', id_json, found)
+    if (.not. found) id_json = ''
+  end function jsonrpc_extract_raw_id
+
+  !> The top-level "error" object of a response, if any.
+  subroutine jsonrpc_response_error(json, error_json, is_error)
+    character(len=*), intent(in) :: json
+    character(len=:), allocatable, intent(out) :: error_json
+    logical, intent(out) :: is_error
+
+    call json_get_raw(json, 'error', error_json, is_error)
+    if (is_error) is_error = error_json /= 'null'
+  end subroutine jsonrpc_response_error
+
+  !> The "code" of a JSON-RPC error object (0 when absent).
+  function jsonrpc_error_code(error_json) result(code)
+    character(len=*), intent(in) :: error_json
+    integer :: code
+    logical :: found
+
+    call json_get_integer(error_json, 'code', code, found)
+  end function jsonrpc_error_code
+
+  !> The "message" of a JSON-RPC error object.
+  function jsonrpc_error_message(error_json) result(message)
+    character(len=*), intent(in) :: error_json
+    character(len=:), allocatable :: message
+
+    message = json_get_string(error_json, 'message')
+  end function jsonrpc_error_message
 
   ! --------------------------------------------------------------------------
   ! Internal framing helpers

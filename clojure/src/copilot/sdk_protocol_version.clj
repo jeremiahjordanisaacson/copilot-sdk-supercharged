@@ -7,7 +7,7 @@
 
 (def sdk-protocol-version
   "The SDK protocol version number. Must match the server's expected version."
-  2)
+  4)
 
 (defn get-sdk-protocol-version
   "Returns the SDK protocol version."

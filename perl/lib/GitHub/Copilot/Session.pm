@@ -40,6 +40,10 @@ sub new {
         _hooks             => undef,
         _exit_plan_mode_handler => undef,
         _trace_context_provider => undef,
+        _shell_authentication_handler => undef,
+        # request id => 1 once cancelled (0 while the handler runs)
+        _pending_shell_authentications => {},
+        _memory_store_handler => undef,
         _destroy_callbacks => [],
     }, $class;
 
@@ -71,6 +75,7 @@ sub send {
     my $request_headers;
     my $source;
     my $response_schema;
+    my $client_turn_id;
 
     if (ref($options) && blessed($options)) {
         $attachments     = $options->attachments;
@@ -82,6 +87,7 @@ sub send {
         $request_headers = $options->request_headers  if $options->can('request_headers');
         $source          = $options->source           if $options->can('source');
         $response_schema = $options->response_schema  if $options->can('response_schema');
+        $client_turn_id  = $options->client_turn_id   if $options->can('client_turn_id');
     } else {
         $attachments     = $options->{attachments};
         $mode            = $options->{mode};
@@ -92,6 +98,7 @@ sub send {
         $request_headers = $options->{request_headers};
         $source          = $options->{source};
         $response_schema = $options->{response_schema};
+        $client_turn_id  = $options->{client_turn_id};
     }
 
     my %payload = (
@@ -100,6 +107,8 @@ sub send {
     );
     # Message provenance: 'user', 'system' or 'agent-<id>' (see MessageSource)
     $payload{source}         = $source          if defined $source;
+    # Opaque caller-chosen turn identifier, echoed on the turn's events
+    $payload{clientTurnId}   = $client_turn_id  if defined $client_turn_id;
     $payload{attachments}    = $attachments     if defined $attachments;
     $payload{mode}           = $mode            if defined $mode;
     if (defined $response_schema) {
@@ -200,7 +209,7 @@ sub send_and_wait_structured {
     my %opts;
     if (blessed($options)) {
         for my $field (qw(prompt attachments mode response_format image_options
-                          request_headers agent_mode display_prompt source)) {
+                          request_headers agent_mode display_prompt source client_turn_id)) {
             next unless $options->can($field);
             my $value = $options->$field;
             $opts{$field} = $value if defined $value;
@@ -409,6 +418,89 @@ sub _on_destroy {
     push @{ $self->{_destroy_callbacks} }, $callback if ref($callback) eq 'CODE';
 }
 
+# --------------------------------------------------------------------------
+# Shell authentication and memory store (v3.0.0)
+# --------------------------------------------------------------------------
+
+sub register_shell_authentication_handler {
+    my ($self, $handler) = @_;
+    $self->{_shell_authentication_handler} = $handler;
+}
+
+# Internal: ask the registered handler for a shell program's credentials. A
+# failure, a malformed answer, or a cancellation answers 'cancel' so the program
+# fails instead of receiving a wrong value. The answer is never logged.
+sub _handle_shell_authentication_request {
+    my ($self, $request) = @_;
+
+    my $handler = $self->{_shell_authentication_handler};
+    my $request_id = $request->request_id;
+    return { action => 'cancel' }
+        if !$handler || exists $self->{_pending_shell_authentications}{$request_id};
+
+    $self->{_pending_shell_authentications}{$request_id} = 0;
+    my $result = eval { $handler->($request, { session_id => $self->{session_id} }) };
+    if ($@) {
+        # The error text could contain the answer, so only its type is logged.
+        my $type = ref($@) || 'string';
+        warn "[CopilotSDK] Shell authentication handler failed ($type)\n";
+        $result = undef;
+    }
+    my $cancelled = delete $self->{_pending_shell_authentications}{$request_id};
+    return { action => 'cancel' } if $cancelled;
+
+    $result = $result->TO_JSON if blessed($result) && $result->can('TO_JSON');
+    if (ref($result) eq 'HASH'
+        && defined $result->{action} && $result->{action} eq 'accept'
+        && defined $result->{value} && !ref $result->{value}) {
+        return { action => 'accept', value => "$result->{value}" };
+    }
+    return { action => 'cancel' };
+}
+
+# Internal: cancel a pending shell authentication prompt; it then answers 'cancel'.
+sub _cancel_shell_authentication_request {
+    my ($self, $request_id) = @_;
+    $self->{_pending_shell_authentications}{$request_id} = 1
+        if exists $self->{_pending_shell_authentications}{$request_id};
+}
+
+sub register_memory_store {
+    my ($self, $handler) = @_;
+    $self->{_memory_store_handler} = $handler;
+}
+
+# Internal: hand a memory the agent asked to store to the registered callback.
+sub _handle_memory_store {
+    my ($self, $memory) = @_;
+
+    my $handler = $self->{_memory_store_handler};
+    croak "No memory store is registered" unless $handler;
+
+    eval { $handler->($memory, { session_id => $self->{session_id} }); 1 } or do {
+        my $err = $@;
+        # The runtime reports a generic failure to the model; keep the cause visible here.
+        warn "[CopilotSDK] Memory store callback failed: $err";
+        croak "Memory store callback failed";
+    };
+    return;
+}
+
+# Change the session's permission mode ('manual', 'assisted' or 'allow-all'; see
+# PermissionMode). Returns a PermissionModeSetResult whose reason explains a
+# refusal when known ('managed_policy').
+sub set_permission_mode {
+    my ($self, $mode) = @_;
+
+    my $result = $self->{_client}->request(
+        'session.permissions.setMode',
+        { sessionId => $self->{session_id}, mode => $mode },
+    );
+    return GitHub::Copilot::Types::PermissionModeSetResult->from_hashref(
+        ref($result) eq 'HASH' ? $result : {},
+    );
+}
+
 sub get_metadata {
     my ($self) = @_;
 
@@ -508,6 +600,10 @@ sub destroy {
     $self->{_hooks}              = undef;
     $self->{_exit_plan_mode_handler} = undef;
     $self->{_trace_context_provider} = undef;
+    $self->{_shell_authentication_handler} = undef;
+    $self->{_memory_store_handler} = undef;
+    $self->{_pending_shell_authentications}{$_} = 1
+        for keys %{ $self->{_pending_shell_authentications} };
 
     my @callbacks = @{ $self->{_destroy_callbacks} || [] };
     $self->{_destroy_callbacks} = [];
@@ -576,6 +672,13 @@ Return the managed settings in effect for this session.
 =head2 recheck_policy_helper()
 
 Re-run the managed-settings policy helper for this session.
+
+=head2 set_permission_mode($mode)
+
+Change the permission mode (C<session.permissions.setMode>) to C<manual>,
+C<assisted> or C<allow-all>. Returns a
+C<GitHub::Copilot::Types::PermissionModeSetResult>; its C<reason> is
+C<managed_policy> when enterprise policy refused the mode.
 
 =head2 on($handler)
 

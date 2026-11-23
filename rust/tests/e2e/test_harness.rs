@@ -158,23 +158,39 @@ impl TestHarness {
     }
 
     /// Returns the CLI path for tests.
+    ///
+    /// Lookup order: `COPILOT_CLI_PATH` (when the file exists), the CLI 1.0.113+
+    /// `@github/copilot/npm-loader.js`, then the legacy `index.js` entry points.
+    /// The client runs `.js` paths with `node` and executes any other path (such as
+    /// the `node_modules/.bin/copilot` shim or a native binary) directly.
     pub fn cli_path(&self) -> String {
         if let Ok(p) = env::var("COPILOT_CLI_PATH") {
-            if Path::new(&p).exists() {
+            if !p.is_empty() && Path::new(&p).exists() {
                 return p;
             }
         }
 
-        let cli = self
+        let github_dir = self
             .repo_root
             .join("nodejs")
             .join("node_modules")
-            .join("@github")
-            .join("copilot")
-            .join("index.js");
+            .join("@github");
+        let mut candidates = vec![github_dir.join("copilot").join("npm-loader.js")];
+        if let Ok(entries) = std::fs::read_dir(&github_dir) {
+            let mut legacy: Vec<PathBuf> = entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("copilot-"))
+                .map(|entry| entry.path().join("index.js"))
+                .collect();
+            legacy.sort();
+            candidates.extend(legacy);
+        }
+        candidates.push(github_dir.join("copilot").join("index.js"));
 
-        if cli.exists() {
-            return cli.to_string_lossy().into_owned();
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate.to_string_lossy().into_owned();
+            }
         }
 
         panic!("CLI not found. Set COPILOT_CLI_PATH or run 'npm install' in the nodejs directory.");

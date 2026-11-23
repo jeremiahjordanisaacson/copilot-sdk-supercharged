@@ -58,6 +58,22 @@ classdef CopilotClientOptions
 
         % W3C Trace Context provider (function handle returning struct).
         OnGetTraceContext
+
+        % Integrating application identity sent as clientInfo on connect:
+        % struct with EditorName, EditorVersion, ExtensionName and
+        % ExtensionVersion (all optional char).  Empty fields are dropped.
+        ClientInfo
+
+        % Client mode: 'coding-agent' (default) or 'empty'.  'empty' requires
+        % SessionConfig 'AvailableTools' on every create/resume and turns off
+        % ambient features.  'copilot-cli' is a legacy alias of 'coding-agent'.
+        Mode (1,:) char = 'coding-agent'
+
+        % Network callbacks (network.setProvider): struct with optional Scope
+        % ('connection' or 'runtime') and function handles ResolveProxy(url),
+        % AuthenticateNegotiate(spn) and
+        % AuthenticateBasic(proxy, realm, previousRejected).
+        Network
     end
 
     methods
@@ -84,6 +100,9 @@ classdef CopilotClientOptions
             p.addParameter('TcpConnectionToken', obj.TcpConnectionToken);
             p.addParameter('Remote', obj.Remote);
             p.addParameter('OnGetTraceContext', []);
+            p.addParameter('ClientInfo', []);
+            p.addParameter('Mode', obj.Mode);
+            p.addParameter('Network', []);
             p.parse(varargin{:});
 
             obj.CliPath          = p.Results.CliPath;
@@ -102,6 +121,9 @@ classdef CopilotClientOptions
             obj.TcpConnectionToken = p.Results.TcpConnectionToken;
             obj.Remote           = p.Results.Remote;
             obj.OnGetTraceContext = p.Results.OnGetTraceContext;
+            obj.ClientInfo       = p.Results.ClientInfo;
+            obj.Mode             = p.Results.Mode;
+            obj.Network          = p.Results.Network;
         end
 
         function s = toStruct(obj)

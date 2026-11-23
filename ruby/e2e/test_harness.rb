@@ -77,6 +77,37 @@ module E2E
           # ignore metadata parse errors
         end
       end
+
+      register_default_copilot_users
+    end
+
+    # Register the replay user answered by the proxy's /copilot_internal/user endpoint.
+    # Current CLIs resolve the Copilot API endpoint from this user (through
+    # COPILOT_DEBUG_GITHUB_API_URL), so every token the tests use must be known.
+    #
+    # @param token [String] the GitHub token the CLI authenticates with
+    def set_copilot_user_by_token(token)
+      raise "Proxy not started" unless @proxy_url
+
+      uri = URI("#{@proxy_url}/copilot-user-config")
+      body = JSON.generate({
+        "token" => token,
+        "response" => {
+          "login" => "e2e-test-user",
+          "id" => 12345,
+          "copilot_plan" => "individual_pro",
+          "endpoints" => {
+            "api" => @proxy_url,
+            "telemetry" => "https://sdk-hydro-collector.example.com",
+          },
+          "analytics_tracking_id" => "e2e-test-tracking-id",
+        },
+      })
+      http = Net::HTTP.new(uri.host, uri.port)
+      req = Net::HTTP::Post.new(uri.path, "Content-Type" => "application/json")
+      req.body = body
+      resp = http.request(req)
+      raise "Proxy copilot user config failed with status #{resp.code}" unless resp.code == "200"
     end
 
     # Configure the proxy for a specific test snapshot.
@@ -142,14 +173,22 @@ module E2E
     end
 
     # Returns the CLI path for tests.
+    #
+    # Lookup order: +COPILOT_CLI_PATH+ (CI points it at the npm bin shim, which runs
+    # directly), then +@github/copilot/npm-loader.js+ (CLI >= 1.0.10x ships a native
+    # binary that this loader launches; the client runs +.js+ paths with node), then the
+    # legacy +index.js+ entry points of older CLIs.
     def self.cli_path
       env_path = ENV["COPILOT_CLI_PATH"]
-      return File.expand_path(env_path) if env_path && File.exist?(env_path)
+      return File.expand_path(env_path) if env_path && !env_path.empty? && File.exist?(env_path)
 
       github_modules = File.join(REPO_ROOT, "nodejs", "node_modules", "@github")
 
-      # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-      # package (e.g. @github/copilot-linux-x64); prefer it when present.
+      loader = File.join(github_modules, "copilot", "npm-loader.js")
+      return File.expand_path(loader) if File.exist?(loader)
+
+      # From CLI 1.0.64-1 until the native-binary releases, the runnable index.js
+      # shipped in a platform-specific package (e.g. @github/copilot-linux-x64).
       platform_cli = Dir.glob(File.join(github_modules, "copilot-*", "index.js"))
                         .reject { |p| p.include?("language-server") }
                         .find { |p| File.exist?(p) }
@@ -164,7 +203,12 @@ module E2E
     # Returns environment variables configured for isolated testing.
     def test_env(work_dir, home_dir)
       env = ENV.to_h.dup
+      # Signing keys would make the CLI sign requests the replay proxy cannot verify.
+      env.delete("COPILOT_HMAC_KEY")
+      env.delete("CAPI_HMAC_KEY")
       env["COPILOT_API_URL"]  = @proxy_url
+      # Route GitHub API calls (including /copilot_internal/user) to the replay proxy.
+      env["COPILOT_DEBUG_GITHUB_API_URL"] = @proxy_url
       env["COPILOT_HOME"]     = home_dir
       env["GH_CONFIG_DIR"]    = home_dir
       env["XDG_CONFIG_HOME"]  = home_dir
@@ -191,6 +235,15 @@ module E2E
       end
 
       env
+    end
+
+    private
+
+    # Tokens the E2E clients authenticate with (see TestCase#github_token and #test_env).
+    def register_default_copilot_users
+      [ENV["GH_TOKEN"], ENV["GITHUB_TOKEN"], "fake-test-token"]
+        .compact.reject(&:empty?).uniq
+        .each { |token| set_copilot_user_by_token(token) }
     end
   end
 end

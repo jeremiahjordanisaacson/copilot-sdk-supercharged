@@ -361,9 +361,9 @@ subtest 'mcp servers config' => sub {
     eval {
         my $session = $client->create_session(
             GitHub::Copilot::Types::SessionConfig->new(
-                mcp_servers => [
-                    { url => 'http://localhost:9999/mcp' },
-                ],
+                mcp_servers => {
+                    'test-server' => { type => 'http', url => 'http://localhost:9999/mcp', tools => ['*'] },
+                },
             )
         );
         ok(defined $session, 'Session with MCP servers config created');

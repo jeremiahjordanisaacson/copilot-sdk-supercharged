@@ -70,6 +70,195 @@ let () =
      Client.stop client)
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and
+requires **Copilot CLI 1.0.113 or newer**. `Client.start` sends `connect` (falling back to `ping` on
+older servers) and rejects any server that does not report protocol version 4 with an
+`SDK protocol version mismatch: SDK supports version 4, but server reports version N` error.
+
+Existing options keep working. `Types.session_config` keeps its flat fields; right before sending
+`session.create` and `session.resume`, the client translates the flat payload into the grouped v4
+shape (`inference`, `tools`, `permissions`, `interaction`, `events`, `agents`, `mcp`, `github`,
+`state`, ...) with `Session_wire.group_session_params`. Only members the runtime accepts are sent:
+unknown flat keys stay at the root, create-only members (`trust_working_directory`,
+`refresh_custom_instructions`) are dropped on resume, and the legacy single `provider` is sent as a
+named provider called `default` (with `github.capi.enabled = false`, as v1 BYOK behaved) unless you
+also pass `providers` / `default_provider` / `capi_enabled`. `Session.send` now calls `session.send`
+with the message fields next to the session id, and `Client.delete_session` raises when the server
+reports a failed delete.
+
+| Feature | OCaml API |
+|---|---|
+| Client info handshake | `client_options.client_info` (`Types.client_info`), sent with `connect` |
+| Client mode | `client_options.client_mode = Some Types.client_mode_empty` (default `"coding-agent"`, legacy `"copilot-cli"` accepted); empty mode requires `available_tools` on every create/resume and applies locked-down defaults under your values |
+| Network callbacks | `client_options.network` (`Types.network_options`: `resolve_proxy`, `authenticate_negotiate`, `authenticate_basic`, `network_scope`), registered with `network.setProvider` |
+| Auto routing tier | `session_config.auto_tier` (sent as `github.capi.autoTier`); `Session.switch_auto_tier session (Some Types.auto_tier_fast)` |
+| Ask-user variant | `ask_user_variant = Some Types.ask_user_variant_elicitation` |
+| GitHub token provider | `github_token_provider` answers `gitHubToken.getToken` with `Types.Github_token {...}` or `Types.Github_token_cancelled`; mutually exclusive with `github_token` |
+| Sandbox bypass | `sandbox_config = Some { (Types.default_sandbox_config ()) with allow_bypass = Some true }` |
+| Feature flags | `feature_flags = Some [ ("my-flag", true) ]` |
+| Session detach | `Client.disconnect_session client session` / `Session.detach session` (`session.detach`) |
+| Message source | `Types.make_message ~source:(Types.message_source_agent "reviewer")` |
+| Managed settings | `Client.clear_managed_settings_cache`, `Session.get_managed_settings`, `Session.recheck_policy_helper` |
+| Model allowlist | `allowed_models` |
+| OAuth client metadata URL | `auth_client_id_metadata_url` |
+| Max output tokens | `model_capabilities = Types.model_limits_to_capabilities { ... max_output_tokens = Some 16384 ... }` (`limits.max_output_tokens`) |
+| Structured output | `Types.make_message ~response_schema:schema` (sent as a `json_schema` `responseFormat`) |
+| Agent / hook directories | `agent_directories`, `hook_directories` |
+| Working directory trust | `trust_working_directory = Some Types.working_directory_trust_session` (create only) |
+| Transcript recovery | `allow_transcript_recovery` (resume only) |
+| Image generation | `image_generation = Some { Types.image_enabled = Some true; image_watermark = None; save_to_disk = Some true }` |
+| Autopilot | `autopilot = Some { Types.continuation_enabled = Some true; max_continues = Some 5 }` |
+| Sub-agent hooks | `on_subagent_start` / `on_subagent_stop` (dispatched from `hooks.invoke`) |
+| BYOK API key command | `Types.make_provider_config ~api_key_command:...`, `Types.make_named_provider ~api_key_command:...` |
+| Named BYOK providers | `providers` (`Types.make_named_provider`), `models` (`Types.make_provider_model`), `default_provider`, `capi_enabled`; `clear_default_provider = true` on resume sends `defaultProvider: null` |
+| Idempotent tools | `Tools.define_tool ~idempotent:true` (sent in `tools.definitions`) |
+| Client turn ID | `Types.make_message ~client_turn_id:"turn-1"` |
+| Shell output events | `Types.ToolShellOutput` event type; parse the data with `Types.tool_shell_output_of_yojson` |
+| Shell authentication | `on_shell_authentication_request` returns `Types.Shell_auth_accept value` or `Types.Shell_auth_cancel`; a `shellAuthentication.cancel` cancels the pending answer |
+| Memory store | `on_store_memory` receives `Types.stored_memory` (sends `state.hasMemoryStore`) |
+| Policy helper failure | `Client.policy_helper_failure exn` reads `error.data.policyHelperFailure` |
+| Permission mode refusal reason | `Session.set_permission_mode session Types.permission_mode_allow_all` returns `pms_reason = Some Types.permission_mode_refusal_managed_policy` (`"managed_policy"`) when refused |
+| Resume event suppression | `suppress_resume_event = Some true` (resume only, wire `suppressResumeEvent`) |
+
+```ocaml
+open Copilot_sdk
+
+(* load_token, ask_user and save_memory are your own functions. *)
+let () =
+  Lwt_main.run
+    (let open Lwt.Syntax in
+     let options =
+       { (Types.default_client_options ()) with
+         client_info =
+           Some
+             { Types.editor_name = Some "my-ide"
+             ; editor_version = Some "1.4.0"
+             ; extension_name = None
+             ; extension_version = None
+             }
+       ; client_mode = Some Types.client_mode_empty (* sessions must set available_tools *)
+       ; network =
+           Some
+             { (Types.default_network_options ()) with
+               network_scope = Some Types.network_scope_connection
+             ; resolve_proxy =
+                 Some (fun _url -> Lwt.return_some "PROXY proxy.contoso.com:8080; DIRECT")
+             }
+       }
+     in
+     let client = Client.create ~options () in
+     let* () = Client.start client in
+     let lookup_order, lookup_handler =
+       Tools.define_tool ~name:"lookup_order" ~description:"Look up an order" ~idempotent:true
+         (fun _invocation -> Lwt.return (Types.make_tool_result "shipped"))
+     in
+     let config =
+       { (Types.default_session_config ()) with
+         model = Some "ollama/llama3"
+       ; session_name = Some "release-triage"
+       ; tools = [ lookup_order ]
+       ; available_tools = Some [ "lookup_order"; "view" ]
+       ; auto_tier = Some Types.auto_tier_intelligence
+       ; ask_user_variant = Some Types.ask_user_variant_elicitation
+       ; sandbox_config =
+           Some { (Types.default_sandbox_config ()) with allow_bypass = Some true }
+       ; feature_flags = Some [ ("my-flag", true) ]
+       ; trust_working_directory = Some Types.working_directory_trust_session
+       ; autopilot = Some { Types.continuation_enabled = Some true; max_continues = Some 5 }
+       ; model_capabilities =
+           Types.model_limits_to_capabilities
+             { Types.max_prompt_tokens = None
+             ; max_output_tokens = Some 16384
+             ; max_context_window_tokens = None
+             }
+       ; providers =
+           Some
+             [ Types.make_named_provider ~provider_type:"openai"
+                 ~api_key_command:"op read op://dev/ollama/key" ~name:"ollama"
+                 "http://localhost:11434/v1"
+             ]
+       ; models = Some [ Types.make_provider_model ~max_output_tokens:4096 ~provider:"ollama" "llama3" ]
+       ; default_provider = Some "ollama"
+       ; capi_enabled = Some false
+       ; github_token_provider =
+           Some
+             (fun request ->
+               Lwt.return
+                 (Types.Github_token
+                    { access_token = load_token request.Types.gtr_host
+                    ; token_type = None
+                    ; expires_in = 28800
+                    }))
+       ; on_subagent_start =
+           Some (fun _input -> Lwt.return_some (`Assoc [ ("additionalContext", `String "Be concise.") ]))
+       ; on_shell_authentication_request =
+           Some
+             (fun request ->
+               if request.Types.sar_input_kind = Types.shell_input_kind_confirm then
+                 Lwt.return Types.Shell_auth_cancel
+               else Lwt.return (Types.Shell_auth_accept (ask_user request.Types.sar_prompt)))
+       ; on_store_memory =
+           Some (fun memory -> save_memory memory.Types.sm_subject memory.Types.sm_fact)
+       }
+     in
+     let* session =
+       Lwt.catch
+         (fun () -> Client.create_session ~config client)
+         (fun exn ->
+           (match Client.policy_helper_failure exn with
+            | Some failure ->
+              Printf.printf "Blocked by the policy helper (%s): %s\n"
+                failure.Types.phf_category failure.Types.phf_message
+            | None -> ());
+           Lwt.fail exn)
+     in
+     Session.register_tool session "lookup_order" lookup_handler;
+     Session.on session (fun event ->
+       (match event.Types.event_type with
+        | Types.ToolShellOutput ->
+          (match Types.tool_shell_output_of_yojson event.Types.data with
+           | Some output -> print_string output.Types.so_text
+           | None -> ())
+        | _ -> ());
+       Lwt.return_unit);
+     let* () =
+       Session.send session
+         (Types.make_message ~source:(Types.message_source_agent "reviewer")
+            ~client_turn_id:"turn-1"
+            ~response_schema:(`Assoc [ ("type", `String "object") ])
+            "Where is order 42? Answer as JSON.")
+     in
+     let* _ack = Session.switch_auto_tier session (Some Types.auto_tier_fast) in
+     let* _settings = Session.recheck_policy_helper session in
+     let* () = Client.clear_managed_settings_cache client in
+     let* result = Session.set_permission_mode session Types.permission_mode_allow_all in
+     if (not result.Types.pms_success)
+        && result.Types.pms_reason = Some Types.permission_mode_refusal_managed_policy
+     then Printf.printf "Managed policy keeps the permission mode at %s\n" result.Types.pms_mode;
+     let* () = Client.disconnect_session client session in
+     let* _resumed =
+       Client.resume_session client (Session.session_id session)
+         ~config:
+           { config with
+             allow_transcript_recovery = Some true
+           ; suppress_resume_event = Some true
+           ; clear_default_provider = true
+           }
+         ()
+     in
+     Client.stop client)
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not available:
+  it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI
+  (stdio) or connecting over TCP. The existing `in_process` option is unchanged.
+- Sub-agent hooks receive and return raw JSON (`Yojson.Safe.t`) rather than typed records.
+
 ## Custom Tools
 
 Register tools that the Copilot agent can invoke during a session:
@@ -297,6 +486,7 @@ Copilot CLI             -- via stdio or TCP
 | `Session` | Event handling, tool dispatch, send/receive messages |
 | `Jsonrpc` | JSON-RPC 2.0 transport with LSP-style framing |
 | `Types` | Records, variants, JSON conversion helpers |
+| `Session_wire` | Flat to grouped SDK protocol 4 session payload translation |
 | `Tools` | Tool definition helpers, parameter schema builders |
 | `Version` | Protocol version constants |
 

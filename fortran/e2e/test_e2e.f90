@@ -93,6 +93,7 @@ contains
 
     ! Create the SDK client pointing at the proxy
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -156,6 +157,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -223,6 +225,7 @@ contains
 
     ! Build client options with session_fs
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
 
     allocate(opts%session_fs)
@@ -283,6 +286,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -348,6 +352,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -413,6 +418,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -469,6 +475,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -530,6 +537,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -599,6 +607,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -651,6 +660,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -707,6 +717,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -755,6 +766,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -813,6 +825,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -883,6 +896,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -956,6 +970,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -1019,6 +1034,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -1075,6 +1091,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
 
     allocate(opts%session_fs)
@@ -1132,6 +1149,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -1195,6 +1213,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()
@@ -1255,6 +1274,7 @@ contains
     end if
 
     opts%cli_url   = trim(proxy%proxy_url)
+    if (len_trim(proxy%cli_path) > 0) opts%cli_path = trim(proxy%cli_path)
     opts%auto_start = .false.
     call copilot_client_create(client, opts)
     call client%start()

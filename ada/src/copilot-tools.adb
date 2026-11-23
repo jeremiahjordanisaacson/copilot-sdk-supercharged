@@ -17,7 +17,8 @@ package body Copilot.Tools is
       return (Name        => To_Unbounded_String (Name),
               Description => To_Unbounded_String (Description),
               Parameters  => Params,
-              Defer       => Null_UString);
+              Defer       => Null_UString,
+              Idempotent  => False);
    end Define_Tool;
 
    function String_Param
@@ -77,6 +78,9 @@ package body Copilot.Tools is
          Append (Result, "{""name"":""" & To_String (Def.Name) & """,");
          Append (Result, """description"":""" &
                          To_String (Def.Description) & """,");
+         if Def.Idempotent then
+            Append (Result, """idempotent"":true,");
+         end if;
          Append (Result, """parameters"":{""type"":""object"",");
          Append (Result, """properties"":{");
 

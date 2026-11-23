@@ -16,6 +16,7 @@ Represents a tool that can be called by the Copilot assistant.
 - `parameters::Union{Dict{String,Any},Nothing}` - JSON Schema for the tool input.
 - `overrides_built_in_tool::Bool` - Whether this replaces a built-in CLI tool.
 - `skip_permission::Bool` - Whether to skip permission prompts.
+- `idempotent::Union{Bool,Nothing}` - Whether repeated calls with the same arguments are safe.
 """
 Base.@kwdef struct Tool
     name::String
@@ -24,6 +25,7 @@ Base.@kwdef struct Tool
     parameters::Union{Dict{String, Any}, Nothing} = nothing
     overrides_built_in_tool::Bool = false
     skip_permission::Bool = false
+    idempotent::Union{Bool, Nothing} = nothing
 end
 
 """
@@ -50,6 +52,7 @@ function define_tool(
     parameters::Union{Dict{String, Any}, Nothing} = nothing,
     overrides_built_in_tool::Bool = false,
     skip_permission::Bool = false,
+    idempotent::Union{Bool, Nothing} = nothing,
 )
     Tool(;
         name,
@@ -58,6 +61,7 @@ function define_tool(
         parameters,
         overrides_built_in_tool,
         skip_permission,
+        idempotent,
     )
 end
 
@@ -73,8 +77,9 @@ function define_tool(
     parameters::Union{Dict{String, Any}, Nothing} = nothing,
     overrides_built_in_tool::Bool = false,
     skip_permission::Bool = false,
+    idempotent::Union{Bool, Nothing} = nothing,
 )
-    define_tool(handler, name, description; parameters, overrides_built_in_tool, skip_permission)
+    define_tool(handler, name, description; parameters, overrides_built_in_tool, skip_permission, idempotent)
 end
 
 """Convert a `Tool` to the JSON-RPC wire format expected by the CLI server."""
@@ -91,6 +96,9 @@ function tool_to_wire(t::Tool)
     end
     if t.skip_permission
         wire["skipPermission"] = true
+    end
+    if t.idempotent !== nothing
+        wire["idempotent"] = t.idempotent
     end
     return wire
 end

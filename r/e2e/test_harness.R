@@ -149,8 +149,10 @@ CapiProxy <- R6::R6Class("CapiProxy",
 
 #' Get the path to the Copilot CLI for tests.
 #'
-#' Checks COPILOT_CLI_PATH env var first, then falls back to
-#' the node_modules CLI in the nodejs directory.
+#' Lookup order: the COPILOT_CLI_PATH env var (when the file exists), then the
+#' CLI 1.0.113+ \code{npm-loader.js} entry point in the nodejs directory, then the
+#' legacy \code{index.js} entry points. \code{.js} paths are run with node; other
+#' paths (such as \code{node_modules/.bin/copilot}) are executed directly.
 #'
 #' @return Character. Absolute path to the CLI.
 #' @keywords internal
@@ -160,12 +162,16 @@ get_cli_path_for_tests <- function() {
     return(normalizePath(env_path, mustWork = TRUE))
   }
 
-  repo_root <- get_repo_root()
-  full_path <- file.path(
-    repo_root, "nodejs", "node_modules", "@github", "copilot", "index.js"
+  github_dir <- file.path(get_repo_root(), "nodejs", "node_modules", "@github")
+  candidates <- c(
+    file.path(github_dir, "copilot", "npm-loader.js"),
+    Sys.glob(file.path(github_dir, "copilot-*", "index.js")),
+    file.path(github_dir, "copilot", "index.js")
   )
-  if (file.exists(full_path)) {
-    return(normalizePath(full_path, mustWork = TRUE))
+  for (candidate in candidates) {
+    if (file.exists(candidate)) {
+      return(normalizePath(candidate, mustWork = TRUE))
+    }
   }
 
   stop("CLI not found for tests. Run 'npm install' in the nodejs directory.")

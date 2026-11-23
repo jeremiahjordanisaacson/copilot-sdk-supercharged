@@ -32,6 +32,7 @@ public func defineTool<T: Decodable>(
     name: String,
     description: String? = nil,
     parametersType: T.Type,
+    idempotent: Bool? = nil,
     handler: @escaping @Sendable (T, ToolInvocation) async throws -> Any?
 ) -> Tool {
     let schema = generateJsonSchema(for: T.self)
@@ -39,7 +40,8 @@ public func defineTool<T: Decodable>(
     return Tool(
         name: name,
         description: description,
-        parameters: schema
+        parameters: schema,
+        idempotent: idempotent
     ) { rawArgs, invocation in
         // Decode the raw arguments into the typed parameters
         let params: T
@@ -73,12 +75,14 @@ public func defineTool<T: Decodable>(
 public func defineTool(
     name: String,
     description: String? = nil,
+    idempotent: Bool? = nil,
     handler: @escaping @Sendable (ToolInvocation) async throws -> Any?
 ) -> Tool {
     return Tool(
         name: name,
         description: description,
-        parameters: nil
+        parameters: nil,
+        idempotent: idempotent
     ) { _, invocation in
         return try await handler(invocation)
     }
@@ -108,12 +112,14 @@ public func defineTool(
     name: String,
     description: String? = nil,
     parameters: [String: Any],
+    idempotent: Bool? = nil,
     handler: @escaping @Sendable (Any?, ToolInvocation) async throws -> Any?
 ) -> Tool {
     return Tool(
         name: name,
         description: description,
         parameters: parameters,
+        idempotent: idempotent,
         handler: handler
     )
 }

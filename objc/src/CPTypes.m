@@ -3,6 +3,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 #import "CPTypes.h"
+#import "CPJsonRpcClient.h"
+
+/// Returns `value` when it is a string (JSON values may be NSNull or another type).
+static NSString *CPStringOrNil(id value) {
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+
+static NSNumber *CPNumberOrNil(id value) {
+    return [value isKindOfClass:[NSNumber class]] ? value : nil;
+}
 
 #pragma mark - Constant Identifiers
 
@@ -18,6 +28,47 @@ NSString * const CPGitHubAttachmentCommit = @"GitHubCommit";
 NSString * const CPGitHubAttachmentRepository = @"GitHubRepository";
 NSString * const CPGitHubAttachmentPullRequest = @"GitHubPullRequest";
 NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
+
+NSString * const CPClientModeCodingAgent = @"coding-agent";
+NSString * const CPClientModeEmpty = @"empty";
+NSString * const CPClientModeCopilotCli = @"copilot-cli";
+
+NSString * const CPAutoTierFast = @"fast";
+NSString * const CPAutoTierEfficiency = @"efficiency";
+NSString * const CPAutoTierBalance = @"balance";
+NSString * const CPAutoTierIntelligence = @"intelligence";
+
+NSString * const CPAskUserVariantLegacy = @"legacy";
+NSString * const CPAskUserVariantElicitation = @"elicitation";
+
+NSString * const CPTrustWorkingDirectorySession = @"session";
+NSString * const CPTrustWorkingDirectoryUser = @"user";
+
+NSString * const CPMessageSourceUser = @"user";
+NSString * const CPMessageSourceSystem = @"system";
+
+NSString *CPMessageSourceAgent(NSString *agentId) {
+    return [NSString stringWithFormat:@"agent-%@", agentId];
+}
+
+NSString * const CPHookTypeSubagentStart = @"subagentStart";
+NSString * const CPHookTypeSubagentStop = @"subagentStop";
+
+NSString * const CPPermissionModeManual = @"manual";
+NSString * const CPPermissionModeAssisted = @"assisted";
+NSString * const CPPermissionModeAllowAll = @"allow-all";
+NSString * const CPPermissionModeRefusalReasonManagedPolicy = @"managed_policy";
+
+NSString * const CPEventTypeToolShellOutput = @"tool.shell_output";
+
+NSString * const CPShellAuthenticationInputKindSecret = @"secret";
+NSString * const CPShellAuthenticationInputKindText = @"text";
+NSString * const CPShellAuthenticationInputKindConfirm = @"confirm";
+
+NSString * const CPNetworkScopeConnection = @"connection";
+NSString * const CPNetworkScopeRuntime = @"runtime";
+
+NSString * const CPPolicyHelperFailureErrorKey = @"CPPolicyHelperFailure";
 
 #pragma mark - CPProviderTokenArgs
 
@@ -55,7 +106,8 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
         || self.onPreMcpToolCall != nil || self.onUserPromptSubmitted != nil
         || self.onUserPromptTransformed != nil
         || self.onSessionStart != nil || self.onSessionEnd != nil
-        || self.onErrorOccurred != nil;
+        || self.onErrorOccurred != nil
+        || self.onSubagentStart != nil || self.onSubagentStop != nil;
 }
 
 - (NSArray<NSString *> *)hookTypes {
@@ -68,7 +120,303 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.onSessionStart) [types addObject:@"sessionStart"];
     if (self.onSessionEnd) [types addObject:@"sessionEnd"];
     if (self.onErrorOccurred) [types addObject:@"errorOccurred"];
+    if (self.onSubagentStart) [types addObject:CPHookTypeSubagentStart];
+    if (self.onSubagentStop) [types addObject:CPHookTypeSubagentStop];
     return [types copy];
+}
+
+- (nullable CPHookHandler)handlerForHookType:(NSString *)hookType {
+    if ([hookType isEqualToString:@"preToolUse"]) return self.onPreToolUse;
+    if ([hookType isEqualToString:@"postToolUse"]) return self.onPostToolUse;
+    if ([hookType isEqualToString:@"preMcpToolCall"]) return self.onPreMcpToolCall;
+    if ([hookType isEqualToString:@"userPromptSubmitted"]) return self.onUserPromptSubmitted;
+    if ([hookType isEqualToString:@"userPromptTransformed"]) return self.onUserPromptTransformed;
+    if ([hookType isEqualToString:@"sessionStart"]) return self.onSessionStart;
+    if ([hookType isEqualToString:@"sessionEnd"]) return self.onSessionEnd;
+    if ([hookType isEqualToString:@"errorOccurred"]) return self.onErrorOccurred;
+    if ([hookType isEqualToString:CPHookTypeSubagentStart]) return self.onSubagentStart;
+    if ([hookType isEqualToString:CPHookTypeSubagentStop]) return self.onSubagentStop;
+    return nil;
+}
+
+@end
+
+#pragma mark - CPClientInfo
+
+@implementation CPClientInfo
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.editorName.length > 0) dict[@"editorName"] = self.editorName;
+    if (self.editorVersion.length > 0) dict[@"editorVersion"] = self.editorVersion;
+    if (self.extensionName.length > 0) dict[@"extensionName"] = self.extensionName;
+    if (self.extensionVersion.length > 0) dict[@"extensionVersion"] = self.extensionVersion;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPGitHubTokenProviderArgs / CPGitHubToken
+
+@implementation CPGitHubTokenProviderArgs
+@end
+
+@implementation CPGitHubToken
+
++ (instancetype)tokenWithAccessToken:(NSString *)accessToken expiresIn:(NSInteger)expiresIn {
+    CPGitHubToken *token = [[CPGitHubToken alloc] init];
+    token.accessToken = accessToken;
+    token.expiresIn = expiresIn;
+    return token;
+}
+
+@end
+
+#pragma mark - CPSandboxConfig
+
+@implementation CPSandboxConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"enabled"] = @(self.enabled);
+    if (self.userPolicy) dict[@"userPolicy"] = self.userPolicy;
+    if (self.addCurrentWorkingDirectory) dict[@"addCurrentWorkingDirectory"] = self.addCurrentWorkingDirectory;
+    if (self.sandboxMcpServers) dict[@"sandboxMcpServers"] = self.sandboxMcpServers;
+    if (self.sandboxLspServers) dict[@"sandboxLspServers"] = self.sandboxLspServers;
+    if (self.sandboxExtensions) dict[@"sandboxExtensions"] = self.sandboxExtensions;
+    if (self.allowBypass) dict[@"allowBypass"] = self.allowBypass;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPImageGenerationConfig
+
+@implementation CPImageGenerationConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.enabled) dict[@"enabled"] = self.enabled;
+    if (self.watermark) dict[@"watermark"] = self.watermark;
+    if (self.saveToDisk) dict[@"saveToDisk"] = self.saveToDisk;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPAutopilotOptions
+
+@implementation CPAutopilotOptions
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.continuationEnabled) dict[@"continuationEnabled"] = self.continuationEnabled;
+    if (self.maxContinues) dict[@"maxContinues"] = self.maxContinues;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPNamedProviderConfig
+
+@implementation CPNamedProviderConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"name"] = self.name ?: @"";
+    if (self.type) dict[@"type"] = self.type;
+    dict[@"baseUrl"] = self.baseUrl ?: @"";
+    if (self.apiKey) dict[@"apiKey"] = self.apiKey;
+    if (self.apiKeyCommand) dict[@"apiKeyCommand"] = self.apiKeyCommand;
+    if (self.bearerToken) dict[@"bearerToken"] = self.bearerToken;
+    if (self.wireApi) dict[@"wireApi"] = self.wireApi;
+    if (self.transport) dict[@"transport"] = self.transport;
+    if (self.azureApiVersion) dict[@"azure"] = @{@"apiVersion": self.azureApiVersion};
+    if (self.headers) dict[@"headers"] = self.headers;
+    if (self.modelProvider) dict[@"modelProvider"] = self.modelProvider;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPProviderModelConfig
+
+@implementation CPProviderModelConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"provider"] = self.provider ?: @"";
+    dict[@"id"] = self.identifier ?: @"";
+    if (self.modelId) dict[@"modelId"] = self.modelId;
+    if (self.wireModel) dict[@"wireModel"] = self.wireModel;
+    if (self.displayName) dict[@"name"] = self.displayName;
+    if (self.maxPromptTokens) dict[@"maxPromptTokens"] = self.maxPromptTokens;
+    if (self.maxContextWindowTokens) dict[@"maxContextWindowTokens"] = self.maxContextWindowTokens;
+    if (self.maxOutputTokens) dict[@"maxOutputTokens"] = self.maxOutputTokens;
+    if (self.capabilities) dict[@"capabilities"] = self.capabilities;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCapiConfig
+
+@implementation CPCapiConfig
+@end
+
+#pragma mark - CPPermissionModeResult
+
+@implementation CPPermissionModeResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _success = [CPNumberOrNil(dict[@"success"]) boolValue];
+        _mode = [(CPStringOrNil(dict[@"mode"]) ?: @"") copy];
+        _reason = [CPStringOrNil(dict[@"reason"]) copy];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPToolShellOutputData
+
+@implementation CPToolShellOutputData
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _toolCallId = [(CPStringOrNil(dict[@"toolCallId"]) ?: @"") copy];
+        _text = [(CPStringOrNil(dict[@"text"]) ?: @"") copy];
+        _sequence = [CPNumberOrNil(dict[@"sequence"]) integerValue];
+        _stream = [CPStringOrNil(dict[@"stream"]) copy];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPShellAuthenticationRequest / CPShellAuthenticationResponse
+
+@implementation CPShellAuthenticationRequest
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _sessionId = [(CPStringOrNil(dict[@"sessionId"]) ?: @"") copy];
+        _requestId = [(CPStringOrNil(dict[@"requestId"]) ?: @"") copy];
+        _program = [(CPStringOrNil(dict[@"program"]) ?: @"") copy];
+        _prompt = [(CPStringOrNil(dict[@"prompt"]) ?: @"") copy];
+        _inputKind = [(CPStringOrNil(dict[@"inputKind"]) ?: @"") copy];
+        _command = [(CPStringOrNil(dict[@"command"]) ?: @"") copy];
+        _cwd = [(CPStringOrNil(dict[@"cwd"]) ?: @"") copy];
+    }
+    return self;
+}
+
+@end
+
+@interface CPShellAuthenticationResponse ()
+@property (nonatomic, copy, nullable) NSString *value;
+@end
+
+@implementation CPShellAuthenticationResponse
+
++ (instancetype)acceptWithValue:(NSString *)value {
+    CPShellAuthenticationResponse *response = [[CPShellAuthenticationResponse alloc] init];
+    response.value = value;
+    return response;
+}
+
++ (instancetype)cancel {
+    return [[CPShellAuthenticationResponse alloc] init];
+}
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    if (self.value) return @{@"action": @"accept", @"value": self.value};
+    return @{@"action": @"cancel"};
+}
+
+@end
+
+#pragma mark - CPStoredMemory
+
+@implementation CPStoredMemory
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _sessionId = [(CPStringOrNil(dict[@"sessionId"]) ?: @"") copy];
+        _subject = [(CPStringOrNil(dict[@"subject"]) ?: @"") copy];
+        _fact = [(CPStringOrNil(dict[@"fact"]) ?: @"") copy];
+        _citations = [(CPStringOrNil(dict[@"citations"]) ?: @"") copy];
+        _reason = [(CPStringOrNil(dict[@"reason"]) ?: @"") copy];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - Network
+
+@implementation CPNetworkBasicAuthRequest
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _proxy = [(CPStringOrNil(dict[@"proxy"]) ?: @"") copy];
+        _realm = [CPStringOrNil(dict[@"realm"]) copy];
+        _previousRejected = [CPNumberOrNil(dict[@"previousRejected"]) boolValue];
+    }
+    return self;
+}
+
+@end
+
+@implementation CPNetworkBasicCredentials
+@end
+
+@implementation CPNetworkOptions
+@end
+
+#pragma mark - CPPolicyHelperFailure
+
+@implementation CPPolicyHelperFailure
+
++ (nullable instancetype)failureFromDictionary:(nullable NSDictionary<NSString *, id> *)dict {
+    if (![dict isKindOfClass:[NSDictionary class]]) return nil;
+    id nested = dict[@"policyHelperFailure"];
+    NSDictionary *failure = [nested isKindOfClass:[NSDictionary class]] ? nested : dict;
+    NSString *category = CPStringOrNil(failure[@"category"]);
+    NSString *message = CPStringOrNil(failure[@"message"]);
+    if (!category || !message) return nil;
+
+    CPPolicyHelperFailure *result = [[CPPolicyHelperFailure alloc] init];
+    result->_category = [category copy];
+    result->_message = [message copy];
+    result->_failureMode = [(CPStringOrNil(failure[@"failureMode"]) ?: @"") copy];
+    result->_reason = [(CPStringOrNil(failure[@"reason"]) ?: @"") copy];
+    result->_previousPolicyRetained = [CPNumberOrNil(failure[@"previousPolicyRetained"]) boolValue];
+    result->_severity = [CPStringOrNil(failure[@"severity"]) copy];
+    result->_authority = [CPStringOrNil(failure[@"authority"]) copy];
+    result->_code = [CPStringOrNil(failure[@"code"]) copy];
+    result->_diagnostic = [CPStringOrNil(failure[@"diagnostic"]) copy];
+    result->_remediation = [CPStringOrNil(failure[@"remediation"]) copy];
+    id helpLink = failure[@"helpLink"];
+    if ([helpLink isKindOfClass:[NSDictionary class]]) {
+        result->_helpLinkUrl = [CPStringOrNil(((NSDictionary *)helpLink)[@"url"]) copy];
+    }
+    id details = failure[@"details"];
+    if ([details isKindOfClass:[NSArray class]]) result->_details = [details copy];
+    return result;
+}
+
++ (nullable instancetype)failureFromError:(nullable NSError *)error {
+    id attached = error.userInfo[CPPolicyHelperFailureErrorKey];
+    if ([attached isKindOfClass:[CPPolicyHelperFailure class]]) return attached;
+    id data = error.userInfo[CPJsonRpcErrorDataKey];
+    return [data isKindOfClass:[NSDictionary class]] ? [self failureFromDictionary:data] : nil;
 }
 
 @end
@@ -561,17 +909,37 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     self = [super init];
     if (self) {
         _type = [type copy];
-        _rawData = [data copy];
-
-        if (data) {
-            _content = data[@"content"];
-            _deltaContent = data[@"delta"];
-            _message = data[@"message"];
-            _toolName = data[@"toolName"];
-            _toolCallId = data[@"toolCallId"];
-        }
+        [self applyData:data];
     }
     return self;
+}
+
+- (instancetype)initWithEnvelope:(NSDictionary<NSString *, id> *)envelope {
+    self = [super init];
+    if (self) {
+        _type = [(CPStringOrNil(envelope[@"type"]) ?: @"unknown") copy];
+        _eventId = [CPStringOrNil(envelope[@"id"]) copy];
+        _timestamp = [CPStringOrNil(envelope[@"timestamp"]) copy];
+        _parentId = [CPStringOrNil(envelope[@"parentId"]) copy];
+        _agentId = [CPStringOrNil(envelope[@"agentId"]) copy];
+        _ephemeral = [CPNumberOrNil(envelope[@"ephemeral"]) boolValue];
+        id data = envelope[@"data"];
+        [self applyData:[data isKindOfClass:[NSDictionary class]] ? data : nil];
+    }
+    return self;
+}
+
+- (void)applyData:(nullable NSDictionary<NSString *, id> *)data {
+    _rawData = [data copy];
+    if (!data) return;
+    _content = [CPStringOrNil(data[@"content"]) copy];
+    _deltaContent = [(CPStringOrNil(data[@"deltaContent"]) ?: CPStringOrNil(data[@"delta"])) copy];
+    _message = [CPStringOrNil(data[@"message"]) copy];
+    _toolName = [CPStringOrNil(data[@"toolName"]) copy];
+    _toolCallId = [CPStringOrNil(data[@"toolCallId"]) copy];
+    if ([_type isEqualToString:CPEventTypeToolShellOutput]) {
+        _shellOutput = [[CPToolShellOutputData alloc] initWithDictionary:data];
+    }
 }
 
 @end
@@ -648,6 +1016,14 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.requestHeaders) dict[@"requestHeaders"] = self.requestHeaders;
     if (self.agentMode) dict[@"agentMode"] = self.agentMode;
     if (self.displayPrompt) dict[@"displayPrompt"] = self.displayPrompt;
+    if (self.source) dict[@"source"] = self.source;
+    if (self.clientTurnId) dict[@"clientTurnId"] = self.clientTurnId;
+    if (self.responseSchema) {
+        dict[@"responseFormat"] = @{
+            @"type": @"json_schema",
+            @"jsonSchema": @{@"name": @"response", @"strict": @YES, @"schema": self.responseSchema},
+        };
+    }
     return [dict copy];
 }
 
@@ -655,24 +1031,63 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
 
 #pragma mark - CPSessionConfig
 
+/// Tool definitions as sent on the wire: SDK-private keys (such as the `_handler` block
+/// added by `CPDefineTool`) are dropped.
+static NSArray *CPWireToolDefinitions(NSArray *tools) {
+    NSMutableArray *definitions = [NSMutableArray arrayWithCapacity:tools.count];
+    for (id tool in tools) {
+        if (![tool isKindOfClass:[NSDictionary class]]) continue;
+        NSMutableDictionary *definition = [NSMutableDictionary dictionary];
+        [(NSDictionary *)tool enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+            if ([key isKindOfClass:[NSString class]] && ![(NSString *)key hasPrefix:@"_"]) {
+                definition[key] = obj;
+            }
+        }];
+        [definitions addObject:definition];
+    }
+    return definitions;
+}
+
 @implementation CPSessionConfig
 
+/// The flat (SDK protocol 3 style) session options. The client converts them to the
+/// grouped SDK protocol 4 payload with `CPGroupSessionParams` before sending.
 - (NSDictionary<NSString *, id> *)toDictionary {
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
 
     if (self.sessionId) dict[@"sessionId"] = self.sessionId;
+    if (self.name) dict[@"name"] = self.name;
     if (self.model) dict[@"model"] = self.model;
     if (self.reasoningEffort) dict[@"reasoningEffort"] = self.reasoningEffort;
     if (self.workingDirectory) dict[@"workingDirectory"] = self.workingDirectory;
     dict[@"streaming"] = @(self.streaming);
-    if (self.tools) dict[@"tools"] = self.tools;
+    if (self.tools) dict[@"tools"] = CPWireToolDefinitions(self.tools);
+    if (self.availableTools) dict[@"availableTools"] = self.availableTools;
+    if (self.excludedTools) dict[@"excludedTools"] = self.excludedTools;
+    if (self.skillDirectories) dict[@"skillDirectories"] = self.skillDirectories;
+    if (self.disabledSkills) dict[@"disabledSkills"] = self.disabledSkills;
+    if (self.includeSubAgentStreamingEvents) dict[@"includeSubAgentStreamingEvents"] = @YES;
+    if (self.enableConfigDiscovery) dict[@"enableConfigDiscovery"] = @YES;
+    if (self.mcpServers) dict[@"mcpServers"] = self.mcpServers;
+    if (self.commands) dict[@"commands"] = self.commands;
     if (self.systemMessage) dict[@"systemMessage"] = self.systemMessage;
-    if (self.githubToken) dict[@"githubToken"] = self.githubToken;
+    if (self.githubToken) dict[@"gitHubToken"] = self.githubToken;
     if (self.instructionDirectories) dict[@"instructionDirectories"] = self.instructionDirectories;
     if (self.permissionHandler) dict[@"requestPermission"] = @YES;
     if (self.exitPlanModeHandler) dict[@"requestExitPlanMode"] = @YES;
     if (self.enableSessionTelemetry) dict[@"enableSessionTelemetry"] = @YES;
-    if (self.modelCapabilities) dict[@"modelCapabilities"] = self.modelCapabilities;
+
+    // Model capabilities, with maxOutputTokens merged into limits.max_output_tokens
+    NSMutableDictionary *capabilities = [self.modelCapabilities mutableCopy];
+    if (self.maxOutputTokens) {
+        if (!capabilities) capabilities = [NSMutableDictionary dictionary];
+        id existingLimits = capabilities[@"limits"];
+        NSMutableDictionary *limits = [existingLimits isKindOfClass:[NSDictionary class]]
+            ? [existingLimits mutableCopy] : [NSMutableDictionary dictionary];
+        limits[@"max_output_tokens"] = self.maxOutputTokens;
+        capabilities[@"limits"] = limits;
+    }
+    if (capabilities) dict[@"modelCapabilities"] = capabilities;
 
     if (self.hooks && [self.hooks hasAnyHandler]) {
         dict[@"hooks"] = @YES;
@@ -683,7 +1098,6 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.sessionLimits) dict[@"sessionLimits"] = [self.sessionLimits toDictionary];
     if (self.memory) dict[@"memory"] = [self.memory toDictionary];
     if (self.otlpProtocol) dict[@"otlpProtocol"] = self.otlpProtocol;
-    if (self.enableWebSocketResponses) dict[@"enableWebSocketResponses"] = self.enableWebSocketResponses;
     if (self.expAssignments) dict[@"expAssignments"] = self.expAssignments;
     if (self.onMcpAuthRequest) dict[@"mcpAuthHandler"] = @YES;
     // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
@@ -694,9 +1108,55 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.canvasProvider) dict[@"canvasProvider"] = self.canvasProvider;
     if (self.customAgentsLocalOnly) dict[@"customAgentsLocalOnly"] = self.customAgentsLocalOnly;
     if (self.toolSearch) dict[@"toolSearch"] = self.toolSearch;
-    if (self.experimentalMode) dict[@"experimentalMode"] = self.experimentalMode;
+    if (self.experimentalMode) dict[@"enableExperimentalMode"] = self.experimentalMode;
     if (self.contentExclusion) dict[@"contentExclusion"] = self.contentExclusion;
     if (self.argsSchema) dict[@"argsSchema"] = self.argsSchema;
+
+    // --- v2.6.0 session options ---
+    if (self.askUserVariant) dict[@"askUserVariant"] = self.askUserVariant;
+    if (self.sandboxConfig) dict[@"sandboxConfig"] = [self.sandboxConfig toDictionary];
+    if (self.featureFlags) dict[@"featureFlags"] = self.featureFlags;
+    if (self.allowedModels) dict[@"allowedModels"] = self.allowedModels;
+    if (self.authClientIdMetadataUrl) dict[@"authClientIdMetadataUrl"] = self.authClientIdMetadataUrl;
+    if (self.agentDirectories) dict[@"agentDirectories"] = self.agentDirectories;
+    if (self.hookDirectories) dict[@"hookDirectories"] = self.hookDirectories;
+    if (self.interactiveUser) dict[@"interactiveUser"] = self.interactiveUser;
+    if (self.excludedManagedSettings) dict[@"excludedManagedSettings"] = self.excludedManagedSettings;
+    if (self.enforceManagedModelDefaults) dict[@"enforceManagedModelDefaults"] = self.enforceManagedModelDefaults;
+    if (self.trustWorkingDirectory) dict[@"trustWorkingDirectory"] = self.trustWorkingDirectory;
+    if (self.refreshCustomInstructions) dict[@"refreshCustomInstructions"] = self.refreshCustomInstructions;
+    if (self.allowTranscriptRecovery) dict[@"allowTranscriptRecovery"] = self.allowTranscriptRecovery;
+    if (self.imageGeneration) dict[@"imageGeneration"] = [self.imageGeneration toDictionary];
+    if (self.autopilot) dict[@"autopilot"] = [self.autopilot toDictionary];
+
+    // --- v3.0.0 session options ---
+    if (self.suppressResumeEvent) dict[@"suppressResumeEvent"] = self.suppressResumeEvent;
+    if (self.providers) {
+        NSMutableArray *providers = [NSMutableArray arrayWithCapacity:self.providers.count];
+        for (CPNamedProviderConfig *provider in self.providers) [providers addObject:[provider toDictionary]];
+        dict[@"providers"] = providers;
+    }
+    if (self.models) {
+        NSMutableArray *models = [NSMutableArray arrayWithCapacity:self.models.count];
+        for (CPProviderModelConfig *model in self.models) [models addObject:[model toDictionary]];
+        dict[@"models"] = models;
+    }
+    if (self.defaultProvider) {
+        dict[@"defaultProvider"] = self.defaultProvider;
+    } else if (self.clearDefaultProvider) {
+        // An explicit null clears the default provider (session.resume only).
+        dict[@"defaultProvider"] = [NSNull null];
+    }
+    // Copilot API options: capi.enabled, the Auto routing tier, and the WebSocket switch
+    NSMutableDictionary *capi = [NSMutableDictionary dictionary];
+    if (self.capi.enabled) capi[@"enabled"] = self.capi.enabled;
+    if (self.autoTier) capi[@"autoTier"] = self.autoTier;
+    if (self.enableWebSocketResponses) capi[@"enableWebSocketResponses"] = self.enableWebSocketResponses;
+    if (capi.count > 0) dict[@"capi"] = capi;
+    if (self.provider) dict[@"provider"] = self.provider;
+    if (self.permissionMode) dict[@"permissionMode"] = self.permissionMode;
+    if (self.onShellAuthentication) dict[@"requestShellAuthentication"] = @YES;
+    if (self.onMemoryStore) dict[@"hasMemoryStore"] = @YES;
 
     return [dict copy];
 }

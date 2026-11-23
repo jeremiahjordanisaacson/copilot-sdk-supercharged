@@ -11,6 +11,7 @@
 -export([
     define_tool/3,
     define_tool/4,
+    define_tool/5,
     normalize_result/1
 ]).
 
@@ -56,6 +57,13 @@ define_tool(Name, Description, Parameters, Handler) ->
         undefined -> Tool;
         _         -> Tool#{<<"parameters">> => Parameters}
     end.
+
+%% @doc Define a tool with extra declaration options sent in
+%% `tools.definitions[]`, for example `#{idempotent => true}` to mark the tool
+%% as safe to retry, or `#{skip_permission => true}`.
+-spec define_tool(binary(), binary(), map() | undefined, fun(), map()) -> map().
+define_tool(Name, Description, Parameters, Handler, Options) when is_map(Options) ->
+    maps:merge(define_tool(Name, Description, Parameters, Handler), Options).
 
 %% @doc Normalize a handler return value into a tool result map.
 %% Accepts binaries, maps with resultType, other maps (JSON-encoded),

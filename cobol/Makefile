@@ -16,7 +16,9 @@ SOURCES    = $(SRCDIR)/COPILOT-CLIENT.cob \
              $(SRCDIR)/COPILOT-SESSION.cob
 
 COPYBOOKS  = $(SRCDIR)/COPILOT-TYPES.cpy \
-             $(SRCDIR)/COPILOT-VERSION.cpy
+             $(SRCDIR)/COPILOT-VERSION.cpy \
+             $(SRCDIR)/COPILOT-SESSION-OPTS.cpy \
+             $(SRCDIR)/COPILOT-PARAMS.cpy
 
 EXAMPLE    = $(EXDIR)/BASIC-EXAMPLE.cob
 TEST       = $(TESTDIR)/TEST-CLIENT.cob

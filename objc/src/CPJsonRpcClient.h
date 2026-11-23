@@ -6,7 +6,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Error domain of JSON-RPC errors returned by the server (the `NSError.code` is the JSON-RPC code).
+FOUNDATION_EXPORT NSString * const CPJsonRpcErrorDomain;
+/// `NSError.userInfo` key holding the JSON-RPC `error.data` value, when the server sent one.
+FOUNDATION_EXPORT NSString * const CPJsonRpcErrorDataKey;
+
+/// Returns YES when `error` reports that the server does not implement the requested method.
+FOUNDATION_EXPORT BOOL CPJsonRpcIsMethodNotFoundError(NSError * _Nullable error);
+
 /// Block called when a JSON-RPC request from the server needs handling.
+/// Call `respond` with a result dictionary, or with an error dictionary `{code, message}`.
+/// Pass `(NSDictionary *)[NSNull null]` as the result to answer with a JSON `null` result.
 typedef void (^CPJsonRpcRequestHandler)(NSDictionary<NSString *, id> *params,
                                         void (^respond)(NSDictionary<NSString *, id> * _Nullable result,
                                                         NSDictionary<NSString *, id> * _Nullable error));

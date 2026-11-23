@@ -17,7 +17,7 @@ lappend auto_path [file join $script_dir .. lib]
 test load-version "Load copilot::version" -body {
     package require copilot::version
     ::copilot::version::get
-} -result "2.0.0"
+} -result "2.5.3"
 
 test load-types "Load copilot::types" -body {
     package require copilot::types
@@ -48,15 +48,19 @@ test load-client "Load copilot::client" -body {
 
 test version-get "version::get returns SDK version" -body {
     ::copilot::version::get
-} -result "2.0.0"
+} -result "2.5.3"
 
 test version-name "version::get_name returns SDK name" -body {
     ::copilot::version::get_name
 } -result "copilot-sdk-tcl"
 
-test version-min-proto "version::get_min_protocol returns 2" -body {
+test version-min-proto "version::get_min_protocol returns 4" -body {
     ::copilot::version::get_min_protocol
-} -result 2
+} -result 4
+
+test version-proto "version::get_protocol returns SDK protocol 4" -body {
+    ::copilot::version::get_protocol
+} -result 4
 
 # ---- Types tests ------------------------------------------------------------
 
@@ -324,6 +328,190 @@ test types-connection-states "connection_states returns valid states" -body {
     set states [::copilot::types::connection_states]
     expr {[llength $states] == 4 && "connected" in $states}
 } -result 1
+
+# ---- SDK protocol 4 payload translation --------------------------------------
+
+proc ::test_decode {json} {
+    return [::copilot::jsonrpc::json_decode $json]
+}
+
+test group-spec-example "flat resume payload becomes grouped v4 payload" -body {
+    set flat [dict create \
+        sessionId     {"s1"} \
+        model         {"m"} \
+        streaming     true \
+        requestPermission true \
+        tools         {[{"name":"t","description":"d"}]} \
+        hooks         true \
+        disableResume true \
+    ]
+    set d [::test_decode [::copilot::session::group_session_params $flat 1]]
+    list [lsort [dict keys $d]] [dict get $d events streaming] [dict get $d permissions request] \
+        [dict get [lindex [dict get $d tools definitions] 0] name] [dict get $d hooks hasHandlers] \
+        [dict get $d suppressResumeEvent]
+} -result [list {events hooks model permissions sessionId suppressResumeEvent tools} true true t true true]
+
+test group-create-only "create drops resume-only members and renames configDir" -body {
+    set flat [dict create model {"m"} disableResume true openCanvases {[]} \
+        trustWorkingDirectory {"session"} configDir {"/cfg"} otlpProtocol {"grpc"}]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0]]
+    list [lsort [dict keys $d]] [dict get $d filesystem trustWorkingDirectory] \
+        [dict get $d configDirectory] [dict get $d otlpProtocol]
+} -result [list {configDirectory filesystem model otlpProtocol} session /cfg grpc]
+
+test group-resume-only "resume drops create-only members and keeps canvases.open" -body {
+    set flat [dict create sessionId {"s"} trustWorkingDirectory {"session"} \
+        refreshCustomInstructions true openCanvases {["c"]} allowTranscriptRecovery true]
+    set d [::test_decode [::copilot::session::group_session_params $flat 1]]
+    list [lsort [dict keys $d]] [dict get $d canvases open] [dict get $d allowTranscriptRecovery]
+} -result [list {allowTranscriptRecovery canvases sessionId} c true]
+
+test group-legacy-provider "legacy provider becomes the default named connection" -body {
+    set flat [dict create model {"gpt"} \
+        provider {{"type":"openai","baseUrl":"http://x/v1","apiKey":"k","maxOutputTokens":10}} \
+        capi {{"autoTier":"fast"}}]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0]]
+    set provider [lindex [dict get $d inference providers] 0]
+    set model [lindex [dict get $d inference models] 0]
+    list [dict get $provider name] [dict get $provider baseUrl] [dict exists $provider maxOutputTokens] \
+        [dict get $d inference defaultProvider] [dict get $model provider] [dict get $model id] \
+        [dict get $model maxOutputTokens] [dict get $d github capi enabled] [dict get $d github capi autoTier] \
+        [dict exists $d provider]
+} -result [list default http://x/v1 0 default default gpt 10 false fast 0]
+
+test group-explicit-providers "explicit providers win over the legacy provider" -body {
+    set flat [dict create provider {{"type":"openai","baseUrl":"http://x"}} \
+        providers {[{"name":"gw","baseUrl":"http://y"}]}]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0]]
+    list [dict get [lindex [dict get $d inference providers] 0] name] [dict exists $d github]
+} -result [list gw 0]
+
+test group-null-default-provider "null defaultProvider is kept to clear the saved default" -body {
+    set json [::copilot::session::group_session_params [dict create sessionId {"s"} defaultProvider null] 1]
+    string match {*"inference":{"defaultProvider":null}*} $json
+} -result 1
+
+test group-mcp-env-value-mode "mcp servers get envValueMode direct" -body {
+    set flat [dict create mcpServers {{"a":{"command":"x","tools":["*"]}}}]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0]]
+    dict get $d mcp envValueMode
+} -result direct
+
+test group-empty-mode "empty mode defaults apply under explicit options" -body {
+    set flat [dict create availableTools {["view"]} enableExperimentalMode true]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0 1]]
+    list [dict get $d experiments enableExperimentalMode] [dict get $d github telemetryEnabled] \
+        [dict get $d mcp oauthTokenStorage] [dict get $d state memory enabled] \
+        [dict get $d git enableHostGitOperations] [dict get $d tools availableTools]
+} -result [list true false in-memory false false view]
+
+test group-flat-builder "session config options map to v4 groups" -body {
+    ::copilot::tools::clear_tools
+    ::copilot::tools::define_tool "lookup" "Look up" [list apply {{p} { return "ok" }}] \
+        [::copilot::jsonrpc::json_raw {{"type":"object"}}] 1
+    set cfg [::copilot::types::make_session_config \
+        model "m" streaming 1 available_tools {view grep} ask_user_variant "elicitation" \
+        sandbox_config [::copilot::types::make_sandbox_config allow_bypass 1] \
+        feature_flags {my_flag 1} allowed_models {m} hook_directories {./hooks} \
+        image_generation [::copilot::types::make_image_generation_config save_to_disk 0] \
+        autopilot [::copilot::types::make_autopilot_options max_continues 3] \
+        model_capabilities [::copilot::types::make_model_capabilities_limits max_output_tokens 4096] \
+        auth_client_id_metadata_url "https://example.com/m.json" \
+        hooks [dict create on_subagent_start ::noop] \
+        store_memory ::noop on_shell_authentication_request ::noop \
+        providers [list [::copilot::types::make_named_provider_config name gw base_url http://y api_key_command "echo k"]] \
+        default_provider gw capi [dict create enabled false]]
+    set flat [::copilot::session::_session_flat_params $cfg 0]
+    set d [::test_decode [::copilot::session::group_session_params $flat 0]]
+    ::copilot::tools::clear_tools
+    list [dict get $d events streaming] [dict get $d tools availableTools] \
+        [dict get $d interaction askUserVariant] [dict get $d permissions sandbox allowBypass] \
+        [dict get $d experiments flags my_flag] [dict get $d policy allowedModels] \
+        [dict get $d hooks directories] [dict get $d hooks hasHandlers] \
+        [dict get $d tools imageGeneration saveToDisk] [dict get $d execution autopilot maxContinues] \
+        [dict get $d inference capabilities limits max_output_tokens] \
+        [dict get $d mcp authClientIdMetadataUrl] [dict get $d state hasMemoryStore] \
+        [dict get $d interaction requestShellAuthentication] \
+        [dict get [lindex [dict get $d inference providers] 0] apiKeyCommand] \
+        [dict get $d inference defaultProvider] [dict get $d github capi enabled] \
+        [dict get [lindex [dict get $d tools definitions] 0] idempotent]
+} -result [list true {view grep} elicitation true true m ./hooks true false 3 4096 \
+    https://example.com/m.json true true {echo k} gw false true]
+
+test group-legacy-provider-builder "make_provider_config feeds the legacy translation" -body {
+    set cfg [::copilot::types::make_session_config model "dep" \
+        provider [::copilot::types::make_provider_config type openai base_url http://x/v1 \
+            api_key_command "echo k" wire_model dep]]
+    set d [::test_decode [::copilot::session::group_session_params \
+        [::copilot::session::_session_flat_params $cfg 0] 0]]
+    list [dict get [lindex [dict get $d inference providers] 0] apiKeyCommand] \
+        [dict get [lindex [dict get $d inference models] 0] wireModel] [dict get $d github capi enabled]
+} -result [list {echo k} dep false]
+
+test empty-mode-requires-tools "empty mode requires available_tools" -body {
+    catch {::copilot::session::_require_available_tools \
+        [::copilot::types::make_session_config] empty} err
+    set err
+} -match glob -result "*requires available_tools*"
+
+# ---- Typed JSON helpers -------------------------------------------------------
+
+test json-object-members "json_object_members keeps member JSON text" -body {
+    set m [::copilot::jsonrpc::json_object_members {{"a": "x,y", "b":{"c":[1,2]}, "d":true}}]
+    list [dict get $m a] [dict get $m b] [dict get $m d]
+} -result [list {"x,y"} {{"c":[1,2]}} true]
+
+test json-params "params_json encodes a flat dict as an object" -body {
+    ::copilot::jsonrpc::params_json [dict create sessionId abc message "hello world"]
+} -result {{"sessionId":"abc","message":"hello world"}}
+
+test send-params "send params carry source, clientTurnId, and the response schema" -body {
+    set ::copilot::session::sessions [dict create h1 [dict create session_id s1]]
+    set opts [::copilot::types::make_send_options message "Hi" \
+        source [::copilot::types::message_source_agent bot] client_turn_id t-1 \
+        response_schema [::copilot::jsonrpc::json_raw {{"type":"object"}}]]
+    set d [::test_decode [lindex [::copilot::session::_send_params h1 $opts] 1]]
+    set ::copilot::session::sessions [dict create]
+    list [dict get $d prompt] [dict get $d source] [dict get $d clientTurnId] \
+        [dict get $d responseFormat type] [dict get $d responseFormat jsonSchema strict] \
+        [dict get $d responseFormat jsonSchema schema type]
+} -result [list Hi agent-bot t-1 json_schema true object]
+
+test shell-auth-reply "shell authentication replies accept only string answers" -body {
+    proc ::test_auth {request context} {
+        return [dict create action accept value "s3cret" extra 1]
+    }
+    set ::copilot::session::sessions [dict create h1 [dict create session_id s1 \
+        config [::copilot::types::make_session_config on_shell_authentication_request ::test_auth]]]
+    set accepted [::copilot::session::_shell_authentication_reply \
+        [dict create sessionId s1 requestId r1 program sudo prompt pw inputKind secret]]
+    set bad_kind [::copilot::session::_shell_authentication_reply \
+        [dict create sessionId s1 requestId r1 program sudo prompt pw inputKind bogus]]
+    set ::copilot::session::sessions [dict create]
+    list $accepted $bad_kind
+} -result [list {{"action":"accept","value":"s3cret"}} {{"action":"cancel"}}]
+
+test permission-decisions "permission handler results map to protocol 4 decisions" -body {
+    list [::copilot::session::permission_decision_json approve] \
+        [::copilot::session::permission_decision_json approved] \
+        [::copilot::session::permission_decision_json 0] \
+        [::copilot::session::permission_decision_json [dict create kind reject feedback "Not now"]] \
+        [::copilot::session::permission_decision_json denied-by-rules] \
+        [::copilot::session::permission_decision_json no-result]
+} -result [list {{"kind":"approve-once"}} {{"kind":"approve-once"}} {{"kind":"reject"}} \
+    {{"kind":"reject","feedback":"Not now"}} {{"kind":"user-not-available"}} {}]
+
+test permission-wire-flags "permission handler and skip_permission reach the wire" -body {
+    ::copilot::tools::clear_tools
+    ::copilot::tools::define_tool "lookup" "Look up" [list apply {{p} { return "ok" }}] {} "" 1
+    set cfg [::copilot::types::make_session_config model "m" \
+        on_permission_request ::copilot::session::approve_all]
+    set d [::test_decode [::copilot::session::group_session_params \
+        [::copilot::session::_session_flat_params $cfg 0] 0]]
+    ::copilot::tools::clear_tools
+    list [dict get $d permissions request] \
+        [dict get [lindex [dict get $d tools definitions] 0] skipPermission]
+} -result [list true true]
 
 # ---- Summary ----------------------------------------------------------------
 

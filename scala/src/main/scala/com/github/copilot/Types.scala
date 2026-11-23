@@ -95,7 +95,10 @@ case class Tool(
   handler: ToolHandler,
 
   /** Tool deferral policy: "auto" (default) or "never". See [[ToolDefer]]. */
-  defer: Option[String] = None
+  defer: Option[String] = None,
+
+  /** Declares that repeating a call with the same arguments has no additional effect, so the runtime may retry it. */
+  idempotent: Option[Boolean] = None
 )
 
 // ============================================================================
@@ -387,12 +390,20 @@ object SessionLimitsConfig:
 
 /** Long-term memory configuration for a session. */
 case class MemoryConfiguration(
-  enabled: Boolean = true
+  enabled: Boolean = true,
+
+  /**
+   * Stores the memories the agent saves (sent to the runtime as `state.hasMemoryStore`).
+   * Requires `enabled`. Never serialized.
+   */
+  storeMemory: Option[MemoryStoreHandler] = None
 )
 
 object MemoryConfiguration:
-  given Encoder[MemoryConfiguration] = deriveEncoder
-  given Decoder[MemoryConfiguration] = deriveDecoder
+  given Encoder[MemoryConfiguration] = Encoder.instance(m => Json.obj("enabled" -> m.enabled.asJson))
+  given Decoder[MemoryConfiguration] = Decoder.instance(c =>
+    c.getOrElse[Boolean]("enabled")(true).map(enabled => MemoryConfiguration(enabled = enabled))
+  )
 
 case class SessionConfig(
   sessionId: Option[String] = None,
@@ -547,6 +558,24 @@ case class SessionConfig(
 
   /** Autopilot continuation policy. */
   autopilot: Option[AutopilotOptions] = None,
+
+  /** Named BYOK provider connections (`inference.providers`). */
+  providers: Option[List[NamedProviderConfig]] = None,
+
+  /** BYOK model definitions served by `providers` (`inference.models`); select one as "provider/id". */
+  models: Option[List[ProviderModelConfig]] = None,
+
+  /** Connection that serves unqualified model names (`inference.defaultProvider`). */
+  defaultProvider: Option[String] = None,
+
+  /** Copilot API options (`github.capi`); its members win over `autoTier` and `enableWebSocketResponses`. */
+  capi: Option[CapiConfig] = None,
+
+  /** Answers secret, text, or confirmation prompts from programs run by shell tools. */
+  onShellAuthenticationRequest: Option[ShellAuthenticationHandler] = None,
+
+  /** Initial permission mode (see [[PermissionMode]]). */
+  permissionMode: Option[String] = None,
 )
 
 /** Configuration for resuming an existing session. */
@@ -643,6 +672,36 @@ case class ResumeSessionConfig(
 
   /** Autopilot continuation policy. */
   autopilot: Option[AutopilotOptions] = None,
+
+  /** Skip emitting the `session.resume` event (same as `disableResume`). */
+  suppressResumeEvent: Option[Boolean] = None,
+
+  /** Continue tool calls and permission prompts that were pending when the session was suspended. */
+  continuePendingWork: Option[Boolean] = None,
+
+  /** Named BYOK provider connections (`inference.providers`); re-supply them on cold resume. */
+  providers: Option[List[NamedProviderConfig]] = None,
+
+  /** BYOK model definitions served by `providers` (`inference.models`). */
+  models: Option[List[ProviderModelConfig]] = None,
+
+  /** Connection that serves unqualified model names (`inference.defaultProvider`). */
+  defaultProvider: Option[String] = None,
+
+  /** When true, sends `inference.defaultProvider: null` to clear the session's default provider. */
+  clearDefaultProvider: Boolean = false,
+
+  /** Copilot API options (`github.capi`); its members win over `autoTier` and `enableWebSocketResponses`. */
+  capi: Option[CapiConfig] = None,
+
+  /** Long-term memory configuration, including the `storeMemory` callback. */
+  memory: Option[MemoryConfiguration] = None,
+
+  /** Answers secret, text, or confirmation prompts from programs run by shell tools. */
+  onShellAuthenticationRequest: Option[ShellAuthenticationHandler] = None,
+
+  /** Permission mode to apply (see [[PermissionMode]]). */
+  permissionMode: Option[String] = None,
 )
 
 // ============================================================================
@@ -764,6 +823,7 @@ object SessionEventType:
   val ToolExecutionPartialResult  = "tool.execution_partial_result"
   val ToolExecutionProgress       = "tool.execution_progress"
   val ToolExecutionStart          = "tool.execution_start"
+  val ToolShellOutput             = "tool.shell_output"
   val ToolUserRequested           = "tool.user_requested"
   val UserMessage                 = "user.message"
 
@@ -1544,6 +1604,11 @@ case class MessageOptions(
   prompt: String,
   attachments: Option[List[Attachment]] = None,
   mode: Option[String] = None,
+
+  /**
+   * Legacy per-message response format. No longer sent: protocol 4 only accepts the structured
+   * `responseSchema` format. Use `SessionConfig.imageGeneration` for images.
+   */
   responseFormat: Option[String] = None,
   imageOptions: Option[ImageOptions] = None,
 
@@ -1560,7 +1625,10 @@ case class MessageOptions(
   source: Option[String] = None,
 
   /** JSON Schema for structured output; sent as a `json_schema` response format when set. */
-  responseSchema: Option[JsonObject] = None
+  responseSchema: Option[JsonObject] = None,
+
+  /** Opaque caller-chosen identifier for this turn, echoed on the turn's events. */
+  clientTurnId: Option[String] = None
 )
 
 // ============================================================================
@@ -1667,7 +1735,17 @@ case class CopilotClientOptions(
   inProcess: Option[Boolean] = None,
 
   /** Identity of the integrating application, sent on the `connect` handshake. */
-  clientInfo: Option[ClientInfo] = None
+  clientInfo: Option[ClientInfo] = None,
+
+  /**
+   * Client mode: [[ClientMode.CodingAgent]] (default, unchanged behavior) or [[ClientMode.Empty]]
+   * (every session must set `availableTools`; runtime features default off). The legacy value
+   * "copilot-cli" is accepted as an alias of "coding-agent".
+   */
+  mode: String = ClientMode.CodingAgent,
+
+  /** Network callbacks (proxy resolution and proxy authentication), registered after connecting. */
+  network: Option[NetworkConfig] = None
 )
 
 // ============================================================================
@@ -1947,3 +2025,280 @@ object GitHubTokenProviderResult:
 
 /** Acquires short-lived GitHub credentials for one session on demand. */
 type GitHubTokenProvider = GitHubTokenProviderArgs => Future[GitHubTokenProviderResult]
+
+// ============================================================================
+// v3.0.0 feature types (SDK protocol 4)
+// ============================================================================
+
+/** Client modes for `CopilotClientOptions.mode`. */
+object ClientMode:
+  /** The default: the full Copilot coding agent, identical to earlier SDK behavior. */
+  val CodingAgent = "coding-agent"
+  /** Every session must set `availableTools`; telemetry, repository hooks, and similar features default off. */
+  val Empty       = "empty"
+  /** Legacy alias of [[CodingAgent]]. */
+  val CopilotCli  = "copilot-cli"
+
+/**
+ * Copilot API (CAPI) provider options, sent as `github.capi`.
+ *
+ * @param enabled                  Enables Copilot API models; set false to keep a BYOK-only catalog
+ * @param autoTier                 Routing preference used when the session model is `auto` (see [[AutoTier]])
+ * @param enableWebSocketResponses Whether to use the WebSocket transport for the CAPI Responses API
+ */
+case class CapiConfig(
+  enabled: Option[Boolean] = None,
+  autoTier: Option[String] = None,
+  enableWebSocketResponses: Option[Boolean] = None
+)
+
+/**
+ * A named BYOK provider connection, sent in `inference.providers`. Model definitions
+ * ([[ProviderModelConfig]]) reference it by `name`.
+ *
+ * @param name          Stable connection identifier; must not contain `/`
+ * @param baseUrl       API endpoint URL
+ * @param `type`        Provider type: "openai" (default), "azure", or "anthropic"
+ * @param apiKeyCommand Command run before each request whose stdout is used as the API key
+ * @param wireApi       "completions" (default) or "responses"
+ * @param transport     "http" (default) or "websockets" (Responses API only)
+ */
+case class NamedProviderConfig(
+  name: String,
+  baseUrl: String,
+  `type`: Option[String] = None,
+  apiKey: Option[String] = None,
+  apiKeyCommand: Option[String] = None,
+  bearerToken: Option[String] = None,
+  wireApi: Option[String] = None,
+  transport: Option[String] = None,
+  azure: Option[AzureProviderOptions] = None,
+  headers: Option[Map[String, String]] = None,
+  modelProvider: Option[String] = None
+)
+
+object NamedProviderConfig:
+  given Encoder[NamedProviderConfig] = deriveEncoder[NamedProviderConfig].mapJson(_.dropNullValues)
+
+/**
+ * A BYOK model definition served by a [[NamedProviderConfig]], sent in `inference.models`.
+ * Select it with the canonical "provider/id" model ID.
+ *
+ * @param provider  Name of the [[NamedProviderConfig]] that serves this model
+ * @param id        Provider-local model ID, unique within its provider
+ * @param modelId   Well-known base model ID used for capability lookup; defaults to `id`
+ * @param wireModel Model or deployment name sent to the provider API; defaults to `id`
+ * @param name      Display name; defaults to "provider/id"
+ */
+case class ProviderModelConfig(
+  provider: String,
+  id: String,
+  modelId: Option[String] = None,
+  wireModel: Option[String] = None,
+  name: Option[String] = None,
+  maxPromptTokens: Option[Int] = None,
+  maxContextWindowTokens: Option[Int] = None,
+  maxOutputTokens: Option[Int] = None,
+  capabilities: Option[Map[String, Json]] = None
+)
+
+object ProviderModelConfig:
+  given Encoder[ProviderModelConfig] = deriveEncoder[ProviderModelConfig].mapJson(_.dropNullValues)
+
+/**
+ * A program's request for a secret or confirmation while a shell command runs.
+ *
+ * @param prompt    Prompt text the program printed; treat it as untrusted
+ * @param inputKind "secret", "text", or "confirm"
+ */
+case class ShellAuthenticationRequest(
+  requestId: String,
+  program: String,
+  prompt: String,
+  inputKind: String,
+  command: String = "",
+  cwd: String = ""
+)
+
+/** Answer to a [[ShellAuthenticationRequest]]. */
+sealed trait ShellAuthenticationResult
+
+object ShellAuthenticationResult:
+  /** Sends `value` to the program. */
+  final case class Accept(value: String) extends ShellAuthenticationResult:
+    override def toString: String = "Accept(value=***)"
+
+  /** Declines the prompt. */
+  case object Cancel extends ShellAuthenticationResult
+
+/** Answers shell authentication prompts (`shellAuthentication.request`). */
+type ShellAuthenticationHandler = (ShellAuthenticationRequest, String) => Future[ShellAuthenticationResult]
+
+/** A memory the agent asked to store, after validation, secret filtering, and approval. */
+case class StoredMemory(
+  sessionId: String,
+  subject: String,
+  fact: String,
+  citations: String,
+  reason: String
+)
+
+/** Stores the memories the agent saves (`memoryStore.store`). */
+type MemoryStoreHandler = StoredMemory => Future[Unit]
+
+/** Network traffic scopes for `NetworkConfig.scope`. */
+object NetworkScope:
+  /** Requests made for sessions this client creates or resumes (the default). */
+  val Connection = "connection"
+  /** Also the runtime's shared background traffic; only one connection can hold it. */
+  val Runtime    = "runtime"
+
+/** Arguments of a `network.resolveProxy` request. */
+case class NetworkResolveProxyRequest(url: String)
+
+/** Arguments of a `network.authenticateNegotiate` request (`service/host[@REALM]` SPN). */
+case class NetworkAuthenticateNegotiateRequest(spn: String)
+
+/** Arguments of a `network.authenticateBasic` request; `realm` is untrusted text from the proxy. */
+case class NetworkAuthenticateBasicRequest(
+  proxy: String,
+  realm: Option[String] = None,
+  previousRejected: Boolean = false
+)
+
+/** Proxy credentials returned by a Basic authentication callback. */
+case class NetworkBasicCredentials(username: Option[String] = None, password: Option[String] = None):
+  override def toString: String = "NetworkBasicCredentials(username=***, password=***)"
+
+/** Returns a PAC-style proxy list (for example "PROXY proxy:8080; DIRECT"), or None for default routing. */
+type ProxyResolver = NetworkResolveProxyRequest => Future[Option[String]]
+
+/** Returns a base64 SPNEGO token without the `Negotiate` prefix, or None when unavailable. */
+type NegotiateAuthenticator = NetworkAuthenticateNegotiateRequest => Future[Option[String]]
+
+/** Returns credentials for a proxy's Basic challenge, or None when unavailable. */
+type BasicAuthenticator = NetworkAuthenticateBasicRequest => Future[Option[NetworkBasicCredentials]]
+
+/**
+ * Network callbacks through which the host takes over parts of the runtime's networking (proxy
+ * resolution and proxy authentication). Registered with `network.setProvider` after the client
+ * connects when at least one callback is set. Never log the tokens or passwords they return.
+ *
+ * @param scope Traffic the callbacks serve (see [[NetworkScope]]); the runtime default is "connection"
+ */
+case class NetworkConfig(
+  scope: Option[String] = None,
+  resolveProxy: Option[ProxyResolver] = None,
+  authenticateNegotiate: Option[NegotiateAuthenticator] = None,
+  authenticateBasic: Option[BasicAuthenticator] = None
+):
+  /** True when at least one callback is set. */
+  def hasCallbacks: Boolean = resolveProxy.isDefined || authenticateNegotiate.isDefined || authenticateBasic.isDefined
+
+/**
+ * Data of a `tool.shell_output` session event: live, append-only output of a running shell tool call.
+ *
+ * @param sequence Zero-based publication sequence across all streams of the tool call
+ * @param stream   "stdout", "stderr", or None (stdout)
+ */
+case class ToolShellOutputData(
+  toolCallId: String,
+  text: String,
+  sequence: Long,
+  stream: Option[String] = None
+)
+
+object ToolShellOutputData:
+  /** The session event type carrying this data. */
+  val EventType: String = SessionEventType.ToolShellOutput
+
+  /** Reads the data of a `tool.shell_output` event, or None for other events. */
+  def fromEvent(event: SessionEvent): Option[ToolShellOutputData] =
+    if event.`type` != EventType then None
+    else
+      val c = event.data.hcursor
+      Some(ToolShellOutputData(
+        toolCallId = c.get[String]("toolCallId").getOrElse(""),
+        text = c.get[String]("text").getOrElse(""),
+        sequence = c.get[Long]("sequence").getOrElse(0L),
+        stream = c.get[String]("stream").toOption
+      ))
+
+/**
+ * The latest unresolved Policy Helper failure. Carried by `session.create` and `session.resume`
+ * errors as `error.data.policyHelperFailure` and by the managed settings snapshot as
+ * `policyHelperFailure`. Helper-authored text is untrusted plain text.
+ *
+ * @param category               Stable runtime classification, for example "timeout"
+ * @param failureMode            Effective runtime behavior: "ignore" or "failClosed"
+ * @param previousPolicyRetained True when an earlier successful helper-derived layer still contributes
+ * @param reason                 Invocation reason, for example "sessionStart"
+ */
+case class PolicyHelperFailure(
+  category: String,
+  failureMode: String,
+  message: String,
+  previousPolicyRetained: Boolean,
+  reason: String,
+  authority: Option[String] = None,
+  code: Option[String] = None,
+  details: Option[List[Json]] = None,
+  diagnostic: Option[String] = None,
+  helpLink: Option[Json] = None,
+  remediation: Option[String] = None,
+  severity: Option[String] = None
+)
+
+object PolicyHelperFailure:
+  /** Reads the failure carried by a failed `session.create` or `session.resume` request. */
+  def fromError(error: Throwable): Option[PolicyHelperFailure] =
+    Iterator.iterate(error)(_.getCause).takeWhile(_ != null)
+      .collectFirst { case ex: JsonRpcException => ex }
+      .flatMap(_.error.data)
+      .flatMap(_.hcursor.downField("policyHelperFailure").focus)
+      .flatMap(fromJson)
+
+  /** Parses a failure from its wire shape, for example a managed settings snapshot's `policyHelperFailure`. */
+  def fromJson(json: Json): Option[PolicyHelperFailure] =
+    json.asObject.map { _ =>
+      val c = json.hcursor
+      PolicyHelperFailure(
+        category = c.get[String]("category").getOrElse(""),
+        failureMode = c.get[String]("failureMode").getOrElse(""),
+        message = c.get[String]("message").getOrElse(""),
+        previousPolicyRetained = c.get[Boolean]("previousPolicyRetained").getOrElse(false),
+        reason = c.get[String]("reason").getOrElse(""),
+        authority = c.get[String]("authority").toOption,
+        code = c.get[String]("code").toOption,
+        details = c.get[List[Json]]("details").toOption,
+        diagnostic = c.get[String]("diagnostic").toOption,
+        helpLink = c.downField("helpLink").focus.filter(_.isObject),
+        remediation = c.get[String]("remediation").toOption,
+        severity = c.get[String]("severity").toOption
+      )
+    }
+
+/** Permission modes for `SessionConfig.permissionMode` and [[CopilotSession.setPermissionMode]]. */
+object PermissionMode:
+  /** Permission requests follow the normal approval flow. */
+  val Manual   = "manual"
+  /** Permission requests include an LLM safety recommendation. */
+  val Assisted = "assisted"
+  /** Tool, path, and URL permission requests are approved automatically. */
+  val AllowAll = "allow-all"
+
+/** Known values of [[PermissionModeResult.reason]]. */
+object PermissionModeRefusalReason:
+  /** Managed (enterprise) policy refused the requested mode. */
+  val ManagedPolicy = "managed_policy"
+
+/**
+ * Result of a permission-mode change: whether it applied and the authoritative mode afterwards.
+ *
+ * @param reason Why the mode was refused, when known (see [[PermissionModeRefusalReason]])
+ */
+case class PermissionModeResult(
+  success: Boolean,
+  mode: Option[String],
+  reason: Option[String] = None
+)

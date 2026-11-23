@@ -18,6 +18,8 @@ module CopilotSDK
   class CopilotSession
     getter session_id : String
     getter model : String?
+    # Invoked once when the session is detached or destroyed (set by the client).
+    property on_close : Proc(Nil)? = nil
 
     @rpc : JsonRpcClient
     @event_handlers : Hash(String, SessionEventHandler)
@@ -26,6 +28,10 @@ module CopilotSDK
     @permission_handler : PermissionHandler?
     @exit_plan_mode_handler : ExitPlanModeHandler?
     @trace_context_provider : TraceContextProvider?
+    @hooks : SessionHooks?
+    @shell_authentication_handler : ShellAuthenticationHandler?
+    @memory_store_handler : MemoryStoreHandler?
+    @pending_shell_authentications : Hash(String, Channel(ShellAuthenticationResponse))
     @mutex : Mutex
     @destroyed : Bool
     @next_handler_id : Int64
@@ -36,6 +42,10 @@ module CopilotSDK
       @tool_definitions = [] of ToolDefinition
       @permission_handler = nil
       @exit_plan_mode_handler = nil
+      @hooks = nil
+      @shell_authentication_handler = nil
+      @memory_store_handler = nil
+      @pending_shell_authentications = {} of String => Channel(ShellAuthenticationResponse)
       @mutex = Mutex.new
       @destroyed = false
       @next_handler_id = 0_i64
@@ -121,6 +131,23 @@ module CopilotSDK
           json.field "agentMode", options.agent_mode if options.agent_mode
           json.field "displayPrompt", options.display_prompt if options.display_prompt
           json.field "requestHeaders", options.request_headers if options.request_headers
+          json.field "source", options.source if options.source
+          json.field "clientTurnId", options.client_turn_id if options.client_turn_id
+          if schema = options.response_schema
+            # Structured output: the final assistant response must match `schema`.
+            json.field "responseFormat" do
+              json.object do
+                json.field "type", "json_schema"
+                json.field "jsonSchema" do
+                  json.object do
+                    json.field "name", "response"
+                    json.field "strict", true
+                    json.field "schema", schema
+                  end
+                end
+              end
+            end
+          end
           json.field "tools", @tool_definitions if @tool_definitions.any?
 
           trace = get_trace_context
@@ -128,11 +155,12 @@ module CopilotSDK
         end
       })
 
-      @rpc.send_request("session/send", params)
+      @rpc.send_request("session.send", params)
     end
 
     # Send a message and wait for the final assistant.message event.
-    # Collects all events and returns the final message content, or nil on timeout.
+    # Collects all events and returns the final message content, or nil on
+    # timeout. Completes on `session.idle` (or the legacy `turn.end`).
     def send_and_wait(options : MessageOptions, timeout : Int32 = 60) : String?
       result_channel = Channel(String?).new(1)
       collected_content = ""
@@ -143,9 +171,15 @@ module CopilotSDK
         end
       end
 
-      done_id = on("turn.end") do |_event|
-        result_channel.send(collected_content.empty? ? nil : collected_content)
+      finish = ->(_event : SessionEvent) do
+        select
+        when result_channel.send(collected_content.empty? ? nil : collected_content)
+        else
+        end
+        nil
       end
+      done_id = on("turn.end") { |event| finish.call(event) }
+      idle_id = on("session.idle") { |event| finish.call(event) }
 
       begin
         send(options)
@@ -159,30 +193,178 @@ module CopilotSDK
       ensure
         off(sub_id)
         off(done_id)
+        off(idle_id)
       end
     end
 
-    # Destroy this session, releasing server-side resources.
+    # Release this session without deleting its on-disk state
+    # (`session.detach`), so it can be resumed later with
+    # `CopilotClient#resume_session`. Falls back to the legacy
+    # `session.destroy` on runtimes without `session.detach`.
+    def detach : Nil
+      return if @destroyed
+
+      params = JSON::Any.new({"sessionId" => JSON::Any.new(@session_id)})
+      response = begin
+        @rpc.send_request("session.detach", params)
+      rescue ex : JsonRpcError
+        raise ex unless ex.method_not_found?
+        @rpc.send_request("session.destroy", params)
+      end
+      if response.as_h?.try(&.["success"]?).try(&.as_bool?) == false
+        message = response["error"]?.try(&.as_s?) || "Unknown error"
+        raise CopilotError.new("Failed to detach session #{@session_id}: #{message}")
+      end
+      release
+    end
+
+    # Destroy this session, releasing server-side resources. Best-effort
+    # `detach`: the on-disk state is kept, so the session can be resumed.
     def destroy : Nil
       return if @destroyed
 
       begin
-        params = JSON.parse(%Q({"sessionId": "#{@session_id}"}))
-        @rpc.send_request("session/destroy", params)
+        detach
       rescue
         # Best-effort cleanup
       end
 
-      @destroyed = true
-      @mutex.synchronize do
-        @event_handlers.clear
-        @tool_handlers.clear
-      end
+      release
     end
 
     # Returns true if this session has been destroyed.
     def destroyed? : Bool
       @destroyed
+    end
+
+    # Change the Auto routing preference without changing the session's model
+    # (`session.model.switchAutoTier`). `tier` is one of `AutoTier` (`fast`,
+    # `efficiency`, `balance`, `intelligence`), or nil for the provider's
+    # default Auto routing. Requires the session model to be `auto`.
+    def switch_auto_tier(tier : String?) : JSON::Any
+      @rpc.send_request("session.model.switchAutoTier", JSON::Any.new({
+        "sessionId" => JSON::Any.new(@session_id),
+        "autoTier"  => JSON::Any.new(tier),
+      }))
+    end
+
+    # Re-run the managed-settings Policy Helper for this session
+    # (`session.managedSettings.recheckPolicyHelper`). Returns the managed
+    # settings snapshot; when the helper still fails it carries
+    # `policyHelperFailure` (parse it with `PolicyHelperFailure.from_json`).
+    def recheck_policy_helper : JSON::Any
+      @rpc.send_request("session.managedSettings.recheckPolicyHelper",
+        JSON::Any.new({"sessionId" => JSON::Any.new(@session_id)}))
+    end
+
+    # Set the permission mode (`session.permissions.setMode`), for example
+    # `"manual"`, `"assisted"`, or `"allow-all"`. A refused mode returns
+    # `success == false` with a `reason` such as
+    # `PermissionModeRefusalReason::MANAGED_POLICY`.
+    def set_permission_mode(mode : String) : PermissionModeSetResult
+      result = @rpc.send_request("session.permissions.setMode", JSON::Any.new({
+        "sessionId" => JSON::Any.new(@session_id),
+        "mode"      => JSON::Any.new(mode),
+      }))
+      return PermissionModeSetResult.new(false, mode) unless result.as_h?
+      PermissionModeSetResult.from_json(result.to_json)
+    end
+
+    # Subscribe to live shell output of running tools (`tool.shell_output`
+    # events). Returns a subscription ID for `#off`.
+    def on_shell_output(&handler : ToolShellOutputData -> Nil) : String
+      on(SessionEventTypes::TOOL_SHELL_OUTPUT) do |event|
+        if data = ToolShellOutputData.from_event(event)
+          handler.call(data)
+        end
+        nil
+      end
+    end
+
+    # Register the session hook handlers (called by CopilotClient).
+    def register_hooks(hooks : SessionHooks?) : Nil
+      @hooks = hooks
+    end
+
+    # Answer a `hooks.invoke` request; returns the hook output, or nil.
+    def handle_hooks_invoke(hook_type : String, input : JSON::Any) : JSON::Any?
+      hooks = @hooks
+      return nil unless hooks
+
+      case hook_type
+      when "subagentStart"
+        if handler = hooks.on_subagent_start
+          output = handler.call(SubagentStartHookInput.from_json(input.to_json), @session_id)
+          return output ? JSON.parse(output.to_json) : nil
+        end
+      when "subagentStop"
+        if handler = hooks.on_subagent_stop
+          output = handler.call(SubagentStopHookInput.from_json(input.to_json), @session_id)
+          return output ? JSON.parse(output.to_json) : nil
+        end
+      end
+
+      if handler = hooks.handlers[hook_type]?
+        return handler.call(input, @session_id)
+      end
+      nil
+    end
+
+    # Register the shell authentication handler (called by CopilotClient).
+    def register_shell_authentication_handler(handler : ShellAuthenticationHandler?) : Nil
+      @shell_authentication_handler = handler
+    end
+
+    # Answer a `shellAuthentication.request`. Resolves to cancel when no handler
+    # is registered, the handler raises, or the runtime cancels the request first.
+    def handle_shell_authentication_request(request : ShellAuthenticationRequest) : ShellAuthenticationResponse
+      handler = @shell_authentication_handler
+      return ShellAuthenticationResponse.cancel if handler.nil? || @destroyed || request.request_id.empty?
+
+      channel = Channel(ShellAuthenticationResponse).new(1)
+      @mutex.synchronize { @pending_shell_authentications[request.request_id] = channel }
+      spawn do
+        answer = begin
+          handler.call(request)
+        rescue
+          ShellAuthenticationResponse.cancel
+        end
+        select
+        when channel.send(answer)
+        else
+        end
+      end
+
+      response = channel.receive
+      @mutex.synchronize do
+        if @pending_shell_authentications[request.request_id]? == channel
+          @pending_shell_authentications.delete(request.request_id)
+        end
+      end
+      response
+    end
+
+    # Handle a `shellAuthentication.cancel`: the pending request resolves to
+    # cancel and a later answer from the handler is ignored.
+    def cancel_shell_authentication_request(request_id : String) : Nil
+      channel = @mutex.synchronize { @pending_shell_authentications.delete(request_id) }
+      return unless channel
+      select
+      when channel.send(ShellAuthenticationResponse.cancel)
+      else
+      end
+    end
+
+    # Register the app-side memory store (called by CopilotClient).
+    def register_memory_store(handler : MemoryStoreHandler?) : Nil
+      @memory_store_handler = handler
+    end
+
+    # Store a memory with the registered handler (`memoryStore.store`).
+    def handle_memory_store(memory : StoredMemory) : Nil
+      handler = @memory_store_handler
+      raise CopilotError.new("Memory store owner is unavailable") if handler.nil? || @destroyed
+      handler.call(memory)
     end
 
     # Dispatch an event to all registered handlers.
@@ -233,6 +415,32 @@ module CopilotSDK
     # Returns the list of currently registered tool definitions.
     def tool_definitions : Array(ToolDefinition)
       @mutex.synchronize { @tool_definitions.dup }
+    end
+
+    # Clear local state, resolve pending prompts, and notify the owning client.
+    private def release : Nil
+      return if @destroyed
+      @destroyed = true
+      pending = @mutex.synchronize do
+        @event_handlers.clear
+        @tool_handlers.clear
+        channels = @pending_shell_authentications.values
+        @pending_shell_authentications.clear
+        channels
+      end
+      pending.each do |channel|
+        select
+        when channel.send(ShellAuthenticationResponse.cancel)
+        else
+        end
+      end
+      @hooks = nil
+      @shell_authentication_handler = nil
+      @memory_store_handler = nil
+      if close = @on_close
+        @on_close = nil
+        close.call
+      end
     end
 
     private def get_trace_context : Hash(String, String)

@@ -21,6 +21,7 @@ mutable struct CopilotSession
     tools::Dict{String, Tool}
     connected::Bool
     listener_lock::ReentrantLock
+    close_callbacks::Vector{Function}  # run once by `disconnect`
 end
 
 function CopilotSession(session_id::String, rpc::JsonRpcClient, config::SessionConfig)
@@ -30,7 +31,7 @@ function CopilotSession(session_id::String, rpc::JsonRpcClient, config::SessionC
             tools[t.name] = t
         end
     end
-    CopilotSession(session_id, rpc, config, Function[], tools, true, ReentrantLock())
+    CopilotSession(session_id, rpc, config, Function[], tools, true, ReentrantLock(), Function[])
 end
 
 # -- Event handling ---------------------------------------------------------------
@@ -83,7 +84,8 @@ end
     send(session, prompt::String; kwargs...)
     send(session, opts::MessageOptions)
 
-Send a message to the session. Returns immediately; listen for events via `on`.
+Send a message to the session (`session.send`). Returns the message ID (or `nothing`);
+listen for events via `on`.
 """
 function send(session::CopilotSession, opts::MessageOptions)
     session.connected || throw(ErrorException("Session is disconnected"))
@@ -106,8 +108,25 @@ function send(session::CopilotSession, opts::MessageOptions)
     if opts.request_headers !== nothing
         params["requestHeaders"] = opts.request_headers
     end
-    send_request(session.rpc, "session/send", params)
-    return nothing
+    if opts.source !== nothing
+        params["source"] = opts.source
+    end
+    if opts.client_turn_id !== nothing
+        params["clientTurnId"] = opts.client_turn_id
+    end
+    if opts.response_schema !== nothing
+        # Structured output: the reply is a JSON document matching the schema.
+        params["responseFormat"] = Dict{String, Any}(
+            "type" => "json_schema",
+            "jsonSchema" => Dict{String, Any}(
+                "name" => "response",
+                "strict" => true,
+                "schema" => opts.response_schema,
+            ),
+        )
+    end
+    result = send_request(session.rpc, "session.send", params)
+    return result isa AbstractDict ? get(result, "messageId", nothing) : nothing
 end
 
 send(session::CopilotSession, prompt::String; kwargs...) =
@@ -138,8 +157,8 @@ function send_and_wait(session::CopilotSession, opts::MessageOptions; timeout::R
     return take!(ch)
 end
 
-send_and_wait(session::CopilotSession, prompt::String; kwargs...) =
-    send_and_wait(session, MessageOptions(; prompt); kwargs...)
+send_and_wait(session::CopilotSession, prompt::String; timeout::Real=120, kwargs...) =
+    send_and_wait(session, MessageOptions(; prompt, kwargs...); timeout)
 
 # -- Tool handling ----------------------------------------------------------------
 
@@ -204,14 +223,184 @@ end
 """
     disconnect(session)
 
-Disconnect from the session and release resources. Safe to call multiple times.
+Disconnect from the session and release resources. Sends `session.detach` (falling back to
+`session.destroy` on CLIs without it), so the session can be resumed later. Safe to call
+multiple times.
 """
 function disconnect(session::CopilotSession)
     session.connected || return nothing
     session.connected = false
     try
-        send_request(session.rpc, "session/disconnect",
-            Dict{String, Any}("sessionId" => session.session_id); timeout=5)
+        detach_session(session)
     catch; end
+    callbacks = copy(session.close_callbacks)
+    empty!(session.close_callbacks)
+    for callback in callbacks
+        try callback() catch; end
+    end
+    return nothing
+end
+
+"""
+    detach_session(session) -> Any
+
+Send `session.detach` for the session (keeping its state for a later resume). Falls back to
+`session.destroy` when the CLI does not implement `session.detach`.
+"""
+function detach_session(session::CopilotSession)
+    params = Dict{String, Any}("sessionId" => session.session_id)
+    try
+        return send_request(session.rpc, "session.detach", params; timeout=10)
+    catch e
+        if e isa JsonRpcError && e.code == -32601
+            return send_request(session.rpc, "session.destroy", params; timeout=10)
+        end
+        rethrow()
+    end
+end
+
+"""
+    switch_auto_tier(session, tier) -> Any
+
+Change the experimental Auto routing preference (`"fast"`, `"efficiency"`, `"balance"`, or
+`"intelligence"`) without changing the model; `nothing` restores the provider default.
+"""
+function switch_auto_tier(session::CopilotSession, tier::Union{AbstractString, Nothing})
+    send_request(session.rpc, "session.model.switchAutoTier",
+        Dict{String, Any}("sessionId" => session.session_id, "autoTier" => tier); timeout=30)
+end
+
+"""
+    get_managed_settings(session) -> Any
+
+Managed (enterprise) settings resolved for the session; read a `policyHelperFailure`
+member with `policy_helper_failure`.
+"""
+get_managed_settings(session::CopilotSession) =
+    send_request(session.rpc, "session.managedSettings.get",
+        Dict{String, Any}("sessionId" => session.session_id); timeout=30)
+
+"""
+    recheck_policy_helper(session) -> Any
+
+Re-run the managed-settings policy helper for the session.
+"""
+recheck_policy_helper(session::CopilotSession) =
+    send_request(session.rpc, "session.managedSettings.recheckPolicyHelper",
+        Dict{String, Any}("sessionId" => session.session_id); timeout=60)
+
+"""
+    set_permission_mode(session, mode) -> PermissionModeSetResult
+
+Change the session's permission mode (`"manual"`, `"assisted"`, or `"allow-all"`). A refused
+mode returns `success == false` and, when known, a `reason` such as
+`PERMISSION_MODE_REFUSAL_MANAGED_POLICY`.
+"""
+function set_permission_mode(session::CopilotSession, mode::AbstractString)
+    result = send_request(session.rpc, "session.permissions.setMode",
+        Dict{String, Any}("sessionId" => session.session_id, "mode" => mode); timeout=30)
+    result isa AbstractDict || return PermissionModeSetResult(mode=String(mode))
+    reason = get(result, "reason", nothing)
+    return PermissionModeSetResult(
+        success = get(result, "success", false) === true,
+        mode    = string(get(result, "mode", mode)),
+        reason  = reason === nothing ? nothing : string(reason),
+    )
+end
+
+# -- Permission requests (SDK protocol 4) -----------------------------------------
+
+# PermissionRequest for a `permission.requested` event's data.
+function _permission_request_from_event(data::AbstractDict)
+    raw = get(data, "permissionRequest", nothing)
+    details = raw isa AbstractDict ? Dict{String, Any}(raw) : Dict{String, Any}()
+    kind = _str(get(details, "kind", ""))
+    args = get(details, "args", nothing)
+    return PermissionRequest(
+        permission_id = _str(get(data, "requestId", "")),
+        tool_name     = _str(get(details, "toolName", kind)),
+        description   = _str(something(get(details, "intention", nothing),
+                                       get(details, "toolDescription", nothing), "")),
+        arguments     = args isa AbstractDict ? Dict{String, Any}(args) : Dict{String, Any}(),
+        kind          = kind,
+        tool_call_id  = _str(get(details, "toolCallId", "")),
+        details       = details,
+    )
+end
+
+# Wire decision (`result`) for a permission handler's return value: `true`/"allow" approve
+# once, `false`/"deny" reject, `nothing` reports that no user is available, and a Dict or
+# NamedTuple with a `kind` is sent as given. "no-result" sends nothing (the request stays
+# pending for another client).
+function _permission_decision_wire(decision)
+    if decision isa AbstractDict || decision isa NamedTuple
+        wire = Dict{String, Any}(String(k) => v for (k, v) in pairs(decision))
+        return get(wire, "kind", nothing) == "no-result" ? nothing : wire
+    end
+    decision isa Bool && return Dict{String, Any}("kind" => decision ? "approve-once" : "reject")
+    choice = decision === nothing ? "user-not-available" : string(decision)
+    choice == "no-result" && return nothing
+    if choice in ("allow", "approve", "approved", "approve-once")
+        return Dict{String, Any}("kind" => "approve-once")
+    end
+    choice == "user-not-available" && return Dict{String, Any}("kind" => "user-not-available")
+    return Dict{String, Any}("kind" => "reject")
+end
+
+"""Answer a `permission.requested` event with the session's `on_permission_request` handler
+(`session.permissions.handlePendingPermissionRequest`)."""
+function _handle_permission_requested(session::CopilotSession, event::SessionEvent)
+    data = event.data
+    get(data, "resolvedByHook", false) === true && return nothing
+    handler = session.config.on_permission_request
+    handler === nothing && return nothing
+    request_id = get(data, "requestId", nothing)
+    request_id isa AbstractString || return nothing
+
+    result = try
+        _permission_decision_wire(handler(_permission_request_from_event(data)))
+    catch e
+        @error "Permission handler error" exception=(e, catch_backtrace())
+        Dict{String, Any}("kind" => "user-not-available")
+    end
+    (result === nothing || !session.connected) && return nothing
+    try
+        send_request(session.rpc, "session.permissions.handlePendingPermissionRequest",
+            Dict{String, Any}("sessionId" => session.session_id, "requestId" => request_id,
+                              "result" => result); timeout=30)
+    catch e
+        @error "Permission decision delivery failed" exception=(e, catch_backtrace())
+    end
+    return nothing
+end
+
+# -- External tools (SDK protocol 4) ----------------------------------------------
+
+"""Run a registered tool for an `external_tool.requested` event and answer it with
+`session.tools.handlePendingToolCall`."""
+function _handle_external_tool(session::CopilotSession, event::SessionEvent)
+    data = event.data
+    get(data, "hasHandler", true) === false && return nothing
+    request_id = get(data, "requestId", nothing)
+    tool_name = get(data, "toolName", nothing)
+    (request_id === nothing || tool_name === nothing) && return nothing
+    haskey(session.tools, tool_name) || return nothing
+
+    reply = _handle_tool_call(session, Dict{String, Any}(
+        "toolName"   => tool_name,
+        "toolCallId" => get(data, "toolCallId", ""),
+        "arguments"  => get(data, "arguments", nothing),
+    ))
+    params = Dict{String, Any}("sessionId" => session.session_id, "requestId" => request_id)
+    if get(reply, "resultType", "success") == "success"
+        params["result"] = get(reply, "textResultForLlm", "")
+    else
+        params["error"] = get(reply, "textResultForLlm", "Tool failed")
+    end
+    @async try
+        send_request(session.rpc, "session.tools.handlePendingToolCall", params; timeout=30)
+    catch e
+        @error "External tool result delivery failed" tool=tool_name exception=(e, catch_backtrace())
+    end
     return nothing
 end

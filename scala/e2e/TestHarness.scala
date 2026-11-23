@@ -26,20 +26,26 @@ object TestHarness:
   /** `true` when the proxy process is running and the URL has been parsed. */
   def isRunning: Boolean = _proxyUrl.isDefined && process.exists(_.isAlive)
 
-  /** Resolve the CLI executable path. */
+  /**
+   * Resolve the CLI executable path: COPILOT_CLI_PATH when it points to an existing file, then the
+   * CLI 1.0.113+ `npm-loader.js` entry point (run with node; it starts the native binary), then the
+   * legacy `index.js` entry points. Paths without a `.js` suffix are run directly.
+   */
   def cliPath: String =
    val envPath = Option(System.getenv("COPILOT_CLI_PATH")).filter(_.nonEmpty)
    envPath.filter(p => java.io.File(p).exists()).getOrElse {
      val repoRoot = resolveRepoRoot()
      val githubModules = repoRoot.resolve("nodejs/node_modules/@github").toFile
-     // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-     // package (e.g. @github/copilot-linux-x64); prefer it when present.
+     val npmLoader = java.io.File(githubModules, "copilot/npm-loader.js")
+     // Legacy layouts: CLI 1.0.64-1 through 1.0.112 shipped a runnable index.js in a
+     // platform-specific package (e.g. @github/copilot-linux-x64); prefer it when present.
      val platformCli = Option(githubModules.listFiles())
        .getOrElse(Array.empty[java.io.File])
        .filter(f => f.isDirectory && f.getName.startsWith("copilot-") && !f.getName.contains("language-server"))
        .map(f => java.io.File(f, "index.js"))
        .find(_.exists())
-     platformCli match
+     if npmLoader.exists() then npmLoader.getAbsolutePath
+     else platformCli match
        case Some(f) => f.getAbsolutePath
        case None =>
          val nodeCliPath = repoRoot.resolve("nodejs/node_modules/@github/copilot/index.js")

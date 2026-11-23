@@ -64,6 +64,7 @@ defmodule Copilot.DefineTool do
 
     * `:description` - Description shown to the LLM (required).
     * `:parameters` - JSON schema map for tool parameters (optional).
+    * `:idempotent` - `true` marks the tool as safe to retry (optional).
     * `:handler` - A 2-arity function `(args, invocation) -> result`.
       The result can be:
       - A string (wrapped as success)
@@ -80,7 +81,8 @@ defmodule Copilot.DefineTool do
       name: name,
       description: description,
       parameters: parameters,
-      handler: handler
+      handler: handler,
+      idempotent: Keyword.get(opts, :idempotent)
     }
   end
 

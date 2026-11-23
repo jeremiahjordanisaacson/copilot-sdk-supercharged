@@ -266,6 +266,8 @@ has name        => (is => 'ro', required => 1);
 has description => (is => 'ro', default => sub { '' });
 has parameters  => (is => 'ro', default => sub { undef });
 has handler     => (is => 'ro', required => 1);
+# True when repeating a call with the same arguments has no additional effect
+has idempotent  => (is => 'ro', default => sub { undef });
 
 sub to_wire {
     my ($self) = @_;
@@ -274,6 +276,7 @@ sub to_wire {
         description => $self->description,
     );
     $h{parameters} = $self->parameters if defined $self->parameters;
+    $h{idempotent} = $self->idempotent ? \1 : \0 if defined $self->idempotent;
     return \%h;
 }
 
@@ -441,11 +444,14 @@ has display_prompt  => (is => 'ro', default => sub { undef });
 has source          => (is => 'ro', default => sub { undef });
 # JSON Schema hashref requesting structured output (takes precedence over response_format)
 has response_schema => (is => 'ro', default => sub { undef });
+# Opaque caller-chosen turn identifier, echoed on the turn's events (maps to clientTurnId)
+has client_turn_id  => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
     my %h = (prompt => $self->prompt);
     $h{source}         = $self->source          if defined $self->source;
+    $h{clientTurnId}   = $self->client_turn_id  if defined $self->client_turn_id;
     $h{attachments}    = $self->attachments     if defined $self->attachments;
     $h{mode}           = $self->mode            if defined $self->mode;
     if (defined $self->response_schema) {
@@ -559,6 +565,7 @@ has content => (is => 'ro', default => sub { undef });
 # ============================================================================
 package GitHub::Copilot::Types::SessionConfig;
 use Moo;
+use Scalar::Util ();
 
 has session_id             => (is => 'ro', default => sub { undef });
 has model                  => (is => 'ro', default => sub { undef });
@@ -689,6 +696,24 @@ has allow_transcript_recovery => (is => 'ro', default => sub { undef });
 has image_generation        => (is => 'ro', default => sub { undef });
 # Autopilot continuation options (AutopilotOptions object or hashref)
 has autopilot               => (is => 'ro', default => sub { undef });
+# --- v3.0.0 (SDK protocol 4) options ---
+# Named BYOK provider connections (arrayref of NamedProviderConfig objects or hashrefs)
+has providers               => (is => 'ro', default => sub { undef });
+# Models registered under named providers (arrayref of ProviderModelConfig objects or
+# hashrefs); select one with 'provider/id'
+has models                  => (is => 'ro', default => sub { undef });
+# Named provider that serves unqualified model names. On resume, passing
+# default_provider => undef explicitly clears the session's default provider.
+has default_provider        => (is => 'ro', predicate => 'has_default_provider');
+# Copilot API routing policy (CapiConfig object or hashref such as { enabled => 0 })
+has capi                    => (is => 'ro', default => sub { undef });
+# Shell authentication handler: code ref receiving (ShellAuthenticationRequest, { session_id })
+# and returning a ShellAuthenticationResponse, a hashref or undef (cancel)
+has on_shell_authentication_request => (is => 'ro', default => sub { undef });
+# Memory store callback: code ref receiving (StoredMemory, { session_id })
+has store_memory            => (is => 'ro', default => sub { undef });
+# Permission mode: 'manual', 'assisted' or 'allow-all' (see PermissionMode)
+has permission_mode         => (is => 'ro', default => sub { undef });
 
 # Serialize to session.create params; pass (resume => 1) for session.resume, which
 # omits create-only fields (name, trustWorkingDirectory, refreshCustomInstructions)
@@ -785,7 +810,14 @@ sub to_wire {
     $payload{onPreMcpToolCall} = \1 if defined $self->on_pre_mcp_tool_call;
 
     # --- v2.6.0 upstream-sync options (parity with @github/copilot-sdk) ---
+    # An explicit capi ({ enabled => ... }) is merged with the Auto tier / WebSocket options.
     my %capi;
+    if (defined $self->capi) {
+        my $c = $self->capi;
+        $c = $c->TO_JSON if Scalar::Util::blessed($c) && $c->can('TO_JSON');
+        %capi = %$c if ref($c) eq 'HASH';
+        $capi{enabled} = $capi{enabled} ? \1 : \0 if defined $capi{enabled} && !ref $capi{enabled};
+    }
     $capi{autoTier} = $self->auto_tier if defined $self->auto_tier;
     $capi{enableWebSocketResponses} = $self->enable_web_socket_responses ? \1 : \0
         if defined $self->enable_web_socket_responses;
@@ -835,6 +867,17 @@ sub to_wire {
     if (defined $self->streaming) {
         $payload{streaming} = $self->streaming ? \1 : \0;
     }
+
+    # --- v3.0.0 (SDK protocol 4) options ---
+    $payload{providers} = $self->providers if defined $self->providers;
+    $payload{models}    = $self->models    if defined $self->models;
+    # On resume an explicit default_provider => undef clears the default provider.
+    if ($opts{resume} ? $self->has_default_provider : defined $self->default_provider) {
+        $payload{defaultProvider} = $self->default_provider;
+    }
+    $payload{requestShellAuthentication} = \1 if defined $self->on_shell_authentication_request;
+    $payload{hasMemoryStore}             = \1 if defined $self->store_memory;
+    $payload{permissionMode} = $self->permission_mode if defined $self->permission_mode;
 
     return \%payload;
 }
@@ -1406,6 +1449,340 @@ sub TO_JSON {
     $h{supports} = $self->supports if defined $self->supports;
     $h{limits}   = $self->limits   if defined $self->limits;
     return \%h;
+}
+
+# ============================================================================
+# v3.0.0 types & constants (SDK protocol 4, parity with the Microsoft Copilot SDK 2.0)
+# ============================================================================
+
+# ClientMode - client `mode` option. 'coding-agent' (the default) keeps the CLI-like
+# coding tools and defaults. 'empty' requires every session to set available_tools
+# and applies conservative session defaults (no telemetry, in-memory OAuth and
+# embedding storage, no cross-session store or memory, no on-demand instruction
+# discovery, repository hooks or host git operations). 'copilot-cli' is a legacy
+# alias of 'coding-agent'.
+package GitHub::Copilot::Types::ClientMode;
+
+use constant {
+    CODING_AGENT => 'coding-agent',
+    EMPTY        => 'empty',
+    COPILOT_CLI  => 'copilot-cli',
+};
+
+# NamedProviderConfig - a named BYOK provider connection (SessionConfig->providers).
+# Select a registered model with 'provider/id' (see ProviderModelConfig) or set
+# default_provider to route unqualified model names through this connection.
+package GitHub::Copilot::Types::NamedProviderConfig;
+use Moo;
+
+has name              => (is => 'ro', required => 1);
+has type              => (is => 'ro', default => sub { undef });
+has base_url          => (is => 'ro', default => sub { undef });
+has api_key           => (is => 'ro', default => sub { undef });
+has api_key_command   => (is => 'ro', default => sub { undef });
+has bearer_token      => (is => 'ro', default => sub { undef });
+has wire_api          => (is => 'ro', default => sub { undef });
+has transport         => (is => 'ro', default => sub { undef });
+# Azure options hashref, e.g. { apiVersion => '2024-10-21' }
+has azure             => (is => 'ro', default => sub { undef });
+# Extra HTTP headers hashref
+has headers           => (is => 'ro', default => sub { undef });
+has model_provider    => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (name => $self->name);
+    $h{type}          = $self->type            if defined $self->type;
+    $h{baseUrl}       = $self->base_url        if defined $self->base_url;
+    $h{apiKey}        = $self->api_key         if defined $self->api_key;
+    $h{apiKeyCommand} = $self->api_key_command if defined $self->api_key_command;
+    $h{bearerToken}   = $self->bearer_token    if defined $self->bearer_token;
+    $h{wireApi}       = $self->wire_api        if defined $self->wire_api;
+    $h{transport}     = $self->transport       if defined $self->transport;
+    $h{azure}         = $self->azure           if defined $self->azure;
+    $h{headers}       = $self->headers         if defined $self->headers;
+    $h{modelProvider} = $self->model_provider  if defined $self->model_provider;
+    return \%h;
+}
+
+# ProviderModelConfig - a model registered under a named provider
+# (SessionConfig->models). The canonical selection id is 'provider/id'; model_id is
+# the known base model and wire_model the name sent to the provider API (both
+# default to id).
+package GitHub::Copilot::Types::ProviderModelConfig;
+use Moo;
+
+has provider                  => (is => 'ro', required => 1);
+has id                        => (is => 'ro', required => 1);
+has model_id                  => (is => 'ro', default => sub { undef });
+has wire_model                => (is => 'ro', default => sub { undef });
+has name                      => (is => 'ro', default => sub { undef });
+has max_prompt_tokens         => (is => 'ro', default => sub { undef });
+has max_context_window_tokens => (is => 'ro', default => sub { undef });
+has max_output_tokens         => (is => 'ro', default => sub { undef });
+# Capability overrides (ModelCapabilitiesOverride or hashref)
+has capabilities              => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (provider => $self->provider, id => $self->id);
+    $h{modelId}                = $self->model_id                       if defined $self->model_id;
+    $h{wireModel}              = $self->wire_model                     if defined $self->wire_model;
+    $h{name}                   = $self->name                           if defined $self->name;
+    $h{maxPromptTokens}        = $self->max_prompt_tokens + 0          if defined $self->max_prompt_tokens;
+    $h{maxContextWindowTokens} = $self->max_context_window_tokens + 0  if defined $self->max_context_window_tokens;
+    $h{maxOutputTokens}        = $self->max_output_tokens + 0          if defined $self->max_output_tokens;
+    $h{capabilities}           = $self->capabilities                   if defined $self->capabilities;
+    return \%h;
+}
+
+# CapiConfig - Copilot API (CAPI) routing policy (SessionConfig->capi). Set
+# enabled => 0 for a BYOK-only model catalog.
+package GitHub::Copilot::Types::CapiConfig;
+use Moo;
+
+has enabled => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    return defined $self->enabled ? { enabled => ($self->enabled ? \1 : \0) } : {};
+}
+
+# ShellOutputData - data of a live 'tool.shell_output' session event.
+package GitHub::Copilot::Types::ShellOutputData;
+use Moo;
+
+use constant {
+    EVENT_TYPE    => 'tool.shell_output',
+    STREAM_STDOUT => 'stdout',
+    STREAM_STDERR => 'stderr',
+};
+
+has tool_call_id => (is => 'ro', default => sub { undef });
+has text         => (is => 'ro', default => sub { '' });
+# Zero-based publication order across both streams of the tool call
+has sequence     => (is => 'ro', default => sub { 0 });
+# 'stdout', 'stderr' or undef (stdout)
+has stream       => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    return $class->new(
+        tool_call_id => $h->{toolCallId},
+        text         => $h->{text} // '',
+        sequence     => $h->{sequence} // 0,
+        stream       => $h->{stream},
+    );
+}
+
+# ShellAuthenticationRequest - a shell program asking for credentials
+# (SessionConfig->on_shell_authentication_request).
+package GitHub::Copilot::Types::ShellAuthenticationRequest;
+use Moo;
+
+use constant {
+    INPUT_SECRET  => 'secret',
+    INPUT_TEXT    => 'text',
+    INPUT_CONFIRM => 'confirm',
+};
+
+has session_id => (is => 'ro', default => sub { undef });
+has request_id => (is => 'ro', default => sub { undef });
+has program    => (is => 'ro', default => sub { undef });
+has prompt     => (is => 'ro', default => sub { undef });
+# 'secret', 'text' or 'confirm'
+has input_kind => (is => 'ro', default => sub { undef });
+has command    => (is => 'ro', default => sub { '' });
+has cwd        => (is => 'ro', default => sub { '' });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    return $class->new(
+        session_id => $h->{sessionId},
+        request_id => $h->{requestId},
+        program    => $h->{program},
+        prompt     => $h->{prompt},
+        input_kind => $h->{inputKind},
+        command    => (defined $h->{command} && !ref $h->{command} ? $h->{command} : ''),
+        cwd        => (defined $h->{cwd} && !ref $h->{cwd} ? $h->{cwd} : ''),
+    );
+}
+
+# ShellAuthenticationResponse - answer to a ShellAuthenticationRequest: 'accept'
+# with a value, or 'cancel'. Handlers may also return a hashref or undef (cancel).
+package GitHub::Copilot::Types::ShellAuthenticationResponse;
+use Moo;
+
+has action => (is => 'ro', required => 1);
+has value  => (is => 'ro', default => sub { undef });
+
+sub accept {
+    my ($class, $value) = @_;
+    return $class->new(action => 'accept', value => $value);
+}
+
+sub cancel {
+    my ($class) = @_;
+    return $class->new(action => 'cancel');
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { action => 'accept', value => $self->value }
+        if $self->action eq 'accept' && defined $self->value;
+    return { action => 'cancel' };
+}
+
+# StoredMemory - a memory the agent asked to store (SessionConfig->store_memory).
+package GitHub::Copilot::Types::StoredMemory;
+use Moo;
+
+has session_id => (is => 'ro', default => sub { undef });
+has subject    => (is => 'ro', default => sub { undef });
+has fact       => (is => 'ro', default => sub { undef });
+has citations  => (is => 'ro', default => sub { undef });
+has reason     => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    return $class->new(
+        session_id => $h->{sessionId},
+        subject    => $h->{subject},
+        fact       => $h->{fact},
+        citations  => $h->{citations},
+        reason     => $h->{reason},
+    );
+}
+
+# NetworkScope - traffic served by the NetworkConfig callbacks.
+package GitHub::Copilot::Types::NetworkScope;
+
+use constant {
+    CONNECTION => 'connection',
+    RUNTIME    => 'runtime',
+};
+
+# NetworkConfig - host network callbacks (client `network` option). Each callback
+# is an optional code ref: resolve_proxy receives a NetworkResolveProxyRequest and
+# returns a PAC-style proxy list string (or undef to keep the runtime's own
+# resolution); authenticate_negotiate receives a NetworkAuthenticateNegotiateRequest
+# and returns a base64 SPNEGO token or undef; authenticate_basic receives a
+# NetworkAuthenticateBasicRequest and returns { username, password } or undef.
+# Tokens and passwords are never logged.
+package GitHub::Copilot::Types::NetworkConfig;
+use Moo;
+
+# 'connection' (default) or 'runtime' (see NetworkScope)
+has scope                  => (is => 'ro', default => sub { undef });
+has resolve_proxy          => (is => 'ro', default => sub { undef });
+has authenticate_negotiate => (is => 'ro', default => sub { undef });
+has authenticate_basic     => (is => 'ro', default => sub { undef });
+
+sub has_any_callback {
+    my ($self) = @_;
+    return defined $self->resolve_proxy || defined $self->authenticate_negotiate
+        || defined $self->authenticate_basic;
+}
+
+# NetworkResolveProxyRequest - request target passed to resolve_proxy.
+package GitHub::Copilot::Types::NetworkResolveProxyRequest;
+use Moo;
+
+has url => (is => 'ro', default => sub { undef });
+
+# NetworkAuthenticateNegotiateRequest - Kerberos service principal passed to
+# authenticate_negotiate.
+package GitHub::Copilot::Types::NetworkAuthenticateNegotiateRequest;
+use Moo;
+
+has spn => (is => 'ro', default => sub { undef });
+
+# NetworkAuthenticateBasicRequest - proxy Basic challenge passed to authenticate_basic.
+package GitHub::Copilot::Types::NetworkAuthenticateBasicRequest;
+use Moo;
+
+has proxy             => (is => 'ro', default => sub { undef });
+has realm             => (is => 'ro', default => sub { undef });
+has previous_rejected => (is => 'ro', default => sub { 0 });
+
+# PolicyHelperFailure - structured Policy Helper failure attached to a failed
+# session.create / session.resume as error.data.policyHelperFailure (see
+# GitHub::Copilot::JsonRpcError->policy_helper_failure). Helper-authored text is
+# untrusted: render it as plain text and never execute it.
+package GitHub::Copilot::Types::PolicyHelperFailure;
+use Moo;
+
+has category                 => (is => 'ro', default => sub { undef });
+has failure_mode             => (is => 'ro', default => sub { undef });
+has message                  => (is => 'ro', default => sub { undef });
+has previous_policy_retained => (is => 'ro', default => sub { 0 });
+has reason                   => (is => 'ro', default => sub { undef });
+has authority                => (is => 'ro', default => sub { undef });
+has code                     => (is => 'ro', default => sub { undef });
+has details                  => (is => 'ro', default => sub { undef });
+has diagnostic               => (is => 'ro', default => sub { undef });
+has help_link                => (is => 'ro', default => sub { undef });
+has remediation              => (is => 'ro', default => sub { undef });
+has severity                 => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    return $class->new(
+        category                 => $h->{category},
+        failure_mode             => $h->{failureMode},
+        message                  => $h->{message},
+        previous_policy_retained => ($h->{previousPolicyRetained} ? 1 : 0),
+        reason                   => $h->{reason},
+        authority                => $h->{authority},
+        code                     => $h->{code},
+        details                  => $h->{details},
+        diagnostic               => $h->{diagnostic},
+        help_link                => $h->{helpLink},
+        remediation              => $h->{remediation},
+        severity                 => $h->{severity},
+    );
+}
+
+# PermissionMode - session permission modes (SessionConfig->permission_mode,
+# Session->set_permission_mode).
+package GitHub::Copilot::Types::PermissionMode;
+
+use constant {
+    MANUAL    => 'manual',
+    ASSISTED  => 'assisted',
+    ALLOW_ALL => 'allow-all',
+};
+
+# PermissionModeRefusalReason - known reasons a permission-mode change was refused.
+package GitHub::Copilot::Types::PermissionModeRefusalReason;
+
+use constant {
+    MANAGED_POLICY => 'managed_policy',
+};
+
+# PermissionModeSetResult - result of Session->set_permission_mode. reason explains
+# a refusal when known (currently 'managed_policy').
+package GitHub::Copilot::Types::PermissionModeSetResult;
+use Moo;
+
+has success => (is => 'ro', default => sub { 0 });
+has mode    => (is => 'ro', default => sub { undef });
+has reason  => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(
+        success => ($h->{success} ? 1 : 0),
+        mode    => $h->{mode},
+        reason  => $h->{reason},
+    );
+}
+
+sub refused_by_managed_policy {
+    my ($self) = @_;
+    return defined $self->reason
+        && $self->reason eq GitHub::Copilot::Types::PermissionModeRefusalReason::MANAGED_POLICY;
 }
 
 1;

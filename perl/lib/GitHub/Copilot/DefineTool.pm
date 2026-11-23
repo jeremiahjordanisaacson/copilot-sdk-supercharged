@@ -104,6 +104,7 @@ sub define_tool {
         description => $description,
         parameters  => $parameters,
         handler     => $handler,
+        idempotent  => $args{idempotent},
     );
 }
 
@@ -126,5 +127,6 @@ Optional arguments:
 
     description => 'What this tool does'
     parameters  => { type => 'object', properties => { ... } }
+    idempotent  => 1   # repeating a call with the same arguments has no additional effect
 
 =cut

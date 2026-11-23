@@ -74,6 +74,142 @@ public class QuickStart {
 }
 ```
 
+## What's New in v3.0.0
+
+This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
+
+* **Requires Copilot CLI 1.0.113 or newer.** Older CLIs are rejected at `start()` with
+  `SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+* **Existing options keep working.** You still configure `SessionConfig` with the same flat
+  builders; the SDK translates the payload into the grouped protocol 4 shape (`inference`,
+  `tools`, `permissions`, `interaction`, `events`, `agents`, `mcp`, `github`, `state`, ...)
+  right before `session.create` and `session.resume`.
+* **Legacy BYOK keeps working.** `SessionConfig.provider(ProviderConfig)` becomes a named
+  `"default"` connection that is also the default provider, and Copilot API models are disabled
+  for that session, exactly as in v1. Explicit `providers`/`defaultProvider`/`capi` win.
+* **Protocol 4 tool and permission flow.** Custom tools and `onPermissionRequest` are served
+  through the runtime's `external_tool.requested` and `permission.requested` events, answered
+  with `session.tools.handlePendingToolCall` and `session.permissions.handlePendingPermissionRequest`.
+
+### New in v3.0.0
+
+```java
+// Named BYOK providers and model definitions (select a model as "provider/id")
+CopilotSession session = client.createSession(new SessionConfig()
+    .model("gateway/chat")
+    .providers(List.of(new Types.NamedProviderConfig("gateway", "https://models.example.com/v1")
+        .apiKeyCommand("print-model-key")
+        .wireApi("responses")))
+    .models(List.of(new Types.ProviderModelConfig("gateway", "chat")
+        .wireModel("my-deployment")
+        .maxOutputTokens(8192)))
+    .capi(new Types.CapiConfig(false)));          // BYOK-only catalog
+
+// Use a connection for unqualified model names; defaultProvider(null) clears it on resume
+new SessionConfig().model("my-deployment").defaultProvider("gateway").capi(new Types.CapiConfig(false));
+```
+
+```java
+// Idempotent tools: the runtime may safely retry them
+Tool lookup = DefineTool.create("lookup_order")
+    .description("Look up an order by ID")
+    .idempotent(true)
+    .handler((args, inv) -> "shipped")
+    .build();
+
+// Client turn IDs are echoed on the turn's events
+session.send(new MessageOptions("Summarize the diff").clientTurnId("turn-42"));
+
+// Resume without emitting session.resume
+client.resumeSession(sessionId, new SessionConfig().suppressResumeEvent(true));
+```
+
+```java
+// Client mode: "coding-agent" (default) or "empty" (every session must pick its tools,
+// and telemetry, repository hooks, cross-session memory, and similar features default off)
+CopilotClient client = new CopilotClient(new CopilotClientOptions().mode(Types.ClientMode.EMPTY));
+CopilotSession session = client.createSession(new SessionConfig().availableTools(List.of("view", "grep")));
+```
+
+```java
+// Live shell output events
+session.on(Types.ToolShellOutputData.EVENT_TYPE, event -> {
+    Types.ToolShellOutputData out = Types.ToolShellOutputData.fromEvent(event);
+    System.out.print(out.text);                    // out.stream is "stdout", "stderr", or null
+});
+
+// Shell authentication: answer sudo/ssh prompts from programs that shell tools run
+new SessionConfig().onShellAuthenticationRequest((request, sessionId) ->
+    "confirm".equals(request.inputKind)
+        ? Types.ShellAuthenticationResult.accept("yes")
+        : Types.ShellAuthenticationResult.cancel());
+
+// Memory store: receive the memories the agent saves (requires memory enabled)
+new SessionConfig().memory(new Types.MemoryConfiguration(true)
+    .storeMemory(memory -> myStore.save(memory.subject, memory.fact)));
+```
+
+```java
+// Network callbacks: proxy resolution and proxy authentication (never log credentials)
+CopilotClient client = new CopilotClient(new CopilotClientOptions()
+    .network(new Types.NetworkConfig()
+        .scope(Types.NetworkScope.CONNECTION)
+        .resolveProxy(request -> "PROXY proxy.corp.example:8080; DIRECT")
+        .authenticateBasic(request -> new Types.NetworkBasicCredentials(proxyUser, proxyPassword))));
+```
+
+```java
+// Policy Helper failures on create/resume, and permission-mode refusal reasons
+try {
+    client.createSession(new SessionConfig().permissionMode(Types.PermissionMode.MANUAL));
+} catch (Exception e) {
+    Types.PolicyHelperFailure failure = Types.PolicyHelperFailure.fromError(e);
+    if (failure != null) System.err.println(failure.category + ": " + failure.message);
+}
+
+Types.PermissionModeResult result = session.setPermissionMode(Types.PermissionMode.ALLOW_ALL);
+if (!result.success && Types.PermissionModeRefusalReason.MANAGED_POLICY.equals(result.reason)) {
+    System.out.println("Blocked by managed policy; mode stays " + result.mode);
+}
+```
+
+### Also available (shipped in v2.6.0)
+
+* **Client info handshake**: `new CopilotClientOptions().clientInfo(new Types.ClientInfo("acme-portal", "2.4.0").integrationName("acme-plugin"))`.
+* **Auto routing tier**: `session.setAutoTier(Types.AutoTier.BALANCE)` (sends `session.model.switchAutoTier`) or `SessionConfig.autoTier(...)`.
+* **Ask-user variant**: `new SessionConfig().askUserVariant(Types.AskUserVariant.ELICITATION)`.
+* **GitHub token provider**: `new SessionConfig().gitHubTokenProvider(args -> Types.GitHubTokenProviderResult.token(fetchToken(args.host), 3600))`.
+* **Sandbox bypass**: `new SessionConfig().sandboxConfig(new Types.SandboxConfig(true).allowBypass(true))`.
+* **Feature flag overrides**: `new SessionConfig().featureFlags(Map.of("my_flag", true))`.
+* **Session detach**: `session.destroy()` sends `session.detach`, so the session can be resumed later.
+* **Message source**: `new MessageOptions("Run the checks").source(Types.MessageSource.agent("planner"))`.
+* **Managed settings cache clear**: `client.clearManagedSettingsCache()`.
+* **Policy helper recheck**: `Map<String, Object> snapshot = session.recheckPolicyHelper();` (parse `snapshot.get("policyHelperFailure")` with `Types.PolicyHelperFailure.fromMap`).
+* **Model allowlist**: `new SessionConfig().allowedModels(List.of("gpt-5", "claude-sonnet-4.5"))`.
+* **OAuth client metadata URL**: `new SessionConfig().authClientIdMetadataUrl("https://example.com/oauth/client.json")`.
+* **Max output tokens override**: `new SessionConfig().modelCapabilities(Map.of("limits", Map.of("max_output_tokens", 8192)))`.
+* **Structured output**: `JsonNode json = session.sendAndWaitStructured("List three colors", schema);` or `new MessageOptions(prompt).responseSchema(schema)`.
+* **Agent/hook directories**: `new SessionConfig().agentDirectories(List.of("./agents")).hookDirectories(List.of("./hooks"))`.
+* **Working directory trust** (create only): `new SessionConfig().trustWorkingDirectory(Types.WorkingDirectoryTrust.SESSION)`.
+* **Transcript recovery** (resume only): `new SessionConfig().allowTranscriptRecovery(true)`.
+* **Image generation config**: `new SessionConfig().imageGeneration(new Types.ImageGenerationConfig(true).watermark(true).saveToDisk(false))`.
+* **Autopilot options**: `new SessionConfig().autopilot(new Types.AutopilotOptions().continuationEnabled(true).maxContinues(3))`.
+* **Subagent lifecycle hooks**: `new SessionHooks().onSubagentStart((input, id) -> Map.of("additionalContext", "Follow the style guide"))` and `.onSubagentStop(...)`.
+* **BYOK API key command**: `provider.apiKeyCommand = "print-model-key";` on `ProviderConfig`, or `NamedProviderConfig.apiKeyCommand(...)`.
+
+### Known limitations
+
+* **AHP host**: the runtime-supervised AHP host (`startAhpHost` and the `ahp.*`/`host.*` RPC
+  families) is not implemented. It is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+* **In-process hosting**: this SDK keeps spawning the CLI (or connecting over TCP) instead of
+  hosting the runtime in-process by default; `CopilotClientOptions.inProcess` is unchanged.
+* **Legacy response format**: `MessageOptions.responseFormat(String)` is no longer sent, because
+  protocol 4 rejects the string form. Use `responseSchema` for structured output and
+  `SessionConfig.imageGeneration` for images.
+* **Callback cancellation**: Java callbacks receive no cancellation token. When the runtime
+  cancels a shell authentication prompt, the SDK answers `cancel` and interrupts the handler thread.
+
 ## Custom Tools
 
 ```java
@@ -203,12 +339,16 @@ jbang https://github.com/github/copilot-sdk-java/blob/main/jbang-example.java
 
 ## Image Generation
 
-Request image responses using `responseFormat` and `imageOptions`:
+Opt in to image generation for the session with `SessionConfig.imageGeneration`. Per-message
+`imageOptions` are still forwarded; the legacy `responseFormat` string is no longer sent because
+protocol 4 rejects it (use `responseSchema` for structured output).
 
 ```java
+CopilotSession session = client.createSession(
+    new SessionConfig().imageGeneration(new Types.ImageGenerationConfig(true).saveToDisk(false))
+);
 SessionEvent response = session.sendAndWait(
     new MessageOptions("Generate a sunset over mountains")
-        .responseFormat("image")
         .imageOptions(new Types.ImageOptions("1024x1024", "hd", "natural"))
 );
 ```

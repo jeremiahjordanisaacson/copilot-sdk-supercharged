@@ -49,6 +49,7 @@ class DefineTool
     private ?string $toolDescription = null;
     private ?array $toolParameters = null;
     private $toolHandler = null;
+    private ?bool $toolIdempotent = null;
 
     private function __construct(string $name)
     {
@@ -110,6 +111,18 @@ class DefineTool
     }
 
     /**
+     * Mark the tool as idempotent: repeating a call with the same arguments has no
+     * additional effect, so the runtime may safely retry it.
+     *
+     * @return $this
+     */
+    public function idempotent(bool $idempotent = true): static
+    {
+        $this->toolIdempotent = $idempotent;
+        return $this;
+    }
+
+    /**
      * Build the Tool instance.
      *
      * @return Tool
@@ -144,6 +157,7 @@ class DefineTool
             description: $this->toolDescription,
             parameters: $this->toolParameters,
             handler: $wrappedHandler,
+            idempotent: $this->toolIdempotent,
         );
     }
 

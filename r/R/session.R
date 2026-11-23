@@ -54,12 +54,14 @@ CopilotSession <- R6::R6Class(
     #'   \code{MessageSource$SYSTEM}, or \code{MessageSource$agent(id)}.
     #' @param response_schema Named list or NULL. JSON Schema for a structured response; sent as
     #'   a \code{json_schema} \code{responseFormat} (takes precedence over \code{response_format}).
+    #' @param client_turn_id Character or NULL. Opaque caller-chosen ID for this turn, echoed on
+    #'   the turn's events so the application can correlate them.
     #'
     #' @return Character. The message ID of the response.
     send = function(prompt, attachments = NULL, mode = NULL,
                     agent_mode = NULL, display_prompt = NULL, request_headers = NULL,
                     response_format = NULL, image_options = NULL,
-                    source = NULL, response_schema = NULL) {
+                    source = NULL, response_schema = NULL, client_turn_id = NULL) {
       agent_mode <- agent_mode %||% private$default_agent_mode
       display_prompt <- display_prompt %||% private$default_display_prompt
       payload <- list(
@@ -67,6 +69,7 @@ CopilotSession <- R6::R6Class(
         prompt = prompt
       )
       if (!is.null(source)) payload$source <- source
+      if (!is.null(client_turn_id)) payload$clientTurnId <- client_turn_id
       if (!is.null(attachments)) payload$attachments <- attachments
       if (!is.null(mode)) payload$mode <- mode
       if (!is.null(agent_mode)) payload$agentMode <- agent_mode
@@ -96,13 +99,15 @@ CopilotSession <- R6::R6Class(
     #' @param timeout Numeric. Timeout in seconds (default 60).
     #' @param source Character or NULL. Message source (see \code{MessageSource}).
     #' @param response_schema Named list or NULL. JSON Schema for a structured response.
+    #' @param client_turn_id Character or NULL. Opaque caller-chosen ID for this turn.
     #'
     #' @return The last assistant.message SessionEvent, or NULL if none received.
     send_and_wait = function(prompt, attachments = NULL, mode = NULL,
                              agent_mode = NULL, display_prompt = NULL,
                              request_headers = NULL,
                              response_format = NULL, image_options = NULL,
-                             timeout = 60, source = NULL, response_schema = NULL) {
+                             timeout = 60, source = NULL, response_schema = NULL,
+                             client_turn_id = NULL) {
       last_assistant_message <- NULL
       error_event <- NULL
       idle_received <- FALSE
@@ -128,7 +133,8 @@ CopilotSession <- R6::R6Class(
                 agent_mode = agent_mode, display_prompt = display_prompt,
                 request_headers = request_headers,
                 response_format = response_format, image_options = image_options,
-                source = source, response_schema = response_schema)
+                source = source, response_schema = response_schema,
+                client_turn_id = client_turn_id)
 
       # Poll until idle or timeout
       start_time <- proc.time()[["elapsed"]]
@@ -163,18 +169,20 @@ CopilotSession <- R6::R6Class(
     #' @param request_headers Named list or NULL. Extra HTTP headers for this message.
     #' @param source Character or NULL. Message source (see \code{MessageSource}).
     #' @param timeout Numeric. Timeout in seconds (default 60).
+    #' @param client_turn_id Character or NULL. Opaque caller-chosen ID for this turn.
     #'
     #' @return The parsed JSON result (named list / list).
     send_and_wait_structured = function(prompt, response_schema, attachments = NULL,
                                         mode = NULL, agent_mode = NULL,
                                         display_prompt = NULL, request_headers = NULL,
-                                        source = NULL, timeout = 60) {
+                                        source = NULL, timeout = 60, client_turn_id = NULL) {
       if (is.null(response_schema)) stop("response_schema is required")
       event <- self$send_and_wait(
         prompt = prompt, attachments = attachments, mode = mode,
         agent_mode = agent_mode, display_prompt = display_prompt,
         request_headers = request_headers, timeout = timeout,
-        source = source, response_schema = response_schema
+        source = source, response_schema = response_schema,
+        client_turn_id = client_turn_id
       )
       content <- if (is.null(event)) NULL else event$data[["content"]]
       if (!is.character(content) || length(content) != 1 || !nzchar(trimws(content))) {
@@ -245,6 +253,13 @@ CopilotSession <- R6::R6Class(
     #' @keywords internal
     register_permission_handler = function(handler) {
       private$permission_handler <- handler
+    },
+
+    #' @description Whether a permission request handler is registered.
+    #' @return Logical.
+    #' @keywords internal
+    has_permission_handler = function() {
+      !is.null(private$permission_handler)
     },
 
     #' @description Handle a permission request from the CLI.
@@ -327,6 +342,74 @@ CopilotSession <- R6::R6Class(
     #' @keywords internal
     register_exit_plan_mode_handler = function(handler) {
       private$exit_plan_mode_handler <- handler
+    },
+
+    #' @description Register a shell authentication request handler.
+    #' @param handler Function or NULL. Called with (ShellAuthenticationRequest, context).
+    #' @keywords internal
+    register_shell_authentication_handler = function(handler) {
+      private$shell_authentication_handler <- handler
+    },
+
+    #' @description Answer a \code{shellAuthentication.request} from the CLI.
+    #'
+    #' Handler failures and any answer other than an accepted string become a cancellation.
+    #' The answer is never logged.
+    #' @param params Named list. The request payload.
+    #' @return Named list: \code{list(action = "accept", value = ...)} or
+    #'   \code{list(action = "cancel")}.
+    #' @keywords internal
+    handle_shell_authentication_request = function(params) {
+      cancel <- list(action = "cancel")
+      handler <- private$shell_authentication_handler
+      if (is.null(handler)) return(cancel)
+      request <- ShellAuthenticationRequest$new(
+        request_id = params$requestId,
+        program = params$program,
+        prompt = params$prompt,
+        input_kind = params$inputKind,
+        command = if (is.character(params$command)) params$command else "",
+        cwd = if (is.character(params$cwd)) params$cwd else ""
+      )
+      result <- tryCatch(
+        handler(request, list(session_id = self$session_id)),
+        error = function(e) NULL
+      )
+      result <- config_to_wire(result)
+      if (!is.list(result) || !identical(result[["action"]], "accept")) return(cancel)
+      value <- result[["value"]]
+      if (!is.character(value) || length(value) != 1 || is.na(value)) return(cancel)
+      list(action = "accept", value = value)
+    },
+
+    #' @description Register a memory store callback.
+    #' @param handler Function or NULL. Called with (StoredMemory, context).
+    #' @keywords internal
+    register_memory_store = function(handler) {
+      private$memory_store_handler <- handler
+    },
+
+    #' @description Handle a \code{memoryStore.store} request from the CLI.
+    #' @param params Named list. The stored memory payload.
+    #' @keywords internal
+    handle_memory_store = function(params) {
+      handler <- private$memory_store_handler
+      if (is.null(handler)) stop("No memory store is registered")
+      memory <- StoredMemory$new(
+        session_id = params$sessionId,
+        subject = params$subject,
+        fact = params$fact,
+        citations = params$citations,
+        reason = params$reason
+      )
+      tryCatch(
+        handler(memory, list(session_id = self$session_id)),
+        error = function(e) {
+          warning(paste("Memory store callback failed:", conditionMessage(e)))
+          stop("Memory store callback failed")
+        }
+      )
+      invisible(NULL)
     },
 
     #' @description Handle an exit-plan-mode request from the CLI.
@@ -442,6 +525,8 @@ CopilotSession <- R6::R6Class(
       private$permission_handler <- NULL
       private$user_input_handler <- NULL
       private$hooks <- NULL
+      private$shell_authentication_handler <- NULL
+      private$memory_store_handler <- NULL
       callbacks <- private$disconnect_callbacks
       private$disconnect_callbacks <- list()
       for (callback in callbacks) {
@@ -488,6 +573,23 @@ CopilotSession <- R6::R6Class(
       )
     },
 
+    #' @description Change the session's permission mode.
+    #' @param mode Character. Permission mode to apply.
+    #' @return A PermissionModeSetResult. When the runtime refuses the mode, \code{success} is
+    #'   FALSE and \code{reason} explains why when known (for example
+    #'   \code{PermissionModeRefusalReason$MANAGED_POLICY}).
+    set_permission_mode = function(mode) {
+      result <- private$client$request(
+        "session.permissions.setMode",
+        list(sessionId = self$session_id, mode = mode)
+      )
+      PermissionModeSetResult$new(
+        success = result$success,
+        mode = result$mode,
+        reason = result$reason
+      )
+    },
+
     #' @description Abort the currently processing message.
     abort = function() {
       private$client$request("session.abort", list(sessionId = self$session_id))
@@ -509,6 +611,8 @@ CopilotSession <- R6::R6Class(
     default_agent_mode = NULL,
     default_display_prompt = NULL,
     disconnect_callbacks = NULL,
+    shell_authentication_handler = NULL,
+    memory_store_handler = NULL,
 
     handle_elicitation_request = function(data) {
       request_id <- data$requestId

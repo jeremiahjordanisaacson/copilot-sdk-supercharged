@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::jsonrpc::JsonRpcClient;
 use crate::types::*;
@@ -214,6 +214,12 @@ pub struct CopilotSession {
     next_handler_id: Arc<Mutex<u64>>,
     /// GitHub token provider registration owned by this session (removed on destroy).
     github_token_registration: Mutex<Option<(String, GitHubTokenRegistry)>>,
+    /// Shell authentication handler (`shellAuthentication.request`).
+    shell_authentication_handler: Mutex<Option<ShellAuthenticationHandlerFn>>,
+    /// Cancellation senders for in-flight shell authentication requests, keyed by request ID.
+    pending_shell_authentications: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// Application memory store (`memoryStore.store`).
+    memory_store: Mutex<Option<MemoryStoreHandlerFn>>,
 }
 
 impl CopilotSession {
@@ -235,6 +241,9 @@ impl CopilotSession {
             typed_event_handlers: Arc::new(Mutex::new(HashMap::new())),
             next_handler_id: Arc::new(Mutex::new(0)),
             github_token_registration: Mutex::new(None),
+            shell_authentication_handler: Mutex::new(None),
+            pending_shell_authentications: Mutex::new(HashMap::new()),
+            memory_store: Mutex::new(None),
         }
     }
 
@@ -272,6 +281,9 @@ impl CopilotSession {
         });
         if let Some(source) = options.source.as_ref() {
             params["source"] = Value::String(source.to_string());
+        }
+        if let Some(client_turn_id) = options.client_turn_id.as_ref() {
+            params["clientTurnId"] = Value::String(client_turn_id.clone());
         }
         // Structured output takes precedence over the legacy string response format.
         if let Some(schema) = options.response_schema.as_ref() {
@@ -591,6 +603,95 @@ impl CopilotSession {
     }
 
     // ========================================================================
+    // Shell Authentication Handler
+    // ========================================================================
+
+    /// Installs the shell authentication handler declared on the session config.
+    pub(crate) async fn set_shell_authentication_handler(
+        &self,
+        handler: ShellAuthenticationHandlerFn,
+    ) {
+        *self.shell_authentication_handler.lock().await = Some(handler);
+    }
+
+    /// Answers a `shellAuthentication.request` from the server.
+    ///
+    /// The handler future is dropped (and `cancel` answered) when the runtime sends
+    /// `shellAuthentication.cancel` for the same request ID.
+    pub(crate) async fn handle_shell_authentication_request(
+        &self,
+        params: Value,
+    ) -> Result<ShellAuthenticationResponse, CopilotError> {
+        let handler = self
+            .shell_authentication_handler
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| {
+                CopilotError::NoHandler(
+                    "Shell authentication requested but no handler registered".to_string(),
+                )
+            })?;
+        let request: ShellAuthenticationRequest = serde_json::from_value(params)
+            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+        let request_id = request.request_id.clone();
+
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        self.pending_shell_authentications
+            .lock()
+            .await
+            .insert(request_id.clone(), cancel_tx);
+
+        let answer = (handler.0)(request, self.session_id.clone());
+        let result = tokio::select! {
+            result = answer => result.map_err(|e| {
+                CopilotError::SessionError(format!("Shell authentication handler failed: {}", e))
+            }),
+            _ = cancel_rx => Ok(ShellAuthenticationResponse::Cancel),
+        };
+
+        self.pending_shell_authentications
+            .lock()
+            .await
+            .remove(&request_id);
+        result
+    }
+
+    /// Cancels a pending shell authentication request (`shellAuthentication.cancel`).
+    /// Unknown or already-answered request IDs are ignored.
+    pub(crate) async fn cancel_shell_authentication(&self, request_id: &str) {
+        if let Some(cancel) = self
+            .pending_shell_authentications
+            .lock()
+            .await
+            .remove(request_id)
+        {
+            let _ = cancel.send(());
+        }
+    }
+
+    // ========================================================================
+    // Memory Store
+    // ========================================================================
+
+    /// Installs the memory store callback declared on the session config.
+    pub(crate) async fn set_memory_store(&self, store: MemoryStoreHandlerFn) {
+        *self.memory_store.lock().await = Some(store);
+    }
+
+    /// Stores a memory through the application callback (`memoryStore.store`).
+    pub(crate) async fn handle_memory_store(&self, params: Value) -> Result<(), CopilotError> {
+        let store = self.memory_store.lock().await.clone().ok_or_else(|| {
+            CopilotError::NoHandler("Memory store requested but no store registered".to_string())
+        })?;
+        let memory: StoredMemory = serde_json::from_value(params)
+            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+        (store.0)(memory)
+            .await
+            .map_err(|e| CopilotError::SessionError(format!("Memory store failed: {}", e)))
+    }
+
+    // ========================================================================
     // Session Operations
     // ========================================================================
 
@@ -669,6 +770,11 @@ impl CopilotSession {
             let mut handler = self.user_input_handler.lock().await;
             *handler = None;
         }
+        *self.shell_authentication_handler.lock().await = None;
+        for (_, cancel) in self.pending_shell_authentications.lock().await.drain() {
+            let _ = cancel.send(());
+        }
+        *self.memory_store.lock().await = None;
 
         Ok(())
     }
@@ -714,6 +820,26 @@ impl CopilotSession {
         self.rpc_client
             .request("session.managedSettings.recheckPolicyHelper", params, None)
             .await
+    }
+
+    /// Changes the session permission mode (`session.permissions.setMode`): `"manual"`,
+    /// `"assisted"`, or `"allow-all"`. Experimental.
+    ///
+    /// A refused change returns `success: false` with the authoritative mode and, when
+    /// known, a `reason` such as [`permission_mode_refusal::MANAGED_POLICY`].
+    pub async fn set_permission_mode(
+        &self,
+        mode: &str,
+    ) -> Result<PermissionsSetModeResult, CopilotError> {
+        let params = serde_json::json!({
+            "sessionId": self.session_id,
+            "mode": mode,
+        });
+        let response = self
+            .rpc_client
+            .request("session.permissions.setMode", params, None)
+            .await?;
+        serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
     }
 
     /// Records the GitHub token provider registration owned by this session.

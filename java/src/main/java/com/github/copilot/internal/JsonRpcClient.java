@@ -34,6 +34,12 @@ public class JsonRpcClient {
         return t;
     });
 
+    /**
+     * Result a {@link RequestHandler} returns to answer a request with a JSON {@code null}
+     * result (a handler that returns Java {@code null} answers with an empty object).
+     */
+    public static final Map<String, Object> NULL_RESULT = java.util.Collections.unmodifiableMap(new HashMap<>());
+
     /** Functional interface for handling incoming JSON-RPC requests. */
     @FunctionalInterface
     public interface RequestHandler {
@@ -245,7 +251,8 @@ public class JsonRpcClient {
                     String errorMsg = String.valueOf(error.getOrDefault("message", "Unknown error"));
                     future.completeExceptionally(new JsonRpcException(
                         ((Number) error.getOrDefault("code", -1)).intValue(),
-                        errorMsg
+                        errorMsg,
+                        error.get("data")
                     ));
                 } else {
                     future.complete(message.get("result"));
@@ -268,7 +275,9 @@ public class JsonRpcClient {
         // Incoming request (has both method and id)
         if (message.containsKey("method") && message.containsKey("id")) {
             String method = (String) message.get("method");
-            String id = String.valueOf(message.get("id"));
+            // Echo the id exactly as received: the runtime uses numeric ids and ignores responses
+            // whose id type differs.
+            Object id = message.get("id");
             Map<String, Object> params = (Map<String, Object>) message.getOrDefault("params", Map.of());
 
             RequestHandler handler = requestHandlers.get(method);
@@ -284,7 +293,11 @@ public class JsonRpcClient {
             handlerExecutor.submit(() -> {
                 try {
                     Map<String, Object> result = handler.handle(params);
-                    sendResponse(id, result != null ? result : Map.of());
+                    if (result == NULL_RESULT) {
+                        sendResponse(id, null);
+                    } else {
+                        sendResponse(id, result != null ? result : Map.of());
+                    }
                 } catch (Exception e) {
                     try {
                         sendErrorResponse(id, -32603, e.getMessage());
@@ -294,22 +307,24 @@ public class JsonRpcClient {
         }
     }
 
-    private void sendResponse(String requestId, Map<String, Object> result) throws Exception {
-        Map<String, Object> response = Map.of(
-            "jsonrpc", "2.0",
-            "id", requestId,
-            "result", result
-        );
+    private void sendResponse(Object requestId, Map<String, Object> result) throws Exception {
+        // HashMap (unlike Map.of) keeps a null result, which serializes as JSON null.
+        Map<String, Object> response = new HashMap<>();
+        response.put("jsonrpc", "2.0");
+        response.put("id", requestId);
+        response.put("result", result);
         sendMessage(response);
     }
 
-    private void sendErrorResponse(String requestId, int code, String message) throws Exception {
-        // Build response manually since Map.of doesn't allow nested mutable maps
-        String json = mapper.writeValueAsString(Map.of(
-            "jsonrpc", "2.0",
-            "id", requestId,
-            "error", Map.of("code", code, "message", message)
-        ));
+    private void sendErrorResponse(Object requestId, int code, String message) throws Exception {
+        Map<String, Object> error = new HashMap<>();
+        error.put("code", code);
+        error.put("message", message != null ? message : "Internal error");
+        Map<String, Object> response = new HashMap<>();
+        response.put("jsonrpc", "2.0");
+        response.put("id", requestId);
+        response.put("error", error);
+        String json = mapper.writeValueAsString(response);
         byte[] contentBytes = json.getBytes(StandardCharsets.UTF_8);
         String header = "Content-Length: " + contentBytes.length + "\r\n\r\n";
         synchronized (writeLock) {
@@ -322,6 +337,12 @@ public class JsonRpcClient {
     /** Exception thrown when a JSON-RPC request returns an error. */
     public static class JsonRpcException extends Exception {
         public final int code;
+        /**
+         * The error's {@code data} member, or null. Session create/resume failures caused by a
+         * Policy Helper carry {@code data.policyHelperFailure}
+         * (see {@code Types.PolicyHelperFailure.fromError}).
+         */
+        public final Object data;
 
         /**
          * Creates a JSON-RPC exception.
@@ -330,8 +351,20 @@ public class JsonRpcClient {
          * @param message the error message
          */
         public JsonRpcException(int code, String message) {
+            this(code, message, null);
+        }
+
+        /**
+         * Creates a JSON-RPC exception carrying the error's {@code data} member.
+         *
+         * @param code the JSON-RPC error code
+         * @param message the error message
+         * @param data the error data, or null
+         */
+        public JsonRpcException(int code, String message, Object data) {
             super("JSON-RPC Error " + code + ": " + message);
             this.code = code;
+            this.data = data;
         }
     }
 }

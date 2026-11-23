@@ -56,6 +56,15 @@ int test_harness_snapshot_path(const test_harness_t *harness,
                                char *out_path,
                                int out_size);
 
+/// Resolve the Copilot CLI for E2E tests, in order: COPILOT_CLI_PATH (when the
+/// file exists), nodejs/node_modules/@github/copilot/npm-loader.js, then the
+/// legacy @github/copilot-<platform>/index.js and @github/copilot/index.js.
+/// The SDK runs ".js" paths with node and other paths directly.
+/// Writes into out_path and returns 0, or returns -1 when no CLI is found.
+int test_harness_cli_path(const test_harness_t *harness,
+                          char *out_path,
+                          int out_size);
+
 #ifdef __cplusplus
 }
 #endif

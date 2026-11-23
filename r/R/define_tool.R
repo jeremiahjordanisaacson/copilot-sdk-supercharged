@@ -19,6 +19,11 @@
 #' @param parameters Named list or NULL. JSON schema for tool parameters.
 #'   Example: \code{list(type = "object", properties = list(query = list(type = "string")),
 #'   required = list("query"))}
+#' @param idempotent Logical or NULL. Mark the tool as safe to call repeatedly with the same
+#'   arguments (sent as \code{idempotent} in the tool definition).
+#' @param skip_permission Logical or NULL. Let the runtime run the tool without a permission
+#'   prompt (sent as \code{skipPermission}); otherwise the session's
+#'   \code{on_permission_request} handler must approve it.
 #'
 #' @return A Tool R6 object.
 #'
@@ -61,7 +66,8 @@
 #'   }
 #' )
 #' }
-define_tool <- function(name, description, handler, parameters = NULL) {
+define_tool <- function(name, description, handler, parameters = NULL, idempotent = NULL,
+                        skip_permission = NULL) {
   # Wrap the handler to normalize results
   wrapped_handler <- function(invocation) {
     result <- tryCatch(
@@ -112,6 +118,8 @@ define_tool <- function(name, description, handler, parameters = NULL) {
     name = name,
     description = description,
     handler = wrapped_handler,
-    parameters = parameters
+    parameters = parameters,
+    idempotent = idempotent,
+    skip_permission = skip_permission
   )
 }

@@ -13,10 +13,14 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <nlohmann/json.hpp>
+
+#include "copilot/types.h"
 
 namespace copilot {
 
@@ -25,6 +29,32 @@ struct JsonRpcError {
     int code = 0;
     std::string message;
     nlohmann::json data;
+};
+
+/// Thrown by JsonRpcClient::request() when the server answers with a JSON-RPC error.
+/// what() keeps the "JSON-RPC Error <code>: <message>" format; code(), rpcMessage()
+/// and data() expose the error object (SDK protocol 4 reports lifecycle failures,
+/// such as session.abort or session.create, this way).
+class JsonRpcException : public std::runtime_error {
+public:
+    JsonRpcException(int code, std::string message, nlohmann::json data)
+        : std::runtime_error("JSON-RPC Error " + std::to_string(code) + ": " + message),
+          code_(code), message_(std::move(message)), data_(std::move(data)) {}
+
+    int code() const noexcept { return code_; }
+    const std::string& rpcMessage() const noexcept { return message_; }
+    const nlohmann::json& data() const noexcept { return data_; }
+
+    /// Structured Policy Helper failure from `error.data.policyHelperFailure`, if any
+    /// (reported when session.create or session.resume fails).
+    std::optional<PolicyHelperFailure> policyHelperFailure() const {
+        return PolicyHelperFailure::from(data_);
+    }
+
+private:
+    int code_;
+    std::string message_;
+    nlohmann::json data_;
 };
 
 /// JSON-RPC "method not found" error code.

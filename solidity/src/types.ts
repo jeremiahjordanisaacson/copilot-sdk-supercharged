@@ -6,91 +6,111 @@
  */
 
 import type {
+    CopilotClientMode,
     CopilotClientOptions,
-    SessionConfig,
+    CreateSessionOptions,
+    ResumeSessionOptions,
+    SessionOptionsBase,
     Tool,
     AskUserVariant,
     AutoTier,
+    CapiSessionOptions,
     CopilotClientInfo,
     GitHubTokenProvider,
     GitHubTokenProviderArgs,
     GitHubTokenProviderResult,
+    ManagedSettingsResolvedData,
+    MemoryStoreCallOptions,
     ModelSwitchAutoTierResult,
+    NamedProviderConfig,
+    NetworkConfig,
+    PolicyHelperFailure,
     ProviderConfigModelProvider,
+    ProviderModelConfig,
+    SessionEventHandler,
+    ShellAuthenticationHandler,
+    ShellAuthenticationRequest,
+    ShellAuthenticationResponse,
+    StoredMemory,
     SubagentStartHandler,
     SubagentStartHookInput,
     SubagentStartHookOutput,
     SubagentStopHandler,
     SubagentStopHookInput,
     SubagentStopHookOutput,
+    SystemMessageConfig,
+    ToolShellOutputData,
+    ToolShellOutputEvent,
     WorkingDirectoryTrust,
     CanvasAction,
-    CanvasActionContext,
     CanvasDeclaration,
-    CanvasHostCapabilities,
     CanvasHostContext,
-    CanvasLifecycleContext,
-    CanvasOpenContext,
-    CanvasOpenResponse,
     CloudSessionOptions,
     CloudSessionRepository,
     ExitPlanModeRequest,
     ExitPlanModeResult,
     ExitPlanModeHandler,
-    ImageOptions,
     ModelCapabilitiesOverride,
-    ResponseFormat,
+    PermissionHandler,
     SectionOverride,
     SystemMessageAppendConfig,
     SystemMessageCustomizeConfig,
     SystemMessageReplaceConfig,
     TraceContext,
     TraceContextProvider,
-    UserInputRequest,
-    UserInputResponse,
 } from "copilot-sdk-supercharged";
 
 export type {
     AskUserVariant,
     AutoTier,
+    CapiSessionOptions,
     CopilotClientInfo,
     GitHubTokenProvider,
     GitHubTokenProviderArgs,
     GitHubTokenProviderResult,
+    ManagedSettingsResolvedData,
+    MemoryStoreCallOptions,
     ModelSwitchAutoTierResult,
+    NamedProviderConfig,
+    NetworkConfig,
+    PolicyHelperFailure,
     ProviderConfigModelProvider,
+    ProviderModelConfig,
+    ShellAuthenticationHandler,
+    ShellAuthenticationRequest,
+    ShellAuthenticationResponse,
+    StoredMemory,
     SubagentStartHandler,
     SubagentStartHookInput,
     SubagentStartHookOutput,
     SubagentStopHandler,
     SubagentStopHookInput,
     SubagentStopHookOutput,
+    ToolShellOutputData,
+    ToolShellOutputEvent,
     WorkingDirectoryTrust,
     CanvasAction,
-    CanvasActionContext,
     CanvasDeclaration,
-    CanvasHostCapabilities,
     CanvasHostContext,
-    CanvasLifecycleContext,
-    CanvasOpenContext,
-    CanvasOpenResponse,
     CloudSessionOptions,
     CloudSessionRepository,
     ExitPlanModeRequest,
     ExitPlanModeResult,
     ExitPlanModeHandler,
-    ImageOptions,
     ModelCapabilitiesOverride,
-    ResponseFormat,
     SectionOverride,
     SystemMessageAppendConfig,
     SystemMessageCustomizeConfig,
     SystemMessageReplaceConfig,
     TraceContext,
     TraceContextProvider,
-    UserInputRequest,
-    UserInputResponse,
 };
+
+/** Type of `member` in the base SDK's grouped session option `group`. */
+type SessionGroupMember<
+    G extends keyof SessionOptionsBase,
+    M extends keyof NonNullable<SessionOptionsBase[G]>,
+> = NonNullable<SessionOptionsBase[G]>[M];
 
 // ---------------------------------------------------------------------------
 // Severity & finding types
@@ -196,15 +216,42 @@ export interface GeneratedTestSuite {
 // Client option extensions
 // ---------------------------------------------------------------------------
 
+/**
+ * Client defaulting strategy. `"coding-agent"` (the default) keeps today's
+ * Copilot CLI behavior; `"empty"` disables ambient features and requires
+ * every session to name its `availableTools`. `"copilot-cli"` is accepted as
+ * a legacy alias of `"coding-agent"`.
+ */
+export type SolidityClientMode = CopilotClientMode | "copilot-cli";
+
 /** Options specific to the Solidity SDK client, extending the base options. */
-export interface CopilotSolidityClientOptions extends CopilotClientOptions {
+export interface CopilotSolidityClientOptions extends Omit<CopilotClientOptions, "mode"> {
     /** Default Solidity compiler version (e.g. "0.8.24"). */
     solidityVersion?: string;
     /** Default test framework when generating tests. */
     defaultTestFramework?: TestFramework;
     /** Whether to include gas optimization hints in every audit. */
     includeGasHints?: boolean;
-    /** Path to the Copilot home directory. */
+    /**
+     * Client mode (default `"coding-agent"`). In `"empty"` mode the one-shot
+     * helpers restrict their sessions to the four Solidity tools.
+     */
+    mode?: SolidityClientMode;
+    /** Path to the Copilot CLI executable (spawned connections). Defaults to `COPILOT_CLI_PATH` or the bundled CLI. */
+    cliPath?: string;
+    /** Extra arguments for the spawned Copilot CLI. */
+    cliArgs?: string[];
+    /** Connect to an already-running CLI server (`"host:port"`, `"http://host:port"`, or a port). */
+    cliUrl?: string;
+    /** Working directory for the spawned CLI process. */
+    cwd?: string;
+    /** Environment for the spawned CLI process. */
+    env?: Record<string, string | undefined>;
+    /** Spawn the CLI over TCP on this port instead of stdio (`0` picks a free port). */
+    port?: number;
+    /** Set to `false` to spawn the CLI over TCP instead of stdio. */
+    useStdio?: boolean;
+    /** Path to the Copilot home directory (the runtime's base directory). */
     copilotHome?: string;
     /** TCP connection token for authenticated server connections. */
     tcpConnectionToken?: string;
@@ -219,20 +266,198 @@ export interface CopilotSolidityClientOptions extends CopilotClientOptions {
      * runtimes without `connect` are tolerated.
      */
     clientInfo?: CopilotClientInfo;
+    /**
+     * Network callbacks (experimental). When `resolveProxy`,
+     * `authenticateNegotiate` or `authenticateBasic` is set, the base client
+     * calls `network.setProvider` after connecting (`scope` defaults to
+     * `"connection"`) and answers the runtime's `network.resolveProxy`,
+     * `network.authenticateNegotiate` and `network.authenticateBasic`
+     * requests with these callbacks. Tokens and passwords are never logged.
+     */
+    network?: NetworkConfig;
 }
 
-/** Configuration for a Solidity-focused session. */
-export interface SoliditySessionConfig extends SessionConfig {
+/**
+ * Legacy single BYOK provider (`provider`). Protocol 4 no longer accepts it:
+ * the client sends it as a `"default"` named provider (`inference.providers`)
+ * with `inference.defaultProvider = "default"` and Copilot API models disabled
+ * (`github.capi.enabled = false`). Model fields become an `inference.models`
+ * entry for the session model.
+ */
+export interface SolidityProviderConfig extends Omit<NamedProviderConfig, "name">, ByokProviderOptions {
+    /** Well-known base model id used for capability lookup. */
+    modelId?: string;
+    /** Model name sent to the provider API. */
+    wireModel?: string;
+    /** Maximum prompt tokens for the session model. */
+    maxPromptTokens?: number;
+    /** Maximum context window tokens for the session model. */
+    maxContextWindowTokens?: number;
+    /** Maximum output tokens for the session model. */
+    maxOutputTokens?: number;
+    /** Capability overrides for the session model. */
+    capabilities?: ModelCapabilitiesOverride;
+}
+
+/**
+ * Configuration for a Solidity-focused session.
+ *
+ * These are the flat (v2.x) session options. The client groups them into the
+ * SDK protocol 4 payload right before `session.create` / `session.resume`
+ * (`streaming` becomes `events.streaming`, `onPermissionRequest` becomes
+ * `permissions.onRequest`, and so on). The grouped forms of the base SDK
+ * (`inference`, `permissions`, `github`, ...) are accepted too; explicit
+ * grouped members win over flat keys.
+ */
+export interface SoliditySessionConfig
+    extends Pick<
+        CreateSessionOptions,
+        | "inference"
+        | "policy"
+        | "experiments"
+        | "permissions"
+        | "interaction"
+        | "events"
+        | "agents"
+        | "skills"
+        | "mcp"
+        | "github"
+        | "filesystem"
+        | "execution"
+        | "instructions"
+        | "git"
+        | "state"
+        | "plugins"
+        | "extensions"
+        | "cloud"
+        | "diagnostics"
+    > {
     /** Extra Solidity-specific tools to register alongside the built-in ones. */
     solidityTools?: Tool[];
     /** Project root for Hardhat/Foundry detection. Defaults to cwd. */
     projectRoot?: string;
+    /** Optional custom session ID (create only). */
+    sessionId?: string;
+    /** Model to use for this session. */
+    model?: string;
+    /** Client name included in the User-Agent header. */
+    clientName?: string;
+    /** Working directory for the session's tool operations. */
+    workingDirectory?: string;
+    /** Configuration directory override. */
+    configDirectory?: string;
+    /** Legacy alias of {@link configDirectory}. */
+    configDir?: string;
+    /** Enable runtime discovery of supported configuration. */
+    enableConfigDiscovery?: boolean;
+    /** System message configuration. Defaults to the Solidity expert prompt (append mode). */
+    systemMessage?: SystemMessageConfig;
+    /** Additional tools (sent as `tools.definitions`). */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools?: Tool<any>[];
+    /** Tool allowlist (`tools.availableTools`). Required for every session in `"empty"` mode. */
+    availableTools?: SessionGroupMember<"tools", "availableTools">;
+    /** Tool denylist (`tools.excludedTools`). */
+    excludedTools?: SessionGroupMember<"tools", "excludedTools">;
+    /** Large tool output handling (`tools.largeOutput`). */
+    largeOutput?: SessionGroupMember<"tools", "largeOutput">;
+    /** Expose the `manage_schedule` tool (`tools.manageScheduleEnabled`). */
+    manageScheduleEnabled?: boolean;
+    /** Permission handler (`permissions.onRequest`). Defaults to `approveAll`. */
+    onPermissionRequest?: PermissionHandler;
+    /** Permission mode applied before the first turn (`permissions.mode`). */
+    permissionMode?: SessionGroupMember<"permissions", "mode">;
+    /** Slash commands (`interaction.commands`). */
+    commands?: SessionGroupMember<"interaction", "commands">;
+    /** User input handler (`interaction.onUserInputRequest`). */
+    onUserInputRequest?: SessionGroupMember<"interaction", "onUserInputRequest">;
+    /** Elicitation handler (`interaction.onElicitationRequest`). */
+    onElicitationRequest?: SessionGroupMember<"interaction", "onElicitationRequest">;
+    /** Exit-plan-mode handler (`interaction.onExitPlanModeRequest`). */
+    onExitPlanModeRequest?: ExitPlanModeHandler;
+    /** Alias of {@link onExitPlanModeRequest}. */
+    onExitPlanMode?: ExitPlanModeHandler;
+    /** Auto-mode-switch handler (`interaction.onAutoModeSwitchRequest`). */
+    onAutoModeSwitchRequest?: SessionGroupMember<"interaction", "onAutoModeSwitchRequest">;
+    /**
+     * Shell authentication handler (`interaction.onShellAuthenticationRequest`).
+     * When set, the base client sends `interaction.requestShellAuthentication`
+     * and answers the runtime's `shellAuthentication.request`
+     * (`{ requestId, program, prompt, inputKind, command, cwd }`) with
+     * `{ action: "accept", value }` or `{ action: "cancel" }`; a
+     * `shellAuthentication.cancel` aborts the pending handler.
+     */
+    onShellAuthenticationRequest?: ShellAuthenticationHandler;
+    /** Stream assistant deltas (`events.streaming`). */
+    streaming?: boolean;
+    /** Forward sub-agent streaming deltas (`events.includeSubAgentStreamingEvents`). */
+    includeSubAgentStreamingEvents?: boolean;
+    /** Event handler registered before `session.create` (`events.onEvent`). */
+    onEvent?: SessionEventHandler;
+    /** Custom agents (`agents.definitions`). */
+    customAgents?: SessionGroupMember<"agents", "definitions">;
+    /** Default agent configuration (`agents.default`). */
+    defaultAgent?: SessionGroupMember<"agents", "default">;
+    /** Custom agent to activate at start (`agents.selected`). */
+    agent?: string;
+    /** Built-in sub-agents to allow (`agents.includedBuiltinAgents`). */
+    includedBuiltinAgents?: readonly string[];
+    /** Skill directories (`skills.directories`). */
+    skillDirectories?: readonly string[];
+    /** Enable skill loading (`skills.enabled`). */
+    enableSkills?: boolean;
+    /** Built-in skills to include (`skills.includedBuiltinSkills`). */
+    includedBuiltinSkills?: readonly string[];
+    /** Skills to disable (`skills.disabledSkills`). */
+    disabledSkills?: readonly string[];
+    /** MCP servers (`mcp.servers`, sent with `mcp.envValueMode = "direct"`). */
+    mcpServers?: SessionGroupMember<"mcp", "servers">;
+    /** Enable MCP Apps UI passthrough (`mcp.enableApps`). */
+    enableMcpApps?: boolean;
+    /** MCP OAuth token storage (`mcp.oauthTokenStorage`). */
+    mcpOAuthTokenStorage?: "persistent" | "in-memory";
     /** Directories containing instruction files. */
     instructionDirectories?: string[];
+    /** Organization custom instructions (`instructions.organizationText`). */
+    organizationCustomInstructions?: string;
+    /** On-demand instruction discovery (`instructions.onDemandDiscovery`). */
+    enableOnDemandInstructionDiscovery?: boolean;
+    /** Skip custom instruction sources (`instructions.skipCustomInstructions`). */
+    skipCustomInstructions?: boolean;
     /** Enable/disable session telemetry. */
     enableSessionTelemetry?: boolean;
-    /** Handler for exit-plan-mode requests. */
-    onExitPlanMode?: ExitPlanModeHandler;
+    /** Self-fetch enterprise managed settings (`github.fetchManagedSettings`). */
+    enableManagedSettings?: boolean;
+    /** Track file changes for rewind (`filesystem.trackFileChanges`). */
+    enableFileChangeTracking?: boolean;
+    /** Enable repository file hooks (`hooks.enableRepositoryHooks`). */
+    enableFileHooks?: boolean;
+    /** Ask the agent for `Co-authored-by` trailers (`git.coauthorEnabled`). */
+    coauthorEnabled?: boolean;
+    /** Enable host git operations (`git.enableHostGitOperations`). */
+    enableHostGitOperations?: boolean;
+    /** Infinite session configuration (`state.infiniteSessions`). */
+    infiniteSessions?: SessionGroupMember<"state", "infiniteSessions">;
+    /** Skip embedding retrieval (`state.skipEmbeddingRetrieval`). */
+    skipEmbeddingRetrieval?: boolean;
+    /** Embedding cache storage (`state.embeddingCacheStorage`). */
+    embeddingCacheStorage?: "persistent" | "in-memory";
+    /** Cross-session store (`state.enableCrossSessionStore`). */
+    enableSessionStore?: boolean;
+    /** Plugin directories (`plugins.directories`). */
+    pluginDirectories?: readonly string[];
+    /** Request the canvas renderer tools (`canvases.requestRenderer`). */
+    requestCanvasRenderer?: boolean;
+    /** Enable extension management (`extensions.enabled`). */
+    requestExtensions?: boolean;
+    /** Enable experimental features (`experiments.enableExperimentalMode`). */
+    enableExperimentalMode?: boolean;
+    /** Host-injected managed settings (`policy.managedSettings`). */
+    managedSettings?: SessionGroupMember<"policy", "managedSettings">;
+    /** Legacy single BYOK provider (see {@link SolidityProviderConfig}). */
+    provider?: SolidityProviderConfig;
+    /** Resume only: continue pending tool calls and permission prompts. */
+    continuePendingWork?: boolean;
     /** Model capabilities override (`limits` accepts {@link ModelLimitsOverride}). */
     modelCapabilities?: ModelCapabilitiesOverride & { limits?: ModelLimitsOverride };
 }
@@ -334,7 +559,8 @@ export interface SolidityCommandDefinition {
 // ---------------------------------------------------------------------------
 
 /** Extended options for Solidity sessions with all feature flags. */
-export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
+export interface SolidityExtendedSessionConfig
+    extends Omit<SoliditySessionConfig, "commands" | "mcpServers" | "modelCapabilities"> {
     /** Idle timeout in seconds — session auto-closes after this inactivity period. */
     idleTimeout?: number;
     /** Excluded tools for this session. */
@@ -363,8 +589,6 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
     elicitationHandler?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>;
     /** Additional request headers sent with each model request. */
     requestHeaders?: Record<string, string>;
-    /** Session idle timeout in seconds. */
-    idleTimeout?: number;
     /** Per-session auth token override. */
     authToken?: string;
     /** Directories containing instruction files. */
@@ -523,6 +747,15 @@ export interface SessionLimitsConfig {
 export interface MemoryConfiguration {
     /** Whether persistent memory is enabled for this session. */
     enabled?: boolean;
+    /**
+     * Store memories in the app instead of the built-in backends
+     * (experimental). The base client sends `state.hasMemoryStore` and answers
+     * the runtime's `memoryStore.store` requests
+     * (`{ sessionId, subject, fact, citations, reason }`) by awaiting this
+     * callback, then replies `null`. Setting it enables memory unless
+     * {@link enabled} is set explicitly.
+     */
+    storeMemory?: (memory: StoredMemory, options: MemoryStoreCallOptions) => Promise<void>;
 }
 
 /** Arguments passed to a {@link BearerTokenProvider} callback (per-session scoping). */
@@ -608,6 +841,12 @@ export interface SolidityMessageOptions {
      * `responseFormat: { type: "json_schema", jsonSchema: { name: "response", strict: true, schema } }`.
      */
     responseSchema?: Record<string, unknown>;
+    /**
+     * Opaque caller-chosen ID for the turn this message starts, sent as the
+     * `session.send` param `clientTurnId`. The runtime echoes it on the
+     * `user.message` event and stamps it on MCP `tools/call` requests.
+     */
+    clientTurnId?: string;
 }
 
 /** Upstream-sync session options forwarded to the base SDK on session creation. */
@@ -709,6 +948,75 @@ export interface SolidityUpstreamSessionOptions {
     imageGeneration?: ImageGenerationOptions;
     /** Autopilot continuation options. */
     autopilot?: AutopilotOptions;
+
+    // --- v3.0.0 (SDK protocol 4) options ---
+
+    /**
+     * Named BYOK provider connections (`inference.providers`), referenced by
+     * {@link models} entries and by {@link defaultProvider}. Select a
+     * registered model with `"<provider>/<id>"`.
+     */
+    providers?: NamedProviderConfig[];
+    /** BYOK model definitions (`inference.models`), each naming a provider. */
+    models?: ProviderModelConfig[];
+    /**
+     * Named connection used for unqualified BYOK model selections
+     * (`inference.defaultProvider`). Requires `capi: { enabled: false }`.
+     * Pass `null` on resume to clear it.
+     */
+    defaultProvider?: string | null;
+    /**
+     * Copilot API (CAPI) options (`github.capi`); `enabled: false` disables
+     * Copilot models for BYOK-only sessions. `autoTier` and
+     * `enableWebSocketResponses` are merged in.
+     */
+    capi?: CapiSessionOptions;
+    /** Resume only: skip emitting the `session.resume` event (root `suppressResumeEvent`). */
+    suppressResumeEvent?: boolean;
+    /** Resume only: legacy alias of {@link suppressResumeEvent}. */
+    disableResume?: boolean;
+}
+
+/** Event type of live shell output chunks (`tool.shell_output`). */
+export const TOOL_SHELL_OUTPUT_EVENT = "tool.shell_output" as const;
+
+/** Stream of a {@link ToolShellOutputData} chunk; omitted means stdout. */
+export type ToolShellOutputStream = NonNullable<ToolShellOutputData["stream"]>;
+
+/** Known refusal reasons on a {@link PermissionModeSetResult}. */
+export const PermissionModeRefusalReason = {
+    /** Managed (enterprise) policy refused the requested permission mode. */
+    managedPolicy: "managed_policy",
+} as const;
+export type PermissionModeRefusalReason =
+    (typeof PermissionModeRefusalReason)[keyof typeof PermissionModeRefusalReason];
+
+/** Result of `session.permissions.setMode`. */
+export interface PermissionModeSetResult {
+    /** Whether the requested mode was applied. */
+    success: boolean;
+    /** Authoritative permission mode after the call. */
+    mode: string;
+    /**
+     * Why the requested mode was refused, when known: currently
+     * `"managed_policy"`. Absent on success or when the cause is unknown.
+     */
+    reason?: PermissionModeRefusalReason | (string & {});
+}
+
+/**
+ * Error thrown when `session.create` / `session.resume` fails. When the
+ * runtime attached a Policy Helper failure to the JSON-RPC error data
+ * (`error.data.policyHelperFailure`), it is exposed as
+ * {@link policyHelperFailure}.
+ */
+export interface SessionStartError extends Error {
+    /** JSON-RPC error code, when the failure was a JSON-RPC error. */
+    code?: number;
+    /** JSON-RPC error data, when present. */
+    data?: unknown;
+    /** Structured Policy Helper failure from `error.data.policyHelperFailure`. */
+    policyHelperFailure?: PolicyHelperFailure;
 }
 
 /** Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto"). */

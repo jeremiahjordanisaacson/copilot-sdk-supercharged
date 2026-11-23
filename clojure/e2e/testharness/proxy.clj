@@ -7,16 +7,47 @@
 ;;;; Manages a child process that acts as a replaying proxy to AI endpoints.
 ;;;; Spawns the shared test harness server from test/harness/server.ts.
 
-(ns copilot-e2e.testharness.proxy
+(ns testharness.proxy
   "Manages the replaying CAPI proxy server for Clojure E2E tests.
 
   The proxy replays recorded HTTP exchanges so that E2E tests run
   deterministically without hitting real AI endpoints."
+  (:require [clojure.string :as str])
   (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]
-           [java.io BufferedReader InputStreamReader]))
+           [java.io BufferedReader File InputStreamReader]))
 
 ;; Proxy state: {:process Process, :url String}
 (def ^:private proxy-state (atom nil))
+
+(defn find-cli-path
+  "Locate the Copilot CLI for E2E tests (run from the clojure/ directory).
+
+  Lookup order: the COPILOT_CLI_PATH environment variable (when it names an
+  existing file), nodejs/node_modules/@github/copilot/npm-loader.js, then the
+  legacy index.js entry points.  `copilot.client` runs `.js` paths with node
+  and executes any other path (such as node_modules/.bin/copilot) directly."
+  []
+  (let [github-dir (.getCanonicalFile (File. "../nodejs/node_modules/@github"))
+        env-path   (System/getenv "COPILOT_CLI_PATH")
+        from-env   (when-not (str/blank? env-path)
+                     [(.getAbsoluteFile (File. ^String env-path))])
+        legacy     (->> (or (.listFiles github-dir) (make-array File 0))
+                        (filter (fn [^File d]
+                                  (let [n (.getName d)]
+                                    (and (str/starts-with? n "copilot-")
+                                         (not (str/includes? n "language-server"))))))
+                        (sort-by (fn [^File d] (.getName d)))
+                        (map (fn [^File d] (File. d "index.js"))))
+        candidates (concat from-env
+                           [(File. github-dir "copilot/npm-loader.js")]
+                           legacy
+                           [(File. github-dir "copilot/index.js")])]
+    (if-let [^File found (first (filter (fn [^File f] (.isFile f)) candidates))]
+      (.getPath found)
+      (throw (ex-info (str "CLI not found for E2E tests. Set COPILOT_CLI_PATH or run "
+                           "`npm install` in the nodejs/ directory. Looked at: "
+                           (str/join ", " (map str candidates)))
+                      {:candidates (mapv str candidates)})))))
 
 (defn start-proxy!
   "Launch the replaying proxy server and return its URL.

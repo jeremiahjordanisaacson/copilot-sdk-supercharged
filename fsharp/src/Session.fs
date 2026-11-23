@@ -19,6 +19,10 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     let mutable workspacePath = initialWorkspacePath
     let mutable subagentStartHook : SubagentStartHandler option = None
     let mutable subagentStopHook : SubagentStopHandler option = None
+    let mutable shellAuthenticationHandler : ShellAuthenticationHandler option = None
+    let mutable storeMemoryHandler : StoreMemoryHandler option = None
+    let pendingShellAuthentications =
+        System.Collections.Concurrent.ConcurrentDictionary<string, CancellationTokenSource>()
     let mutable disconnectCallbacks : (unit -> unit) list = []
 
     let dispatchEvent (evt: SessionEvent) =
@@ -147,6 +151,7 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
                        displayPrompt = options.DisplayPrompt
                        requestHeaders = options.RequestHeaders |})
         WireJson.setOpt request "source" options.Source
+        WireJson.setOpt request "clientTurnId" options.ClientTurnId
         match options.ResponseSchema with
         | Some schema -> WireJson.set request "responseFormat" (box (MessageOptions.responseFormatFor schema))
         | None -> ()
@@ -235,6 +240,31 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
                 {| sessionId = sessionId |})
     }
 
+    /// Change the session's permission mode. When the runtime refuses the
+    /// change, Success is false and Reason may be
+    /// PermissionModeRefusalReason.ManagedPolicy ("managed_policy").
+    member _.SetPermissionModeAsync(mode: string, ?cancellationToken: CancellationToken) : Async<PermissionModeSetResult> = async {
+        let! result =
+            rpc.SendRequestAsync<JsonElement>(
+                "session.permissions.setMode",
+                {| sessionId = sessionId; mode = mode |})
+        let tryString (name: string) =
+            if result.ValueKind <> JsonValueKind.Object then None
+            else
+                match result.TryGetProperty(name) with
+                | true, v when v.ValueKind = JsonValueKind.String -> Some (v.GetString())
+                | _ -> None
+        let success =
+            result.ValueKind = JsonValueKind.Object
+            && (match result.TryGetProperty("success") with
+                | true, v -> v.ValueKind = JsonValueKind.True
+                | _ -> false)
+        return
+            ({ Success = success
+               Mode = tryString "mode" |> Option.defaultValue mode
+               Reason = tryString "reason" } : PermissionModeSetResult)
+    }
+
     /// Disconnect this session and release its in-memory resources. Session
     /// state on disk is preserved so it can be resumed later. Sends
     /// `session.detach`, falling back to `session.destroy` on older CLIs.
@@ -249,6 +279,11 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
         toolHandlers.Clear()
         subagentStartHook <- None
         subagentStopHook <- None
+        shellAuthenticationHandler <- None
+        storeMemoryHandler <- None
+        for pending in pendingShellAuthentications.Values do
+            try pending.Cancel()
+            with _ -> ()
         let callbacks = disconnectCallbacks
         disconnectCallbacks <- []
         for callback in callbacks do
@@ -260,6 +295,58 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     member internal _.SetSubagentHooks(onStart: SubagentStartHandler option, onStop: SubagentStopHandler option) =
         subagentStartHook <- onStart
         subagentStopHook <- onStop
+
+    /// Register the shell authentication handler for this session.
+    member internal _.SetShellAuthenticationHandler(handler: ShellAuthenticationHandler option) =
+        shellAuthenticationHandler <- handler
+
+    /// Register the store-memory callback for this session.
+    member internal _.SetMemoryStoreHandler(handler: StoreMemoryHandler option) =
+        storeMemoryHandler <- handler
+
+    /// Answer a `shellAuthentication.request`. Returns ShellAuthenticationCancel
+    /// when no handler is registered, the request id is already pending, the
+    /// handler fails, or the request is cancelled before the handler answers.
+    member internal _.HandleShellAuthenticationAsync(request: ShellAuthenticationRequest) : Async<ShellAuthenticationResult> = async {
+        match shellAuthenticationHandler with
+        | None -> return ShellAuthenticationCancel
+        | Some handler ->
+            let cts = new CancellationTokenSource()
+            if not (pendingShellAuthentications.TryAdd(request.RequestId, cts)) then
+                cts.Dispose()
+                return ShellAuthenticationCancel
+            else
+                try
+                    let answer = Async.StartAsTask(handler request cts.Token, cancellationToken = cts.Token)
+                    let cancelled = Task.Delay(Timeout.Infinite, cts.Token)
+                    let! winner = Task.WhenAny(answer :> Task, cancelled) |> Async.AwaitTask
+                    if cts.IsCancellationRequested || not (obj.ReferenceEquals(winner, answer)) then
+                        return ShellAuthenticationCancel
+                    elif answer.Status = TaskStatus.RanToCompletion then
+                        return answer.Result
+                    else
+                        return ShellAuthenticationCancel
+                finally
+                    pendingShellAuthentications.TryRemove(request.RequestId) |> ignore
+                    try cts.Cancel()
+                    with _ -> ()
+                    cts.Dispose()
+    }
+
+    /// Cancel a pending shell authentication prompt (`shellAuthentication.cancel`).
+    member internal _.CancelShellAuthentication(requestId: string) =
+        match pendingShellAuthentications.TryGetValue(requestId) with
+        | true, cts ->
+            try cts.Cancel()
+            with _ -> ()
+        | _ -> ()
+
+    /// Deliver a `memoryStore.store` request to the store-memory callback.
+    member internal _.HandleMemoryStoreAsync(memory: StoredMemory) : Async<unit> = async {
+        match storeMemoryHandler with
+        | Some handler -> do! handler memory
+        | None -> return raise (InvalidOperationException("No memory store is registered for this session"))
+    }
 
     /// Register a callback invoked once the session is disconnected.
     member internal _.AddDisconnectCallback(callback: unit -> unit) =

@@ -33,8 +33,14 @@ module DefineTool =
         { Tool =
             { Name = name
               Description = description
-              Parameters = parameters }
+              Parameters = parameters
+              Idempotent = None }
           Handler = handler }
+
+    /// Mark a tool as idempotent: repeating a call with the same arguments has
+    /// no additional side effects (sent as `idempotent` in tools.definitions).
+    let idempotent (tool: RegisteredTool) : RegisteredTool =
+        { tool with Tool = { tool.Tool with Idempotent = Some true } }
 
     /// Create a RegisteredTool using a typed argument extractor.
     /// The extractor deserializes the arguments JSON element into a typed value,
@@ -74,13 +80,15 @@ module DefineTool =
         { Name: string
           Description: string
           Parameters: ToolParameterSchema option
-          Handler: ToolHandler option }
+          Handler: ToolHandler option
+          Idempotent: bool option }
 
     let define (name: string) (description: string) : ToolBuilder =
         { Name = name
           Description = description
           Parameters = None
-          Handler = None }
+          Handler = None
+          Idempotent = None }
 
     let withParameters (schema: ToolParameterSchema) (builder: ToolBuilder) : ToolBuilder =
         { builder with Parameters = Some schema }
@@ -88,7 +96,13 @@ module DefineTool =
     let withHandler (handler: ToolHandler) (builder: ToolBuilder) : ToolBuilder =
         { builder with Handler = Some handler }
 
+    /// Declare whether the tool is idempotent (sent as `idempotent`).
+    let withIdempotent (value: bool) (builder: ToolBuilder) : ToolBuilder =
+        { builder with Idempotent = Some value }
+
     let build (builder: ToolBuilder) : RegisteredTool =
         match builder.Handler with
-        | Some handler -> create builder.Name builder.Description builder.Parameters handler
+        | Some handler ->
+            let registered = create builder.Name builder.Description builder.Parameters handler
+            { registered with Tool = { registered.Tool with Idempotent = builder.Idempotent } }
         | None -> failwith "Tool handler is required. Call withHandler before build."

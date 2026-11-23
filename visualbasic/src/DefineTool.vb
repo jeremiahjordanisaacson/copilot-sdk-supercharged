@@ -53,6 +53,23 @@ Namespace GitHub.Copilot.SDK
         Public Property Handler As Func(Of Object, Task(Of String))
 
         ''' <summary>
+        ''' Whether repeating a call with the same arguments is safe (no additional side effects).
+        ''' Sent as <c>idempotent</c> in <c>tools.definitions</c>; omitted when Nothing.
+        ''' </summary>
+        Public Property Idempotent As Boolean? = Nothing
+
+        ''' <summary>Build the <c>tools.definitions</c> wire entry for this tool.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object) From {
+                {"name", Name},
+                {"description", Description}
+            }
+            If ParametersSchema IsNot Nothing Then d("parameters") = ParametersSchema
+            If Idempotent.HasValue Then d("idempotent") = Idempotent.Value
+            Return d
+        End Function
+
+        ''' <summary>
         ''' Creates an empty tool definition. Set properties before registering.
         ''' </summary>
         Public Sub New()

@@ -21,6 +21,18 @@ public struct JsonRpcError: Error, @unchecked Sendable {
     public var localizedDescription: String {
         "JSON-RPC Error \(code): \(message)"
     }
+
+    /// True when the server does not implement the requested method.
+    public var isMethodNotFound: Bool {
+        code == -32601 || message.hasPrefix("Unhandled method")
+    }
+
+    /// The Policy Helper failure attached to the error data (`error.data.policyHelperFailure`),
+    /// for example when `session.create` or `session.resume` fails because of managed policy.
+    public var policyHelperFailure: PolicyHelperFailure? {
+        guard let failure = data?["policyHelperFailure"] as? [String: Any] else { return nil }
+        return PolicyHelperFailure.from(failure)
+    }
 }
 
 // MARK: - Request Handler
@@ -293,8 +305,11 @@ public actor JsonRpcClient {
             let params = message["params"] as? [String: Any] ?? [:]
 
             if hasId {
-                // Server request - needs a response
-                await handleServerRequest(id: message["id"]!, method: method, params: params)
+                // Server request: answer it concurrently so a long-running handler (a tool,
+                // a shell authentication prompt) neither blocks reading the next message nor
+                // prevents a later cancel request from being processed.
+                let id = message["id"]!
+                Task { await self.handleServerRequest(id: id, method: method, params: params) }
             } else {
                 // Server notification
                 await notificationHandler?(method, params)

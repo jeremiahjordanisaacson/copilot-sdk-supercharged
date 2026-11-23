@@ -66,6 +66,11 @@ public:
     /// (`session.managedSettings.recheckPolicyHelper`).
     nlohmann::json recheckPolicyHelper();
 
+    /// Requests a permission mode (see PermissionMode) via `session.permissions.setMode`.
+    /// When managed policy refuses the change, `success` is false and `reason` is
+    /// PermissionModeRefusalReason::ManagedPolicy.
+    PermissionModeResult setPermissionMode(const std::string& mode);
+
     /// Subscribe to all events from this session.
     /// @return An ID that can be passed to off() to unsubscribe.
     uint64_t on(SessionEventHandler handler);
@@ -126,6 +131,19 @@ public:
     /// @internal Handle an exit plan mode request from the CLI.
     ExitPlanModeResponse handleExitPlanModeRequest(const ExitPlanModeRequest& request);
 
+    /// @internal Register a shell authentication handler.
+    void registerShellAuthenticationHandler(ShellAuthenticationHandler handler);
+
+    /// @internal Handle a shell authentication request from the CLI (cancel when no handler).
+    ShellAuthenticationResponse handleShellAuthenticationRequest(const ShellAuthenticationRequest& request,
+                                                                 std::function<bool()> isCancelled);
+
+    /// @internal Register a memory store callback.
+    void registerMemoryStoreHandler(MemoryStoreHandler handler);
+
+    /// @internal Hand a stored memory to the callback; returns false when none is registered.
+    bool handleMemoryStore(const StoredMemory& memory);
+
 private:
     friend class CopilotClient;
 
@@ -163,6 +181,14 @@ private:
     // Exit plan mode handler
     mutable std::mutex exitPlanModeMutex_;
     ExitPlanModeHandler exitPlanModeHandler_;
+
+    // Shell authentication handler
+    mutable std::mutex shellAuthenticationMutex_;
+    ShellAuthenticationHandler shellAuthenticationHandler_;
+
+    // Memory store callback
+    mutable std::mutex memoryStoreMutex_;
+    MemoryStoreHandler memoryStoreHandler_;
 
     // Invoked once after a successful destroy() (e.g. to drop a GitHub token
     // provider registration). Guarded by handlerMutex_.

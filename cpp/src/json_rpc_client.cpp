@@ -233,13 +233,14 @@ void JsonRpcClient::handleResponse(const nlohmann::json& msg) {
     }
 
     if (msg.contains("error") && !msg["error"].is_null()) {
-        auto& err = msg["error"];
-        std::string errMsg = "JSON-RPC Error";
-        if (err.contains("code")) errMsg += " " + std::to_string(err["code"].get<int>());
-        if (err.contains("message")) errMsg += ": " + err["message"].get<std::string>();
+        const auto& err = msg["error"];
+        int code = err.contains("code") && err["code"].is_number_integer() ? err["code"].get<int>() : -1;
+        std::string message = err.contains("message") && err["message"].is_string()
+            ? err["message"].get<std::string>() : std::string("Unknown error");
+        nlohmann::json data = err.contains("data") ? err["data"] : nlohmann::json(nullptr);
         try {
             pending->promise.set_exception(
-                std::make_exception_ptr(std::runtime_error(errMsg)));
+                std::make_exception_ptr(JsonRpcException(code, std::move(message), std::move(data))));
         } catch (...) {}
     } else {
         nlohmann::json result = nullptr;

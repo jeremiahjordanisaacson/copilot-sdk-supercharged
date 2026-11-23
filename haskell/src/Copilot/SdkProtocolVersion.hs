@@ -12,4 +12,4 @@ module Copilot.SdkProtocolVersion
 
 -- | The SDK protocol version.
 sdkProtocolVersion :: Int
-sdkProtocolVersion = 3
+sdkProtocolVersion = 4

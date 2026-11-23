@@ -7,10 +7,12 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'json_rpc_client.dart';
 import 'sdk_protocol_version.dart';
 import 'session.dart';
+import 'session_params.dart';
 import 'types.dart';
 
 /// Main client for interacting with the Copilot CLI.
@@ -67,6 +69,12 @@ class CopilotClient {
   late final Map<String, String>? _env;
   late final String? _githubToken;
   late final bool _useLoggedInUser;
+  late final ClientInfo? _clientInfo;
+  late final String _mode;
+  late final NetworkConfig? _network;
+
+  // GitHub token providers by registration ID (gitHubToken.getToken).
+  final Map<String, GitHubTokenProvider> _gitHubTokenProviders = {};
 
   /// Creates a new [CopilotClient].
   ///
@@ -109,15 +117,25 @@ class CopilotClient {
     _githubToken = options.githubToken;
     _useLoggedInUser =
         options.useLoggedInUser ?? (options.githubToken != null ? false : true);
+    _clientInfo = options.clientInfo;
+    _mode = _resolveMode(options.mode);
+    _network = options.network;
   }
 
   /// Current connection state.
   ConnectionState get state => _state;
 
+  /// Effective client mode: [ClientMode.codingAgent] (the default) or
+  /// [ClientMode.empty].
+  String get mode => _mode;
+
   /// Starts the CLI server and establishes a connection.
   ///
   /// If connecting to an external server (via cliUrl), only establishes the
-  /// connection. Otherwise, spawns the CLI process and connects.
+  /// connection. Otherwise, spawns the CLI process and connects. Then
+  /// declares [CopilotClientOptions.clientInfo] on `connect` (when set),
+  /// verifies that the server speaks SDK protocol 4 (Copilot CLI 1.0.113 or
+  /// newer), and registers the network callbacks (`network.setProvider`).
   ///
   /// Called automatically on first use when [CopilotClientOptions.autoStart]
   /// is true (the default).
@@ -131,7 +149,9 @@ class CopilotClient {
         await _startCliServer();
       }
       await _connectToServer();
+      await _sendClientInfo();
       await _verifyProtocolVersion();
+      await _registerNetworkProvider();
       _state = ConnectionState.connected;
     } catch (e) {
       _state = ConnectionState.error;
@@ -146,8 +166,8 @@ class CopilotClient {
   Future<List<Exception>> stop() async {
     final errors = <Exception>[];
 
-    // Destroy all active sessions with retry logic.
-    for (final session in _sessions.values) {
+    // Detach all active sessions with retry logic.
+    for (final session in _sessions.values.toList()) {
       final sessionId = session.sessionId;
       Exception? lastError;
 
@@ -172,6 +192,7 @@ class CopilotClient {
       }
     }
     _sessions.clear();
+    _gitHubTokenProviders.clear();
 
     // Close notification subscription.
     await _notificationSub?.cancel();
@@ -221,6 +242,7 @@ class CopilotClient {
   Future<void> forceStop() async {
     _forceStopping = true;
     _sessions.clear();
+    _gitHubTokenProviders.clear();
 
     await _notificationSub?.cancel();
     _notificationSub = null;
@@ -259,31 +281,46 @@ class CopilotClient {
   /// Creates a new conversation session.
   ///
   /// If the client is not connected and [autoStart] is enabled, this will
-  /// automatically start the connection.
+  /// automatically start the connection. The flat options are grouped for
+  /// SDK protocol 4 right before `session.create` is sent. A failure throws
+  /// a [JsonRpcError]; [JsonRpcError.policyHelperFailure] exposes a Policy
+  /// Helper failure reported by the runtime.
   Future<CopilotSession> createSession([SessionConfig? config]) async {
     config ??= const SessionConfig();
+    _validateSessionOptions(
+      gitHubToken: config.gitHubToken,
+      gitHubTokenProvider: config.gitHubTokenProvider,
+      availableTools: config.availableTools,
+    );
     await _ensureConnected();
+
+    final tokenProvider = config.gitHubTokenProvider;
+    final registrationId = tokenProvider == null ? null : _newRegistrationId();
 
     final params = <String, dynamic>{
       if (config.model != null) 'model': config.model,
       if (config.sessionId != null) 'sessionId': config.sessionId,
+      if (config.name != null) 'name': config.name,
       if (config.reasoningEffort != null)
         'reasoningEffort': config.reasoningEffort,
       if (config.tools != null)
         'tools': config.tools!.map((t) => t.toJson()).toList(),
       if (config.systemMessage != null)
-        'systemMessage': config.systemMessage is String
-            ? config.systemMessage
-            : (config.systemMessage as dynamic).toJson(),
+        'systemMessage': _systemMessageToWire(config.systemMessage),
       if (config.availableTools != null) 'availableTools': config.availableTools,
       if (config.excludedTools != null) 'excludedTools': config.excludedTools,
       if (config.provider != null) 'provider': config.provider!.toJson(),
       'requestPermission': config.onPermissionRequest != null,
       'requestUserInput': config.onUserInputRequest != null,
       'hooks': config.hooks?.hasAny ?? false,
+      if (config.onShellAuthenticationRequest != null)
+        'requestShellAuthentication': true,
+      if (config.onStoreMemory != null) 'hasMemoryStore': true,
       if (config.workingDirectory != null)
         'workingDirectory': config.workingDirectory,
       if (config.streaming != null) 'streaming': config.streaming,
+      if (config.includeSubAgentStreamingEvents != null)
+        'includeSubAgentStreamingEvents': config.includeSubAgentStreamingEvents,
       if (config.mcpServers != null)
         'mcpServers':
             config.mcpServers!.map((k, v) => MapEntry(k, v.toJson())),
@@ -295,6 +332,17 @@ class CopilotClient {
       if (config.disabledSkills != null) 'disabledSkills': config.disabledSkills,
       if (config.infiniteSessions != null)
         'infiniteSessions': config.infiniteSessions!.toJson(),
+      if (config.modelCapabilities != null)
+        'modelCapabilities': config.modelCapabilities,
+      if (config.enableConfigDiscovery != null)
+        'enableConfigDiscovery': config.enableConfigDiscovery,
+      if (config.gitHubToken != null) 'gitHubToken': config.gitHubToken,
+      if (registrationId != null)
+        'gitHubTokenProviderRegistrationId': registrationId,
+      if (config.enableSessionTelemetry != null)
+        'enableSessionTelemetry': config.enableSessionTelemetry,
+      if (config.instructionDirectories != null)
+        'instructionDirectories': config.instructionDirectories,
       // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
       if (config.enableCitations != null)
         'enableCitations': config.enableCitations,
@@ -302,13 +350,14 @@ class CopilotClient {
         'excludedBuiltinAgents': config.excludedBuiltinAgents,
       if (config.sessionLimits != null)
         'sessionLimits': config.sessionLimits!.toJson(),
-      if (config.memory != null) 'memory': config.memory!.toJson(),
+      if (config.memory != null)
+        'memory': config.memory!.toJson()
+      else if (config.onStoreMemory != null)
+        // An app-side memory store needs memory enabled.
+        'memory': <String, dynamic>{'enabled': true},
       if (config.otlpProtocol != null) 'otlpProtocol': config.otlpProtocol,
-      if (config.enableWebSocketResponses != null)
-        'enableWebSocketResponses': config.enableWebSocketResponses,
       if (config.expAssignments != null)
         'expAssignments': config.expAssignments,
-      if (config.onMcpAuthRequest != null) 'mcpAuthHandler': true,
       // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
       if (config.rewindEnabled != null) 'rewindEnabled': config.rewindEnabled,
       if (config.additionalDirectories != null)
@@ -322,10 +371,36 @@ class CopilotClient {
         'customAgentsLocalOnly': config.customAgentsLocalOnly,
       if (config.toolSearch != null) 'toolSearch': config.toolSearch,
       if (config.experimentalMode != null)
-        'experimentalMode': config.experimentalMode,
+        'enableExperimentalMode': config.experimentalMode,
       if (config.contentExclusion != null)
         'contentExclusion': config.contentExclusion,
+      // --- v2.6.0 upstream-sync session options ---
+      if (config.askUserVariant != null) 'askUserVariant': config.askUserVariant,
+      if (config.sandboxConfig != null)
+        'sandboxConfig': config.sandboxConfig!.toJson(),
+      if (config.featureFlags != null) 'featureFlags': config.featureFlags,
+      if (config.allowedModels != null) 'allowedModels': config.allowedModels,
+      if (config.authClientIdMetadataUrl != null)
+        'authClientIdMetadataUrl': config.authClientIdMetadataUrl,
+      if (config.agentDirectories != null)
+        'agentDirectories': config.agentDirectories,
+      if (config.hookDirectories != null)
+        'hookDirectories': config.hookDirectories,
+      if (config.trustWorkingDirectory != null)
+        'trustWorkingDirectory': config.trustWorkingDirectory,
+      if (config.imageGeneration != null)
+        'imageGeneration': config.imageGeneration!.toJson(),
+      if (config.autopilot != null) 'autopilot': config.autopilot!.toJson(),
+      // --- v3.0.0 (SDK protocol 4) session options ---
+      if (config.providers != null)
+        'providers': config.providers!.map((p) => p.toJson()).toList(),
+      if (config.models != null)
+        'models': config.models!.map((m) => m.toJson()).toList(),
+      if (config.defaultProvider != null)
+        'defaultProvider': config.defaultProvider,
     };
+    final capi = _capiToWire(config.capi, config.enableWebSocketResponses);
+    if (capi != null) params['capi'] = capi;
 
     // BYOK: resolve a per-session bearer token for the provider, if requested.
     if (config.bearerTokenProvider != null && params['provider'] is Map) {
@@ -337,16 +412,23 @@ class CopilotClient {
       }
     }
 
-    final response =
-        await _connection!.sendRequest('session.create', params) as Map<String, dynamic>;
+    final payload = _groupForMode(params, isResume: false);
+    if (registrationId != null) {
+      _gitHubTokenProviders[registrationId] = tokenProvider!;
+    }
+
+    final Map<String, dynamic> response;
+    try {
+      response = await _connection!.sendRequest('session.create', payload)
+          as Map<String, dynamic>;
+    } catch (_) {
+      if (registrationId != null) _gitHubTokenProviders.remove(registrationId);
+      rethrow;
+    }
     final sessionId = response['sessionId'] as String;
     final workspacePath = response['workspacePath'] as String?;
 
-    final session = CopilotSession(
-      sessionId: sessionId,
-      connection: _connection!,
-      workspacePath: workspacePath,
-    );
+    final session = _newSession(sessionId, workspacePath, registrationId);
 
     session.registerTools(config.tools);
     if (config.onPermissionRequest != null) {
@@ -358,18 +440,35 @@ class CopilotClient {
     if (config.hooks != null) {
       session.registerHooks(config.hooks);
     }
+    session.registerShellAuthenticationHandler(
+        config.onShellAuthenticationRequest);
+    session.registerMemoryStore(config.onStoreMemory);
 
     _sessions[sessionId] = session;
     return session;
   }
 
   /// Resumes an existing session by its ID.
+  ///
+  /// The flat options are grouped for SDK protocol 4 right before
+  /// `session.resume` is sent. A failure throws a [JsonRpcError];
+  /// [JsonRpcError.policyHelperFailure] exposes a Policy Helper failure.
   Future<CopilotSession> resumeSession(
     String sessionId, [
     ResumeSessionConfig? config,
   ]) async {
     config ??= const ResumeSessionConfig();
+    _validateSessionOptions(
+      gitHubToken: config.gitHubToken,
+      gitHubTokenProvider: config.gitHubTokenProvider,
+      availableTools: config.availableTools,
+    );
     await _ensureConnected();
+
+    final tokenProvider = config.gitHubTokenProvider;
+    final registrationId = tokenProvider == null ? null : _newRegistrationId();
+    final suppressResumeEvent =
+        config.suppressResumeEvent ?? config.disableResume;
 
     final params = <String, dynamic>{
       'sessionId': sessionId,
@@ -379,19 +478,25 @@ class CopilotClient {
       if (config.tools != null)
         'tools': config.tools!.map((t) => t.toJson()).toList(),
       if (config.systemMessage != null)
-        'systemMessage': config.systemMessage is String
-            ? config.systemMessage
-            : (config.systemMessage as dynamic).toJson(),
+        'systemMessage': _systemMessageToWire(config.systemMessage),
       if (config.availableTools != null) 'availableTools': config.availableTools,
       if (config.excludedTools != null) 'excludedTools': config.excludedTools,
       if (config.provider != null) 'provider': config.provider!.toJson(),
       'requestPermission': config.onPermissionRequest != null,
       'requestUserInput': config.onUserInputRequest != null,
       'hooks': config.hooks?.hasAny ?? false,
+      if (config.onShellAuthenticationRequest != null)
+        'requestShellAuthentication': true,
+      if (config.onStoreMemory != null) 'hasMemoryStore': true,
+      if (config.onStoreMemory != null)
+        // An app-side memory store needs memory enabled.
+        'memory': <String, dynamic>{'enabled': true},
       if (config.workingDirectory != null)
         'workingDirectory': config.workingDirectory,
       if (config.configDir != null) 'configDir': config.configDir,
       if (config.streaming != null) 'streaming': config.streaming,
+      if (config.includeSubAgentStreamingEvents != null)
+        'includeSubAgentStreamingEvents': config.includeSubAgentStreamingEvents,
       if (config.mcpServers != null)
         'mcpServers':
             config.mcpServers!.map((k, v) => MapEntry(k, v.toJson())),
@@ -402,19 +507,66 @@ class CopilotClient {
       if (config.disabledSkills != null) 'disabledSkills': config.disabledSkills,
       if (config.infiniteSessions != null)
         'infiniteSessions': config.infiniteSessions!.toJson(),
-      if (config.disableResume != null) 'disableResume': config.disableResume,
+      if (config.modelCapabilities != null)
+        'modelCapabilities': config.modelCapabilities,
+      if (config.enableConfigDiscovery != null)
+        'enableConfigDiscovery': config.enableConfigDiscovery,
+      if (config.gitHubToken != null) 'gitHubToken': config.gitHubToken,
+      if (registrationId != null)
+        'gitHubTokenProviderRegistrationId': registrationId,
+      if (config.enableSessionTelemetry != null)
+        'enableSessionTelemetry': config.enableSessionTelemetry,
+      if (config.instructionDirectories != null)
+        'instructionDirectories': config.instructionDirectories,
+      if (suppressResumeEvent != null)
+        'suppressResumeEvent': suppressResumeEvent,
+      // --- v2.6.0 upstream-sync resume options ---
+      if (config.askUserVariant != null) 'askUserVariant': config.askUserVariant,
+      if (config.sandboxConfig != null)
+        'sandboxConfig': config.sandboxConfig!.toJson(),
+      if (config.featureFlags != null) 'featureFlags': config.featureFlags,
+      if (config.allowedModels != null) 'allowedModels': config.allowedModels,
+      if (config.authClientIdMetadataUrl != null)
+        'authClientIdMetadataUrl': config.authClientIdMetadataUrl,
+      if (config.agentDirectories != null)
+        'agentDirectories': config.agentDirectories,
+      if (config.hookDirectories != null)
+        'hookDirectories': config.hookDirectories,
+      if (config.allowTranscriptRecovery != null)
+        'allowTranscriptRecovery': config.allowTranscriptRecovery,
+      if (config.imageGeneration != null)
+        'imageGeneration': config.imageGeneration!.toJson(),
+      if (config.autopilot != null) 'autopilot': config.autopilot!.toJson(),
+      // --- v3.0.0 (SDK protocol 4) resume options ---
+      if (config.providers != null)
+        'providers': config.providers!.map((p) => p.toJson()).toList(),
+      if (config.models != null)
+        'models': config.models!.map((m) => m.toJson()).toList(),
+      if (config.defaultProvider != null)
+        'defaultProvider': config.defaultProvider
+      else if (config.clearDefaultProvider == true)
+        'defaultProvider': null,
     };
+    final capi = _capiToWire(config.capi, null);
+    if (capi != null) params['capi'] = capi;
 
-    final response =
-        await _connection!.sendRequest('session.resume', params) as Map<String, dynamic>;
-    final resumedId = response['sessionId'] as String;
+    final payload = _groupForMode(params, isResume: true);
+    if (registrationId != null) {
+      _gitHubTokenProviders[registrationId] = tokenProvider!;
+    }
+
+    final Map<String, dynamic> response;
+    try {
+      response = await _connection!.sendRequest('session.resume', payload)
+          as Map<String, dynamic>;
+    } catch (_) {
+      if (registrationId != null) _gitHubTokenProviders.remove(registrationId);
+      rethrow;
+    }
+    final resumedId = response['sessionId'] as String? ?? sessionId;
     final workspacePath = response['workspacePath'] as String?;
 
-    final session = CopilotSession(
-      sessionId: resumedId,
-      connection: _connection!,
-      workspacePath: workspacePath,
-    );
+    final session = _newSession(resumedId, workspacePath, registrationId);
 
     session.registerTools(config.tools);
     if (config.onPermissionRequest != null) {
@@ -426,9 +578,103 @@ class CopilotClient {
     if (config.hooks != null) {
       session.registerHooks(config.hooks);
     }
+    session.registerShellAuthenticationHandler(
+        config.onShellAuthenticationRequest);
+    session.registerMemoryStore(config.onStoreMemory);
 
     _sessions[resumedId] = session;
     return session;
+  }
+
+  /// Validates options shared by [createSession] and [resumeSession].
+  void _validateSessionOptions({
+    String? gitHubToken,
+    GitHubTokenProvider? gitHubTokenProvider,
+    List<String>? availableTools,
+  }) {
+    if (gitHubToken != null && gitHubTokenProvider != null) {
+      throw ArgumentError(
+          'gitHubToken and gitHubTokenProvider are mutually exclusive');
+    }
+    if (_mode == ClientMode.empty && availableTools == null) {
+      throw ArgumentError(
+        "CopilotClient is in mode 'empty' but the session config did not "
+        "specify 'availableTools'. Empty mode requires every session to opt "
+        'into the tools it wants.',
+      );
+    }
+  }
+
+  /// Groups the flat payload for SDK protocol 4 and applies the empty-mode
+  /// defaults under the caller's values.
+  Map<String, dynamic> _groupForMode(
+    Map<String, dynamic> params, {
+    required bool isResume,
+  }) {
+    final payload = groupSessionParams(params, isResume: isResume);
+    return _mode == ClientMode.empty
+        ? applyEmptyModeSessionDefaults(payload)
+        : payload;
+  }
+
+  /// Creates a session object that unregisters itself (and its GitHub token
+  /// provider) when it is detached.
+  CopilotSession _newSession(
+    String sessionId,
+    String? workspacePath,
+    String? registrationId,
+  ) {
+    late final CopilotSession session;
+    session = CopilotSession(
+      sessionId: sessionId,
+      connection: _connection!,
+      workspacePath: workspacePath,
+      onClose: () {
+        if (identical(_sessions[sessionId], session)) {
+          _sessions.remove(sessionId);
+        }
+        if (registrationId != null) {
+          _gitHubTokenProviders.remove(registrationId);
+        }
+      },
+    );
+    return session;
+  }
+
+  /// Wire form of the Copilot API options; `enableWebSocketResponses` (a
+  /// legacy flat option) moves under `capi`.
+  static Map<String, dynamic>? _capiToWire(
+    CapiSessionOptions? capi,
+    bool? enableWebSocketResponses,
+  ) {
+    final wire = <String, dynamic>{
+      ...?capi?.toJson(),
+      if (enableWebSocketResponses != null)
+        'enableWebSocketResponses': enableWebSocketResponses,
+    };
+    return wire.isEmpty ? null : wire;
+  }
+
+  /// Wire form of a system message: a plain string is appended to the
+  /// default system message.
+  static dynamic _systemMessageToWire(dynamic systemMessage) {
+    if (systemMessage is String) {
+      return <String, dynamic>{'mode': 'append', 'content': systemMessage};
+    }
+    if (systemMessage is Map) return systemMessage;
+    return systemMessage.toJson();
+  }
+
+  /// A random (version 4) UUID for a callback registration.
+  static String _newRegistrationId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
   }
 
   /// Deletes a session and its data from disk.
@@ -543,6 +789,18 @@ class CopilotClient {
       _modelsCacheLock!.complete();
       _modelsCacheLock = null;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Managed Settings
+  // -------------------------------------------------------------------------
+
+  /// Force-refreshes enterprise managed settings for every account
+  /// (`managedSettings.clearCache`). The next session resolution re-fetches
+  /// the account's policy instead of serving a cached response.
+  Future<void> clearManagedSettingsCache() async {
+    await _ensureConnected();
+    await _connection!.sendRequest('managedSettings.clearCache', {});
   }
 
   // -------------------------------------------------------------------------
@@ -816,6 +1074,87 @@ class CopilotClient {
     _connection!.onRequest('hooks.invoke', (params) async {
       return await _handleHooksInvoke(params as Map<String, dynamic>);
     });
+
+    _connection!.onRequest('gitHubToken.getToken', (params) async {
+      return await _handleGitHubTokenRequest(params);
+    });
+
+    _connection!.onRequest('shellAuthentication.request', (params) async {
+      return await _handleShellAuthenticationRequest(params);
+    });
+
+    _connection!.onRequest('shellAuthentication.cancel', (params) async {
+      if (params is Map) {
+        final sessionId = params['sessionId'];
+        final requestId = params['requestId'];
+        if (sessionId is String && requestId is String) {
+          _sessions[sessionId]?.cancelShellAuthenticationRequest(requestId);
+        }
+      }
+      return <String, dynamic>{};
+    });
+
+    _connection!.onRequest('memoryStore.store', (params) async {
+      final json = params is Map<String, dynamic> ? params : <String, dynamic>{};
+      final session = _sessions[json['sessionId']];
+      if (session == null) {
+        throw StateError('Memory store owner is unavailable');
+      }
+      await session.handleMemoryStore(StoredMemory.fromJson(json));
+      return null;
+    });
+
+    _registerNetworkHandlers();
+  }
+
+  /// Registers the `network.*` request handlers for the configured callbacks.
+  /// Tokens and passwords are never logged.
+  void _registerNetworkHandlers() {
+    final network = _network;
+    if (network == null) return;
+
+    final resolveProxy = network.resolveProxy;
+    if (resolveProxy != null) {
+      _connection!.onRequest('network.resolveProxy', (params) async {
+        final url = params is Map ? params['url'] as String? ?? '' : '';
+        final proxy = await resolveProxy(url);
+        return <String, dynamic>{
+          if (proxy != null && proxy.isNotEmpty) 'proxy': proxy,
+        };
+      });
+    }
+
+    final authenticateNegotiate = network.authenticateNegotiate;
+    if (authenticateNegotiate != null) {
+      _connection!.onRequest('network.authenticateNegotiate', (params) async {
+        final spn = params is Map ? params['spn'] as String? ?? '' : '';
+        final token = await authenticateNegotiate(spn);
+        return <String, dynamic>{
+          if (token != null && token.isNotEmpty) 'token': token,
+        };
+      });
+    }
+
+    final authenticateBasic = network.authenticateBasic;
+    if (authenticateBasic != null) {
+      _connection!.onRequest('network.authenticateBasic', (params) async {
+        final json = params is Map ? params : const <String, dynamic>{};
+        final credentials = await authenticateBasic(
+          NetworkAuthenticateBasicRequest(
+            proxy: json['proxy'] as String? ?? '',
+            realm: json['realm'] as String?,
+            previousRejected: json['previousRejected'] as bool? ?? false,
+          ),
+        );
+        if (credentials == null) return <String, dynamic>{};
+        final username = credentials.username;
+        final password = credentials.password;
+        return <String, dynamic>{
+          if (username != null) 'username': username,
+          if (password != null) 'password': password,
+        };
+      });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -984,6 +1323,42 @@ class CopilotClient {
     return {'output': output};
   }
 
+  /// Answers `gitHubToken.getToken` with the registered provider's
+  /// `{kind: "token", accessToken, tokenType?, expiresIn}` or
+  /// `{kind: "cancelled"}`.
+  Future<Map<String, dynamic>> _handleGitHubTokenRequest(dynamic params) async {
+    final json = params is Map ? params : const <String, dynamic>{};
+    final registrationId = json['registrationId'] as String?;
+    final provider =
+        registrationId == null ? null : _gitHubTokenProviders[registrationId];
+    if (provider == null) {
+      throw StateError(
+          'No GitHub token provider registered for "$registrationId"');
+    }
+    final result = await provider(GitHubTokenRequest(
+      host: json['host'] as String? ?? '',
+      sessionId: json['sessionId'] as String?,
+      reason: json['reason'] as String? ?? '',
+    ));
+    return result.toJson();
+  }
+
+  /// Answers `shellAuthentication.request` with the session's handler,
+  /// or `{action: "cancel"}` when nobody can answer.
+  Future<Map<String, dynamic>> _handleShellAuthenticationRequest(
+      dynamic params) async {
+    if (params is! Map<String, dynamic>) {
+      return const ShellAuthenticationResponse.cancel().toJson();
+    }
+    final request = ShellAuthenticationRequest.fromJson(params);
+    final session = _sessions[request.sessionId];
+    if (session == null || request.requestId.isEmpty) {
+      return const ShellAuthenticationResponse.cancel().toJson();
+    }
+    final response = await session.handleShellAuthenticationRequest(request);
+    return response.toJson();
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
@@ -1014,6 +1389,49 @@ class CopilotClient {
     };
   }
 
+  /// Declares [CopilotClientOptions.clientInfo] on the `connect` handshake.
+  /// Runtimes without `connect` are tolerated.
+  Future<void> _sendClientInfo() async {
+    final wire = _clientInfo?.toWire();
+    if (wire == null) return;
+    try {
+      await _connection!.sendRequest('connect', {'clientInfo': wire});
+    } on JsonRpcError catch (e) {
+      if (!e.isMethodNotFound) rethrow;
+    }
+  }
+
+  /// Calls `network.setProvider` when any network callback is configured,
+  /// marking each registered callback with an empty object.
+  Future<void> _registerNetworkProvider() async {
+    final network = _network;
+    if (network == null || !network.hasCallbacks) return;
+    await _connection!.sendRequest('network.setProvider', {
+      if (network.scope != null) 'scope': network.scope,
+      if (network.resolveProxy != null) 'resolveProxy': <String, dynamic>{},
+      if (network.authenticateNegotiate != null)
+        'authenticateNegotiate': <String, dynamic>{},
+      if (network.authenticateBasic != null)
+        'authenticateBasic': <String, dynamic>{},
+    });
+  }
+
+  /// Resolves [CopilotClientOptions.mode]; `"copilot-cli"` is an alias of
+  /// `"coding-agent"`.
+  static String _resolveMode(String? mode) {
+    switch (mode) {
+      case null:
+      case ClientMode.codingAgent:
+      case ClientMode.copilotCli:
+        return ClientMode.codingAgent;
+      case ClientMode.empty:
+        return ClientMode.empty;
+      default:
+        throw ArgumentError(
+            "Unsupported client mode '$mode'; use 'coding-agent' or 'empty'");
+    }
+  }
+
   Future<void> _verifyProtocolVersion() async {
     final expected = getSdkProtocolVersion();
     final pingResult = await ping();
@@ -1021,15 +1439,15 @@ class CopilotClient {
 
     if (serverVersion == null) {
       throw Exception(
-        'SDK protocol version mismatch: SDK expects version $expected, '
+        'SDK protocol version mismatch: SDK supports version $expected, '
         'but server does not report a protocol version. '
-        'Please update your server to ensure compatibility.',
+        'Please update your SDK or server to ensure compatibility.',
       );
     }
 
     if (serverVersion != expected) {
       throw Exception(
-        'SDK protocol version mismatch: SDK expects version $expected, '
+        'SDK protocol version mismatch: SDK supports version $expected, '
         'but server reports version $serverVersion. '
         'Please update your SDK or server to ensure compatibility.',
       );

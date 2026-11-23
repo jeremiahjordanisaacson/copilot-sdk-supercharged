@@ -51,6 +51,118 @@ async {
 } |> Async.RunSynchronously
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and
+requires **Copilot CLI 1.0.113 or newer**. `StartAsync` rejects older CLIs with an
+`SDK protocol version mismatch: SDK supports version 4, but server reports version N` error.
+
+Existing options keep working. `SessionConfig`, `ResumeSessionConfig`, and `MessageOptions` keep their
+flat F# fields; right before sending `session.create` and `session.resume`, the client translates the
+flat payload into the grouped v4 shape (`inference`, `tools`, `permissions`, `interaction`, `events`,
+`agents`, `mcp`, `github`, `state`, ...) with `SessionWire.groupSessionParams`. For example
+`Streaming = true` is sent as `events.streaming`, sub-agent hooks as `hooks.hasHandlers`, and
+`AutoTier` as `github.capi.autoTier`. The legacy single `Provider` is sent as a named provider called
+`default` (with `inference.defaultProvider = "default"` and `github.capi.enabled = false`, as v1 BYOK
+behaved) unless you also pass the new `Providers` / `DefaultProvider` / `CapiEnabled` options.
+`DeleteSessionAsync` now waits for the server, so a failed delete raises `JsonRpcException`.
+
+| Feature | F# API |
+|---------|--------|
+| Named BYOK providers | `Providers` (`NamedProviderConfig`), `Models` (`ProviderModelConfig`), `DefaultProvider`, `CapiEnabled` on `SessionConfig` / `ResumeSessionConfig`; select a model with `Model = Some "provider/id"`; `ClearDefaultProvider = Some true` on resume sends `defaultProvider: null` |
+| Idempotent tools | `Tools = Some [ ... ]` declares tool definitions (`tools.definitions`) and registers the handlers; `DefineTool.idempotent` or `DefineTool.withIdempotent true` sets `idempotent` |
+| Client turn ID | `MessageOptions.ClientTurnId = Some "turn-1"` (sent as `clientTurnId`) |
+| Client mode | `CopilotClientOptions.Mode = Some ClientMode.Empty`; default is `ClientMode.CodingAgent` (`"coding-agent"`, legacy `"copilot-cli"` accepted). Empty mode requires `AvailableTools` on every create/resume and applies locked-down defaults under your values |
+| Shell output events | `ToolShellOutput` event case (`tool.shell_output`): `ToolCallId`, `Text`, `Sequence`, `Stream` |
+| Shell authentication | `OnShellAuthenticationRequest` answers `shellAuthentication.request` with `ShellAuthenticationAccept value` or `ShellAuthenticationCancel`; the `CancellationToken` fires on `shellAuthentication.cancel` |
+| Memory store | `OnStoreMemory` receives `StoredMemory` from `memoryStore.store` (sends `state.hasMemoryStore`) |
+| Network callbacks | `CopilotClientOptions.Network` (`NetworkOptions`): `ResolveProxy`, `AuthenticateNegotiate`, `AuthenticateBasic`, `Scope`; registered with `network.setProvider` after connecting |
+| Policy helper failure | `JsonRpcException.PolicyHelperFailure` reads `error.data.policyHelperFailure` when `session.create` / `session.resume` fails |
+| Permission mode refusal reason | `session.SetPermissionModeAsync PermissionMode.AllowAll` returns `PermissionModeSetResult` whose `Reason` can be `PermissionModeRefusalReason.ManagedPolicy` (`"managed_policy"`) |
+| Resume event suppression | `ResumeSessionConfig.SuppressResumeEvent = Some true` (wire `suppressResumeEvent`) |
+
+```fsharp
+open CopilotSDK.Supercharged.FSharp
+
+async {
+    use client =
+        CopilotClient.create
+            { CopilotClientOptions.defaults with
+                Mode = Some ClientMode.Empty // every session must list AvailableTools
+                Network =
+                    Some { NetworkOptions.empty with
+                            Scope = Some NetworkScope.Connection
+                            ResolveProxy = Some (fun url -> async { return Some "PROXY proxy.contoso.com:8080; DIRECT" })
+                            AuthenticateBasic =
+                                Some (fun request -> async {
+                                    // request.Proxy, request.Realm, request.PreviousRejected
+                                    return Some { Username = Some "svc-copilot"; Password = Some (loadSecret ()) } }) } }
+    do! client.StartAsync()
+
+    let lookupOrder =
+        DefineTool.createSimple "lookup_order" "Look up an order" (fun () -> async { return "shipped" })
+        |> DefineTool.idempotent
+
+    let config =
+        { SessionConfig.defaults with
+            Model = Some "ollama/llama3"
+            AvailableTools = Some [ "lookup_order"; "view" ]
+            Tools = Some [ lookupOrder ]
+            Providers =
+                Some [ { NamedProviderConfig.create "ollama" "http://localhost:11434/v1" with
+                            ProviderType = Some "openai"
+                            ApiKeyCommand = Some "op read op://dev/ollama/key" } ]
+            Models = Some [ { ProviderModelConfig.create "ollama" "llama3" with MaxOutputTokens = Some 4096 } ]
+            DefaultProvider = Some "ollama"
+            CapiEnabled = Some false
+            OnShellAuthenticationRequest =
+                Some (fun request cancellationToken -> async {
+                    if request.InputKind = ShellAuthenticationInputKind.Confirm then
+                        return ShellAuthenticationCancel
+                    else
+                        return ShellAuthenticationAccept (askUser request.Prompt) })
+            OnStoreMemory = Some (fun memory -> async { saveMemory memory.Subject memory.Fact memory.Citations }) }
+
+    let! session =
+        async {
+            try
+                return! client.CreateSessionAsync(config)
+            with :? JsonRpcException as ex when ex.PolicyHelperFailure.IsSome ->
+                let failure = ex.PolicyHelperFailure.Value
+                printfn "Blocked by the policy helper (%s): %s" failure.Category failure.Message
+                return raise ex
+        }
+
+    use _ = session.On(function
+        | ToolShellOutput data -> printf "%s" data.Text
+        | _ -> ())
+
+    let! _ = session.SendAsync({ MessageOptions.create "Where is order 42?" with ClientTurnId = Some "turn-1" })
+
+    let! modeResult = session.SetPermissionModeAsync(PermissionMode.AllowAll)
+    if not modeResult.Success && modeResult.Reason = Some PermissionModeRefusalReason.ManagedPolicy then
+        printfn "Managed policy keeps the permission mode at %s" modeResult.Mode
+
+    do! session.DisconnectAsync()
+    let! resumed =
+        client.ResumeSessionAsync(
+            { ResumeSessionConfig.create session.SessionId with
+                AvailableTools = Some [ "lookup_order"; "view" ]
+                SuppressResumeEvent = Some true
+                ClearDefaultProvider = Some true })
+    ()
+} |> Async.RunSynchronously
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not available:
+  it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI
+  (stdio or TCP) or connecting to `CliUrl`. The existing `InProcess` option is unchanged.
+- Tool invocations still arrive on this SDK's `session.toolCall` path; `Tools` now declares the
+  definitions to the runtime, but host-owned `external_tool.requested` cancellation is not exposed.
+
 ## API Reference
 
 ### CopilotClient

@@ -7,7 +7,7 @@ C++ SDK for the GitHub Copilot CLI. Communicates with the Copilot CLI server via
 - C++17 compatible compiler (GCC 8+, Clang 7+, MSVC 2019+)
 - CMake 3.16+
 - [nlohmann/json](https://github.com/nlohmann/json) (automatically fetched via CMake FetchContent)
-- [GitHub Copilot CLI](https://github.com/github/copilot) installed and available on PATH (or specify path via `CopilotClientOptions::cliPath`)
+- [GitHub Copilot CLI](https://github.com/github/copilot) 1.0.113 or newer, installed and available on PATH (or specify path via `CopilotClientOptions::cliPath`; `.js` entry points such as `npm-loader.js` run under `node`)
 
 ## Building
 
@@ -55,6 +55,207 @@ int main() {
     return 0;
 }
 ```
+
+## What's New in v3.0.0
+
+The SDK now speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected during `start()` with an "SDK protocol version mismatch" error.
+
+Existing code keeps working unchanged. You still fill the same flat `SessionConfig` / `ResumeSessionConfig` fields; the SDK translates them into the grouped protocol 4 `session.create` / `session.resume` payload internally (for example `streaming` is sent as `events.streaming` and `onPermissionRequest` as `permissions.request`). A legacy single `provider` is sent as a named provider called `default` with Copilot API models disabled, which preserves the v1 BYOK behavior. `ping()` now also reads the ISO 8601 timestamp that current CLIs report.
+
+### Named BYOK providers
+
+Register provider connections and model definitions, then select a model as `<provider>/<id>`. A default provider requires Copilot API models to be disabled:
+
+```cpp
+copilot::NamedProviderConfig gateway;
+gateway.name = "gateway";
+gateway.type = "openai";
+gateway.baseUrl = "https://models.example.com/v1";
+gateway.apiKeyCommand = "get-model-key";
+
+copilot::ProviderModelConfig chat;
+chat.provider = "gateway";
+chat.id = "chat";
+chat.wireModel = "org/chat-large";
+chat.maxOutputTokens = 8192;
+
+copilot::SessionConfig config;
+config.model = "gateway/chat";
+config.providers = std::vector<copilot::NamedProviderConfig>{gateway};
+config.models = std::vector<copilot::ProviderModelConfig>{chat};
+config.defaultProvider = "gateway";
+config.capi = copilot::CapiConfig{false};
+```
+
+On resume, set `ResumeSessionConfig::clearDefaultProvider = true` to clear the default provider.
+
+### Idempotent tools and client turn IDs
+
+```cpp
+copilot::Tool lookup;
+lookup.name = "lookup_order";
+lookup.description = "Looks up an order";
+lookup.handler = lookupOrder;
+lookup.idempotent = true;  // safe to retry
+
+copilot::MessageOptions msg;
+msg.prompt = "Summarize the diff";
+msg.clientTurnId = "turn-42";
+session->send(msg);
+```
+
+### Client mode
+
+`copilot::ClientMode::CodingAgent` (the default, identical to earlier releases) or `copilot::ClientMode::Empty`. Empty mode requires `availableTools` on every create and resume (otherwise `std::invalid_argument` is thrown) and applies minimal defaults (experimental mode, telemetry, cross-session store, memory, on-demand instructions, repository hooks, and host git operations off; in-memory OAuth and embedding storage) underneath your own values:
+
+```cpp
+copilot::CopilotClientOptions options;
+options.mode = copilot::ClientMode::Empty;
+copilot::CopilotClient client(options);
+
+copilot::SessionConfig config;
+config.availableTools = std::vector<std::string>{"view"};
+auto session = client.createSession(config);
+```
+
+### Live shell output
+
+```cpp
+session->on(copilot::SessionEventType::ToolShellOutput, [](const copilot::SessionEvent& event) {
+    if (auto output = event.shellOutput()) {
+        std::cerr << "[" << output->stream.value_or(copilot::ShellOutputStream::Stdout)
+                  << " #" << output->sequence << "] " << output->text;
+    }
+});
+```
+
+### Shell authentication
+
+Answer password and confirmation prompts from commands such as `sudo`, `ssh`, or `git`. The answer goes only to the program that asked. `invocation.isCancelled()` turns true when the runtime withdraws the prompt:
+
+```cpp
+config.onShellAuthenticationRequest = [](const copilot::ShellAuthenticationRequest& request,
+                                         const copilot::ShellAuthenticationInvocation& invocation) {
+    if (request.program != "sudo" || invocation.isCancelled()) {
+        return copilot::ShellAuthenticationResponse::cancel();
+    }
+    return copilot::ShellAuthenticationResponse::accept(readSecret(request.prompt));
+};
+```
+
+### Memory store
+
+```cpp
+config.storeMemory = [&memoryLog](const copilot::StoredMemory& memory) {
+    memoryLog << memory.subject << ": " << memory.fact << " (" << memory.citations << ")\n";
+};
+```
+
+### Network callbacks
+
+Callbacks are registered with `network.setProvider` during `start()`. The SDK never logs tokens or passwords:
+
+```cpp
+copilot::NetworkOptions network;
+network.scope = copilot::NetworkScope::Connection;
+network.resolveProxy = [](const std::string& url) -> std::optional<std::string> {
+    return std::string("PROXY proxy.corp.example:8080; DIRECT");
+};
+network.authenticateBasic = [](const copilot::NetworkBasicAuthRequest& request) {
+    return copilot::NetworkBasicCredentials{"proxy-user", lookupProxyPassword(request.proxy)};
+};
+
+copilot::CopilotClientOptions options;
+options.network = network;
+```
+
+### Policy Helper failures and permission mode refusals
+
+RPC failures now throw `copilot::JsonRpcException` (a `std::runtime_error` with `code()`, `rpcMessage()`, and `data()`):
+
+```cpp
+try {
+    auto session = client.createSession(config);
+} catch (const copilot::JsonRpcException& e) {
+    if (auto failure = e.policyHelperFailure()) {
+        std::cerr << "Policy Helper (" << failure->category << "): " << failure->message << "\n";
+    }
+}
+
+auto result = session->setPermissionMode(copilot::PermissionMode::AllowAll);
+if (!result.success && result.reason == copilot::PermissionModeRefusalReason::ManagedPolicy) {
+    std::cerr << "Managed policy keeps the permission mode at " << result.mode << "\n";
+}
+```
+
+`copilot::PolicyHelperFailure::from(session->getManagedSettings())` reads the same structure from a managed-settings snapshot. Set `config.permissionMode` to request a mode when the session is created.
+
+### Resume without side effects
+
+```cpp
+copilot::ResumeSessionConfig resume;
+resume.suppressResumeEvent = true;  // disableResume remains a legacy alias
+resume.allowTranscriptRecovery = true;
+auto session = client.resumeSession(sessionId, resume);
+```
+
+### Also included (upstream v2.6.0 parity)
+
+```cpp
+// Client identity on the connect handshake
+options.clientInfo = copilot::CopilotClientInfo{std::string("my-editor"), std::string("1.2.0"),
+                                                std::nullopt, std::nullopt};
+
+// GitHub token provider (gitHubToken.getToken); mutually exclusive with gitHubToken
+config.gitHubTokenProvider = [](const copilot::GitHubTokenProviderArgs& args) {
+    return copilot::GitHubTokenProviderResult::token(fetchTokenForHost(args.host), 3600);
+};
+
+// Session options
+config.askUserVariant = copilot::AskUserVariant::Elicitation;
+config.featureFlags = std::map<std::string, bool>{{"newPlanner", true}};
+config.allowedModels = std::vector<std::string>{"claude-sonnet-4.5"};
+config.authClientIdMetadataUrl = "https://example.com/oauth/client-metadata.json";
+config.agentDirectories = std::vector<std::string>{"./agents"};
+config.hookDirectories = std::vector<std::string>{"./hooks"};
+config.trustWorkingDirectory = copilot::TrustWorkingDirectory::Session;  // create only
+config.modelCapabilities = nlohmann::json(copilot::ModelCapabilitiesOverride{
+    std::nullopt, copilot::ModelLimitsOverride{std::nullopt, 4096, std::nullopt}});
+copilot::SandboxConfig sandbox;
+sandbox.enabled = true;
+sandbox.allowBypass = true;
+config.sandboxConfig = sandbox;
+config.imageGeneration = copilot::ImageGenerationConfig{std::nullopt, std::nullopt, true};  // saveToDisk
+config.autopilot = copilot::AutopilotOptions{true, 3};  // continuationEnabled, maxContinues
+copilot::ProviderConfig provider;
+provider.baseUrl = "https://models.example.com/v1";
+provider.apiKeyCommand = "get-model-key";
+
+// Sub-agent lifecycle hooks
+copilot::SessionHooks hooks;
+hooks.onSubagentStart = [](const copilot::SubagentStartHookInput& input, const std::string& sessionId) {
+    return std::optional<copilot::SubagentStartHookOutput>{};
+};
+config.hooks = hooks;
+
+// Message source and structured output
+copilot::MessageOptions msg;
+msg.prompt = "List three colors";
+msg.source = copilot::MessageSource::System;
+nlohmann::json colors = session->sendAndWaitStructured(
+    msg, {{"type", "array"}, {"items", {{"type", "string"}}}});
+
+// Session and client RPCs
+session->setAutoTier(copilot::AutoTier::Fast);  // session.model.switchAutoTier
+session->recheckPolicyHelper();
+client.clearManagedSettingsCache();
+session->destroy();  // session.detach: the session can be resumed later
+```
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not implemented. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process native runtime hosting is not the default connection. The C++ SDK keeps spawning the CLI over stdio (`inProcess` is unchanged).
 
 ## Architecture
 
@@ -329,7 +530,7 @@ config.includeSubAgentStreamingEvents = true;
 
 ## Protocol Version
 
-The SDK verifies protocol compatibility on connection. The expected protocol version is
+The SDK verifies protocol compatibility on connection. The expected protocol version (4) is
 defined in `copilot/sdk_protocol_version.h`. If the server reports a different version,
 an error is thrown during `start()`.
 

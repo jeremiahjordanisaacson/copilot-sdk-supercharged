@@ -9,6 +9,7 @@ import com.github.copilot.Types.*;
 import com.github.copilot.internal.JsonRpcClient;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -47,6 +48,13 @@ public class CopilotSession {
         t.setDaemon(true);
         return t;
     });
+    /** Runs cancellable host callbacks (shell authentication prompts) so a cancel can release the waiting request. */
+    private static final ExecutorService CALLBACK_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "copilot-callback");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final Set<String> SHELL_AUTH_INPUT_KINDS = Set.of("secret", "text", "confirm");
 
     private final String sessionId;
     private final JsonRpcClient client;
@@ -60,6 +68,10 @@ public class CopilotSession {
     private volatile UserInputHandler userInputHandler;
     private volatile SessionHooks hooks;
     private volatile ExitPlanModeHandler exitPlanModeHandler;
+    private volatile ShellAuthenticationHandler shellAuthenticationHandler;
+    private volatile MemoryStoreHandler memoryStoreHandler;
+    /** In-flight shell authentication prompts keyed by request ID, cancelled on {@code shellAuthentication.cancel}. */
+    private final ConcurrentHashMap<String, PendingShellAuthentication> pendingShellAuthentications = new ConcurrentHashMap<>();
     private volatile Runnable onDestroyed;
 
     CopilotSession(String sessionId, JsonRpcClient client, String workspacePath) {
@@ -257,17 +269,24 @@ public class CopilotSession {
     public void destroy() throws Exception {
         Map<String, Object> params = Map.of("sessionId", sessionId);
         try {
-            client.request("session.detach", params);
+            Map<String, Object> result = client.request("session.detach", params);
+            if (Boolean.FALSE.equals(result.get("success"))) {
+                throw new RuntimeException("Failed to disconnect session " + sessionId + ": "
+                    + result.getOrDefault("error", "Unknown error"));
+            }
         } catch (Exception e) {
             if (!JsonRpcClient.isMethodNotFound(e, "session.detach")) throw e;
             client.request("session.destroy", params);
         }
         cancelPendingExternalTools();
+        cancelPendingShellAuthentications();
         eventHandlers.clear();
         typedEventHandlers.clear();
         toolHandlers.clear();
         permissionHandler = null;
         exitPlanModeHandler = null;
+        shellAuthenticationHandler = null;
+        memoryStoreHandler = null;
         Runnable callback = onDestroyed;
         onDestroyed = null;
         if (callback != null) callback.run();
@@ -314,6 +333,22 @@ public class CopilotSession {
         return client.request("session.managedSettings.recheckPolicyHelper", Map.of("sessionId", sessionId));
     }
 
+    /**
+     * Changes the session's permission mode. A refused change reports {@code success == false} with
+     * the authoritative mode and, when known, a {@code reason} such as
+     * {@link Types.PermissionModeRefusalReason#MANAGED_POLICY}.
+     *
+     * @param mode the permission mode (see {@link Types.PermissionMode})
+     * @return the result of the change
+     * @throws Exception if the request fails
+     */
+    public PermissionModeResult setPermissionMode(String mode) throws Exception {
+        Map<String, Object> params = new HashMap<>();
+        params.put("sessionId", sessionId);
+        params.put("mode", mode);
+        return PermissionModeResult.fromMap(client.request("session.permissions.setMode", params));
+    }
+
     // --- Internal methods ---
 
     void registerTools(List<Tool> tools) {
@@ -339,6 +374,118 @@ public class CopilotSession {
 
     void registerExitPlanModeHandler(ExitPlanModeHandler handler) {
         this.exitPlanModeHandler = handler;
+    }
+
+    void registerShellAuthenticationHandler(ShellAuthenticationHandler handler) {
+        this.shellAuthenticationHandler = handler;
+    }
+
+    void registerMemoryStore(MemoryStoreHandler handler) {
+        this.memoryStoreHandler = handler;
+    }
+
+    /**
+     * Answers a {@code shellAuthentication.request}: runs the handler off the request thread so a
+     * {@code shellAuthentication.cancel} can release it, and answers {@code cancel} for invalid
+     * requests, missing handlers, failures, and cancelled prompts. Never logs the answer.
+     */
+    Map<String, Object> handleShellAuthenticationRequest(Map<String, Object> params) {
+        ShellAuthenticationHandler handler = shellAuthenticationHandler;
+        Object requestId = params.get("requestId");
+        Object program = params.get("program");
+        Object prompt = params.get("prompt");
+        Object inputKind = params.get("inputKind");
+        if (handler == null || !(requestId instanceof String) || !(program instanceof String)
+            || !(prompt instanceof String) || !SHELL_AUTH_INPUT_KINDS.contains(inputKind)) {
+            return shellAuthenticationCancel();
+        }
+        ShellAuthenticationRequest request = new ShellAuthenticationRequest();
+        request.requestId = (String) requestId;
+        request.program = (String) program;
+        request.prompt = (String) prompt;
+        request.inputKind = (String) inputKind;
+        request.command = params.get("command") instanceof String ? (String) params.get("command") : "";
+        request.cwd = params.get("cwd") instanceof String ? (String) params.get("cwd") : "";
+
+        PendingShellAuthentication pending = new PendingShellAuthentication();
+        if (pendingShellAuthentications.putIfAbsent(request.requestId, pending) != null) {
+            return shellAuthenticationCancel();
+        }
+        try {
+            pending.task = CALLBACK_EXECUTOR.submit(() -> {
+                try {
+                    pending.result.complete(handler.handle(request, sessionId));
+                } catch (Throwable t) {
+                    pending.result.completeExceptionally(t);
+                }
+            });
+            // A cancel that raced the submit must still interrupt the handler.
+            if (pending.result.isCancelled()) pending.cancel();
+            ShellAuthenticationResult result = pending.result.get();
+            if (result == null || !"accept".equals(result.action) || result.value == null) {
+                return shellAuthenticationCancel();
+            }
+            Map<String, Object> answer = new HashMap<>();
+            answer.put("action", "accept");
+            answer.put("value", result.value);
+            return answer;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return shellAuthenticationCancel();
+        } catch (Exception e) {
+            // Cancelled, rejected, or the handler failed; the error could contain the answer, so it is not reported.
+            return shellAuthenticationCancel();
+        } finally {
+            pendingShellAuthentications.remove(request.requestId, pending);
+        }
+    }
+
+    /** Cancels a pending shell authentication prompt ({@code shellAuthentication.cancel}). */
+    void cancelShellAuthentication(String requestId) {
+        if (requestId == null) return;
+        PendingShellAuthentication pending = pendingShellAuthentications.remove(requestId);
+        if (pending != null) pending.cancel();
+    }
+
+    private void cancelPendingShellAuthentications() {
+        for (String requestId : new ArrayList<>(pendingShellAuthentications.keySet())) {
+            cancelShellAuthentication(requestId);
+        }
+    }
+
+    private static Map<String, Object> shellAuthenticationCancel() {
+        Map<String, Object> answer = new HashMap<>();
+        answer.put("action", "cancel");
+        return answer;
+    }
+
+    /** A shell authentication prompt whose handler can be cancelled by request ID. */
+    private static final class PendingShellAuthentication {
+        final CompletableFuture<ShellAuthenticationResult> result = new CompletableFuture<>();
+        volatile Future<?> task;
+
+        void cancel() {
+            result.cancel(true);
+            Future<?> running = task;
+            if (running != null) running.cancel(true);
+        }
+    }
+
+    /** Invokes the registered memory store callback for a {@code memoryStore.store} request. */
+    void handleMemoryStore(Map<String, Object> params) throws Exception {
+        MemoryStoreHandler handler = memoryStoreHandler;
+        if (handler == null) throw new IllegalStateException("No memory store is registered");
+        StoredMemory memory = new StoredMemory();
+        memory.sessionId = params.get("sessionId") instanceof String ? (String) params.get("sessionId") : sessionId;
+        memory.subject = params.get("subject") instanceof String ? (String) params.get("subject") : "";
+        memory.fact = params.get("fact") instanceof String ? (String) params.get("fact") : "";
+        memory.citations = params.get("citations") instanceof String ? (String) params.get("citations") : "";
+        memory.reason = params.get("reason") instanceof String ? (String) params.get("reason") : "";
+        try {
+            handler.store(memory);
+        } catch (Exception e) {
+            throw new RuntimeException("Memory store callback failed", e);
+        }
     }
 
     /** Registers a callback run once after this session is successfully destroyed. */
@@ -407,6 +554,45 @@ public class CopilotSession {
         } else if ("external_tool.completed".equals(event.type)) {
             Object requestId = event.data.get("requestId");
             if (requestId instanceof String) cancelExternalTool((String) requestId);
+        } else if ("permission.requested".equals(event.type)) {
+            Object requestId = event.data.get("requestId");
+            if (!(requestId instanceof String) || Boolean.TRUE.equals(event.data.get("resolvedByHook"))
+                || permissionHandler == null) {
+                return;
+            }
+            Object permissionRequest = event.data.get("permissionRequest");
+            try {
+                CALLBACK_EXECUTOR.submit(() -> respondToPermissionRequest((String) requestId, permissionRequest));
+            } catch (RejectedExecutionException ignored) {
+                // The executor only rejects work while the JVM shuts down.
+            }
+        }
+    }
+
+    /**
+     * Answers a protocol 4 {@code permission.requested} event with the registered permission
+     * handler via {@code session.permissions.handlePendingPermissionRequest}; a failing handler
+     * answers {@code user-not-available}.
+     */
+    private void respondToPermissionRequest(String requestId, Object permissionRequest) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("sessionId", sessionId);
+        response.put("requestId", requestId);
+        try {
+            PermissionRequestResult result = handlePermissionRequest(permissionRequest);
+            if (result == null || "no-result".equals(result.kind)) return;
+            Map<String, Object> decision = new HashMap<>();
+            decision.put("kind", result.kind);
+            if (result.rules != null) decision.put("rules", result.rules);
+            response.put("result", decision);
+            if (result.decisionContext != null) response.put("decisionContext", result.decisionContext);
+        } catch (Exception e) {
+            response.put("result", Map.of("kind", "user-not-available"));
+        }
+        try {
+            client.request("session.permissions.handlePendingPermissionRequest", response);
+        } catch (Exception ignored) {
+            // Connection lost or RPC error: nothing more to report.
         }
     }
 

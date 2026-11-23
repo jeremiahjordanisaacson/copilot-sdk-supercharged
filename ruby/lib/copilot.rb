@@ -5,6 +5,7 @@
 require_relative "copilot/version"
 require_relative "copilot/sdk_protocol_version"
 require_relative "copilot/types"
+require_relative "copilot/session_params"
 require_relative "copilot/json_rpc_client"
 require_relative "copilot/define_tool"
 require_relative "copilot/session"

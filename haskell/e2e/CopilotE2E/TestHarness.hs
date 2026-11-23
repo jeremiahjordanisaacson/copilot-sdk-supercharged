@@ -38,11 +38,12 @@ data ProxyHandle = ProxyHandle
 
 -- | Locate the Copilot CLI binary for E2E tests.
 --
--- Checks @COPILOT_CLI_PATH@ first, then falls back to the Node.js
--- @node_modules@ CLI in the sibling @nodejs@ directory. As of CLI 1.0.64-1 the
--- runnable @index.js@ ships in a platform-specific package
--- (e.g. @\@github\/copilot-linux-x64@), so that is preferred over the legacy
--- @\@github\/copilot\/index.js@ location.
+-- Checks @COPILOT_CLI_PATH@ first, then the CLI in the sibling @nodejs@
+-- directory: @\@github\/copilot\/npm-loader.js@ (CLI 1.0.113 and newer, which
+-- starts the native binary), then the legacy @index.js@ entry points in the
+-- platform-specific package (e.g. @\@github\/copilot-linux-x64@) and in
+-- @\@github\/copilot@. @.js@ paths are run with @node@ by the client; any
+-- other path (such as @node_modules\/.bin\/copilot@) is executed directly.
 getCliPath :: IO FilePath
 getCliPath = do
   envPath <- lookupEnv "COPILOT_CLI_PATH"
@@ -57,9 +58,10 @@ getCliPath = do
       cwd <- getCurrentDirectory
       -- cabal test runs from haskell/, so go up one level to repo root
       let githubModules = cwd </> ".." </> "nodejs" </> "node_modules" </> "@github"
+          npmLoader     = githubModules </> "copilot" </> "npm-loader.js"
           legacyCli     = githubModules </> "copilot" </> "index.js"
       platformCli <- findPlatformCli githubModules
-      let candidates = maybe [] pure platformCli ++ [legacyCli]
+      let candidates = [npmLoader] ++ maybe [] pure platformCli ++ [legacyCli]
       found <- firstExistingFile candidates
       case found of
         Just p  -> pure p
@@ -192,14 +194,14 @@ snapshotsDir = do
 
 -- | Configure the proxy with a specific snapshot file and working directory.
 --
--- Uses curl to POST JSON to the proxy's /config endpoint.
+-- Uses curl to POST JSON to the proxy's /config endpoint. curl is run
+-- directly (no shell) so the JSON body is passed intact on every platform;
+-- 'show' renders each path as a JSON string (escaping backslashes and quotes).
 configureProxy :: ProxyHandle -> FilePath -> FilePath -> IO ()
 configureProxy proxy filePath wd = do
   let configUrl = phUrl proxy ++ "/config"
-      body = "{\"filePath\":\"" ++ filePath ++ "\",\"workDir\":\"" ++ wd ++ "\"}"
-      cpSpec = if isWindows
-        then shell $ "curl -s -X POST -H \"Content-Type: application/json\" -d '" ++ body ++ "' " ++ show configUrl
-        else proc "curl" ["-s", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, configUrl]
+      body = "{\"filePath\":" ++ show filePath ++ ",\"workDir\":" ++ show wd ++ "}"
+      cpSpec = proc "curl" ["-s", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, configUrl]
   (_, _, _, ph) <- createProcess cpSpec { std_out = CreatePipe, std_err = CreatePipe }
   _ <- waitForProcess ph
   pure ()

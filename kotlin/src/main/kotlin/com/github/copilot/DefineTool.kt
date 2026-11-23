@@ -45,9 +45,18 @@ class ToolBuilder(private val name: String) {
     /** Handler function that executes the tool. */
     var handler: ToolHandler? = null
 
+    /** Declares that repeating a call with the same arguments has no additional effect. */
+    var idempotent: Boolean? = null
+
     /** Sets the description and returns this builder for chaining. */
     fun description(description: String): ToolBuilder {
         this.description = description
+        return this
+    }
+
+    /** Sets whether the tool is idempotent and returns this builder for chaining. */
+    fun idempotent(idempotent: Boolean): ToolBuilder {
+        this.idempotent = idempotent
         return this
     }
 
@@ -74,7 +83,8 @@ class ToolBuilder(private val name: String) {
             name = name,
             description = description,
             parameters = parameters,
-            handler = h
+            handler = h,
+            idempotent = idempotent
         )
     }
 }

@@ -8,7 +8,8 @@
  */
 
 #ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200112L
+/* 200809L declares strdup() under strict C11 and keeps ETIMEDOUT/clock_gettime available. */
+#define _POSIX_C_SOURCE 200809L
 #endif
 
 #include "copilot/copilot.h"
@@ -77,6 +78,14 @@ struct copilot_session {
     copilot_exit_plan_mode_handler_fn exit_plan_mode_handler;
     void *exit_plan_mode_user_data;
 
+    /* Shell authentication handler (shellAuthentication.request) */
+    copilot_shell_authentication_handler_fn shell_authentication_handler;
+    void *shell_authentication_user_data;
+
+    /* Memory store callback (memoryStore.store) */
+    copilot_memory_store_handler_fn memory_store_handler;
+    void *memory_store_user_data;
+
     /* GitHub token provider registration (removed on destroy) */
     char *github_token_registration_id;
 
@@ -132,6 +141,20 @@ struct copilot_client {
     github_token_registration_t *github_token_providers;
     unsigned long github_token_seq;
     pthread_mutex_t github_token_mutex;
+
+    /* Client mode: "empty" requires available_tools and applies minimal defaults */
+    bool empty_mode;
+
+    /* Network callbacks (network.setProvider) */
+    char *network_scope;
+    copilot_network_resolve_proxy_fn network_resolve_proxy;
+    copilot_network_authenticate_negotiate_fn network_authenticate_negotiate;
+    copilot_network_authenticate_basic_fn network_authenticate_basic;
+    void *network_user_data;
+
+    /* error.data.policyHelperFailure of the last failed session.create/resume (JSON) */
+    char *last_policy_helper_failure_json;
+    pthread_mutex_t last_error_mutex;
 
     /* State */
     copilot_connection_state_t state;
@@ -445,6 +468,8 @@ static void on_session_event_notification(const char *method, cJSON *params, voi
     /* Build event struct */
     copilot_session_event_t event;
     memset(&event, 0, sizeof(event));
+    copilot_shell_output_data_t shell_output;
+    memset(&shell_output, 0, sizeof(shell_output));
 
     cJSON *type_item = cJSON_GetObjectItem(event_item, "type");
     if (type_item && cJSON_IsString(type_item)) {
@@ -478,6 +503,17 @@ static void on_session_event_notification(const char *method, cJSON *params, voi
         cJSON *tool_call_id = cJSON_GetObjectItem(data, "toolCallId");
         if (tool_call_id && cJSON_IsString(tool_call_id)) {
             event.tool_call_id = tool_call_id->valuestring;
+        }
+        if (strcmp(event.type, COPILOT_EVENT_TOOL_SHELL_OUTPUT) == 0) {
+            cJSON *text = cJSON_GetObjectItem(data, "text");
+            cJSON *sequence = cJSON_GetObjectItem(data, "sequence");
+            cJSON *stream = cJSON_GetObjectItem(data, "stream");
+            shell_output.tool_call_id = event.tool_call_id;
+            shell_output.text = (text && cJSON_IsString(text)) ? text->valuestring : "";
+            shell_output.sequence = (sequence && cJSON_IsNumber(sequence))
+                                        ? (int64_t)sequence->valuedouble : 0;
+            shell_output.stream = (stream && cJSON_IsString(stream)) ? stream->valuestring : NULL;
+            event.shell_output = &shell_output;
         }
     }
 
@@ -949,8 +985,220 @@ static cJSON *on_github_token_get_token(const char *method, cJSON *params, void 
 }
 
 /* ============================================================================
+ * Internal: v3.0.0 server request handlers (shell authentication, memory store,
+ * network callbacks)
+ * ============================================================================ */
+
+/* Returns obj[key] when it is a string, else fallback. */
+static const char *json_string_or(cJSON *obj, const char *key, const char *fallback)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return (item && cJSON_IsString(item)) ? item->valuestring : fallback;
+}
+
+/* Overwrites a heap-allocated secret before freeing it. */
+static void free_secret(char *secret)
+{
+    if (!secret) return;
+    volatile char *p = secret;
+    while (*p) {
+        *p = '\0';
+        p++;
+    }
+    free(secret);
+}
+
+/* shellAuthentication.request: answers a shell prompt with {action:"accept", value} or {action:"cancel"}. */
+static cJSON *on_shell_authentication_request(const char *method, cJSON *params, void *user_data,
+                                              int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    const char *session_id = json_string_or(params, "sessionId", NULL);
+    const char *request_id = json_string_or(params, "requestId", NULL);
+    if (!session_id || !request_id) {
+        *out_error_code = -32602;
+        *out_error_message = strdup("Invalid shellAuthentication.request params");
+        return NULL;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    copilot_session_t *session = find_session(client, session_id);
+    if (!session || !session->shell_authentication_handler) {
+        cJSON_AddStringToObject(result, "action", "cancel");
+        return result;
+    }
+
+    copilot_shell_authentication_request_t request;
+    memset(&request, 0, sizeof(request));
+    request.session_id = session_id;
+    request.request_id = request_id;
+    request.program = json_string_or(params, "program", "");
+    request.prompt = json_string_or(params, "prompt", "");
+    request.input_kind = json_string_or(params, "inputKind", COPILOT_SHELL_AUTH_INPUT_SECRET);
+    request.command = json_string_or(params, "command", "");
+    request.cwd = json_string_or(params, "cwd", "");
+
+    copilot_shell_authentication_response_t response;
+    memset(&response, 0, sizeof(response));
+    response.action = COPILOT_SHELL_AUTH_CANCEL;
+
+    copilot_error_t err = session->shell_authentication_handler(
+        &request, session->shell_authentication_user_data, &response);
+
+    if (err == COPILOT_OK && response.action == COPILOT_SHELL_AUTH_ACCEPT && response.value) {
+        cJSON_AddStringToObject(result, "action", "accept");
+        cJSON_AddStringToObject(result, "value", response.value);
+    } else {
+        cJSON_AddStringToObject(result, "action", "cancel");
+    }
+    free_secret(response.value);
+    return result;
+}
+
+/*
+ * shellAuthentication.cancel: requests are answered synchronously on the reader
+ * thread, so a cancellation always arrives after its request was answered.
+ * Acknowledge it with {}.
+ */
+static cJSON *on_shell_authentication_cancel(const char *method, cJSON *params, void *user_data,
+                                             int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    (void)params;
+    (void)user_data;
+    (void)out_error_code;
+    (void)out_error_message;
+    return cJSON_CreateObject();
+}
+
+/* memoryStore.store: hands a stored memory to the session's callback and replies null. */
+static cJSON *on_memory_store(const char *method, cJSON *params, void *user_data,
+                              int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    const char *session_id = json_string_or(params, "sessionId", NULL);
+    copilot_session_t *session = session_id ? find_session(client, session_id) : NULL;
+    if (!session || !session->memory_store_handler) {
+        *out_error_code = -32603;
+        *out_error_message = strdup("Memory store owner is unavailable");
+        return NULL;
+    }
+
+    copilot_stored_memory_t memory;
+    memset(&memory, 0, sizeof(memory));
+    memory.session_id = session_id;
+    memory.subject = json_string_or(params, "subject", "");
+    memory.fact = json_string_or(params, "fact", "");
+    memory.citations = json_string_or(params, "citations", "");
+    memory.reason = json_string_or(params, "reason", "");
+
+    if (session->memory_store_handler(&memory, session->memory_store_user_data) != COPILOT_OK) {
+        *out_error_code = -32603;
+        *out_error_message = strdup("Memory store callback failed");
+        return NULL;
+    }
+    return cJSON_CreateNull();
+}
+
+/* network.resolveProxy: {url} -> {proxy?} */
+static cJSON *on_network_resolve_proxy(const char *method, cJSON *params, void *user_data,
+                                       int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    (void)out_error_code;
+    (void)out_error_message;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    cJSON *result = cJSON_CreateObject();
+    if (!client->network_resolve_proxy) return result;
+
+    char *proxy = client->network_resolve_proxy(json_string_or(params, "url", ""),
+                                                client->network_user_data);
+    if (proxy) {
+        if (proxy[0] != '\0') {
+            cJSON_AddStringToObject(result, "proxy", proxy);
+        }
+        free(proxy);
+    }
+    return result;
+}
+
+/* network.authenticateNegotiate: {spn} -> {token?} */
+static cJSON *on_network_authenticate_negotiate(const char *method, cJSON *params, void *user_data,
+                                                int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    (void)out_error_code;
+    (void)out_error_message;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    cJSON *result = cJSON_CreateObject();
+    if (!client->network_authenticate_negotiate) return result;
+
+    char *token = client->network_authenticate_negotiate(json_string_or(params, "spn", ""),
+                                                         client->network_user_data);
+    if (token) {
+        if (token[0] != '\0') {
+            cJSON_AddStringToObject(result, "token", token);
+        }
+        free_secret(token);
+    }
+    return result;
+}
+
+/* network.authenticateBasic: {proxy, realm?, previousRejected} -> {username?, password?} */
+static cJSON *on_network_authenticate_basic(const char *method, cJSON *params, void *user_data,
+                                            int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    cJSON *result = cJSON_CreateObject();
+    if (!client->network_authenticate_basic) return result;
+
+    copilot_network_basic_auth_request_t request;
+    memset(&request, 0, sizeof(request));
+    request.proxy = json_string_or(params, "proxy", "");
+    request.realm = json_string_or(params, "realm", NULL);
+    cJSON *rejected = cJSON_GetObjectItemCaseSensitive(params, "previousRejected");
+    request.previous_rejected = rejected && cJSON_IsTrue(rejected);
+
+    copilot_network_basic_credentials_t credentials;
+    memset(&credentials, 0, sizeof(credentials));
+
+    copilot_error_t err = client->network_authenticate_basic(&request, client->network_user_data,
+                                                             &credentials);
+    if (err != COPILOT_OK) {
+        cJSON_Delete(result);
+        result = NULL;
+        *out_error_code = -32603;
+        *out_error_message = strdup("Network Basic authentication callback failed");
+    } else if (credentials.username && credentials.username[0] != '\0') {
+        cJSON_AddStringToObject(result, "username", credentials.username);
+        if (credentials.password && credentials.password[0] != '\0') {
+            cJSON_AddStringToObject(result, "password", credentials.password);
+        }
+    }
+
+    free_secret(credentials.username);
+    free_secret(credentials.password);
+    return result;
+}
+
+/* ============================================================================
  * Internal: spawn CLI process
  * ============================================================================ */
+
+/* True when the CLI path is a JavaScript entry point (such as npm-loader.js) that runs under node. */
+static bool cli_path_is_javascript(const char *path)
+{
+    size_t len = strlen(path);
+    return len > 3 && (strcmp(path + len - 3, ".js") == 0 || strcmp(path + len - 3, ".JS") == 0);
+}
 
 #ifdef _WIN32
 
@@ -959,7 +1207,7 @@ static copilot_error_t spawn_cli_process(copilot_client_t *client)
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE;
-    sa.lpSecurityAttributes = NULL;
+    sa.lpSecurityDescriptor = NULL;
 
     HANDLE stdin_read, stdin_write, stdout_read, stdout_write;
 
@@ -975,6 +1223,7 @@ static copilot_error_t spawn_cli_process(copilot_client_t *client)
 
     /* Build command line */
     const char *cli_path = client->cli_path ? client->cli_path : "copilot";
+    bool is_js = cli_path_is_javascript(cli_path);
 
     /* Estimate command line length */
     size_t cmd_len = strlen(cli_path) + 256;
@@ -988,7 +1237,9 @@ static copilot_error_t spawn_cli_process(copilot_client_t *client)
         return COPILOT_ERROR_OUT_OF_MEMORY;
     }
 
-    int pos = snprintf(cmd_line, cmd_len, "\"%s\"", cli_path);
+    /* JavaScript entry points (npm-loader.js, legacy index.js) run under node */
+    int pos = is_js ? snprintf(cmd_line, cmd_len, "node \"%s\"", cli_path)
+                    : snprintf(cmd_line, cmd_len, "\"%s\"", cli_path);
 
     /* Add extra args first */
     for (int i = 0; i < client->extra_args_count; i++) {
@@ -1094,18 +1345,22 @@ static copilot_error_t spawn_cli_process(copilot_client_t *client)
         unsetenv("NODE_DEBUG");
 
         const char *cli_path = client->cli_path ? client->cli_path : "copilot";
+        /* JavaScript entry points (npm-loader.js, legacy index.js) run under node */
+        bool is_js = cli_path_is_javascript(cli_path);
 
-        /* Build argv: cli_path [extra_args...] --headless --no-auto-update --log-level <level> --stdio */
+        /* Build argv: [node] cli_path [extra_args...] --headless --no-auto-update --log-level <level> --stdio */
         int base_args = 7; /* cli_path + 5 standard args + NULL */
         int extra_count = client->extra_args_count;
         int auth_args = 0;
         if (client->github_token) auth_args += 2;
         if (!client->use_logged_in_user) auth_args += 1;
 
-        int total = extra_count + base_args + auth_args;
+        int total = extra_count + base_args + auth_args + (is_js ? 1 : 0);
         char **argv = calloc((size_t)(total + 1), sizeof(char *));
+        if (!argv) _exit(1);
         int idx = 0;
 
+        if (is_js) argv[idx++] = "node";
         argv[idx++] = (char *)cli_path;
         for (int i = 0; i < extra_count; i++) {
             argv[idx++] = client->extra_args[i];
@@ -1124,7 +1379,7 @@ static copilot_error_t spawn_cli_process(copilot_client_t *client)
         }
         argv[idx] = NULL;
 
-        execvp(cli_path, argv);
+        execvp(is_js ? "node" : cli_path, argv);
         /* If exec fails */
         _exit(1);
     }
@@ -1165,6 +1420,11 @@ static copilot_error_t verify_protocol_version(copilot_client_t *client)
     cJSON *pv = cJSON_GetObjectItem(result, "protocolVersion");
     if (!pv || !cJSON_IsNumber(pv)) {
         cJSON_Delete(result);
+        fprintf(stderr,
+            "SDK protocol version mismatch: SDK supports version %d, but server does not "
+            "report a protocol version. Please update your SDK or server to ensure "
+            "compatibility.\n",
+            COPILOT_SDK_PROTOCOL_VERSION);
         return COPILOT_ERROR_PROTOCOL_MISMATCH;
     }
 
@@ -1173,12 +1433,53 @@ static copilot_error_t verify_protocol_version(copilot_client_t *client)
 
     if (server_version != COPILOT_SDK_PROTOCOL_VERSION) {
         fprintf(stderr,
-            "SDK protocol version mismatch: SDK expects version %d, "
-            "but server reports version %d.\n",
+            "SDK protocol version mismatch: SDK supports version %d, but server reports "
+            "version %d. Please update your SDK or server to ensure compatibility.\n",
             COPILOT_SDK_PROTOCOL_VERSION, server_version);
         return COPILOT_ERROR_PROTOCOL_MISMATCH;
     }
 
+    return COPILOT_OK;
+}
+
+/* ============================================================================
+ * Internal: network callbacks registration (network.setProvider)
+ * ============================================================================ */
+
+/* Registers the configured network callbacks; each present member marks one callback. */
+static copilot_error_t register_network_provider(copilot_client_t *client)
+{
+    if (!client->network_resolve_proxy && !client->network_authenticate_negotiate &&
+        !client->network_authenticate_basic) {
+        return COPILOT_OK;
+    }
+
+    cJSON *params = cJSON_CreateObject();
+    if (client->network_scope) {
+        cJSON_AddStringToObject(params, "scope", client->network_scope);
+    }
+    if (client->network_resolve_proxy) {
+        cJSON_AddObjectToObject(params, "resolveProxy");
+    }
+    if (client->network_authenticate_negotiate) {
+        cJSON_AddObjectToObject(params, "authenticateNegotiate");
+    }
+    if (client->network_authenticate_basic) {
+        cJSON_AddObjectToObject(params, "authenticateBasic");
+    }
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "network.setProvider", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON_Delete(result);
     return COPILOT_OK;
 }
 
@@ -1291,6 +1592,9 @@ static cJSON *build_session_params(const copilot_session_config_t *config, bool 
             }
             if (config->tools[i].defer) {
                 cJSON_AddStringToObject(tool, "defer", config->tools[i].defer);
+            }
+            if (config->tools[i].idempotent) {
+                cJSON_AddBoolToObject(tool, "idempotent", true);
             }
             cJSON_AddItemToArray(tools, tool);
         }
@@ -1466,7 +1770,7 @@ static cJSON *build_session_params(const copilot_session_config_t *config, bool 
         }
     }
     if (config->has_experimental_mode) {
-        cJSON_AddBoolToObject(params, "experimentalMode", config->experimental_mode);
+        cJSON_AddBoolToObject(params, "enableExperimentalMode", config->experimental_mode);
     }
     if (config->has_content_exclusion) {
         cJSON_AddBoolToObject(params, "contentExclusion", config->content_exclusion);
@@ -1501,9 +1805,13 @@ static cJSON *build_session_params(const copilot_session_config_t *config, bool 
         }
     }
 
-    /* CAPI options: the runtime only accepts enableWebSocketResponses under `capi` */
-    if (config->auto_tier || config->has_enable_web_socket_responses) {
+    /* CAPI options (github.capi): enabled, autoTier, enableWebSocketResponses */
+    if (config->auto_tier || config->has_enable_web_socket_responses ||
+        (config->capi && config->capi->has_enabled)) {
         cJSON *capi = cJSON_CreateObject();
+        if (config->capi && config->capi->has_enabled) {
+            cJSON_AddBoolToObject(capi, "enabled", config->capi->enabled);
+        }
         if (config->auto_tier) {
             cJSON_AddStringToObject(capi, "autoTier", config->auto_tier);
         }
@@ -1587,9 +1895,99 @@ static cJSON *build_session_params(const copilot_session_config_t *config, bool 
         cJSON_AddItemToObject(params, "autopilot", auto_obj);
     }
 
+    /* --- v3.0.0 session options (SDK protocol 4 parity with @github/copilot-sdk 2.0) --- */
+    if (config->providers && config->providers_count > 0) {
+        cJSON *arr = cJSON_AddArrayToObject(params, "providers");
+        for (size_t i = 0; arr && i < config->providers_count; i++) {
+            const copilot_named_provider_config_t *p = &config->providers[i];
+            cJSON *prov = cJSON_CreateObject();
+            if (p->name) cJSON_AddStringToObject(prov, "name", p->name);
+            if (p->type) cJSON_AddStringToObject(prov, "type", p->type);
+            if (p->base_url) cJSON_AddStringToObject(prov, "baseUrl", p->base_url);
+            if (p->api_key) cJSON_AddStringToObject(prov, "apiKey", p->api_key);
+            if (p->api_key_command) cJSON_AddStringToObject(prov, "apiKeyCommand", p->api_key_command);
+            if (p->bearer_token) cJSON_AddStringToObject(prov, "bearerToken", p->bearer_token);
+            if (p->wire_api) cJSON_AddStringToObject(prov, "wireApi", p->wire_api);
+            if (p->transport) cJSON_AddStringToObject(prov, "transport", p->transport);
+            if (p->azure_api_version) {
+                cJSON *azure = cJSON_AddObjectToObject(prov, "azure");
+                if (azure) cJSON_AddStringToObject(azure, "apiVersion", p->azure_api_version);
+            }
+            if (p->model_provider) cJSON_AddStringToObject(prov, "modelProvider", p->model_provider);
+            if (p->headers_json) {
+                cJSON *headers = cJSON_Parse(p->headers_json);
+                if (headers) cJSON_AddItemToObject(prov, "headers", headers);
+            }
+            cJSON_AddItemToArray(arr, prov);
+        }
+    }
+    if (config->models && config->models_count > 0) {
+        cJSON *arr = cJSON_AddArrayToObject(params, "models");
+        for (size_t i = 0; arr && i < config->models_count; i++) {
+            const copilot_provider_model_config_t *m = &config->models[i];
+            cJSON *model = cJSON_CreateObject();
+            if (m->provider) cJSON_AddStringToObject(model, "provider", m->provider);
+            if (m->id) cJSON_AddStringToObject(model, "id", m->id);
+            if (m->model_id) cJSON_AddStringToObject(model, "modelId", m->model_id);
+            if (m->wire_model) cJSON_AddStringToObject(model, "wireModel", m->wire_model);
+            if (m->name) cJSON_AddStringToObject(model, "name", m->name);
+            if (m->max_prompt_tokens > 0) {
+                cJSON_AddNumberToObject(model, "maxPromptTokens", m->max_prompt_tokens);
+            }
+            if (m->max_context_window_tokens > 0) {
+                cJSON_AddNumberToObject(model, "maxContextWindowTokens", m->max_context_window_tokens);
+            }
+            if (m->max_output_tokens > 0) {
+                cJSON_AddNumberToObject(model, "maxOutputTokens", m->max_output_tokens);
+            }
+            if (m->capabilities_json) {
+                cJSON *caps = cJSON_Parse(m->capabilities_json);
+                if (caps) cJSON_AddItemToObject(model, "capabilities", caps);
+            }
+            cJSON_AddItemToArray(arr, model);
+        }
+    }
+    if (config->default_provider) {
+        cJSON_AddStringToObject(params, "defaultProvider", config->default_provider);
+    } else if (is_resume && config->clear_default_provider) {
+        cJSON_AddNullToObject(params, "defaultProvider");
+    }
+    if (config->permission_mode) {
+        cJSON_AddStringToObject(params, "permissionMode", config->permission_mode);
+    }
+    if (config->on_shell_authentication_request) {
+        cJSON_AddBoolToObject(params, "requestShellAuthentication", true);
+    }
+    if (config->on_memory_store) {
+        cJSON_AddBoolToObject(params, "hasMemoryStore", true);
+    }
+    if (config->has_enable_config_discovery) {
+        cJSON_AddBoolToObject(params, "enableConfigDiscovery", config->enable_config_discovery);
+    }
+    if (config->has_include_sub_agent_streaming_events) {
+        cJSON_AddBoolToObject(params, "includeSubAgentStreamingEvents",
+                              config->include_sub_agent_streaming_events);
+    }
+    if (config->github_token) {
+        cJSON_AddStringToObject(params, "gitHubToken", config->github_token);
+    }
+    if (config->instruction_directories) {
+        cJSON *arr = cJSON_CreateArray();
+        int count = config->instruction_directories_count;
+        for (int i = 0; count > 0 ? i < count : config->instruction_directories[i] != NULL; i++) {
+            if (config->instruction_directories[i]) {
+                cJSON_AddItemToArray(arr, cJSON_CreateString(config->instruction_directories[i]));
+            }
+        }
+        cJSON_AddItemToObject(params, "instructionDirectories", arr);
+    }
+
     if (is_resume) {
         if (config->has_allow_transcript_recovery) {
             cJSON_AddBoolToObject(params, "allowTranscriptRecovery", config->allow_transcript_recovery);
+        }
+        if (config->has_suppress_resume_event) {
+            cJSON_AddBoolToObject(params, "suppressResumeEvent", config->suppress_resume_event);
         }
     } else {
         if (config->name) {
@@ -1604,6 +2002,436 @@ static cJSON *build_session_params(const copilot_session_config_t *config, bool 
     }
 
     return params;
+}
+
+/* ============================================================================
+ * Internal: SDK protocol 4 grouped session payloads
+ * ============================================================================ */
+
+/* Lifecycle methods that accept a key. Keys sent to the wrong method are dropped. */
+typedef enum {
+    PARAM_SCOPE_BOTH = 0,
+    PARAM_SCOPE_CREATE,
+    PARAM_SCOPE_RESUME,
+} session_param_scope_t;
+
+/* Maps a flat session.create/resume key to its protocol 4 location (group NULL = root). */
+typedef struct {
+    const char *flat_key;
+    const char *group;
+    const char *member;
+    session_param_scope_t scope;
+} session_param_rule_t;
+
+static const session_param_rule_t k_session_param_rules[] = {
+    /* Root fields (configDir and disableResume are renamed) */
+    { "sessionId",                     NULL, "sessionId",                     PARAM_SCOPE_BOTH },
+    { "model",                         NULL, "model",                         PARAM_SCOPE_BOTH },
+    { "name",                          NULL, "name",                          PARAM_SCOPE_CREATE },
+    { "clientName",                    NULL, "clientName",                    PARAM_SCOPE_BOTH },
+    { "workingDirectory",              NULL, "workingDirectory",              PARAM_SCOPE_BOTH },
+    { "configDirectory",               NULL, "configDirectory",               PARAM_SCOPE_BOTH },
+    { "configDir",                     NULL, "configDirectory",               PARAM_SCOPE_BOTH },
+    { "enableConfigDiscovery",         NULL, "enableConfigDiscovery",         PARAM_SCOPE_BOTH },
+    { "systemMessage",                 NULL, "systemMessage",                 PARAM_SCOPE_BOTH },
+    { "diagnostics",                   NULL, "diagnostics",                   PARAM_SCOPE_BOTH },
+    { "lifecycleDiagnostics",          NULL, "lifecycleDiagnostics",          PARAM_SCOPE_BOTH },
+    { "cloud",                         NULL, "cloud",                         PARAM_SCOPE_CREATE },
+    { "traceparent",                   NULL, "traceparent",                   PARAM_SCOPE_BOTH },
+    { "tracestate",                    NULL, "tracestate",                    PARAM_SCOPE_BOTH },
+    { "suppressResumeEvent",           NULL, "suppressResumeEvent",           PARAM_SCOPE_RESUME },
+    { "disableResume",                 NULL, "suppressResumeEvent",           PARAM_SCOPE_RESUME },
+    { "continuePendingWork",           NULL, "continuePendingWork",           PARAM_SCOPE_RESUME },
+    { "allowTranscriptRecovery",       NULL, "allowTranscriptRecovery",       PARAM_SCOPE_RESUME },
+    { "requestedEnvironmentVariables", NULL, "requestedEnvironmentVariables", PARAM_SCOPE_RESUME },
+    /* inference */
+    { "reasoningEffort",        "inference", "reasoningEffort",        PARAM_SCOPE_BOTH },
+    { "reasoningSummary",       "inference", "reasoningSummary",       PARAM_SCOPE_BOTH },
+    { "contextTier",            "inference", "contextTier",            PARAM_SCOPE_BOTH },
+    { "allowMultipleToolCalls", "inference", "allowMultipleToolCalls", PARAM_SCOPE_BOTH },
+    { "enableCitations",        "inference", "enableCitations",        PARAM_SCOPE_BOTH },
+    { "modelCapabilities",      "inference", "capabilities",           PARAM_SCOPE_BOTH },
+    { "verbosity",              "inference", "verbosity",              PARAM_SCOPE_BOTH },
+    { "providers",              "inference", "providers",              PARAM_SCOPE_BOTH },
+    { "models",                 "inference", "models",                 PARAM_SCOPE_BOTH },
+    { "defaultProvider",        "inference", "defaultProvider",        PARAM_SCOPE_BOTH },
+    /* tools */
+    { "tools",                 "tools", "definitions",           PARAM_SCOPE_BOTH },
+    { "availableTools",        "tools", "availableTools",        PARAM_SCOPE_BOTH },
+    { "excludedTools",         "tools", "excludedTools",         PARAM_SCOPE_BOTH },
+    { "toolSearch",            "tools", "search",                PARAM_SCOPE_BOTH },
+    { "largeOutput",           "tools", "largeOutput",           PARAM_SCOPE_BOTH },
+    { "imageGeneration",       "tools", "imageGeneration",       PARAM_SCOPE_BOTH },
+    { "manageScheduleEnabled", "tools", "manageScheduleEnabled", PARAM_SCOPE_BOTH },
+    { "webSearch",             "tools", "webSearch",             PARAM_SCOPE_BOTH },
+    { "shell",                 "tools", "shell",                 PARAM_SCOPE_BOTH },
+    { "maxInlineBinaryBytes",  "tools", "maxInlineBinaryBytes",  PARAM_SCOPE_BOTH },
+    /* permissions */
+    { "requestPermission",   "permissions", "request",       PARAM_SCOPE_BOTH },
+    { "sandboxConfig",       "permissions", "sandbox",       PARAM_SCOPE_BOTH },
+    { "sandbox",             "permissions", "sandbox",       PARAM_SCOPE_BOTH },
+    { "permissionMode",      "permissions", "mode",          PARAM_SCOPE_BOTH },
+    { "sandboxConfigSource", "permissions", "sandboxSource", PARAM_SCOPE_BOTH },
+    /* interaction */
+    { "commands",                   "interaction", "commands",                   PARAM_SCOPE_BOTH },
+    { "askUserVariant",             "interaction", "askUserVariant",             PARAM_SCOPE_BOTH },
+    { "requestUserInput",           "interaction", "requestUserInput",           PARAM_SCOPE_BOTH },
+    { "requestElicitation",         "interaction", "requestElicitation",         PARAM_SCOPE_BOTH },
+    { "requestShellAuthentication", "interaction", "requestShellAuthentication", PARAM_SCOPE_BOTH },
+    { "requestExitPlanMode",        "interaction", "requestExitPlanMode",        PARAM_SCOPE_BOTH },
+    { "requestAutoModeSwitch",      "interaction", "requestAutoModeSwitch",      PARAM_SCOPE_BOTH },
+    { "requestAutoModeRecovery",    "interaction", "requestAutoModeRecovery",    PARAM_SCOPE_BOTH },
+    /* events */
+    { "streaming",                      "events", "streaming",                      PARAM_SCOPE_BOTH },
+    { "includeSubAgentStreamingEvents", "events", "includeSubAgentStreamingEvents", PARAM_SCOPE_BOTH },
+    /* agents */
+    { "customAgents",          "agents", "definitions",           PARAM_SCOPE_BOTH },
+    { "defaultAgent",          "agents", "default",               PARAM_SCOPE_BOTH },
+    { "agent",                 "agents", "selected",              PARAM_SCOPE_BOTH },
+    { "includedBuiltinAgents", "agents", "includedBuiltinAgents", PARAM_SCOPE_BOTH },
+    { "excludedBuiltinAgents", "agents", "excludedBuiltinAgents", PARAM_SCOPE_BOTH },
+    { "customAgentsLocalOnly", "agents", "localDiscoveryOnly",    PARAM_SCOPE_BOTH },
+    { "agentDirectories",      "agents", "directories",           PARAM_SCOPE_BOTH },
+    /* skills */
+    { "skillDirectories",       "skills", "directories",           PARAM_SCOPE_BOTH },
+    { "enableSkills",           "skills", "enabled",               PARAM_SCOPE_BOTH },
+    { "includedBuiltinSkills",  "skills", "includedBuiltinSkills", PARAM_SCOPE_BOTH },
+    { "disabledSkills",         "skills", "disabledSkills",        PARAM_SCOPE_BOTH },
+    { "hasSkillProvider",       "skills", "hasProvider",           PARAM_SCOPE_BOTH },
+    { "ignoredSkillsLocations", "skills", "ignoredLocations",      PARAM_SCOPE_BOTH },
+    /* mcp */
+    { "mcpServers",                    "mcp", "servers",                    PARAM_SCOPE_BOTH },
+    { "disabledMcpServers",            "mcp", "disabledServers",            PARAM_SCOPE_BOTH },
+    { "requestMcpApps",                "mcp", "enableApps",                 PARAM_SCOPE_BOTH },
+    { "enableMcpApps",                 "mcp", "enableApps",                 PARAM_SCOPE_BOTH },
+    { "mcpOAuthTokenStorage",          "mcp", "oauthTokenStorage",          PARAM_SCOPE_BOTH },
+    { "authClientIdMetadataUrl",       "mcp", "authClientIdMetadataUrl",    PARAM_SCOPE_BOTH },
+    { "envValueMode",                  "mcp", "envValueMode",               PARAM_SCOPE_BOTH },
+    { "managedMcpServers",             "mcp", "managedServers",             PARAM_SCOPE_BOTH },
+    { "allowAllMcpServerInstructions", "mcp", "allowAllServerInstructions", PARAM_SCOPE_BOTH },
+    /* github */
+    { "gitHubToken",                       "github", "token",                       PARAM_SCOPE_BOTH },
+    { "gitHubTokenProviderRegistrationId", "github", "tokenProviderRegistrationId", PARAM_SCOPE_BOTH },
+    { "githubMcpToolConfig",               "github", "mcp",                         PARAM_SCOPE_BOTH },
+    { "capi",                              "github", "capi",                        PARAM_SCOPE_BOTH },
+    { "enableSessionTelemetry",            "github", "telemetryEnabled",            PARAM_SCOPE_BOTH },
+    { "enableManagedSettings",             "github", "fetchManagedSettings",        PARAM_SCOPE_BOTH },
+    { "interactiveUser",                   "github", "interactiveUser",             PARAM_SCOPE_BOTH },
+    { "enableGitHubTelemetryForwarding",   "github", "telemetryForwarding",         PARAM_SCOPE_BOTH },
+    { "authInfo",                          "github", "authInfo",                    PARAM_SCOPE_BOTH },
+    { "copilotUrl",                        "github", "copilotUrl",                  PARAM_SCOPE_BOTH },
+    /* filesystem */
+    { "additionalDirectories",    "filesystem", "additionalDirectories", PARAM_SCOPE_BOTH },
+    { "enableFileChangeTracking", "filesystem", "trackFileChanges",      PARAM_SCOPE_BOTH },
+    { "trustWorkingDirectory",    "filesystem", "trustWorkingDirectory", PARAM_SCOPE_CREATE },
+    /* execution */
+    { "sessionLimits",         "execution", "limits",                PARAM_SCOPE_BOTH },
+    { "autopilot",             "execution", "autopilot",             PARAM_SCOPE_BOTH },
+    { "autopilotContinuation", "execution", "autopilotContinuation", PARAM_SCOPE_BOTH },
+    /* instructions */
+    { "instructionDirectories",             "instructions", "directories",               PARAM_SCOPE_BOTH },
+    { "organizationCustomInstructions",     "instructions", "organizationText",          PARAM_SCOPE_BOTH },
+    { "enableOnDemandInstructionDiscovery", "instructions", "onDemandDiscovery",         PARAM_SCOPE_BOTH },
+    { "skipCustomInstructions",             "instructions", "skipCustomInstructions",    PARAM_SCOPE_BOTH },
+    { "refreshCustomInstructions",          "instructions", "refreshCustomInstructions", PARAM_SCOPE_CREATE },
+    /* hooks (boolean "hooks" becomes hooks.hasHandlers) */
+    { "hooks",           "hooks", "hasHandlers",           PARAM_SCOPE_BOTH },
+    { "hookDirectories", "hooks", "directories",           PARAM_SCOPE_BOTH },
+    { "enableFileHooks", "hooks", "enableRepositoryHooks", PARAM_SCOPE_BOTH },
+    /* git */
+    { "coauthorEnabled",         "git", "coauthorEnabled",         PARAM_SCOPE_BOTH },
+    { "enableHostGitOperations", "git", "enableHostGitOperations", PARAM_SCOPE_BOTH },
+    /* state */
+    { "infiniteSessions",       "state", "infiniteSessions",        PARAM_SCOPE_BOTH },
+    { "memory",                 "state", "memory",                  PARAM_SCOPE_BOTH },
+    { "hasMemoryStore",         "state", "hasMemoryStore",          PARAM_SCOPE_BOTH },
+    { "enableSessionStore",     "state", "enableCrossSessionStore", PARAM_SCOPE_BOTH },
+    { "skipEmbeddingRetrieval", "state", "skipEmbeddingRetrieval",  PARAM_SCOPE_BOTH },
+    { "embeddingCacheStorage",  "state", "embeddingCacheStorage",   PARAM_SCOPE_BOTH },
+    /* plugins */
+    { "pluginDirectories", "plugins", "directories", PARAM_SCOPE_BOTH },
+    { "installedPlugins",  "plugins", "installed",   PARAM_SCOPE_BOTH },
+    /* canvases */
+    { "canvases",              "canvases", "definitions",     PARAM_SCOPE_BOTH },
+    { "canvasProvider",        "canvases", "provider",        PARAM_SCOPE_BOTH },
+    { "requestCanvasRenderer", "canvases", "requestRenderer", PARAM_SCOPE_BOTH },
+    { "openCanvases",          "canvases", "open",            PARAM_SCOPE_RESUME },
+    /* extensions */
+    { "requestExtensions", "extensions", "enabled",  PARAM_SCOPE_BOTH },
+    { "extensionSdkPath",  "extensions", "sdkPath",  PARAM_SCOPE_BOTH },
+    { "extensionInfo",     "extensions", "identity", PARAM_SCOPE_BOTH },
+    /* experiments */
+    { "enableExperimentalMode",   "experiments", "enableExperimentalMode", PARAM_SCOPE_BOTH },
+    { "isExperimentalMode",       "experiments", "enableExperimentalMode", PARAM_SCOPE_BOTH },
+    { "featureFlags",             "experiments", "flags",                  PARAM_SCOPE_BOTH },
+    { "expAssignments",           "experiments", "assignments",            PARAM_SCOPE_BOTH },
+    { "featureFlagConfiguration", "experiments", "configuration",          PARAM_SCOPE_BOTH },
+    /* policy */
+    { "allowedModels",               "policy", "allowedModels",               PARAM_SCOPE_BOTH },
+    { "managedSettings",             "policy", "managedSettings",             PARAM_SCOPE_BOTH },
+    { "excludedManagedSettings",     "policy", "excludedManagedSettings",     PARAM_SCOPE_BOTH },
+    { "enforceManagedModelDefaults", "policy", "enforceManagedModelDefaults", PARAM_SCOPE_BOTH },
+};
+
+/* Protocol 4 option groups. A key naming a group that holds an object is already grouped. */
+static const char *const k_session_param_groups[] = {
+    "inference", "tools", "permissions", "interaction", "events", "agents", "skills",
+    "mcp", "github", "filesystem", "execution", "instructions", "hooks", "git",
+    "state", "plugins", "canvases", "extensions", "experiments", "policy",
+};
+
+/* Model-specific fields of the legacy single provider (moved to inference.models[]). */
+static const char *const k_legacy_provider_model_fields[] = {
+    "modelId", "wireModel", "maxPromptTokens", "maxContextWindowTokens", "maxOutputTokens",
+    "capabilities",
+};
+
+static const session_param_rule_t *find_session_param_rule(const char *key)
+{
+    for (size_t i = 0; i < sizeof(k_session_param_rules) / sizeof(k_session_param_rules[0]); i++) {
+        if (strcmp(k_session_param_rules[i].flat_key, key) == 0) return &k_session_param_rules[i];
+    }
+    return NULL;
+}
+
+static bool string_in_list(const char *value, const char *const *list, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(list[i], value) == 0) return true;
+    }
+    return false;
+}
+
+/* Returns parent[name] as an object, creating it (or replacing a non-object) when needed. */
+static cJSON *ensure_child_object(cJSON *parent, const char *name)
+{
+    cJSON *obj = cJSON_GetObjectItemCaseSensitive(parent, name);
+    if (obj && cJSON_IsObject(obj)) return obj;
+    if (obj) cJSON_DeleteItemFromObjectCaseSensitive(parent, name);
+    return cJSON_AddObjectToObject(parent, name);
+}
+
+/* Stores a detached value at out[group][member] unless an explicit member exists. Takes ownership. */
+static void put_group_member(cJSON *out, const char *group, const char *member, cJSON *item)
+{
+    if (!item) return;
+    cJSON *obj = ensure_child_object(out, group);
+    if (!obj || cJSON_GetObjectItemCaseSensitive(obj, member)) {
+        cJSON_Delete(item);
+        return;
+    }
+    if (!cJSON_AddItemToObject(obj, member, item)) cJSON_Delete(item);
+}
+
+/* Merges an already-grouped object into out[group]; its members win. Takes ownership. */
+static void merge_group_object(cJSON *out, const char *group, cJSON *grouped)
+{
+    cJSON *obj = ensure_child_object(out, group);
+    cJSON *member = grouped->child;
+    while (member) {
+        cJSON *next = member->next;
+        cJSON_DetachItemViaPointer(grouped, member);
+        if (!obj || !member->string) {
+            cJSON_Delete(member);
+        } else {
+            cJSON_DeleteItemFromObjectCaseSensitive(obj, member->string);
+            if (!cJSON_AddItemToObject(obj, member->string, member)) cJSON_Delete(member);
+        }
+        member = next;
+    }
+    cJSON_Delete(grouped);
+}
+
+/*
+ * Translates the legacy single `provider` (no longer accepted by protocol 4) into
+ * inference.providers [{name:"default", ...connection}], inference.defaultProvider
+ * "default" and github.capi.enabled false, plus inference.models when model-specific
+ * fields are present and the session model is set. Explicit providers,
+ * defaultProvider, or capi.enabled win: the legacy provider is then dropped.
+ * Takes ownership of `provider`.
+ */
+static void translate_legacy_provider(cJSON *out, cJSON *provider)
+{
+    cJSON *inference = cJSON_GetObjectItemCaseSensitive(out, "inference");
+    cJSON *github = cJSON_GetObjectItemCaseSensitive(out, "github");
+    cJSON *capi = github ? cJSON_GetObjectItemCaseSensitive(github, "capi") : NULL;
+    bool explicit_routing =
+        (inference && (cJSON_GetObjectItemCaseSensitive(inference, "providers") ||
+                       cJSON_GetObjectItemCaseSensitive(inference, "defaultProvider"))) ||
+        (capi && cJSON_GetObjectItemCaseSensitive(capi, "enabled"));
+
+    cJSON *connection = explicit_routing ? NULL : cJSON_CreateObject();
+    cJSON *model_fields = explicit_routing ? NULL : cJSON_CreateObject();
+    if (!connection || !model_fields) {
+        cJSON_Delete(connection);
+        cJSON_Delete(model_fields);
+        cJSON_Delete(provider);
+        return;
+    }
+
+    cJSON_AddStringToObject(connection, "name", "default");
+    cJSON *field = provider->child;
+    while (field) {
+        cJSON *next = field->next;
+        cJSON_DetachItemViaPointer(provider, field);
+        if (!field->string || cJSON_IsNull(field) || strcmp(field->string, "name") == 0) {
+            cJSON_Delete(field);
+        } else {
+            bool model_field = string_in_list(
+                field->string, k_legacy_provider_model_fields,
+                sizeof(k_legacy_provider_model_fields) / sizeof(k_legacy_provider_model_fields[0]));
+            if (!cJSON_AddItemToObject(model_field ? model_fields : connection, field->string, field)) {
+                cJSON_Delete(field);
+            }
+        }
+        field = next;
+    }
+    cJSON_Delete(provider);
+
+    inference = ensure_child_object(out, "inference");
+    github = ensure_child_object(out, "github");
+    capi = github ? ensure_child_object(github, "capi") : NULL;
+    cJSON *providers = inference ? cJSON_AddArrayToObject(inference, "providers") : NULL;
+    if (!providers || !capi) {
+        cJSON_Delete(connection);
+        cJSON_Delete(model_fields);
+        return;
+    }
+    cJSON_AddItemToArray(providers, connection);
+    cJSON_AddStringToObject(inference, "defaultProvider", "default");
+    cJSON_AddFalseToObject(capi, "enabled");
+
+    cJSON *model = cJSON_GetObjectItemCaseSensitive(out, "model");
+    cJSON *definition = (model_fields->child && model && cJSON_IsString(model))
+                            ? cJSON_CreateObject() : NULL;
+    if (definition) {
+        cJSON_AddStringToObject(definition, "provider", "default");
+        cJSON_AddStringToObject(definition, "id", model->valuestring);
+        cJSON *item = model_fields->child;
+        while (item) {
+            cJSON *next = item->next;
+            cJSON_DetachItemViaPointer(model_fields, item);
+            if (!cJSON_AddItemToObject(definition, item->string, item)) cJSON_Delete(item);
+            item = next;
+        }
+        cJSON *models = cJSON_GetObjectItemCaseSensitive(inference, "models");
+        if (!models || !cJSON_IsArray(models)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(inference, "models");
+            models = cJSON_AddArrayToObject(inference, "models");
+        }
+        if (models) {
+            cJSON_AddItemToArray(models, definition);
+        } else {
+            cJSON_Delete(definition);
+        }
+    }
+    cJSON_Delete(model_fields);
+}
+
+/*
+ * Converts the flat session.create/session.resume payload into the SDK protocol 4
+ * grouped payload: root keys stay at the top level, every known flat key moves to
+ * its option group, unknown keys stay at the root (forward compatibility), null
+ * values are skipped (except defaultProvider: null, which clears it on resume),
+ * explicit grouped members win over flat ones, and empty groups are not emitted.
+ * Consumes `flat`; returns the grouped payload, or NULL on allocation failure.
+ */
+static cJSON *group_session_params(cJSON *flat, bool is_resume)
+{
+    if (!flat) return NULL;
+    cJSON *out = cJSON_CreateObject();
+    if (!out) {
+        cJSON_Delete(flat);
+        return NULL;
+    }
+
+    const size_t group_count = sizeof(k_session_param_groups) / sizeof(k_session_param_groups[0]);
+    cJSON *legacy_provider = NULL;
+    cJSON *item = flat->child;
+    while (item) {
+        cJSON *next = item->next;
+        cJSON_DetachItemViaPointer(flat, item);
+        const char *key = item->string;
+        const session_param_rule_t *rule = key ? find_session_param_rule(key) : NULL;
+
+        if (!key) {
+            cJSON_Delete(item);
+        } else if (strcmp(key, "provider") == 0) {
+            /* Translated after the walk, once explicit routing options are known */
+            cJSON_Delete(legacy_provider);
+            legacy_provider = item;
+        } else if (cJSON_IsObject(item) && string_in_list(key, k_session_param_groups, group_count)) {
+            merge_group_object(out, key, item);
+        } else if (cJSON_IsNull(item) && !(is_resume && strcmp(key, "defaultProvider") == 0)) {
+            cJSON_Delete(item);
+        } else if (!rule) {
+            cJSON_DeleteItemFromObjectCaseSensitive(out, key);
+            if (!cJSON_AddItemToObject(out, key, item)) cJSON_Delete(item);
+        } else if ((rule->scope == PARAM_SCOPE_CREATE && is_resume) ||
+                   (rule->scope == PARAM_SCOPE_RESUME && !is_resume)) {
+            cJSON_Delete(item);
+        } else if (!rule->group) {
+            cJSON_DeleteItemFromObjectCaseSensitive(out, rule->member);
+            if (!cJSON_AddItemToObject(out, rule->member, item)) cJSON_Delete(item);
+        } else {
+            put_group_member(out, rule->group, rule->member, item);
+        }
+        item = next;
+    }
+    cJSON_Delete(flat);
+
+    /* MCP server definitions use direct environment values */
+    cJSON *mcp = cJSON_GetObjectItemCaseSensitive(out, "mcp");
+    if (mcp && cJSON_GetObjectItemCaseSensitive(mcp, "servers")) {
+        put_group_member(out, "mcp", "envValueMode", cJSON_CreateString("direct"));
+    }
+
+    if (legacy_provider) {
+        if (cJSON_IsObject(legacy_provider)) {
+            translate_legacy_provider(out, legacy_provider);
+        } else {
+            cJSON_Delete(legacy_provider);
+        }
+    }
+
+    for (size_t i = 0; i < group_count; i++) {
+        cJSON *group = cJSON_GetObjectItemCaseSensitive(out, k_session_param_groups[i]);
+        if (group && cJSON_IsObject(group) && !group->child) {
+            cJSON_DeleteItemFromObjectCaseSensitive(out, k_session_param_groups[i]);
+        }
+    }
+    return out;
+}
+
+/* Client mode "empty": minimal defaults applied underneath the caller's own values. */
+static void apply_empty_mode_defaults(cJSON *grouped)
+{
+    put_group_member(grouped, "experiments", "enableExperimentalMode", cJSON_CreateFalse());
+    put_group_member(grouped, "github", "telemetryEnabled", cJSON_CreateFalse());
+    put_group_member(grouped, "mcp", "oauthTokenStorage", cJSON_CreateString("in-memory"));
+    put_group_member(grouped, "state", "skipEmbeddingRetrieval", cJSON_CreateTrue());
+    put_group_member(grouped, "state", "embeddingCacheStorage", cJSON_CreateString("in-memory"));
+    put_group_member(grouped, "state", "enableCrossSessionStore", cJSON_CreateFalse());
+    cJSON *memory = cJSON_CreateObject();
+    if (memory) cJSON_AddFalseToObject(memory, "enabled");
+    put_group_member(grouped, "state", "memory", memory);
+    put_group_member(grouped, "instructions", "onDemandDiscovery", cJSON_CreateFalse());
+    put_group_member(grouped, "hooks", "enableRepositoryHooks", cJSON_CreateFalse());
+    put_group_member(grouped, "git", "enableHostGitOperations", cJSON_CreateFalse());
+}
+
+/* Remembers error.data.policyHelperFailure of a failed create/resume (NULL clears it). */
+static void record_policy_helper_failure(copilot_client_t *client, cJSON *error_data)
+{
+    cJSON *failure = error_data
+                         ? cJSON_GetObjectItemCaseSensitive(error_data, "policyHelperFailure")
+                         : NULL;
+    char *json = (failure && cJSON_IsObject(failure)) ? cJSON_PrintUnformatted(failure) : NULL;
+
+    pthread_mutex_lock(&client->last_error_mutex);
+    free(client->last_policy_helper_failure_json);
+    client->last_policy_helper_failure_json = json;
+    pthread_mutex_unlock(&client->last_error_mutex);
 }
 
 /* ============================================================================
@@ -1662,6 +2490,10 @@ static copilot_session_t *create_session_from_response(
         session->hook_user_data = config->hook_user_data;
         session->exit_plan_mode_handler = config->on_exit_plan_mode;
         session->exit_plan_mode_user_data = config->exit_plan_mode_user_data;
+        session->shell_authentication_handler = config->on_shell_authentication_request;
+        session->shell_authentication_user_data = config->shell_authentication_user_data;
+        session->memory_store_handler = config->on_memory_store;
+        session->memory_store_user_data = config->memory_store_user_data;
     }
 
     return session;
@@ -1673,11 +2505,23 @@ static copilot_session_t *create_session_from_response(
 
 copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
 {
+    copilot_client_options_t opts = options ? *options : copilot_client_options_default();
+
+    /* Client mode: "coding-agent" (default; legacy alias "copilot-cli") or "empty" */
+    bool empty_mode = false;
+    if (opts.mode) {
+        if (strcmp(opts.mode, COPILOT_CLIENT_MODE_EMPTY) == 0) {
+            empty_mode = true;
+        } else if (strcmp(opts.mode, COPILOT_CLIENT_MODE_CODING_AGENT) != 0 &&
+                   strcmp(opts.mode, "copilot-cli") != 0) {
+            return NULL;
+        }
+    }
+
     copilot_client_t *client = calloc(1, sizeof(copilot_client_t));
     if (!client) return NULL;
 
-    copilot_client_options_t opts = options ? *options : copilot_client_options_default();
-
+    client->empty_mode = empty_mode;
     client->cli_path = opts.cli_path ? strdup(opts.cli_path) : NULL;
     client->cwd = opts.cwd ? strdup(opts.cwd) : NULL;
     client->log_level = strdup(opts.log_level ? opts.log_level : "info");
@@ -1724,6 +2568,19 @@ copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
     client->github_token_providers = NULL;
     client->github_token_seq = 0;
     pthread_mutex_init(&client->github_token_mutex, NULL);
+
+    /* Network callbacks */
+    if (opts.network) {
+        client->network_scope = opts.network->scope ? strdup(opts.network->scope) : NULL;
+        client->network_resolve_proxy = opts.network->resolve_proxy;
+        client->network_authenticate_negotiate = opts.network->authenticate_negotiate;
+        client->network_authenticate_basic = opts.network->authenticate_basic;
+        client->network_user_data = opts.network->user_data;
+    }
+
+    /* Last Policy Helper failure of a failed create/resume */
+    client->last_policy_helper_failure_json = NULL;
+    pthread_mutex_init(&client->last_error_mutex, NULL);
 
 #ifdef _WIN32
     client->process_handle = NULL;
@@ -1781,6 +2638,24 @@ copilot_error_t copilot_client_start(copilot_client_t *client)
                                         on_exit_plan_mode_request, client);
     json_rpc_client_set_request_handler(client->rpc, "gitHubToken.getToken",
                                         on_github_token_get_token, client);
+    json_rpc_client_set_request_handler(client->rpc, "shellAuthentication.request",
+                                        on_shell_authentication_request, client);
+    json_rpc_client_set_request_handler(client->rpc, "shellAuthentication.cancel",
+                                        on_shell_authentication_cancel, client);
+    json_rpc_client_set_request_handler(client->rpc, "memoryStore.store",
+                                        on_memory_store, client);
+    if (client->network_resolve_proxy) {
+        json_rpc_client_set_request_handler(client->rpc, "network.resolveProxy",
+                                            on_network_resolve_proxy, client);
+    }
+    if (client->network_authenticate_negotiate) {
+        json_rpc_client_set_request_handler(client->rpc, "network.authenticateNegotiate",
+                                            on_network_authenticate_negotiate, client);
+    }
+    if (client->network_authenticate_basic) {
+        json_rpc_client_set_request_handler(client->rpc, "network.authenticateBasic",
+                                            on_network_authenticate_basic, client);
+    }
 
     /* Start reader thread */
     if (json_rpc_client_start(client->rpc) != 0) {
@@ -1802,6 +2677,10 @@ copilot_error_t copilot_client_start(copilot_client_t *client)
 
     /* Verify protocol version */
     err = verify_protocol_version(client);
+    if (err == COPILOT_OK) {
+        /* Register network callbacks (no-op without them) */
+        err = register_network_provider(client);
+    }
     if (err != COPILOT_OK) {
         json_rpc_client_stop(client->rpc);
         json_rpc_client_free(client->rpc);
@@ -1899,6 +2778,9 @@ void copilot_client_free(copilot_client_t *client)
 
     clear_github_token_providers(client);
     pthread_mutex_destroy(&client->github_token_mutex);
+    free(client->network_scope);
+    free(client->last_policy_helper_failure_json);
+    pthread_mutex_destroy(&client->last_error_mutex);
     pthread_mutex_destroy(&client->sessions_mutex);
     free(client);
 }
@@ -1906,6 +2788,35 @@ void copilot_client_free(copilot_client_t *client)
 copilot_connection_state_t copilot_client_get_state(const copilot_client_t *client)
 {
     return client ? client->state : COPILOT_STATE_DISCONNECTED;
+}
+
+/* Parses an ISO 8601 UTC timestamp ("2026-11-22T21:29:43.527Z") into Unix epoch milliseconds (0 if malformed). */
+static int64_t parse_iso8601_utc_ms(const char *text)
+{
+    int year, month, day, hour, minute, second;
+    if (sscanf(text, "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second) != 6 ||
+        month < 1 || month > 12) {
+        return 0;
+    }
+
+    int64_t millis = 0;
+    const char *frac = strchr(text, '.');
+    if (frac) {
+        int64_t scale = 100;
+        for (const char *p = frac + 1; *p >= '0' && *p <= '9' && scale > 0; p++, scale /= 10) {
+            millis += (int64_t)(*p - '0') * scale;
+        }
+    }
+
+    /* Days since 1970-01-01 for the proleptic Gregorian calendar */
+    int64_t y = (int64_t)year - (month <= 2 ? 1 : 0);
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int64_t yoe = y - era * 400;
+    int64_t doy = (153 * (int64_t)(month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    int64_t days = era * 146097 + doe - 719468;
+
+    return ((days * 24 + hour) * 60 + minute) * 60000 + (int64_t)second * 1000 + millis;
 }
 
 copilot_error_t copilot_client_ping(
@@ -1938,7 +2849,11 @@ copilot_error_t copilot_client_ping(
     out->message = msg && cJSON_IsString(msg) ? strdup(msg->valuestring) : strdup("");
 
     cJSON *ts = cJSON_GetObjectItem(result, "timestamp");
-    out->timestamp = ts && cJSON_IsString(ts) ? strdup(ts->valuestring) : strdup("");
+    if (ts && cJSON_IsNumber(ts)) {
+        out->timestamp = (int64_t)ts->valuedouble;
+    } else if (ts && cJSON_IsString(ts)) {
+        out->timestamp = parse_iso8601_utc_ms(ts->valuestring);
+    }
 
     cJSON *pv = cJSON_GetObjectItem(result, "protocolVersion");
     out->protocol_version = pv && cJSON_IsNumber(pv) ? pv->valueint : -1;
@@ -1952,8 +2867,7 @@ void copilot_ping_response_free(copilot_ping_response_t *response)
     if (!response) return;
     free(response->message);
     response->message = NULL;
-    free(response->timestamp);
-    response->timestamp = NULL;
+    response->timestamp = 0;
 }
 
 copilot_error_t copilot_client_list_models(
@@ -2328,6 +3242,10 @@ copilot_error_t copilot_client_create_session(
         /* github_token and github_token_provider are mutually exclusive */
         return COPILOT_ERROR_INVALID_ARGUMENT;
     }
+    if (client->empty_mode && (!config || !config->available_tools)) {
+        /* Client mode "empty" requires an explicit available_tools list */
+        return COPILOT_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Auto-start if needed */
     if (client->state != COPILOT_STATE_CONNECTED && client->auto_start) {
@@ -2354,13 +3272,30 @@ copilot_error_t copilot_client_create_session(
         cJSON_AddStringToObject(params, "gitHubTokenProviderRegistrationId", gh_registration_id);
     }
 
+    /* SDK protocol 4: move the flat options into their option groups */
+    params = group_session_params(params, false);
+    if (!params) {
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
+        return COPILOT_ERROR_OUT_OF_MEMORY;
+    }
+    if (client->empty_mode) {
+        apply_empty_mode_defaults(params);
+    }
+
+    record_policy_helper_failure(client, NULL);
     int err_code = 0;
     char *err_msg = NULL;
-    cJSON *result = json_rpc_client_request(client->rpc, "session.create", params, 30000,
-                                            &err_code, &err_msg);
+    cJSON *err_data = NULL;
+    cJSON *result = json_rpc_client_request_ex(client->rpc, "session.create", params, 30000,
+                                               &err_code, &err_msg, &err_data);
     cJSON_Delete(params);
 
     if (!result) {
+        record_policy_helper_failure(client, err_data);
+        cJSON_Delete(err_data);
         free(err_msg);
         if (gh_registration_id) {
             unregister_github_token_provider(client, gh_registration_id);
@@ -2401,6 +3336,10 @@ copilot_error_t copilot_client_resume_session(
         /* github_token and github_token_provider are mutually exclusive */
         return COPILOT_ERROR_INVALID_ARGUMENT;
     }
+    if (client->empty_mode && (!config || !config->available_tools)) {
+        /* Client mode "empty" requires an explicit available_tools list */
+        return COPILOT_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Auto-start if needed */
     if (client->state != COPILOT_STATE_CONNECTED && client->auto_start) {
@@ -2413,6 +3352,7 @@ copilot_error_t copilot_client_resume_session(
     if (!config) config = &default_config;
 
     cJSON *params = build_session_params(config, true);
+    cJSON_DeleteItemFromObjectCaseSensitive(params, "sessionId");
     cJSON_AddStringToObject(params, "sessionId", session_id);
     inject_trace_context(client, params);
 
@@ -2428,13 +3368,30 @@ copilot_error_t copilot_client_resume_session(
         cJSON_AddStringToObject(params, "gitHubTokenProviderRegistrationId", gh_registration_id);
     }
 
+    /* SDK protocol 4: move the flat options into their option groups */
+    params = group_session_params(params, true);
+    if (!params) {
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
+        return COPILOT_ERROR_OUT_OF_MEMORY;
+    }
+    if (client->empty_mode) {
+        apply_empty_mode_defaults(params);
+    }
+
+    record_policy_helper_failure(client, NULL);
     int err_code = 0;
     char *err_msg = NULL;
-    cJSON *result = json_rpc_client_request(client->rpc, "session.resume", params, 30000,
-                                            &err_code, &err_msg);
+    cJSON *err_data = NULL;
+    cJSON *result = json_rpc_client_request_ex(client->rpc, "session.resume", params, 30000,
+                                               &err_code, &err_msg, &err_data);
     cJSON_Delete(params);
 
     if (!result) {
+        record_policy_helper_failure(client, err_data);
+        cJSON_Delete(err_data);
         free(err_msg);
         if (gh_registration_id) {
             unregister_github_token_provider(client, gh_registration_id);
@@ -2542,6 +3499,9 @@ copilot_error_t copilot_session_send(
     }
     if (options->source) {
         cJSON_AddStringToObject(params, "source", options->source);
+    }
+    if (options->client_turn_id) {
+        cJSON_AddStringToObject(params, "clientTurnId", options->client_turn_id);
     }
     if (options->request_headers_keys && options->request_headers_values) {
         cJSON *headers = cJSON_CreateObject();
@@ -2872,7 +3832,14 @@ copilot_error_t copilot_session_abort(copilot_session_t *session)
                                             &err_code, &err_msg);
     cJSON_Delete(params);
 
-    if (result) cJSON_Delete(result);
+    if (!result) {
+        /* Protocol 4 reports abort failures as JSON-RPC errors */
+        copilot_error_t err = err_code ? COPILOT_ERROR_RPC : COPILOT_ERROR_IO;
+        free(err_msg);
+        return err;
+    }
+
+    cJSON_Delete(result);
     free(err_msg);
 
     return COPILOT_OK;
@@ -2986,4 +3953,148 @@ copilot_error_t copilot_session_recheck_policy_helper(
                                                params, out_json);
     cJSON_Delete(params);
     return err;
+}
+
+/* Returns a heap copy of obj[key] when it is a string, else NULL. */
+static char *dup_json_string(cJSON *obj, const char *key)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    return (item && cJSON_IsString(item)) ? strdup(item->valuestring) : NULL;
+}
+
+copilot_error_t copilot_session_set_permission_mode(
+    copilot_session_t *session,
+    const char *mode,
+    copilot_permission_mode_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (!session || !mode) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session->session_id);
+    cJSON_AddStringToObject(params, "mode", mode);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(session->rpc, "session.permissions.setMode", params,
+                                            30000, &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        copilot_error_t err = err_code ? COPILOT_ERROR_RPC : COPILOT_ERROR_IO;
+        free(err_msg);
+        return err;
+    }
+
+    if (out) {
+        cJSON *success = cJSON_GetObjectItemCaseSensitive(result, "success");
+        out->success = success && cJSON_IsTrue(success);
+        out->mode = dup_json_string(result, "mode");
+        /* Known refusal reason: COPILOT_PERMISSION_MODE_REASON_MANAGED_POLICY */
+        out->reason = dup_json_string(result, "reason");
+    }
+
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+void copilot_permission_mode_result_free(copilot_permission_mode_result_t *result)
+{
+    if (!result) return;
+    free(result->mode);
+    free(result->reason);
+    memset(result, 0, sizeof(*result));
+}
+
+/* ============================================================================
+ * Public API: Policy Helper failures
+ * ============================================================================ */
+
+/* Parses a PolicyHelperFailure from `root` or from root.policyHelperFailure. */
+static bool parse_policy_helper_failure(cJSON *root, copilot_policy_helper_failure_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    cJSON *nested = cJSON_GetObjectItemCaseSensitive(root, "policyHelperFailure");
+    cJSON *failure = nested ? nested : root;
+    if (!failure || !cJSON_IsObject(failure)) return false;
+
+    cJSON *category = cJSON_GetObjectItemCaseSensitive(failure, "category");
+    cJSON *message = cJSON_GetObjectItemCaseSensitive(failure, "message");
+    if (!category || !cJSON_IsString(category) || !message || !cJSON_IsString(message)) {
+        return false;
+    }
+
+    out->category = dup_json_string(failure, "category");
+    out->failure_mode = dup_json_string(failure, "failureMode");
+    out->message = dup_json_string(failure, "message");
+    cJSON *retained = cJSON_GetObjectItemCaseSensitive(failure, "previousPolicyRetained");
+    out->previous_policy_retained = retained && cJSON_IsTrue(retained);
+    out->reason = dup_json_string(failure, "reason");
+    out->severity = dup_json_string(failure, "severity");
+    out->authority = dup_json_string(failure, "authority");
+    out->code = dup_json_string(failure, "code");
+    out->diagnostic = dup_json_string(failure, "diagnostic");
+    out->remediation = dup_json_string(failure, "remediation");
+
+    cJSON *details = cJSON_GetObjectItemCaseSensitive(failure, "details");
+    if (details && cJSON_IsArray(details)) {
+        out->details_json = cJSON_PrintUnformatted(details);
+    }
+    cJSON *help_link = cJSON_GetObjectItemCaseSensitive(failure, "helpLink");
+    if (help_link && cJSON_IsObject(help_link)) {
+        out->help_link_url = dup_json_string(help_link, "url");
+        out->help_link_label = dup_json_string(help_link, "label");
+    }
+    return true;
+}
+
+bool copilot_policy_helper_failure_parse(const char *json, copilot_policy_helper_failure_t *out)
+{
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    if (!json) return false;
+
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return false;
+
+    bool found = parse_policy_helper_failure(root, out);
+    cJSON_Delete(root);
+    return found;
+}
+
+bool copilot_client_get_last_policy_helper_failure(
+    copilot_client_t *client,
+    copilot_policy_helper_failure_t *out)
+{
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    if (!client) return false;
+
+    pthread_mutex_lock(&client->last_error_mutex);
+    char *json = client->last_policy_helper_failure_json
+                     ? strdup(client->last_policy_helper_failure_json) : NULL;
+    pthread_mutex_unlock(&client->last_error_mutex);
+
+    bool found = copilot_policy_helper_failure_parse(json, out);
+    free(json);
+    return found;
+}
+
+void copilot_policy_helper_failure_free(copilot_policy_helper_failure_t *failure)
+{
+    if (!failure) return;
+    free(failure->category);
+    free(failure->failure_mode);
+    free(failure->message);
+    free(failure->reason);
+    free(failure->severity);
+    free(failure->authority);
+    free(failure->code);
+    free(failure->details_json);
+    free(failure->diagnostic);
+    free(failure->help_link_url);
+    free(failure->help_link_label);
+    free(failure->remediation);
+    memset(failure, 0, sizeof(*failure));
 }

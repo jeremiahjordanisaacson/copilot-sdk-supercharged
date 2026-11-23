@@ -36,6 +36,18 @@ COPILOT_EVENT_ASSISTANT_TURN_START="assistant.turn_start"
 COPILOT_EVENT_ASSISTANT_TURN_END="assistant.turn_end"
 COPILOT_EVENT_TOOL_EXECUTION_START="tool.execution_start"
 COPILOT_EVENT_TOOL_EXECUTION_COMPLETE="tool.execution_complete"
+# Streamed output of a shell tool call (SDK protocol 4); data: {toolCallId, text, sequence,
+# stream?} where stream is "stdout", "stderr", or absent. See copilot_shell_output_event_data.
+COPILOT_EVENT_TOOL_SHELL_OUTPUT="tool.shell_output"
+# No longer emitted by protocol 4 runtimes; still tolerated when received.
+COPILOT_EVENT_TOOL_EXECUTION_PARTIAL_RESULT="tool.execution_partial_result"
+# A custom tool call the SDK answers with session.tools.handlePendingToolCall
+COPILOT_EVENT_EXTERNAL_TOOL_REQUESTED="external_tool.requested"
+
+# --- Permission Mode Refusal Reason Constants ---
+# Known values of the "reason" in a session.permissions.setMode result
+# (see copilot_session_set_permission_mode).
+COPILOT_PERMISSION_MODE_REFUSAL_MANAGED_POLICY="managed_policy"
 
 # --- Slash Command Input Completion Constants ---
 COPILOT_SLASH_COMMAND_INPUT_COMPLETION_DIRECTORY="directory"
@@ -248,6 +260,147 @@ copilot_provider_config() {
         json=$(echo "$json" | jq -c --arg v "$PROVIDER_BEARER_TOKEN" '. + {"bearerToken":$v}')
     fi
     echo "$json"
+}
+
+# --- v3.0.0 Config Builders (SDK protocol 4) ---
+
+# Build a named BYOK provider connection (NamedProviderConfig) for COPILOT_PROVIDERS.
+# Arguments:
+#   $1 - Connection name (must not contain "/")
+#   $2 - Base URL
+#   $3 - Optional provider type ("openai", "azure", or "anthropic")
+#   $4 - Optional API key
+# Optional env vars to set before calling (same as copilot_provider_config):
+#   PROVIDER_MODEL_PROVIDER, PROVIDER_API_KEY_COMMAND, PROVIDER_WIRE_API, PROVIDER_BEARER_TOKEN,
+#   PROVIDER_TRANSPORT ("http" or "websockets"), PROVIDER_HEADERS (JSON object),
+#   PROVIDER_AZURE_API_VERSION
+# Example:
+#   COPILOT_PROVIDERS="[$(copilot_named_provider_config gateway https://models.example.com/v1 openai "$KEY")]"
+copilot_named_provider_config() {
+    local name="$1"
+    local base_url="$2"
+    local provider_type="${3:-}"
+    local api_key="${4:-}"
+
+    local json
+    json=$(jq -c -n --arg name "$name" --arg url "$base_url" '{"name":$name,"baseUrl":$url}')
+    if [[ -n "$provider_type" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$provider_type" '. + {"type":$v}')
+    fi
+    if [[ -n "$api_key" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$api_key" '. + {"apiKey":$v}')
+    fi
+    if [[ -n "${PROVIDER_MODEL_PROVIDER:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_MODEL_PROVIDER" '. + {"modelProvider":$v}')
+    fi
+    if [[ -n "${PROVIDER_API_KEY_COMMAND:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_API_KEY_COMMAND" '. + {"apiKeyCommand":$v}')
+    fi
+    if [[ -n "${PROVIDER_WIRE_API:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_WIRE_API" '. + {"wireApi":$v}')
+    fi
+    if [[ -n "${PROVIDER_BEARER_TOKEN:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_BEARER_TOKEN" '. + {"bearerToken":$v}')
+    fi
+    if [[ -n "${PROVIDER_TRANSPORT:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_TRANSPORT" '. + {"transport":$v}')
+    fi
+    if [[ -n "${PROVIDER_HEADERS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$PROVIDER_HEADERS" '. + {"headers":$v}')
+    fi
+    if [[ -n "${PROVIDER_AZURE_API_VERSION:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_AZURE_API_VERSION" '. + {"azure":{"apiVersion":$v}}')
+    fi
+    echo "$json"
+}
+
+# Build a BYOK model definition (ProviderModelConfig) for COPILOT_MODELS.
+# Arguments:
+#   $1 - Provider connection name
+#   $2 - Provider-local model id (select it with "<provider>/<id>")
+#   $3 - Optional modelId (well-known base model for capability lookup)
+#   $4 - Optional wireModel (model or deployment name sent to the provider API)
+# Optional env vars to set before calling:
+#   MODEL_NAME, MODEL_MAX_PROMPT_TOKENS, MODEL_MAX_CONTEXT_WINDOW_TOKENS,
+#   MODEL_MAX_OUTPUT_TOKENS, MODEL_CAPABILITIES (JSON object)
+# Example:
+#   COPILOT_MODELS="[$(copilot_provider_model_config gateway chat gpt-4o deployment)]"
+copilot_provider_model_config() {
+    local provider="$1"
+    local id="$2"
+    local model_id="${3:-}"
+    local wire_model="${4:-}"
+
+    local json
+    json=$(jq -c -n --arg p "$provider" --arg id "$id" '{"provider":$p,"id":$id}')
+    if [[ -n "$model_id" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$model_id" '. + {"modelId":$v}')
+    fi
+    if [[ -n "$wire_model" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$wire_model" '. + {"wireModel":$v}')
+    fi
+    if [[ -n "${MODEL_NAME:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$MODEL_NAME" '. + {"name":$v}')
+    fi
+    if [[ -n "${MODEL_MAX_PROMPT_TOKENS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$MODEL_MAX_PROMPT_TOKENS" '. + {"maxPromptTokens":$v}')
+    fi
+    if [[ -n "${MODEL_MAX_CONTEXT_WINDOW_TOKENS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$MODEL_MAX_CONTEXT_WINDOW_TOKENS" '. + {"maxContextWindowTokens":$v}')
+    fi
+    if [[ -n "${MODEL_MAX_OUTPUT_TOKENS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$MODEL_MAX_OUTPUT_TOKENS" '. + {"maxOutputTokens":$v}')
+    fi
+    if [[ -n "${MODEL_CAPABILITIES:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$MODEL_CAPABILITIES" '. + {"capabilities":$v}')
+    fi
+    echo "$json"
+}
+
+# Build a custom tool definition (sent in tools.definitions).
+# Arguments:
+#   $1 - Tool name
+#   $2 - Description shown to the model
+#   $3 - Optional JSON Schema for the parameters (JSON object string)
+#   $4 - Optional idempotent flag ("true"/"false"): repeated calls with the same arguments
+#        are safe
+#   $5 - Optional skip_permission flag ("true"): the runtime runs the tool without a
+#        permission prompt (otherwise COPILOT_PERMISSION_HANDLER must approve it)
+# Example:
+#   copilot_tool_definition "lookup_order" "Look up an order" '{"type":"object"}' true
+copilot_tool_definition() {
+    local name="$1"
+    local description="$2"
+    local parameters="${3:-}"
+    local idempotent="${4:-}"
+    local skip_permission="${5:-}"
+
+    local json
+    json=$(jq -c -n --arg n "$name" --arg d "$description" '{"name":$n,"description":$d}')
+    if [[ -n "$parameters" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$parameters" '. + {"parameters":$v}')
+    fi
+    if [[ -n "$idempotent" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$idempotent")" '. + {"idempotent":$v}')
+    fi
+    if [[ "$(_copilot_json_bool "$skip_permission")" == "true" ]]; then
+        json=$(echo "$json" | jq -c '. + {"skipPermission":true}')
+    fi
+    echo "$json"
+}
+
+# Extract the data of a tool.shell_output event as {toolCallId, text, sequence, stream?}.
+# Outputs nothing when the event is not a shell output event.
+# Arguments:
+#   $1 - Session event JSON object ({"type":"tool.shell_output","data":{...}})
+copilot_shell_output_event_data() {
+    local event="${1:-}"
+    if [[ -z "$event" ]]; then
+        return 0
+    fi
+    echo "$event" | jq -c 'select(.type == "tool.shell_output") | .data
+        | {"toolCallId": .toolCallId, "text": .text, "sequence": .sequence}
+          + (if .stream == null then {} else {"stream": .stream} end)' 2>/dev/null || true
 }
 
 # --- UserInput Types ---

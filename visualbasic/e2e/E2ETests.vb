@@ -69,6 +69,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -104,6 +106,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -143,6 +147,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
 
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env,
                 .SessionFs = New SessionFsConfig() With {
                     .InitialCwd = "/",
@@ -174,6 +180,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -210,6 +218,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -249,6 +259,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -283,6 +295,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -313,6 +327,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -354,6 +370,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -381,6 +399,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -411,6 +431,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -437,6 +459,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -469,6 +493,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -500,6 +526,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -541,6 +569,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -580,6 +610,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -613,6 +645,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
 
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env,
                 .SessionFs = New SessionFsConfig() With {
                     .InitialCwd = _workDir,
@@ -642,6 +676,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -677,6 +713,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 
@@ -709,6 +747,8 @@ Namespace GitHub.Copilot.SDK.VB.E2E
             Dim env = _harness.GetTestEnvironment(_homeDir)
             Dim options As New CopilotClientOptions() With {
                 .Cwd = _workDir,
+                .CliPath = _harness.CliPath,
+                .CliArgs = _harness.CliArgs,
                 .Environment = env
             }
 

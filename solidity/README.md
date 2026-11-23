@@ -7,7 +7,7 @@ The Solidity SDK provides TypeScript helpers for integrating GitHub Copilot into
 ## Requirements
 
 - Node.js >= 20
-- The Copilot CLI installed and available on PATH (or set `COPILOT_CLI_PATH`)
+- Copilot CLI 1.0.113 or newer (SDK protocol 4) installed and available on PATH (or set `COPILOT_CLI_PATH`)
 - Active GitHub Copilot authentication
 - A Hardhat or Foundry project (optional, but recommended)
 
@@ -65,6 +65,136 @@ for (const f of report.findings) {
 
 await client.stop();
 ```
+
+## What's New in v3.0.0
+
+SDK protocol 4 support, matching the upstream SDK 2.0 (Microsoft Copilot SDK)
+wire format. **Requires Copilot CLI 1.0.113 or newer**: `client.start()` checks
+the server's protocol version and rejects older CLIs with
+`SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+
+Existing options keep working. You still pass the flat v2.x session options;
+right before `session.create` / `session.resume` the client groups them into the
+protocol 4 payload (`streaming` becomes `events.streaming`, `onPermissionRequest`
+becomes `permissions.onRequest`, `sandboxConfig` becomes `permissions.sandbox`,
+and so on). A legacy single `provider` is sent as a `"default"` named provider
+with `inference.defaultProvider = "default"` and Copilot API models disabled
+(`github.capi.enabled = false`), so v2.x BYOK sessions behave as before. The
+grouped forms (`inference`, `permissions`, `github`, ...) are accepted too, and
+explicit grouped members win.
+
+The client is built on `copilot-sdk-supercharged` 3.x. It supplies the base
+client's required `mode` and, like v2.x, spawns the Copilot CLI over stdio by
+default: `cliPath`, `cliArgs`, `cwd`, `env`, `copilotHome`, `port` /
+`useStdio: false` and `cliUrl` select the runtime connection, or pass `runtime`
+(for example `RuntimeConnection.forTcp("localhost", 3000)`) for full control.
+
+```typescript
+import {
+    CopilotSolidityClient,
+    PermissionModeRefusalReason,
+    getPolicyHelperFailure,
+} from "copilot-sdk-supercharged-solidity";
+import { defineTool } from "copilot-sdk-supercharged";
+
+// Client mode: "coding-agent" (default; "copilot-cli" is accepted as an alias) or "empty".
+// Network callbacks: the base client calls `network.setProvider` after connecting and
+// answers `network.resolveProxy` / `network.authenticateNegotiate` / `network.authenticateBasic`.
+const client = new CopilotSolidityClient({
+    mode: "coding-agent",
+    network: {
+        resolveProxy: async ({ url }) =>
+            url.includes("corp.example") ? "PROXY proxy.corp.example:8080" : undefined,
+    },
+});
+await client.start();
+
+// Named BYOK providers: select a registered model with "<provider>/<id>".
+const session = await client.createSession({
+    model: "local/qwen3",
+    providers: [{ name: "local", type: "openai", baseUrl: "http://localhost:11434/v1" }],
+    models: [{ provider: "local", id: "qwen3", maxOutputTokens: 8192 }],
+    defaultProvider: "local",
+    capi: { enabled: false },
+    // Idempotent tools: `idempotent` is sent in tools.definitions[] (the four
+    // built-in Solidity tools are idempotent prompt builders).
+    tools: [
+        defineTool<{ address: string }>("erc20_metadata", {
+            description: "Look up ERC-20 token metadata",
+            parameters: { type: "object", properties: { address: { type: "string" } } },
+            idempotent: true,
+            handler: async ({ address }) => lookupToken(address),
+        }),
+    ],
+    // Shell authentication: answers `shellAuthentication.request` for sudo / ssh / git prompts.
+    onShellAuthenticationRequest: async (request) =>
+        request.inputKind === "confirm" ? { action: "accept", value: "yes" } : { action: "cancel" },
+    // Memory store: answers `memoryStore.store` (memory is enabled automatically).
+    memory: {
+        storeMemory: async ({ subject, fact, citations }) => {
+            await saveMemory(subject, fact, citations);
+        },
+    },
+});
+
+// Shell output events (`tool.shell_output`): toolCallId, text, sequence, stream.
+const unsubscribe = client.onShellOutput(session, ({ toolCallId, text, stream }) => {
+    (stream === "stderr" ? process.stderr : process.stdout).write(`[${toolCallId}] ${text}`);
+});
+
+// Client turn ID: sent as `clientTurnId` on session.send.
+await client.sendMessage(session, { prompt: "Audit Vault.sol", clientTurnId: "turn-42" });
+
+// Permission mode refusal reason.
+const result = await client.setPermissionMode(session, "allow-all");
+if (!result.success && result.reason === PermissionModeRefusalReason.managedPolicy) {
+    console.warn("Managed policy keeps the current permission mode");
+}
+
+unsubscribe();
+```
+
+- **Grouped v4 session payload**: `client.createRawSession(params)` and
+  `client.resumeSession(id)` send raw RPCs and group flat wire params too, so a
+  boolean `hooks: true` becomes `hooks: { hasHandlers: true }`.
+- **Resume event suppression**: `client.resumeSession(id, { suppressResumeEvent: true })`
+  (the legacy `disableResume` is accepted as an alias).
+- **Client mode**: in `mode: "empty"` the base client applies the empty-mode
+  defaults and every session must set `availableTools`; the one-shot helpers
+  (`auditContract`, `optimizeGas`, ...) restrict their sessions to the four
+  Solidity tools. Unless you connect to an external server (`cliUrl`), empty
+  mode also needs `copilotHome` (or `sessionFs`).
+- **Policy helper failure**: when `session.create` / `session.resume` fails with
+  a Policy Helper failure in the JSON-RPC error data, it is exposed as
+  `error.policyHelperFailure` (also `getPolicyHelperFailure(error)`), and
+  `client.getManagedSettings(session)` / `client.recheckPolicyHelper(session)`
+  report the latest failure as `policyHelperFailure`:
+
+  ```typescript
+  try {
+      await client.createSession({ model: "gpt-5" });
+  } catch (error) {
+      const failure = getPolicyHelperFailure(error);
+      if (failure) console.error(`${failure.category}: ${failure.message}`);
+      throw error;
+  }
+  ```
+
+- **Protocol constant**: `SDK_PROTOCOL_VERSION` (4) is exported.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC
+  families) is an experimental upstream surface that depends on the runtime's
+  in-process hosting library; this SDK does not wrap it.
+- In-process native runtime hosting is not the default connection: like the
+  other additional SDKs, this client spawns the CLI (or connects over TCP). Pass
+  `runtime: RuntimeConnection.forInProcess()` (or set
+  `COPILOT_SDK_DEFAULT_CONNECTION=inprocess`) to opt in through the base SDK.
+- The flat v2.x session options `otlpProtocol`, `inProcess`, `rewindEnabled`,
+  `contentExclusion`, `decisionContext`, `argsSchema` and
+  `builtinPluginDirectories` have no protocol 4 session field and are not sent
+  (configure telemetry and built-in plugin directories on the client instead).
 
 ## Architecture
 
@@ -162,10 +292,16 @@ Available tools:
 | `solidityVersion` | `string` | `undefined` | Default Solidity compiler version |
 | `defaultTestFramework` | `"hardhat" \| "foundry"` | `"hardhat"` | Target framework for test generation |
 | `includeGasHints` | `boolean` | `false` | Add gas hints to every audit |
-| `cliUrl` | `string` | `undefined` | Connect to an existing Copilot CLI server |
+| `mode` | `"coding-agent" \| "empty"` | `"coding-agent"` | Client defaulting strategy (`"copilot-cli"` is an alias of `"coding-agent"`) |
+| `cliPath` | `string` | `COPILOT_CLI_PATH` or bundled CLI | Copilot CLI executable to spawn |
+| `cliUrl` | `string` | `undefined` | Connect to an existing Copilot CLI server (`"host:port"`) |
 | `cwd` | `string` | `process.cwd()` | Working directory for the CLI process |
+| `env` | `Record<string, string>` | `process.env` | Environment for the CLI process |
+| `port` / `useStdio` | `number` / `boolean` | stdio | Spawn the CLI over TCP instead of stdio |
+| `copilotHome` | `string` | `~/.copilot` | Runtime base directory |
+| `network` | `NetworkConfig` | `undefined` | Proxy and Kerberos/Basic callbacks (`network.setProvider`) |
 
-All base `CopilotClientOptions` from the core SDK are also accepted.
+All base `CopilotClientOptions` from the core SDK are also accepted (for example `runtime`, `clientInfo`, `sessionFs`, `observability`).
 
 ## What's New in v2.6.0
 

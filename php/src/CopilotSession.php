@@ -59,6 +59,15 @@ class CopilotSession
     /** @var callable[] Callbacks run once after destroy() releases the session */
     private array $destroyCallbacks = [];
 
+    /** @var callable|null Shell authentication handler */
+    private $shellAuthenticationHandler = null;
+
+    /** @var array<string, bool> Pending shell authentication request IDs (true once cancelled) */
+    private array $pendingShellAuthentications = [];
+
+    /** @var callable|null Memory store callback */
+    private $memoryStoreHandler = null;
+
     /**
      * Creates a new CopilotSession instance.
      *
@@ -204,6 +213,7 @@ class CopilotSession
             displayPrompt: $options->displayPrompt,
             source: $options->source,
             responseSchema: $schema,
+            clientTurnId: $options->clientTurnId,
         );
 
         $event = $this->sendAndWait($structured, $timeout);
@@ -391,6 +401,96 @@ class CopilotSession
     }
 
     /**
+     * Registers the shell authentication handler.
+     *
+     * @param callable|null $handler fn(ShellAuthenticationRequest, array{sessionId:string}): ShellAuthenticationResponse|array|null
+     * @internal
+     */
+    public function registerShellAuthenticationHandler(?callable $handler): void
+    {
+        $this->shellAuthenticationHandler = $handler;
+    }
+
+    /**
+     * Asks the registered handler for a shell program's credentials. A failure, a
+     * malformed answer, or a cancellation answers "cancel" so the program fails
+     * instead of receiving a wrong value. The answer is never logged.
+     *
+     * @internal
+     * @return array{action:string,value?:string}
+     */
+    public function handleShellAuthenticationRequestInternal(ShellAuthenticationRequest $request): array
+    {
+        $handler = $this->shellAuthenticationHandler;
+        if ($handler === null || isset($this->pendingShellAuthentications[$request->requestId])) {
+            return ['action' => 'cancel'];
+        }
+
+        $this->pendingShellAuthentications[$request->requestId] = false;
+        try {
+            $result = $handler($request, ['sessionId' => $this->sessionId]);
+        } catch (\Throwable $e) {
+            // The error text could contain the answer, so only its type is logged.
+            fwrite(STDERR, '[CopilotSDK] Shell authentication handler failed (' . get_class($e) . ")\n");
+            $result = null;
+        } finally {
+            $cancelled = $this->pendingShellAuthentications[$request->requestId] ?? true;
+            unset($this->pendingShellAuthentications[$request->requestId]);
+        }
+
+        if ($cancelled) {
+            return ['action' => 'cancel'];
+        }
+        if ($result instanceof ShellAuthenticationResponse) {
+            $result = $result->toArray();
+        }
+        if (is_array($result) && ($result['action'] ?? null) === 'accept' && is_string($result['value'] ?? null)) {
+            return ['action' => 'accept', 'value' => $result['value']];
+        }
+        return ['action' => 'cancel'];
+    }
+
+    /**
+     * Cancels a pending shell authentication prompt; it then answers "cancel".
+     * @internal
+     */
+    public function cancelShellAuthenticationRequestInternal(string $requestId): void
+    {
+        if (array_key_exists($requestId, $this->pendingShellAuthentications)) {
+            $this->pendingShellAuthentications[$requestId] = true;
+        }
+    }
+
+    /**
+     * Registers the memory store callback.
+     *
+     * @param callable|null $handler fn(StoredMemory, array{sessionId:string}): void
+     * @internal
+     */
+    public function registerMemoryStore(?callable $handler): void
+    {
+        $this->memoryStoreHandler = $handler;
+    }
+
+    /**
+     * Hands a memory the agent asked to store to the registered callback.
+     * @internal
+     */
+    public function handleMemoryStoreInternal(StoredMemory $memory): void
+    {
+        if ($this->memoryStoreHandler === null) {
+            throw new \RuntimeException('No memory store is registered');
+        }
+        try {
+            ($this->memoryStoreHandler)($memory, ['sessionId' => $this->sessionId]);
+        } catch (\Throwable $e) {
+            // The runtime reports a generic failure to the model; keep the cause visible here.
+            fwrite(STDERR, "[CopilotSDK] Memory store callback failed: {$e->getMessage()}\n");
+            throw new \RuntimeException('Memory store callback failed');
+        }
+    }
+
+    /**
      * Handle a permission request from the server.
      *
      * @internal
@@ -552,6 +652,22 @@ class CopilotSession
     }
 
     /**
+     * Changes the session's permission mode.
+     *
+     * @param string $mode "manual", "assisted" or "allow-all" (see PermissionMode)
+     * @return PermissionModeSetResult Whether the mode was applied, the authoritative mode
+     *         afterwards, and the refusal reason when known ("managed_policy")
+     */
+    public function setPermissionMode(string $mode): PermissionModeSetResult
+    {
+        $result = $this->connection->request('session.permissions.setMode', [
+            'sessionId' => $this->sessionId,
+            'mode' => $mode,
+        ]);
+        return PermissionModeSetResult::fromArray(is_array($result) ? $result : []);
+    }
+
+    /**
      * Destroys this session and releases all associated resources.
      *
      * Sends `session.detach` (falling back to `session.destroy` on older CLIs), so
@@ -579,6 +695,11 @@ class CopilotSession
         $this->hooks = null;
         $this->exitPlanModeHandler = null;
         $this->traceContextProvider = null;
+        $this->memoryStoreHandler = null;
+        $this->shellAuthenticationHandler = null;
+        foreach (array_keys($this->pendingShellAuthentications) as $requestId) {
+            $this->pendingShellAuthentications[$requestId] = true;
+        }
 
         $callbacks = $this->destroyCallbacks;
         $this->destroyCallbacks = [];

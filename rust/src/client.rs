@@ -19,13 +19,18 @@ use crate::session::{CopilotSession, GitHubTokenRegistration, GitHubTokenRegistr
 use crate::types::*;
 use crate::CopilotError;
 
-/// Moves the Auto routing tier and WebSocket transport options into the `capi` wire object.
+/// Moves the Auto routing tier, WebSocket transport, and CAPI policy options into the
+/// `capi` wire object (grouped as `github.capi` by [`group_session_params`]).
 fn insert_capi_options(
     params: &mut Value,
     auto_tier: Option<AutoTier>,
     enable_web_socket_responses: Option<bool>,
+    capi_config: Option<&CapiConfig>,
 ) {
     let mut capi = serde_json::Map::new();
+    if let Some(enabled) = capi_config.and_then(|c| c.enabled) {
+        capi.insert("enabled".to_string(), Value::Bool(enabled));
+    }
     if let Some(tier) = auto_tier {
         if let Ok(value) = serde_json::to_value(tier) {
             capi.insert("autoTier".to_string(), value);
@@ -38,6 +43,442 @@ fn insert_capi_options(
         if let Some(obj) = params.as_object_mut() {
             obj.insert("capi".to_string(), Value::Object(capi));
         }
+    }
+}
+
+/// Sets a flat capability flag (for example `requestShellAuthentication`) on the params.
+fn insert_flag(params: &mut Value, key: &str) {
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert(key.to_string(), Value::Bool(true));
+    }
+}
+
+/// Application callbacks declared on a session config and installed on the opened session.
+struct SessionCallbacks {
+    shell_authentication: Option<ShellAuthenticationHandlerFn>,
+    memory_store: Option<MemoryStoreHandlerFn>,
+}
+
+impl SessionCallbacks {
+    /// Adds the capability flags that tell the runtime which callbacks are registered
+    /// (`interaction.requestShellAuthentication`, `state.hasMemoryStore`).
+    fn declare(&self, params: &mut Value) {
+        if self.shell_authentication.is_some() {
+            insert_flag(params, "requestShellAuthentication");
+        }
+        if self.memory_store.is_some() {
+            insert_flag(params, "hasMemoryStore");
+        }
+    }
+}
+
+// ============================================================================
+// SDK protocol 4: grouped session payloads
+// ============================================================================
+
+/// Option groups of the SDK protocol 4 `session.create` / `session.resume` payloads.
+const SESSION_OPTION_GROUPS: &[&str] = &[
+    "inference",
+    "tools",
+    "permissions",
+    "interaction",
+    "events",
+    "agents",
+    "skills",
+    "mcp",
+    "github",
+    "filesystem",
+    "execution",
+    "instructions",
+    "hooks",
+    "git",
+    "state",
+    "plugins",
+    "canvases",
+    "extensions",
+    "experiments",
+    "policy",
+];
+
+/// Keys valid only on `session.create`; dropped from resume payloads.
+const CREATE_ONLY_SESSION_KEYS: &[&str] = &[
+    "name",
+    "cloud",
+    "trustWorkingDirectory",
+    "refreshCustomInstructions",
+];
+
+/// Keys valid only on `session.resume`; dropped from create payloads.
+const RESUME_ONLY_SESSION_KEYS: &[&str] = &[
+    "suppressResumeEvent",
+    "continuePendingWork",
+    "allowTranscriptRecovery",
+    "requestedEnvironmentVariables",
+    "openCanvases",
+];
+
+/// Flat session option key -> SDK protocol 4 `(group, member)`. Keys not listed here
+/// (such as `sessionId`, `model`, `workingDirectory`, `systemMessage`) stay at the root.
+const SESSION_OPTION_PATHS: &[(&str, &str, &str)] = &[
+    ("reasoningEffort", "inference", "reasoningEffort"),
+    ("reasoningSummary", "inference", "reasoningSummary"),
+    ("contextTier", "inference", "contextTier"),
+    ("allowMultipleToolCalls", "inference", "allowMultipleToolCalls"),
+    ("enableCitations", "inference", "enableCitations"),
+    ("modelCapabilities", "inference", "capabilities"),
+    ("verbosity", "inference", "verbosity"),
+    ("providers", "inference", "providers"),
+    ("models", "inference", "models"),
+    ("defaultProvider", "inference", "defaultProvider"),
+    ("tools", "tools", "definitions"),
+    ("availableTools", "tools", "availableTools"),
+    ("excludedTools", "tools", "excludedTools"),
+    ("toolSearch", "tools", "search"),
+    ("largeOutput", "tools", "largeOutput"),
+    ("imageGeneration", "tools", "imageGeneration"),
+    ("manageScheduleEnabled", "tools", "manageScheduleEnabled"),
+    ("webSearch", "tools", "webSearch"),
+    ("shell", "tools", "shell"),
+    ("maxInlineBinaryBytes", "tools", "maxInlineBinaryBytes"),
+    ("requestPermission", "permissions", "request"),
+    ("sandboxConfig", "permissions", "sandbox"),
+    ("sandbox", "permissions", "sandbox"),
+    ("permissionMode", "permissions", "mode"),
+    ("sandboxConfigSource", "permissions", "sandboxSource"),
+    ("commands", "interaction", "commands"),
+    ("askUserVariant", "interaction", "askUserVariant"),
+    ("requestUserInput", "interaction", "requestUserInput"),
+    ("requestElicitation", "interaction", "requestElicitation"),
+    ("requestShellAuthentication", "interaction", "requestShellAuthentication"),
+    ("requestExitPlanMode", "interaction", "requestExitPlanMode"),
+    ("requestAutoModeSwitch", "interaction", "requestAutoModeSwitch"),
+    ("requestAutoModeRecovery", "interaction", "requestAutoModeRecovery"),
+    ("streaming", "events", "streaming"),
+    ("includeSubAgentStreamingEvents", "events", "includeSubAgentStreamingEvents"),
+    ("customAgents", "agents", "definitions"),
+    ("defaultAgent", "agents", "default"),
+    ("agent", "agents", "selected"),
+    ("includedBuiltinAgents", "agents", "includedBuiltinAgents"),
+    ("excludedBuiltinAgents", "agents", "excludedBuiltinAgents"),
+    ("customAgentsLocalOnly", "agents", "localDiscoveryOnly"),
+    ("agentDirectories", "agents", "directories"),
+    ("skillDirectories", "skills", "directories"),
+    ("enableSkills", "skills", "enabled"),
+    ("includedBuiltinSkills", "skills", "includedBuiltinSkills"),
+    ("disabledSkills", "skills", "disabledSkills"),
+    ("hasSkillProvider", "skills", "hasProvider"),
+    ("ignoredSkillsLocations", "skills", "ignoredLocations"),
+    ("mcpServers", "mcp", "servers"),
+    ("disabledMcpServers", "mcp", "disabledServers"),
+    ("requestMcpApps", "mcp", "enableApps"),
+    ("enableMcpApps", "mcp", "enableApps"),
+    ("mcpOAuthTokenStorage", "mcp", "oauthTokenStorage"),
+    ("authClientIdMetadataUrl", "mcp", "authClientIdMetadataUrl"),
+    ("envValueMode", "mcp", "envValueMode"),
+    ("managedMcpServers", "mcp", "managedServers"),
+    ("allowAllMcpServerInstructions", "mcp", "allowAllServerInstructions"),
+    ("gitHubToken", "github", "token"),
+    // This SDK historically serialized `github_token` as `githubToken`.
+    ("githubToken", "github", "token"),
+    ("gitHubTokenProviderRegistrationId", "github", "tokenProviderRegistrationId"),
+    ("githubMcpToolConfig", "github", "mcp"),
+    ("capi", "github", "capi"),
+    ("enableSessionTelemetry", "github", "telemetryEnabled"),
+    ("enableManagedSettings", "github", "fetchManagedSettings"),
+    ("interactiveUser", "github", "interactiveUser"),
+    ("enableGitHubTelemetryForwarding", "github", "telemetryForwarding"),
+    ("authInfo", "github", "authInfo"),
+    ("copilotUrl", "github", "copilotUrl"),
+    ("additionalDirectories", "filesystem", "additionalDirectories"),
+    ("enableFileChangeTracking", "filesystem", "trackFileChanges"),
+    ("trustWorkingDirectory", "filesystem", "trustWorkingDirectory"),
+    ("sessionLimits", "execution", "limits"),
+    ("autopilot", "execution", "autopilot"),
+    ("autopilotContinuation", "execution", "autopilotContinuation"),
+    ("instructionDirectories", "instructions", "directories"),
+    ("organizationCustomInstructions", "instructions", "organizationText"),
+    ("enableOnDemandInstructionDiscovery", "instructions", "onDemandDiscovery"),
+    ("skipCustomInstructions", "instructions", "skipCustomInstructions"),
+    ("refreshCustomInstructions", "instructions", "refreshCustomInstructions"),
+    ("hooks", "hooks", "hasHandlers"),
+    ("hookDirectories", "hooks", "directories"),
+    ("enableFileHooks", "hooks", "enableRepositoryHooks"),
+    ("coauthorEnabled", "git", "coauthorEnabled"),
+    ("enableHostGitOperations", "git", "enableHostGitOperations"),
+    ("infiniteSessions", "state", "infiniteSessions"),
+    ("memory", "state", "memory"),
+    ("hasMemoryStore", "state", "hasMemoryStore"),
+    ("enableSessionStore", "state", "enableCrossSessionStore"),
+    ("skipEmbeddingRetrieval", "state", "skipEmbeddingRetrieval"),
+    ("embeddingCacheStorage", "state", "embeddingCacheStorage"),
+    ("pluginDirectories", "plugins", "directories"),
+    ("installedPlugins", "plugins", "installed"),
+    ("canvases", "canvases", "definitions"),
+    ("canvasProvider", "canvases", "provider"),
+    ("requestCanvasRenderer", "canvases", "requestRenderer"),
+    ("openCanvases", "canvases", "open"),
+    ("requestExtensions", "extensions", "enabled"),
+    ("extensionSdkPath", "extensions", "sdkPath"),
+    ("extensionInfo", "extensions", "identity"),
+    ("enableExperimentalMode", "experiments", "enableExperimentalMode"),
+    ("isExperimentalMode", "experiments", "enableExperimentalMode"),
+    // This SDK historically sent the experimental-mode flag as `experimentalMode`.
+    ("experimentalMode", "experiments", "enableExperimentalMode"),
+    ("featureFlags", "experiments", "flags"),
+    ("expAssignments", "experiments", "assignments"),
+    ("featureFlagConfiguration", "experiments", "configuration"),
+    ("allowedModels", "policy", "allowedModels"),
+    ("managedSettings", "policy", "managedSettings"),
+    ("excludedManagedSettings", "policy", "excludedManagedSettings"),
+    ("enforceManagedModelDefaults", "policy", "enforceManagedModelDefaults"),
+];
+
+/// Legacy `provider` fields that describe the model rather than the connection.
+const LEGACY_PROVIDER_MODEL_FIELDS: &[&str] = &[
+    "modelId",
+    "wireModel",
+    "maxPromptTokens",
+    "maxContextWindowTokens",
+    "maxOutputTokens",
+    "capabilities",
+];
+
+/// Defaults applied under the caller's values when the client runs in `ClientMode::Empty`.
+fn empty_mode_defaults() -> [(&'static str, &'static str, Value); 10] {
+    [
+        ("experiments", "enableExperimentalMode", Value::Bool(false)),
+        ("github", "telemetryEnabled", Value::Bool(false)),
+        ("mcp", "oauthTokenStorage", Value::String("in-memory".to_string())),
+        ("state", "skipEmbeddingRetrieval", Value::Bool(true)),
+        ("state", "embeddingCacheStorage", Value::String("in-memory".to_string())),
+        ("state", "enableCrossSessionStore", Value::Bool(false)),
+        ("state", "memory", serde_json::json!({ "enabled": false })),
+        ("instructions", "onDemandDiscovery", Value::Bool(false)),
+        ("hooks", "enableRepositoryHooks", Value::Bool(false)),
+        ("git", "enableHostGitOperations", Value::Bool(false)),
+    ]
+}
+
+/// Returns the member object of `group`, creating it when missing.
+fn group_members<'a>(
+    groups: &'a mut serde_json::Map<String, Value>,
+    group: &str,
+) -> &'a mut serde_json::Map<String, Value> {
+    let entry = groups
+        .entry(group.to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !entry.is_object() {
+        *entry = Value::Object(serde_json::Map::new());
+    }
+    match entry {
+        Value::Object(members) => members,
+        _ => unreachable!("group entry was just made an object"),
+    }
+}
+
+/// Converts the flat session payload this SDK builds into the SDK protocol 4 grouped
+/// payload sent with `session.create` (`is_resume == false`) and `session.resume`.
+///
+/// Protocol 4 runtimes reject the flat keys and any unknown group member, while
+/// unknown root keys are tolerated. So known flat keys move to their exact
+/// `group.member` (for example `streaming` to `events.streaming` and `hooks: true` to
+/// `hooks.hasHandlers`), root keys and unrecognized keys stay at the top level, `null`
+/// values are skipped (except an explicit `defaultProvider: null` on resume, which
+/// clears the default), members invalid for the method are dropped
+/// (`filesystem.trustWorkingDirectory` and `instructions.refreshCustomInstructions` on
+/// resume, `canvases.open` on create), and empty groups are not emitted.
+/// Already-grouped objects are merged; their members win. The legacy single `provider`
+/// becomes a named `"default"` connection unless `providers`, `defaultProvider`, or
+/// `capi.enabled` are set explicitly.
+pub(crate) fn group_session_params(flat: Value, is_resume: bool) -> Value {
+    let flat = match flat {
+        Value::Object(flat) => flat,
+        other => return other,
+    };
+
+    let mut root = serde_json::Map::new();
+    let mut groups = serde_json::Map::new();
+    let mut explicit_groups = serde_json::Map::new();
+    let mut legacy_provider = None;
+
+    for (key, value) in flat {
+        let clears_default_provider = is_resume && key == "defaultProvider";
+        if value.is_null() && !clears_default_provider {
+            continue;
+        }
+        let key_str = key.as_str();
+        if (is_resume && CREATE_ONLY_SESSION_KEYS.contains(&key_str))
+            || (!is_resume && RESUME_ONLY_SESSION_KEYS.contains(&key_str))
+        {
+            continue;
+        }
+        match key_str {
+            "provider" => {
+                legacy_provider = Some(value);
+                continue;
+            }
+            "configDir" => {
+                root.entry("configDirectory".to_string()).or_insert(value);
+                continue;
+            }
+            "disableResume" => {
+                if is_resume {
+                    root.entry("suppressResumeEvent".to_string()).or_insert(value);
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if SESSION_OPTION_GROUPS.contains(&key_str) && value.is_object() {
+            explicit_groups.insert(key, value);
+        } else if let Some((_, group, member)) =
+            SESSION_OPTION_PATHS.iter().find(|(flat_key, _, _)| *flat_key == key_str)
+        {
+            group_members(&mut groups, group).insert(member.to_string(), value);
+        } else {
+            root.insert(key, value);
+        }
+    }
+
+    // Explicitly grouped members win over members moved from flat keys.
+    for (group, members) in explicit_groups {
+        if let Value::Object(members) = members {
+            let target = group_members(&mut groups, &group);
+            for (member, value) in members {
+                if !value.is_null() || (is_resume && group == "inference" && member == "defaultProvider") {
+                    target.insert(member, value);
+                }
+            }
+        }
+    }
+
+    // The runtime rejects members that are invalid for this lifecycle method.
+    let excluded_members: &[(&str, &str)] = if is_resume {
+        &[
+            ("filesystem", "trustWorkingDirectory"),
+            ("instructions", "refreshCustomInstructions"),
+        ]
+    } else {
+        &[("canvases", "open")]
+    };
+    for (group, member) in excluded_members {
+        if let Some(Value::Object(members)) = groups.get_mut(*group) {
+            members.remove(*member);
+        }
+    }
+
+    if let Some(provider) = legacy_provider {
+        translate_legacy_provider(provider, root.get("model"), &mut groups);
+    }
+
+    if let Some(Value::Object(mcp)) = groups.get_mut("mcp") {
+        if mcp.get("servers").is_some_and(|servers| !servers.is_null()) {
+            mcp.entry("envValueMode".to_string())
+                .or_insert_with(|| Value::String("direct".to_string()));
+        }
+    }
+
+    for (group, members) in groups {
+        if members.as_object().is_some_and(|m| !m.is_empty()) {
+            root.insert(group, members);
+        }
+    }
+    Value::Object(root)
+}
+
+/// Translates the legacy single BYOK `provider` into a named `"default"` connection
+/// (`inference.providers`), selects it (`inference.defaultProvider`), disables CAPI
+/// (`github.capi.enabled = false`, as v1 BYOK did), and moves model-specific fields
+/// into `inference.models` when the session model is set. Skipped when the caller
+/// already supplied `providers`, `defaultProvider`, or `capi.enabled`.
+fn translate_legacy_provider(
+    provider: Value,
+    model: Option<&Value>,
+    groups: &mut serde_json::Map<String, Value>,
+) {
+    let explicit_inference = groups.get("inference").is_some_and(|inference| {
+        inference.get("providers").is_some() || inference.get("defaultProvider").is_some()
+    });
+    let explicit_capi = groups
+        .get("github")
+        .and_then(|github| github.get("capi"))
+        .is_some_and(|capi| capi.get("enabled").is_some());
+    let provider = match provider {
+        Value::Object(provider) if !explicit_inference && !explicit_capi => provider,
+        _ => return,
+    };
+
+    let mut connection = serde_json::Map::new();
+    connection.insert("name".to_string(), Value::String("default".to_string()));
+    let mut model_fields = serde_json::Map::new();
+    for (key, value) in provider {
+        if value.is_null() || key == "name" {
+            continue;
+        }
+        if LEGACY_PROVIDER_MODEL_FIELDS.contains(&key.as_str()) {
+            model_fields.insert(key, value);
+        } else {
+            connection.insert(key, value);
+        }
+    }
+
+    let inference = group_members(groups, "inference");
+    inference.insert(
+        "providers".to_string(),
+        Value::Array(vec![Value::Object(connection)]),
+    );
+    inference.insert(
+        "defaultProvider".to_string(),
+        Value::String("default".to_string()),
+    );
+    if let (false, Some(Value::String(model))) = (model_fields.is_empty(), model) {
+        let mut definition = serde_json::Map::new();
+        definition.insert("provider".to_string(), Value::String("default".to_string()));
+        definition.insert("id".to_string(), Value::String(model.clone()));
+        definition.extend(model_fields);
+        inference.insert(
+            "models".to_string(),
+            Value::Array(vec![Value::Object(definition)]),
+        );
+    }
+
+    let github = group_members(groups, "github");
+    let capi = github
+        .entry("capi".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if let Value::Object(capi) = capi {
+        capi.insert("enabled".to_string(), Value::Bool(false));
+    } else {
+        *capi = serde_json::json!({ "enabled": false });
+    }
+}
+
+/// Applies the `ClientMode::Empty` defaults under the caller's grouped values.
+fn apply_empty_mode_defaults(params: &mut Value) {
+    let Some(root) = params.as_object_mut() else {
+        return;
+    };
+    for (group, member, value) in empty_mode_defaults() {
+        let members = group_members(root, group);
+        if members.get(member).map_or(true, Value::is_null) {
+            members.insert(member.to_string(), value);
+        }
+    }
+}
+
+/// Builds the command that launches the CLI. JavaScript entry points (`npm-loader.js`,
+/// legacy `index.js`) run under `node`; any other path (a native binary or the
+/// `node_modules/.bin/copilot` shim) is executed directly.
+fn cli_command(cli_path: &str) -> Command {
+    let is_script = [".js", ".mjs", ".cjs"]
+        .iter()
+        .any(|suffix| cli_path.to_ascii_lowercase().ends_with(suffix));
+    if is_script {
+        let mut cmd = Command::new("node");
+        cmd.arg(cli_path);
+        cmd
+    } else {
+        Command::new(cli_path)
     }
 }
 
@@ -177,6 +618,9 @@ impl CopilotClient {
 
         // Verify protocol version
         self.verify_protocol_version().await?;
+
+        // Register network callbacks (proxy resolution / proxy authentication)
+        self.register_network_provider().await?;
 
         Ok(())
     }
@@ -318,6 +762,7 @@ impl CopilotClient {
                 "github_token and github_token_provider are mutually exclusive".to_string(),
             ));
         }
+        self.validate_mode_tools(config.available_tools.as_ref())?;
 
         self.ensure_connected().await?;
 
@@ -334,7 +779,13 @@ impl CopilotClient {
             &mut params,
             config.auto_tier,
             config.enable_web_socket_responses,
+            config.capi.as_ref(),
         );
+        let callbacks = SessionCallbacks {
+            shell_authentication: config.on_shell_authentication_request.clone(),
+            memory_store: config.store_memory.clone(),
+        };
+        callbacks.declare(&mut params);
 
         let registration_id = self
             .register_github_token_provider(
@@ -344,7 +795,8 @@ impl CopilotClient {
             )
             .await;
 
-        self.open_session(rpc, "session.create", params, registration_id)
+        let params = self.finalize_session_params(params, false);
+        self.open_session(rpc, "session.create", params, registration_id, callbacks)
             .await
     }
 
@@ -358,6 +810,7 @@ impl CopilotClient {
                 "github_token and github_token_provider are mutually exclusive".to_string(),
             ));
         }
+        self.validate_mode_tools(config.available_tools.as_ref())?;
 
         self.ensure_connected().await?;
 
@@ -369,7 +822,13 @@ impl CopilotClient {
             &mut params,
             config.auto_tier,
             config.enable_web_socket_responses,
+            config.capi.as_ref(),
         );
+        let callbacks = SessionCallbacks {
+            shell_authentication: config.on_shell_authentication_request.clone(),
+            memory_store: config.store_memory.clone(),
+        };
+        callbacks.declare(&mut params);
 
         let registration_id = self
             .register_github_token_provider(
@@ -379,20 +838,52 @@ impl CopilotClient {
             )
             .await;
 
-        self.open_session(rpc, "session.resume", params, registration_id)
+        let params = self.finalize_session_params(params, true);
+        self.open_session(rpc, "session.resume", params, registration_id, callbacks)
             .await
+    }
+
+    /// Returns the client mode (`CodingAgent` or `Empty`).
+    pub fn mode(&self) -> ClientMode {
+        self.options.mode
+    }
+
+    /// In `ClientMode::Empty`, every session must explicitly opt into its tools.
+    fn validate_mode_tools(&self, available_tools: Option<&Vec<String>>) -> Result<(), CopilotError> {
+        if self.options.mode == ClientMode::Empty && available_tools.is_none() {
+            return Err(CopilotError::Configuration(
+                "CopilotClient is in mode \"empty\" but the session config did not specify \
+                 available_tools. Empty mode requires every session to explicitly opt into the \
+                 tools it wants."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Converts the flat params into the SDK protocol 4 grouped payload and applies the
+    /// client mode defaults. Called immediately before sending create / resume.
+    fn finalize_session_params(&self, params: Value, is_resume: bool) -> Value {
+        let mut params = group_session_params(params, is_resume);
+        if self.options.mode == ClientMode::Empty {
+            apply_empty_mode_defaults(&mut params);
+        }
+        params
     }
 
     /// Sends `session.create` / `session.resume` and tracks the resulting session.
     ///
     /// A GitHub token provider registration is dropped if the request fails, and
     /// otherwise bound to the returned session (which removes it on destroy).
+    /// A failed request keeps the JSON-RPC error data, so a refusing managed-settings
+    /// policy helper is available through [`CopilotError::policy_helper_failure`].
     async fn open_session(
         &self,
         rpc: Arc<JsonRpcClient>,
         method: &str,
         params: Value,
         github_token_registration: Option<String>,
+        callbacks: SessionCallbacks,
     ) -> Result<Arc<CopilotSession>, CopilotError> {
         let opened = rpc.request(method, params, None).await.and_then(|response| {
             let session_id = response
@@ -424,6 +915,12 @@ impl CopilotClient {
             rpc.clone(),
             workspace_path,
         ));
+        if let Some(handler) = callbacks.shell_authentication {
+            session.set_shell_authentication_handler(handler).await;
+        }
+        if let Some(store) = callbacks.memory_store {
+            session.set_memory_store(store).await;
+        }
 
         if let Some(registration_id) = github_token_registration {
             {
@@ -759,7 +1256,7 @@ impl CopilotClient {
             args.push("--no-auto-login".to_string());
         }
 
-        let mut cmd = Command::new(cli_path);
+        let mut cmd = cli_command(cli_path);
         cmd.args(&args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -840,7 +1337,7 @@ impl CopilotClient {
             args.push(self.options.port.to_string());
         }
 
-        let mut cmd = Command::new(cli_path);
+        let mut cmd = cli_command(cli_path);
         cmd.args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -1015,6 +1512,19 @@ impl CopilotClient {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Registers the client network callbacks with `network.setProvider` (skipped when
+    /// no callback is configured). The request handlers are attached with the connection.
+    async fn register_network_provider(&self) -> Result<(), CopilotError> {
+        let network = match self.options.network.as_ref() {
+            Some(network) if network.has_callbacks() => network,
+            _ => return Ok(()),
+        };
+        let rpc = self.get_rpc_client().await?;
+        rpc.request("network.setProvider", network.set_provider_params(), None)
+            .await?;
+        Ok(())
     }
 
     // ========================================================================
@@ -1294,7 +1804,144 @@ impl CopilotClient {
         rpc_client
             .set_request_handler("gitHubToken.getToken", github_token_handler)
             .await;
+
+        // Set up shellAuthentication.request / shellAuthentication.cancel handlers
+        let sessions_for_shell_auth = Arc::clone(&self.sessions);
+        let shell_auth_handler: RequestHandler = Arc::new(move |params: Value| {
+            let sessions = Arc::clone(&sessions_for_shell_auth);
+            Box::pin(async move {
+                let session = find_session(&sessions, &params).await?;
+                let response = session.handle_shell_authentication_request(params).await?;
+                serde_json::to_value(response)
+                    .map_err(|e| CopilotError::Serialization(e.to_string()))
+            })
+        });
+        rpc_client
+            .set_request_handler("shellAuthentication.request", shell_auth_handler)
+            .await;
+
+        let sessions_for_shell_cancel = Arc::clone(&self.sessions);
+        let shell_cancel_handler: RequestHandler = Arc::new(move |params: Value| {
+            let sessions = Arc::clone(&sessions_for_shell_cancel);
+            Box::pin(async move {
+                if let Ok(session) = find_session(&sessions, &params).await {
+                    if let Some(request_id) = params.get("requestId").and_then(|v| v.as_str()) {
+                        session.cancel_shell_authentication(request_id).await;
+                    }
+                }
+                Ok(serde_json::json!({}))
+            })
+        });
+        rpc_client
+            .set_request_handler("shellAuthentication.cancel", shell_cancel_handler)
+            .await;
+
+        // Set up memoryStore.store handler (application memory store)
+        let sessions_for_memory = Arc::clone(&self.sessions);
+        let memory_store_handler: RequestHandler = Arc::new(move |params: Value| {
+            let sessions = Arc::clone(&sessions_for_memory);
+            Box::pin(async move {
+                let session = find_session(&sessions, &params).await?;
+                session.handle_memory_store(params).await?;
+                Ok(Value::Null)
+            })
+        });
+        rpc_client
+            .set_request_handler("memoryStore.store", memory_store_handler)
+            .await;
+
+        // Set up network.* handlers for the configured network callbacks
+        if let Some(network) = self.options.network.clone() {
+            if let Some(resolve_proxy) = network.resolve_proxy {
+                let handler: RequestHandler = Arc::new(move |params: Value| {
+                    let resolve_proxy = resolve_proxy.clone();
+                    Box::pin(async move {
+                        let request: NetworkResolveProxyRequest = serde_json::from_value(params)
+                            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+                        let proxy = (resolve_proxy.0)(request).await.map_err(|e| {
+                            CopilotError::SessionError(format!("Proxy resolution failed: {}", e))
+                        })?;
+                        Ok(match proxy {
+                            Some(proxy) => serde_json::json!({ "proxy": proxy }),
+                            None => serde_json::json!({}),
+                        })
+                    })
+                });
+                rpc_client
+                    .set_request_handler("network.resolveProxy", handler)
+                    .await;
+            }
+            if let Some(negotiate) = network.authenticate_negotiate {
+                let handler: RequestHandler = Arc::new(move |params: Value| {
+                    let negotiate = negotiate.clone();
+                    Box::pin(async move {
+                        let request: NetworkAuthenticateNegotiateRequest =
+                            serde_json::from_value(params)
+                                .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+                        // Never include the token in errors or logs.
+                        let token = (negotiate.0)(request).await.map_err(|_| {
+                            CopilotError::SessionError(
+                                "Negotiate authentication callback failed".to_string(),
+                            )
+                        })?;
+                        Ok(match token {
+                            Some(token) => serde_json::json!({ "token": token }),
+                            None => serde_json::json!({}),
+                        })
+                    })
+                });
+                rpc_client
+                    .set_request_handler("network.authenticateNegotiate", handler)
+                    .await;
+            }
+            if let Some(basic) = network.authenticate_basic {
+                let handler: RequestHandler = Arc::new(move |params: Value| {
+                    let basic = basic.clone();
+                    Box::pin(async move {
+                        let request: NetworkAuthenticateBasicRequest =
+                            serde_json::from_value(params)
+                                .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+                        // Never include credentials in errors or logs.
+                        let credentials = (basic.0)(request).await.map_err(|_| {
+                            CopilotError::SessionError(
+                                "Basic authentication callback failed".to_string(),
+                            )
+                        })?;
+                        let mut result = serde_json::Map::new();
+                        if let Some(credentials) = credentials {
+                            result.insert(
+                                "username".to_string(),
+                                Value::String(credentials.username),
+                            );
+                            if let Some(password) = credentials.password {
+                                result.insert("password".to_string(), Value::String(password));
+                            }
+                        }
+                        Ok(Value::Object(result))
+                    })
+                });
+                rpc_client
+                    .set_request_handler("network.authenticateBasic", handler)
+                    .await;
+            }
+        }
     }
+}
+
+/// Looks up the session addressed by a server request's `sessionId`.
+async fn find_session(
+    sessions: &Arc<Mutex<HashMap<String, Arc<CopilotSession>>>>,
+    params: &Value,
+) -> Result<Arc<CopilotSession>, CopilotError> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CopilotError::Protocol("Missing sessionId".to_string()))?;
+    let sessions = sessions.lock().await;
+    sessions
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| CopilotError::SessionError(format!("Session not found: {}", session_id)))
 }
 
 // ============================================================================
@@ -1335,5 +1982,135 @@ fn normalize_tool_result(value: Value) -> ToolResultObject {
         error: None,
         session_log: None,
         tool_telemetry: Some(HashMap::new()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn groups_flat_resume_payload_for_protocol_4() {
+        let flat = json!({
+            "sessionId": "s1",
+            "model": "m",
+            "name": "create only",
+            "streaming": true,
+            "requestPermission": true,
+            "tools": [{ "name": "t", "idempotent": true }],
+            "hooks": true,
+            "disableResume": true,
+            "configDir": "/cfg",
+            "trustWorkingDirectory": "session",
+            "mcpServers": { "s": { "command": "x", "args": [], "tools": ["*"] } },
+            "capi": { "autoTier": "fast" },
+            "futureOption": 1,
+            "reasoningEffort": null,
+        });
+
+        assert_eq!(
+            group_session_params(flat, true),
+            json!({
+                "sessionId": "s1",
+                "model": "m",
+                "configDirectory": "/cfg",
+                "suppressResumeEvent": true,
+                "futureOption": 1,
+                "events": { "streaming": true },
+                "permissions": { "request": true },
+                "tools": { "definitions": [{ "name": "t", "idempotent": true }] },
+                "hooks": { "hasHandlers": true },
+                "mcp": {
+                    "servers": { "s": { "command": "x", "args": [], "tools": ["*"] } },
+                    "envValueMode": "direct",
+                },
+                "github": { "capi": { "autoTier": "fast" } },
+            })
+        );
+    }
+
+    #[test]
+    fn translates_legacy_provider_unless_named_providers_are_explicit() {
+        let flat = json!({
+            "model": "gpt-4o",
+            "provider": {
+                "type": "openai",
+                "baseUrl": "https://models.example.com/v1",
+                "apiKeyCommand": "print-key",
+                "maxOutputTokens": 2048,
+            },
+        });
+        assert_eq!(
+            group_session_params(flat, false),
+            json!({
+                "model": "gpt-4o",
+                "inference": {
+                    "providers": [{
+                        "name": "default",
+                        "type": "openai",
+                        "baseUrl": "https://models.example.com/v1",
+                        "apiKeyCommand": "print-key",
+                    }],
+                    "defaultProvider": "default",
+                    "models": [{ "provider": "default", "id": "gpt-4o", "maxOutputTokens": 2048 }],
+                },
+                "github": { "capi": { "enabled": false } },
+            })
+        );
+
+        let explicit = json!({
+            "sessionId": "s1",
+            "provider": { "baseUrl": "https://legacy.example.com" },
+            "defaultProvider": null,
+        });
+        assert_eq!(
+            group_session_params(explicit, true),
+            json!({ "sessionId": "s1", "inference": { "defaultProvider": null } })
+        );
+    }
+
+    #[test]
+    fn empty_mode_defaults_never_override_session_values() {
+        let mut params = group_session_params(
+            json!({ "availableTools": ["view"], "memory": { "enabled": true } }),
+            false,
+        );
+        apply_empty_mode_defaults(&mut params);
+
+        assert_eq!(params["tools"], json!({ "availableTools": ["view"] }));
+        assert_eq!(params["state"]["memory"], json!({ "enabled": true }));
+        assert_eq!(params["state"]["skipEmbeddingRetrieval"], json!(true));
+        assert_eq!(params["mcp"]["oauthTokenStorage"], json!("in-memory"));
+        assert_eq!(params["experiments"]["enableExperimentalMode"], json!(false));
+        assert_eq!(params["git"]["enableHostGitOperations"], json!(false));
+    }
+
+    #[test]
+    fn ping_timestamp_accepts_rfc3339_strings_and_epoch_millis() {
+        let iso: PingResponse = serde_json::from_value(json!({
+            "message": "pong",
+            "timestamp": "1970-01-02T00:00:01.5Z",
+            "protocolVersion": 4
+        }))
+        .unwrap();
+        assert_eq!(iso.timestamp, 86_401_500.0);
+        assert_eq!(iso.protocol_version, Some(4));
+
+        let offset: PingResponse = serde_json::from_value(json!({
+            "message": "pong",
+            "timestamp": "2026-01-01T01:00:00+01:00"
+        }))
+        .unwrap();
+        let utc: PingResponse = serde_json::from_value(json!({
+            "message": "pong",
+            "timestamp": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(offset.timestamp, utc.timestamp);
+
+        let millis: PingResponse =
+            serde_json::from_value(json!({ "message": "pong", "timestamp": 1234.0 })).unwrap();
+        assert_eq!(millis.timestamp, 1234.0);
     }
 }

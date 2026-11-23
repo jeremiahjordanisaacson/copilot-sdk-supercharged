@@ -171,6 +171,66 @@ Namespace GitHub.Copilot.SDK
             End Try
         End Function
 
+        Private Sub HandleRequest(root As JsonElement)
+            Dim idProp As JsonElement = root.GetProperty("id").Clone()
+            Dim methodProp As JsonElement = Nothing
+            If Not root.TryGetProperty("method", methodProp) OrElse methodProp.ValueKind <> JsonValueKind.String Then Return
+            Dim method = methodProp.GetString()
+
+            Dim paramsProp As JsonElement = Nothing
+            If root.TryGetProperty("params", paramsProp) Then
+                paramsProp = paramsProp.Clone()
+            End If
+
+            Dim handler As Func(Of JsonElement, Task(Of Object)) = Nothing
+            If Not _requestHandlers.TryGetValue(method, handler) Then
+                ' Legacy notification-style handlers still see the payload.
+                HandleNotification(root)
+                Dim unused = SendErrorResponseAsync(idProp, -32601, $"Method not found: {method}")
+                Return
+            End If
+
+            Task.Run(Async Function()
+                         Dim result As Object = Nothing
+                         Dim failure As Exception = Nothing
+                         Try
+                             result = Await handler(paramsProp)
+                         Catch ex As Exception
+                             failure = ex
+                         End Try
+                         If failure Is Nothing Then
+                             Await SendResultResponseAsync(idProp, result)
+                         Else
+                             Await SendErrorResponseAsync(idProp, -32603, failure.Message)
+                         End If
+                     End Function)
+        End Sub
+
+        Private Async Function SendResultResponseAsync(id As JsonElement, result As Object) As Task
+            Dim response = New Dictionary(Of String, Object) From {
+                {"jsonrpc", "2.0"},
+                {"id", id},
+                {"result", result}
+            }
+            Await WriteMessageAsync(JsonSerializer.Serialize(response))
+        End Function
+
+        Private Async Function SendErrorResponseAsync(id As JsonElement, code As Integer, message As String) As Task
+            Try
+                Dim response = New Dictionary(Of String, Object) From {
+                    {"jsonrpc", "2.0"},
+                    {"id", id},
+                    {"error", New Dictionary(Of String, Object) From {
+                        {"code", code},
+                        {"message", If(message, "Internal error")}
+                    }}
+                }
+                Await WriteMessageAsync(JsonSerializer.Serialize(response))
+            Catch
+                ' The connection may already be closed.
+            End Try
+        End Function
+
         Private Sub HandleResponse(root As JsonElement)
             Dim idProp As JsonElement = Nothing
             If Not root.TryGetProperty("id", idProp) Then Return
@@ -189,7 +249,7 @@ Namespace GitHub.Copilot.SDK
             If root.TryGetProperty("error", errorProp) Then
                 Dim message = "JSON-RPC error"
                 Dim msgProp As JsonElement = Nothing
-                If errorProp.TryGetProperty("message", msgProp) Then
+                If errorProp.ValueKind = JsonValueKind.Object AndAlso errorProp.TryGetProperty("message", msgProp) Then
                     message = msgProp.GetString()
                 End If
                 Dim code = 0
@@ -199,7 +259,12 @@ Namespace GitHub.Copilot.SDK
                    codeProp.ValueKind = JsonValueKind.Number Then
                     code = codeProp.GetInt32()
                 End If
-                tcs.TrySetException(New JsonRpcException(message) With {.Code = code})
+                Dim data As JsonElement? = Nothing
+                Dim dataProp As JsonElement = Nothing
+                If errorProp.ValueKind = JsonValueKind.Object AndAlso errorProp.TryGetProperty("data", dataProp) Then
+                    data = dataProp.Clone()
+                End If
+                tcs.TrySetException(New JsonRpcException(message) With {.Code = code, .ErrorData = data})
             Else
                 Dim resultProp As JsonElement = Nothing
                 If root.TryGetProperty("result", resultProp) Then
@@ -286,6 +351,25 @@ Namespace GitHub.Copilot.SDK
         Public Sub New(message As String, innerException As Exception)
             MyBase.New(message, innerException)
         End Sub
+
+        ''' <summary>JSON-RPC error code (for example -32601 when the method is unknown).</summary>
+        Public Property Code As Integer
+
+        ''' <summary>The error's <c>data</c> member, when the server sent one.</summary>
+        Public Property ErrorData As JsonElement?
+
+        ''' <summary>
+        ''' Policy Helper failure carried in <c>error.data.policyHelperFailure</c>, for example when
+        ''' <c>session.create</c> or <c>session.resume</c> is blocked by managed policy. Nothing otherwise.
+        ''' </summary>
+        Public ReadOnly Property PolicyHelperFailure As PolicyHelperFailure
+            Get
+                If Not ErrorData.HasValue OrElse ErrorData.Value.ValueKind <> JsonValueKind.Object Then Return Nothing
+                Dim failure As JsonElement = Nothing
+                If Not ErrorData.Value.TryGetProperty("policyHelperFailure", failure) Then Return Nothing
+                Return Global.GitHub.Copilot.SDK.PolicyHelperFailure.FromJson(failure)
+            End Get
+        End Property
     End Class
 
 End Namespace

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -60,9 +61,12 @@ public:
     void forceStop();
 
     /// Creates a new conversation session.
+    /// Throws JsonRpcException when the server rejects the request; use
+    /// JsonRpcException::policyHelperFailure() for a structured Policy Helper failure.
+    /// In ClientMode::Empty, throws std::invalid_argument unless availableTools is set.
     std::shared_ptr<CopilotSession> createSession(const SessionConfig& config = {});
 
-    /// Resumes an existing session by ID.
+    /// Resumes an existing session by ID (same error behavior as createSession()).
     std::shared_ptr<CopilotSession> resumeSession(const std::string& sessionId,
                                                     const ResumeSessionConfig& config = {});
 
@@ -128,6 +132,16 @@ private:
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleHooksInvoke(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleExitPlanModeRequest(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleGitHubTokenGetToken(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleShellAuthenticationRequest(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleShellAuthenticationCancel(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleMemoryStore(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleNetworkResolveProxy(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleNetworkAuthenticateNegotiate(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleNetworkAuthenticateBasic(const nlohmann::json& params);
+
+    // Registers network callbacks with `network.setProvider` (no-op without callbacks).
+    void registerNetworkProvider();
+    std::shared_ptr<CopilotSession> findSession(const std::string& sessionId);
 
     // GitHub token provider registry (gitHubToken.getToken)
     std::string registerGitHubTokenProvider(const GitHubTokenProvider& provider, const std::string& sessionId);
@@ -177,6 +191,11 @@ private:
     };
     mutable std::mutex gitHubTokenProvidersMutex_;
     std::map<std::string, GitHubTokenRegistration> gitHubTokenProviders_;
+
+    // Cancellation flags of in-flight shell authentication requests, keyed by
+    // "<sessionId>\n<requestId>" (set by shellAuthentication.cancel).
+    std::mutex shellAuthMutex_;
+    std::map<std::string, std::shared_ptr<std::atomic<bool>>> pendingShellAuth_;
 
     // Lifecycle handlers
     struct LifecycleEntry {

@@ -80,6 +80,15 @@ struct CopilotClientOptions
 
     /// Identity of the embedding application, declared via `connect` on start.
     ClientInfo clientInfo;
+
+    /// Client behavior profile: `ClientMode.codingAgent` (default) or
+    /// `ClientMode.empty`, which requires `availableTools` on every session and
+    /// applies conservative defaults beneath the caller's options.
+    ClientMode mode = ClientMode.codingAgent;
+
+    /// Proxy resolution and proxy-authentication callbacks, registered with
+    /// `network.setProvider` after connecting.
+    NetworkOptions network;
 }
 
 // ---------------------------------------------------------------------------
@@ -719,13 +728,16 @@ private JSONValue stringListJson(const string[] items) @safe
     return JSONValue(arr);
 }
 
-/// Build the `capi` object (auto routing tier + WebSocket responses);
-/// JSON null when neither is set.
-private JSONValue capiJson(const Nullable!string autoTier, bool webSocketResponses) @safe
+/// Build the `capi` object (auto routing tier, WebSocket responses, and
+/// Copilot model availability); JSON null when nothing is set.
+private JSONValue capiJson(const Nullable!string autoTier, bool webSocketResponses,
+    const Nullable!bool enabled = Nullable!bool.init) @safe
 {
-    if (autoTier.isNull && !webSocketResponses)
+    if (autoTier.isNull && !webSocketResponses && enabled.isNull)
         return JSONValue(null);
     auto obj = JSONValue(string[string].init);
+    if (!enabled.isNull)
+        obj["enabled"] = enabled.get;
     if (!autoTier.isNull)
         obj["autoTier"] = autoTier.get;
     if (webSocketResponses)
@@ -733,7 +745,7 @@ private JSONValue capiJson(const Nullable!string autoTier, bool webSocketRespons
     return obj;
 }
 
-/// Serialize the v2.6.0 options shared by `session.create` and `session.resume`.
+/// Serialize the options shared by `session.create` and `session.resume`.
 private void putSharedSessionOptions(T)(ref JSONValue obj, ref const T cfg) @safe
 {
     if (!cfg.askUserVariant.isNull)
@@ -767,15 +779,380 @@ private void putSharedSessionOptions(T)(ref JSONValue obj, ref const T cfg) @saf
         obj["autopilot"] = cfg.autopilot.get.toJson();
     if (cfg.onSubagentStart !is null || cfg.onSubagentStop !is null)
         obj["hooks"] = true;
+
+    // v3.0.0 / SDK protocol 4 options.
+    if (!cfg.availableTools.isNull)
+        obj["availableTools"] = stringListJson(cfg.availableTools.get);
+    if (cfg.providers.length > 0)
+    {
+        JSONValue[] arr;
+        foreach (ref p; cfg.providers) arr ~= p.toJson();
+        obj["providers"] = JSONValue(arr);
+    }
+    if (cfg.models.length > 0)
+    {
+        JSONValue[] arr;
+        foreach (ref m; cfg.models) arr ~= m.toJson();
+        obj["models"] = JSONValue(arr);
+    }
+    if (!cfg.defaultProvider.isNull)
+        obj["defaultProvider"] = cfg.defaultProvider.get;
+    if (cfg.onShellAuthenticationRequest !is null)
+        obj["requestShellAuthentication"] = true;
+    if (cfg.onStoreMemory !is null)
+        obj["hasMemoryStore"] = true;
+}
+
+// ---------------------------------------------------------------------------
+// v3.0.0 / SDK protocol 4 types (parity with the Microsoft Copilot SDK 2.0)
+// ---------------------------------------------------------------------------
+
+/// Client behavior profile (`CopilotClientOptions.mode`).
+enum ClientMode : string
+{
+    /// Default: the coding-agent behavior.
+    codingAgent = "coding-agent",
+    /// Requires `availableTools` on every session and applies conservative
+    /// defaults (no telemetry, in-memory storage, no repository hooks).
+    empty = "empty",
+}
+
+/// Parse a client mode name; "copilot-cli" is accepted as an alias of
+/// "coding-agent".
+ClientMode parseClientMode(string name) @safe
+{
+    switch (name)
+    {
+        case "", "coding-agent", "copilot-cli":
+            return ClientMode.codingAgent;
+        case "empty":
+            return ClientMode.empty;
+        default:
+            throw new Exception("unknown client mode: " ~ name);
+    }
+}
+
+/// A named BYOK provider connection (`inference.providers`).
+struct NamedProviderConfig
+{
+    /// Stable identifier referenced by `ProviderModelConfig.provider`.
+    string name;
+    /// Provider type, e.g. "openai", "azure", or "anthropic".
+    Nullable!string type;
+    string baseUrl;
+    Nullable!string apiKey;
+    /// Command run before each request to obtain a fresh API key.
+    Nullable!string apiKeyCommand;
+    Nullable!string bearerToken;
+    /// "completions" or "responses".
+    Nullable!string wireApi;
+    /// "http" or "websockets".
+    Nullable!string transport;
+    /// Product serving the models (see `ModelProvider`).
+    Nullable!string modelProvider;
+    /// Azure API version (wire: azure.apiVersion).
+    Nullable!string azureApiVersion;
+    string[string] headers;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["name"] = name;
+        putConnectionFields(obj, type, baseUrl.length > 0 ? Nullable!string(baseUrl) : Nullable!string.init,
+            apiKey, apiKeyCommand, bearerToken, wireApi, transport, modelProvider,
+            azureApiVersion, headers);
+        return obj;
+    }
+}
+
+/// A BYOK model served by a named provider (`inference.models`). Select it
+/// with the model id "provider/id".
+struct ProviderModelConfig
+{
+    /// Name of the `NamedProviderConfig` serving this model.
+    string provider;
+    /// Provider-local model id.
+    string id;
+    Nullable!string modelId;
+    Nullable!string wireModel;
+    Nullable!string name;
+    Nullable!long maxPromptTokens;
+    Nullable!long maxContextWindowTokens;
+    Nullable!long maxOutputTokens;
+    /// Capability overrides (see `ModelLimitsOverride.toModelCapabilities`).
+    JSONValue capabilities;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["provider"] = provider;
+        obj["id"] = id;
+        if (!modelId.isNull) obj["modelId"] = modelId.get;
+        if (!wireModel.isNull) obj["wireModel"] = wireModel.get;
+        if (!name.isNull) obj["name"] = name.get;
+        if (!maxPromptTokens.isNull) obj["maxPromptTokens"] = maxPromptTokens.get;
+        if (!maxContextWindowTokens.isNull) obj["maxContextWindowTokens"] = maxContextWindowTokens.get;
+        if (!maxOutputTokens.isNull) obj["maxOutputTokens"] = maxOutputTokens.get;
+        if (capabilities.type == JSONType.object) obj["capabilities"] = capabilities;
+        return obj;
+    }
+}
+
+/// Write BYOK connection fields shared by `ProviderConfig` and `NamedProviderConfig`.
+private void putConnectionFields(ref JSONValue obj, const Nullable!string type,
+    const Nullable!string baseUrl, const Nullable!string apiKey,
+    const Nullable!string apiKeyCommand, const Nullable!string bearerToken,
+    const Nullable!string wireApi, const Nullable!string transport,
+    const Nullable!string modelProvider, const Nullable!string azureApiVersion,
+    const string[string] headers) @safe
+{
+    if (!type.isNull) obj["type"] = type.get;
+    if (!baseUrl.isNull) obj["baseUrl"] = baseUrl.get;
+    if (!apiKey.isNull) obj["apiKey"] = apiKey.get;
+    if (!apiKeyCommand.isNull) obj["apiKeyCommand"] = apiKeyCommand.get;
+    if (!bearerToken.isNull) obj["bearerToken"] = bearerToken.get;
+    if (!wireApi.isNull) obj["wireApi"] = wireApi.get;
+    if (!transport.isNull) obj["transport"] = transport.get;
+    if (!modelProvider.isNull) obj["modelProvider"] = modelProvider.get;
+    if (!azureApiVersion.isNull)
+    {
+        auto azure = JSONValue(string[string].init);
+        azure["apiVersion"] = azureApiVersion.get;
+        obj["azure"] = azure;
+    }
+    if (headers.length > 0)
+    {
+        auto hdr = JSONValue(string[string].init);
+        foreach (key, val; headers)
+            hdr[key] = val;
+        obj["headers"] = hdr;
+    }
+}
+
+/// A password or other answer a shell command asks for
+/// (`shellAuthentication.request`). The answer is never shown to the model.
+struct ShellAuthenticationRequest
+{
+    string sessionId;
+    /// Identifies the request; a cancellation carries the same id.
+    string requestId;
+    /// The program that asked: "sudo", "ssh", or "git".
+    string program;
+    string prompt;
+    /// "secret", "text", or "confirm".
+    string inputKind;
+    string command;
+    string cwd;
+
+    static ShellAuthenticationRequest fromJson(JSONValue v) @safe
+    {
+        ShellAuthenticationRequest req;
+        req.sessionId = jsonStr(v, "sessionId");
+        req.requestId = jsonStr(v, "requestId");
+        req.program = jsonStr(v, "program");
+        req.prompt = jsonStr(v, "prompt");
+        req.inputKind = jsonStr(v, "inputKind");
+        req.command = jsonStr(v, "command");
+        req.cwd = jsonStr(v, "cwd");
+        return req;
+    }
+}
+
+/// Answer to a `ShellAuthenticationRequest`.
+struct ShellAuthenticationResponse
+{
+    /// "accept" or "cancel".
+    string action = "cancel";
+    /// The answer when accepting.
+    string value;
+
+    /// Accept the request with an answer.
+    static ShellAuthenticationResponse accept(string value) @safe pure nothrow
+    {
+        return ShellAuthenticationResponse("accept", value);
+    }
+
+    /// Decline the request.
+    static ShellAuthenticationResponse cancel() @safe pure nothrow
+    {
+        return ShellAuthenticationResponse.init;
+    }
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["action"] = action;
+        if (action == "accept")
+            obj["value"] = value;
+        return obj;
+    }
+}
+
+/// Answers shell authentication requests for a session.
+alias ShellAuthenticationHandler = ShellAuthenticationResponse delegate(ShellAuthenticationRequest request);
+
+/// A memory the agent asked to store (`memoryStore.store`).
+struct StoredMemory
+{
+    string sessionId;
+    string subject;
+    string fact;
+    string citations;
+    string reason;
+
+    static StoredMemory fromJson(JSONValue v) @safe
+    {
+        StoredMemory m;
+        m.sessionId = jsonStr(v, "sessionId");
+        m.subject = jsonStr(v, "subject");
+        m.fact = jsonStr(v, "fact");
+        m.citations = jsonStr(v, "citations");
+        m.reason = jsonStr(v, "reason");
+        return m;
+    }
+}
+
+/// Receives memories to store for a session.
+alias StoreMemoryHandler = void delegate(StoredMemory memory);
+
+/// A proxy Basic authentication challenge (`network.authenticateBasic`).
+struct NetworkBasicAuthRequest
+{
+    string proxy;
+    Nullable!string realm;
+    bool previousRejected;
+}
+
+/// Credentials for a proxy Basic challenge. Never log them.
+struct NetworkBasicCredentials
+{
+    string username;
+    string password;
+}
+
+/// Network callbacks registered with `network.setProvider` after connecting.
+struct NetworkOptions
+{
+    /// "connection" or "runtime"; null uses the runtime default.
+    Nullable!string scope_;
+    /// Returns a PAC-style proxy list for a URL, or null to use default routing.
+    Nullable!string delegate(string url) resolveProxy;
+    /// Returns a base64 SPNEGO token for a service principal, or null.
+    Nullable!string delegate(string spn) authenticateNegotiate;
+    /// Returns proxy credentials, or null when none are available.
+    Nullable!NetworkBasicCredentials delegate(NetworkBasicAuthRequest request) authenticateBasic;
+
+    /// Whether any callback is configured.
+    bool hasCallbacks() const @safe pure nothrow
+    {
+        return resolveProxy !is null || authenticateNegotiate !is null || authenticateBasic !is null;
+    }
+}
+
+/// Structured Policy Helper failure reported in RPC error data
+/// (`error.data.policyHelperFailure`). The text is untrusted: render it as
+/// plain text.
+struct PolicyHelperFailure
+{
+    string category;
+    string failureMode;
+    string message;
+    bool previousPolicyRetained;
+    string reason;
+    Nullable!string authority;
+    Nullable!string code;
+    Nullable!string diagnostic;
+    JSONValue details;
+    JSONValue helpLink;
+
+    static Nullable!PolicyHelperFailure fromJson(JSONValue v) @safe
+    {
+        if (v.type != JSONType.object) return Nullable!PolicyHelperFailure.init;
+        PolicyHelperFailure f;
+        f.category = jsonStr(v, "category");
+        f.failureMode = jsonStr(v, "failureMode");
+        f.message = jsonStr(v, "message");
+        auto pRetained = "previousPolicyRetained" in v;
+        f.previousPolicyRetained = pRetained !is null && (*pRetained).type == JSONType.true_;
+        f.reason = jsonStr(v, "reason");
+        f.authority = jsonOptStr(v, "authority");
+        f.code = jsonOptStr(v, "code");
+        f.diagnostic = jsonOptStr(v, "diagnostic");
+        auto pDetails = "details" in v;
+        if (pDetails !is null) f.details = *pDetails;
+        auto pHelp = "helpLink" in v;
+        if (pHelp !is null) f.helpLink = *pHelp;
+        return Nullable!PolicyHelperFailure(f);
+    }
+}
+
+/// Known refusal reason for `PermissionModeResult.reason`.
+enum string permissionModeRefusalManagedPolicy = "managed_policy";
+
+/// Result of `CopilotSession.setPermissionMode` (`session.permissions.setMode`).
+struct PermissionModeResult
+{
+    bool success;
+    /// Authoritative permission mode after the call.
+    string mode;
+    /// Why the mode was refused, e.g. `permissionModeRefusalManagedPolicy`.
+    Nullable!string reason;
+
+    static PermissionModeResult fromJson(JSONValue v) @safe
+    {
+        PermissionModeResult r;
+        if (v.type != JSONType.object) return r;
+        auto pSuccess = "success" in v;
+        r.success = pSuccess !is null && (*pSuccess).type == JSONType.true_;
+        r.mode = jsonStr(v, "mode");
+        r.reason = jsonOptStr(v, "reason");
+        return r;
+    }
+}
+
+/// Data of a `tool.shell_output` event: one chunk of live shell output.
+struct ShellOutputData
+{
+    string toolCallId;
+    string text;
+    long sequence;
+    /// "stdout", "stderr", or null when omitted.
+    Nullable!string stream;
+
+    static ShellOutputData fromJson(JSONValue v) @safe
+    {
+        ShellOutputData d;
+        d.toolCallId = jsonStr(v, "toolCallId");
+        d.text = jsonStr(v, "text");
+        d.sequence = jsonLong(v, "sequence");
+        d.stream = jsonOptStr(v, "stream");
+        return d;
+    }
+
+    /// Decode a `tool.shell_output` event (its `data` member).
+    static ShellOutputData fromEvent(SessionEvent ev) @safe
+    {
+        if (ev.payload.type == JSONType.object)
+        {
+            auto pData = "data" in ev.payload;
+            if (pData !is null && (*pData).type == JSONType.object)
+                return fromJson(*pData);
+        }
+        return fromJson(ev.payload);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Session configuration
 // ---------------------------------------------------------------------------
 
-/// Provider configuration for the LLM backend.
+/// Legacy single BYOK provider for the LLM backend. On the protocol 4 wire it
+/// becomes the named "default" provider (`inference.providers`) with Copilot
+/// models disabled; model-specific fields become an `inference.models` entry
+/// for the session model.
 struct ProviderConfig
 {
+    /// Model name sent to the provider API (wire: wireModel).
     Nullable!string model;
     Nullable!string baseUrl;
 
@@ -785,13 +1162,45 @@ struct ProviderConfig
     /// Command whose stdout is used as the API key; run before each request.
     Nullable!string apiKeyCommand;
 
+    /// Provider type, e.g. "openai", "azure", or "anthropic".
+    Nullable!string type;
+
+    /// Static API key.
+    Nullable!string apiKey;
+
+    /// Bearer token (takes precedence over `apiKey`).
+    Nullable!string bearerToken;
+
+    /// "completions" or "responses".
+    Nullable!string wireApi;
+
+    /// "http" or "websockets".
+    Nullable!string transport;
+
+    /// Azure API version (wire: azure.apiVersion).
+    Nullable!string azureApiVersion;
+
+    /// Custom HTTP headers for every provider request.
+    string[string] headers;
+
+    /// Well-known base model id used for capability lookup.
+    Nullable!string modelId;
+
+    /// Token limits for the model.
+    Nullable!long maxPromptTokens;
+    Nullable!long maxContextWindowTokens;
+    Nullable!long maxOutputTokens;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
-        if (!model.isNull) obj["model"] = model.get;
-        if (!baseUrl.isNull) obj["baseUrl"] = baseUrl.get;
-        if (!modelProvider.isNull) obj["modelProvider"] = modelProvider.get;
-        if (!apiKeyCommand.isNull) obj["apiKeyCommand"] = apiKeyCommand.get;
+        putConnectionFields(obj, type, baseUrl, apiKey, apiKeyCommand, bearerToken,
+            wireApi, transport, modelProvider, azureApiVersion, headers);
+        if (!modelId.isNull) obj["modelId"] = modelId.get;
+        if (!model.isNull) obj["wireModel"] = model.get;
+        if (!maxPromptTokens.isNull) obj["maxPromptTokens"] = maxPromptTokens.get;
+        if (!maxContextWindowTokens.isNull) obj["maxContextWindowTokens"] = maxContextWindowTokens.get;
+        if (!maxOutputTokens.isNull) obj["maxOutputTokens"] = maxOutputTokens.get;
         return obj;
     }
 }
@@ -974,14 +1383,45 @@ struct SessionConfig
     /// Hook fired after a sub-agent completes a turn.
     SubagentStopHandler onSubagentStop;
 
+    // --- v3.0.0 / SDK protocol 4 options ---
+
+    /// Tool allowlist (wire: tools.availableTools). Required on every session
+    /// when the client mode is `ClientMode.empty`.
+    Nullable!(string[]) availableTools;
+
+    /// Named BYOK provider connections (wire: inference.providers).
+    NamedProviderConfig[] providers;
+
+    /// BYOK model definitions (wire: inference.models).
+    ProviderModelConfig[] models;
+
+    /// Default named provider (wire: inference.defaultProvider).
+    Nullable!string defaultProvider;
+
+    /// Enable or disable Copilot (CAPI) models (wire: github.capi.enabled).
+    Nullable!bool capiEnabled;
+
+    /// Answers shell authentication requests (sudo, ssh, and git prompts).
+    ShellAuthenticationHandler onShellAuthenticationRequest;
+
+    /// Stores memories the agent asks to keep.
+    StoreMemoryHandler onStoreMemory;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
         obj["streaming"] = streaming;
-        obj["infiniteSessions"] = infiniteSessions;
+        auto infinite = JSONValue(string[string].init);
+        infinite["enabled"] = infiniteSessions;
+        obj["infiniteSessions"] = infinite;
 
         if (!systemMessage.isNull)
-            obj["systemMessage"] = systemMessage.get;
+        {
+            auto sys = JSONValue(string[string].init);
+            sys["mode"] = "append";
+            sys["content"] = systemMessage.get;
+            obj["systemMessage"] = sys;
+        }
 
         if (!provider.isNull)
             obj["provider"] = provider.get.toJson();
@@ -1088,9 +1528,9 @@ struct SessionConfig
         if (!otlpProtocol.isNull)
             obj["otlpProtocol"] = otlpProtocol.get;
 
-        // The runtime accepts the auto routing tier and WebSocket responses
-        // only under `capi`.
-        auto capi = capiJson(autoTier, enableWebSocketResponses);
+        // The runtime accepts the auto routing tier, WebSocket responses, and
+        // Copilot model availability only under `capi`.
+        auto capi = capiJson(autoTier, enableWebSocketResponses, capiEnabled);
         if (capi.type == JSONType.object)
             obj["capi"] = capi;
 
@@ -1130,7 +1570,7 @@ struct SessionConfig
             obj["toolSearch"] = toolSearch;
 
         if (experimentalMode)
-            obj["experimentalMode"] = true;
+            obj["enableExperimentalMode"] = true;
 
         if (contentExclusion)
             obj["contentExclusion"] = true;
@@ -1218,11 +1658,47 @@ struct ResumeSessionConfig
     /// Hook fired after a sub-agent completes a turn.
     SubagentStopHandler onSubagentStop;
 
+    // --- v3.0.0 / SDK protocol 4 options ---
+
+    /// Model to use after resuming.
+    Nullable!string model;
+
+    /// Suppress the resume event (wire: suppressResumeEvent).
+    bool disableResume = false;
+
+    /// Tool allowlist (wire: tools.availableTools). Required on every session
+    /// when the client mode is `ClientMode.empty`.
+    Nullable!(string[]) availableTools;
+
+    /// Named BYOK provider connections to re-supply (wire: inference.providers).
+    NamedProviderConfig[] providers;
+
+    /// BYOK model definitions to re-supply (wire: inference.models).
+    ProviderModelConfig[] models;
+
+    /// Default named provider (wire: inference.defaultProvider).
+    Nullable!string defaultProvider;
+
+    /// Send an explicit null default provider to clear the resident one.
+    bool clearDefaultProvider = false;
+
+    /// Enable or disable Copilot (CAPI) models (wire: github.capi.enabled).
+    Nullable!bool capiEnabled;
+
+    /// Answers shell authentication requests (sudo, ssh, and git prompts).
+    ShellAuthenticationHandler onShellAuthenticationRequest;
+
+    /// Stores memories the agent asks to keep.
+    StoreMemoryHandler onStoreMemory;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
         obj["sessionId"] = sessionId;
         obj["streaming"] = streaming;
+
+        if (!model.isNull)
+            obj["model"] = model.get;
 
         if (tools.length > 0)
         {
@@ -1239,14 +1715,20 @@ struct ResumeSessionConfig
             obj["instructionDirectories"] = JSONValue(arr);
         }
 
-        auto capi = capiJson(autoTier, false);
+        auto capi = capiJson(autoTier, false, capiEnabled);
         if (capi.type == JSONType.object)
             obj["capi"] = capi;
 
         putSharedSessionOptions(obj, this);
 
+        if (clearDefaultProvider && defaultProvider.isNull)
+            obj["defaultProvider"] = JSONValue(null);
+
         if (allowTranscriptRecovery)
             obj["allowTranscriptRecovery"] = true;
+
+        if (disableResume)
+            obj["disableResume"] = true;
         return obj;
     }
 }
@@ -1267,12 +1749,17 @@ struct Tool
     /// JSON Schema describing accepted parameters.
     JSONValue parametersSchema;
 
+    /// Safe to retry with the same arguments (wire: idempotent).
+    bool idempotent = false;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
         obj["name"] = name;
         obj["description"] = description;
         obj["parameters"] = parametersSchema;
+        if (idempotent)
+            obj["idempotent"] = true;
         return obj;
     }
 }
@@ -1310,7 +1797,8 @@ struct MessageOptions
     /// File attachments or context references.
     JSONValue[] attachments;
 
-    /// Desired response format.
+    /// Legacy response format string. No longer sent to the runtime; use
+    /// `responseSchema` for structured output.
     Nullable!string responseFormat;
 
     /// Agent mode override for this message (e.g. "agent" or "ask").
@@ -1329,6 +1817,9 @@ struct MessageOptions
     /// JSON Schema the final assistant response must satisfy (structured
     /// output). When set, it replaces any legacy `responseFormat` string.
     JSONValue responseSchema;
+
+    /// Opaque caller-chosen turn identifier (wire: clientTurnId).
+    Nullable!string clientTurnId;
 }
 
 // ---------------------------------------------------------------------------
@@ -1368,6 +1859,7 @@ enum SessionEventType : string
     sessionEnd            = "session.end",
     compactionStart       = "session.compaction_start",
     compactionComplete    = "session.compaction_complete",
+    toolShellOutput       = "tool.shell_output",
     unknown               = "",
 }
 

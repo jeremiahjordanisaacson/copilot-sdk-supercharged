@@ -159,4 +159,31 @@
     }
 }
 
++ (nullable NSString *)cliPathWithRepoRoot:(NSString *)repoRoot {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    NSString *envPath = [[NSProcessInfo processInfo] environment][@"COPILOT_CLI_PATH"];
+    if (envPath.length > 0 && [fileManager fileExistsAtPath:envPath]) {
+        return envPath;
+    }
+
+    NSString *scopeDir = [repoRoot stringByAppendingPathComponent:@"nodejs/node_modules/@github"];
+    NSString *loader = [scopeDir stringByAppendingPathComponent:@"copilot/npm-loader.js"];
+    if ([fileManager fileExistsAtPath:loader]) {
+        return loader;
+    }
+
+    NSArray<NSString *> *entries = [fileManager contentsOfDirectoryAtPath:scopeDir error:nil] ?: @[];
+    for (NSString *entry in [entries sortedArrayUsingSelector:@selector(compare:)]) {
+        if (![entry hasPrefix:@"copilot-"]) continue;
+        NSString *legacy = [[scopeDir stringByAppendingPathComponent:entry] stringByAppendingPathComponent:@"index.js"];
+        if ([fileManager fileExistsAtPath:legacy]) {
+            return legacy;
+        }
+    }
+
+    NSString *index = [scopeDir stringByAppendingPathComponent:@"copilot/index.js"];
+    return [fileManager fileExistsAtPath:index] ? index : nil;
+}
+
 @end

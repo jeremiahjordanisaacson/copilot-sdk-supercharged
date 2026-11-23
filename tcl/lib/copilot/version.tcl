@@ -5,7 +5,9 @@
 namespace eval ::copilot::version {
     variable sdk_version "2.5.3"
     variable sdk_name    "copilot-sdk-tcl"
-    variable min_protocol_version 3
+    # SDK protocol version spoken by this SDK; the server must report exactly this.
+    variable sdk_protocol_version 4
+    variable min_protocol_version 4
 }
 
 proc ::copilot::version::get {} {
@@ -23,4 +25,9 @@ proc ::copilot::version::get_min_protocol {} {
     return $min_protocol_version
 }
 
-package provide copilot::version 2.0.0
+proc ::copilot::version::get_protocol {} {
+    variable sdk_protocol_version
+    return $sdk_protocol_version
+}
+
+package provide copilot::version 2.5.3

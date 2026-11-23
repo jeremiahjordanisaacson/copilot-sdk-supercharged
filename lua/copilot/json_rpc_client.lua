@@ -28,6 +28,9 @@ end
 local JsonRpcClient = {}
 JsonRpcClient.__index = JsonRpcClient
 
+--- Generate a UUID v4 string (exposed for provider registration ids).
+JsonRpcClient.generate_uuid = generate_uuid
+
 --- Create a new JSON-RPC 2.0 client.
 -- @param write_handle file-like object with a :write() method (stdin pipe)
 -- @param read_handle  file-like object with a :read() method  (stdout pipe)
@@ -58,6 +61,8 @@ end
 -- @param params table
 -- @return table|nil result
 -- @return string|nil error message
+-- @return table|nil structured JSON-RPC error { code, message, data } when the
+--   server answered with an error response
 function JsonRpcClient:request(method, params)
     local id = generate_uuid()
 
@@ -84,8 +89,8 @@ function JsonRpcClient:request(method, params)
         if co then
             self._pending_requests[id].co = co
             -- Yield control back to the read loop driver
-            local res_result, res_err = coroutine.yield()
-            return res_result, res_err
+            local res_result, res_err, res_rpc_err = coroutine.yield()
+            return res_result, res_err, res_rpc_err
         end
     end
 
@@ -101,7 +106,7 @@ function JsonRpcClient:request(method, params)
     local entry = self._pending_requests[id]
     self._pending_requests[id] = nil
     if entry.error then
-        return nil, entry.error
+        return nil, entry.error, entry.rpc_error
     end
     return entry.result, nil
 end
@@ -294,6 +299,13 @@ function JsonRpcClient:_handle_response(response)
             tostring(response.error.message or "unknown")
         )
         entry.error = err_msg
+        if type(response.error) == "table" then
+            entry.rpc_error = {
+                code    = response.error.code,
+                message = response.error.message,
+                data    = response.error.data,
+            }
+        end
     else
         entry.result = response.result
     end
@@ -302,7 +314,7 @@ function JsonRpcClient:_handle_response(response)
     -- If a coroutine is waiting, resume it
     if entry.co then
         self._pending_requests[id] = nil
-        local ok, resume_err = coroutine.resume(entry.co, entry.result, entry.error)
+        local ok, resume_err = coroutine.resume(entry.co, entry.result, entry.error, entry.rpc_error)
         if not ok then
             io.stderr:write("coroutine resume error: " .. tostring(resume_err) .. "\n")
         end

@@ -7,7 +7,7 @@
 ;;;; Uses the shared replaying CAPI proxy (test/harness/server.ts) so tests
 ;;;; run deterministically without hitting real AI endpoints.
 
-(ns copilot-e2e.e2e-test
+(ns e2e-test
   "E2E tests for the Clojure Copilot SDK.
 
   Each test creates a CopilotClient that connects to the replaying proxy
@@ -16,7 +16,7 @@
             [copilot.client :as client]
             [copilot.session :as session]
             [copilot.define-tool :as define-tool]
-            [copilot-e2e.testharness.proxy :as proxy]))
+            [testharness.proxy :as proxy]))
 
 ;; ============================================================================
 ;; Fixture: start/stop the replaying proxy once for all tests
@@ -42,9 +42,19 @@
 ;; ============================================================================
 
 (defn- create-test-client
-  "Create a client connected to the replaying proxy."
+  "Create a client that spawns the CLI (see `proxy/find-cli-path`) with its
+  model traffic pointed at the replaying proxy."
   []
-  (client/create-client :cli-url @proxy-url-atom))
+  (let [home (str (java.nio.file.Files/createTempDirectory
+                   "copilot-clojure-e2e-home-"
+                   (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (client/create-client
+     :cli-path     (proxy/find-cli-path)
+     :github-token "fake-token-for-e2e-tests"
+     :env          {"COPILOT_API_URL" @proxy-url-atom
+                    "COPILOT_HOME"    home
+                    "XDG_CONFIG_HOME" home
+                    "XDG_STATE_HOME"  home})))
 
 (defn- with-client
   "Execute body-fn with a started client, ensuring cleanup via stop!."

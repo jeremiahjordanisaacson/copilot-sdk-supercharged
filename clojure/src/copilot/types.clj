@@ -56,12 +56,15 @@
   `name`        - tool name string
   `description` - description for the LLM
   `parameters`  - JSON Schema map (or nil)
-  `handler`     - (fn [args invocation] ...) -> any  (may return a promise)"
-  [name description parameters handler]
-  {:name        name
-   :description description
-   :parameters  parameters
-   :handler     handler})
+  `handler`     - (fn [args invocation] ...) -> any  (may return a promise)
+  Optional: :idempotent true marks the tool as safe to retry (repeated calls
+            with the same arguments have no additional side effects)."
+  [name description parameters handler & {:keys [idempotent]}]
+  (cond-> {:name        name
+           :description description
+           :parameters  parameters
+           :handler     handler}
+    (some? idempotent) (assoc :idempotent idempotent)))
 
 (defn tool-invocation
   "Construct a tool invocation context map."
@@ -132,14 +135,36 @@
     :rewind-enabled :additional-directories :disabled-mcp-servers
     :github-mcp-tool-config :canvas-provider :custom-agents-local-only
     :tool-search :experimental-mode :content-exclusion
-    :on-mcp-auth-request (fn invoked to supply an MCP OAuth host token)"
+    :on-mcp-auth-request (fn invoked to supply an MCP OAuth host token)
+
+  v2.6.0 / v3.0.0 keys:
+    :ask-user-variant (\"legacy\" or \"elicitation\")
+    :github-token-provider (fn [request] -> token string, token map, or
+                            :cancelled; mutually exclusive with :github-token)
+    :sandbox-config (see `sandbox-config`, includes :allow-bypass)
+    :feature-flags (map of flag name -> value)
+    :allowed-models (vector of model ids)
+    :auth-client-id-metadata-url (string)
+    :agent-directories :hook-directories (vectors of paths)
+    :trust-working-directory (create only: \"session\" trusts the working
+                              directory for this session, \"user\" persists it)
+    :allow-transcript-recovery (resume only)
+    :image-generation (see `image-generation-config`)
+    :autopilot (see `autopilot-options`)
+    :providers (see `named-provider-config`) :models (see `provider-model-config`)
+    :default-provider (string; on resume an explicit nil clears it)
+    :capi (see `capi-config`)
+    :on-shell-authentication-request (fn [request] -> value string or nil)
+    :store-memory (fn [memory] ...)"
   [& {:as opts}]
   (or opts {}))
 
 (defn resume-session-config
   "Create a resume-session configuration map.  Accepts the same keys as
   `session-config` plus :disable-resume, :github-token,
-  :commands, :on-elicitation-request, and :instruction-directories."
+  :commands, :on-elicitation-request, :instruction-directories, and
+  :allow-transcript-recovery.  :trust-working-directory is create-only and is
+  not sent on resume."
   [& {:as opts}]
   (or opts {}))
 
@@ -335,15 +360,29 @@
 
   Required: :base-url
   Optional: :type (:openai :azure :anthropic), :wire-api, :api-key,
-            :bearer-token, :azure {:api-version ...}"
+            :bearer-token, :azure {:api-version ...},
+            :api-key-command (command whose stdout is used as the API key),
+            :model-provider (\"openai\" \"anthropic\" \"azure_openai\" \"ollama\"
+                             \"lm_studio\" \"foundry_local\" \"llama_cpp\"),
+            :transport, :headers
+
+  On SDK protocol 4 this legacy single provider is sent as the named
+  \"default\" connection (`inference.providers`), selected with
+  `inference.defaultProvider`, with Copilot API models disabled
+  (`github.capi.enabled` false), which preserves v1 behavior."
   [& {:as opts}]
-  (let [{:keys [base-url type wire-api api-key bearer-token azure]} opts]
+  (let [{:keys [base-url type wire-api api-key bearer-token azure
+                api-key-command model-provider transport headers]} opts]
     (cond-> {:baseUrl base-url}
-      type         (assoc :type (name type))
-      wire-api     (assoc :wireApi (name wire-api))
-      api-key      (assoc :apiKey api-key)
-      bearer-token (assoc :bearerToken bearer-token)
-      azure        (assoc :azure azure))))
+      type            (assoc :type (name type))
+      wire-api        (assoc :wireApi (name wire-api))
+      api-key         (assoc :apiKey api-key)
+      bearer-token    (assoc :bearerToken bearer-token)
+      azure           (assoc :azure azure)
+      api-key-command (assoc :apiKeyCommand api-key-command)
+      model-provider  (assoc :modelProvider (name model-provider))
+      transport       (assoc :transport (name transport))
+      headers         (assoc :headers headers))))
 
 ;; ============================================================================
 ;; MCP server configuration
@@ -521,16 +560,24 @@
             :response-format (keyword from response-formats), :image-options (image options map),
             :agent-mode (string agent name to route the message to),
             :display-prompt (string shown in the UI in place of the raw prompt),
-            :request-headers (map of string->string custom HTTP headers for outbound model requests)"
+            :request-headers (map of string->string custom HTTP headers for outbound model requests),
+            :source (message provenance: \"user\", \"system\", or \"agent-<id>\";
+                     see `message-source`),
+            :response-schema (JSON Schema map for structured output, sent as a
+                              `json_schema` responseFormat),
+            :client-turn-id (opaque caller-chosen turn identifier, wire `clientTurnId`)"
   [prompt & {:as opts}]
   (cond-> {:prompt prompt}
     (:attachments opts)     (assoc :attachments (:attachments opts))
     (:mode opts)            (assoc :mode (name (:mode opts)))
     (:response-format opts) (assoc :response-format (response-format->str (:response-format opts)))
     (:image-options opts)   (assoc :image-options (:image-options opts))
-    (:agent-mode opts)      (assoc :agentMode (:agent-mode opts))
-    (:display-prompt opts)  (assoc :displayPrompt (:display-prompt opts))
-    (:request-headers opts) (assoc :requestHeaders (:request-headers opts))))
+    (:agent-mode opts)      (assoc :agent-mode (:agent-mode opts))
+    (:display-prompt opts)  (assoc :display-prompt (:display-prompt opts))
+    (:request-headers opts) (assoc :request-headers (:request-headers opts))
+    (:source opts)          (assoc :source (:source opts))
+    (:response-schema opts) (assoc :response-schema (:response-schema opts))
+    (:client-turn-id opts)  (assoc :client-turn-id (:client-turn-id opts))))
 
 ;; ============================================================================
 ;; Session hooks
@@ -546,7 +593,14 @@
     :on-user-prompt-submitted   (fn [input invocation] ...)
     :on-session-start           (fn [input invocation] ...)
     :on-session-end             (fn [input invocation] ...)
-    :on-error-occurred          (fn [input invocation] ...)"
+    :on-error-occurred          (fn [input invocation] ...)
+    :on-subagent-start          (fn [input invocation] ...)  hook type \"subagentStart\":
+                                input has :agentName :agentDisplayName :agentDescription;
+                                may return {:additionalContext \"...\"}
+    :on-subagent-stop           (fn [input invocation] ...)  hook type \"subagentStop\":
+                                input adds :agentId :agentType :stopReason :response;
+                                may return {:decision \"block\" :reason \"...\"} or
+                                {:modifiedResponse \"...\"}"
   [& {:as opts}]
   (or opts {}))
 
@@ -595,6 +649,288 @@
    :url             "GitHubUrl"
    :file            "GitHubFile"
    :snippet         "GitHubSnippet"})
+
+;; ============================================================================
+;; v2.6.0 and v3.0.0 constructors (SDK protocol 4)
+;; ============================================================================
+
+(defn client-info
+  "Construct the ClientInfo map declared on the `connect` handshake
+  (client option :client-info).  All keys are optional strings; empty values
+  are dropped, and `connect` is not sent when every field is empty.
+  Keys: :editor-name :editor-version :extension-name :extension-version"
+  [& {:keys [editor-name editor-version extension-name extension-version]}]
+  (cond-> {}
+    (seq editor-name)       (assoc :editorName editor-name)
+    (seq editor-version)    (assoc :editorVersion editor-version)
+    (seq extension-name)    (assoc :extensionName extension-name)
+    (seq extension-version) (assoc :extensionVersion extension-version)))
+
+(def auto-tiers
+  "Auto routing tiers accepted by `copilot.session/switch-auto-tier!`."
+  #{"fast" "efficiency" "balance" "intelligence"})
+
+(def ask-user-variants
+  "Values of the :ask-user-variant session option (wire askUserVariant)."
+  #{"legacy" "elicitation"})
+
+(defn sandbox-config
+  "Construct a sandbox configuration map (session option :sandbox-config,
+  wire permissions.sandbox).
+
+  Optional: :enabled (default true), :user-policy, :add-current-working-directory,
+            :sandbox-mcp-servers, :sandbox-lsp-servers, :sandbox-extensions,
+            :allow-bypass (lets the agent ask to run an individual command
+            outside the sandbox; the request goes through the normal
+            permission flow)"
+  [& {:keys [enabled user-policy add-current-working-directory sandbox-mcp-servers
+             sandbox-lsp-servers sandbox-extensions allow-bypass]
+      :or   {enabled true}}]
+  (cond-> {:enabled enabled}
+    (some? user-policy)                   (assoc :userPolicy user-policy)
+    (some? add-current-working-directory) (assoc :addCurrentWorkingDirectory add-current-working-directory)
+    (some? sandbox-mcp-servers)           (assoc :sandboxMcpServers sandbox-mcp-servers)
+    (some? sandbox-lsp-servers)           (assoc :sandboxLspServers sandbox-lsp-servers)
+    (some? sandbox-extensions)            (assoc :sandboxExtensions sandbox-extensions)
+    (some? allow-bypass)                  (assoc :allowBypass allow-bypass)))
+
+(defn image-generation-config
+  "Construct an image generation opt-in map (session option :image-generation,
+  wire tools.imageGeneration).
+  Optional: :enabled, :watermark, :save-to-disk (booleans)"
+  [& {:keys [enabled watermark save-to-disk]}]
+  (cond-> {}
+    (some? enabled)      (assoc :enabled enabled)
+    (some? watermark)    (assoc :watermark watermark)
+    (some? save-to-disk) (assoc :saveToDisk save-to-disk)))
+
+(defn autopilot-options
+  "Construct autopilot continuation options (session option :autopilot,
+  wire execution.autopilot).
+  Optional: :continuation-enabled (boolean), :max-continues (integer)"
+  [& {:keys [continuation-enabled max-continues]}]
+  (cond-> {}
+    (some? continuation-enabled) (assoc :continuationEnabled continuation-enabled)
+    (some? max-continues)        (assoc :maxContinues max-continues)))
+
+(defn message-source
+  "Construct a MessageSource value for the :source message option:
+  (message-source :user) => \"user\", (message-source :system) => \"system\",
+  (message-source :agent \"id\") => \"agent-id\"."
+  ([kind]
+   (case kind
+     :user   "user"
+     :system "system"
+     (throw (ex-info (str "Unknown message source " (pr-str kind)) {:kind kind}))))
+  ([kind agent-id]
+   (if (= kind :agent)
+     (str "agent-" agent-id)
+     (throw (ex-info (str "Unknown message source " (pr-str kind)) {:kind kind})))))
+
+(defn github-token-response
+  "Encode a :github-token-provider result as the gitHubToken.getToken reply.
+
+  `result` - a token string, a map {:access-token s :token-type s :expires-in secs}
+             (camelCase keys are also accepted), or :cancelled / nil to decline.
+             :expires-in is the remaining lifetime in seconds; the runtime
+             requires more than one hour, and it defaults to 28800 (8 hours,
+             the typical GitHub token lifetime)."
+  [result]
+  (let [token (cond
+                (string? result) result
+                (map? result)    (or (:access-token result) (:accessToken result)))]
+    (if (string? token)
+      (let [token-type (when (map? result) (or (:token-type result) (:tokenType result)))
+            expires-in (or (when (map? result) (or (:expires-in result) (:expiresIn result)))
+                           28800)]
+        (cond-> {:kind "token" :accessToken token :expiresIn expires-in}
+          token-type (assoc :tokenType token-type)))
+      {:kind "cancelled"})))
+
+(def client-modes
+  "Client modes (client option :mode).  \"coding-agent\" (the default) keeps
+  the CLI-like coding tools and defaults; \"empty\" enables only what each
+  session asks for, so every create/resume must pass :available-tools.  The
+  legacy name \"copilot-cli\" is accepted as an alias of \"coding-agent\"."
+  {:coding-agent "coding-agent"
+   :empty        "empty"})
+
+(defn parse-client-mode
+  "Normalize a :mode client option (string or keyword) to :coding-agent or
+  :empty.  Throws ex-info for unknown values."
+  [mode]
+  (let [m (if (keyword? mode) (name mode) mode)]
+    (cond
+      (contains? #{nil "coding-agent" "copilot-cli"} m) :coding-agent
+      (= "empty" m)                                     :empty
+      :else (throw (ex-info (str "Invalid client mode " (pr-str mode)
+                                 ": expected \"coding-agent\" or \"empty\"")
+                            {:mode mode})))))
+
+(defn named-provider-config
+  "Construct a NamedProviderConfig map for the :providers session option
+  (wire inference.providers[]).  Model definitions reference it by :name,
+  which cannot contain '/'.
+
+  Required: :name, :base-url
+  Optional: :type, :api-key, :api-key-command, :bearer-token, :wire-api,
+            :transport, :azure, :headers, :model-provider"
+  [& {:keys [type base-url api-key api-key-command bearer-token wire-api
+             transport azure headers model-provider]
+      provider-name :name}]
+  (cond-> {:name provider-name :baseUrl base-url}
+    type            (assoc :type (name type))
+    api-key         (assoc :apiKey api-key)
+    api-key-command (assoc :apiKeyCommand api-key-command)
+    bearer-token    (assoc :bearerToken bearer-token)
+    wire-api        (assoc :wireApi (name wire-api))
+    transport       (assoc :transport (name transport))
+    azure           (assoc :azure azure)
+    headers         (assoc :headers headers)
+    model-provider  (assoc :modelProvider (name model-provider))))
+
+(defn provider-model-config
+  "Construct a ProviderModelConfig map for the :models session option
+  (wire inference.models[]).  Select the model with \"<provider>/<id>\".
+
+  Required: :provider, :id
+  Optional: :model-id, :wire-model, :name, :max-prompt-tokens,
+            :max-context-window-tokens, :max-output-tokens, :capabilities"
+  [& {:keys [provider id model-id wire-model max-prompt-tokens
+             max-context-window-tokens max-output-tokens capabilities]
+      display-name :name}]
+  (cond-> {:provider provider :id id}
+    model-id                  (assoc :modelId model-id)
+    wire-model                (assoc :wireModel wire-model)
+    display-name              (assoc :name display-name)
+    max-prompt-tokens         (assoc :maxPromptTokens max-prompt-tokens)
+    max-context-window-tokens (assoc :maxContextWindowTokens max-context-window-tokens)
+    max-output-tokens         (assoc :maxOutputTokens max-output-tokens)
+    capabilities              (assoc :capabilities capabilities)))
+
+(defn capi-config
+  "Construct the built-in Copilot API policy (session option :capi, wire
+  github.capi).  :enabled false keeps a BYOK-only model catalog."
+  [& {:keys [enabled]}]
+  (cond-> {} (some? enabled) (assoc :enabled enabled)))
+
+(defn model-limits-override
+  "Construct the :limits map of `model-capabilities-override`.  The wire keys
+  inside capabilities limits are snake_case (max_output_tokens, ...).
+  Optional: :max-prompt-tokens, :max-output-tokens, :max-context-window-tokens,
+            :vision (map with snake_case keys)"
+  [& {:keys [max-prompt-tokens max-output-tokens max-context-window-tokens vision]}]
+  (cond-> {}
+    max-prompt-tokens         (assoc :max_prompt_tokens max-prompt-tokens)
+    max-output-tokens         (assoc :max_output_tokens max-output-tokens)
+    max-context-window-tokens (assoc :max_context_window_tokens max-context-window-tokens)
+    vision                    (assoc :vision vision)))
+
+(defn shell-authentication-request
+  "Parse shellAuthentication.request params into the map passed to an
+  :on-shell-authentication-request handler.  :input-kind is \"secret\" (mask
+  the input), \"text\", or \"confirm\" (answer \"yes\" or cancel)."
+  [m]
+  {:session-id (:sessionId m)
+   :request-id (:requestId m)
+   :program    (:program m)
+   :prompt     (:prompt m)
+   :input-kind (:inputKind m)
+   :command    (:command m)
+   :cwd        (:cwd m)})
+
+(defn shell-authentication-response
+  "Encode a shell authentication handler result as the reply: a string (or
+  {:action \"accept\" :value s}) accepts with that value; nil, :cancel, or
+  {:action \"cancel\"} cancels."
+  [result]
+  (let [value (cond
+                (string? result) result
+                (map? result)    (when-not (= "cancel" (some-> (:action result) name))
+                                   (:value result)))]
+    (if (string? value)
+      {:action "accept" :value value}
+      {:action "cancel"})))
+
+(defn stored-memory
+  "Parse memoryStore.store params into the map passed to a :store-memory
+  callback: {:session-id :subject :fact :citations :reason}."
+  [m]
+  {:session-id (:sessionId m)
+   :subject    (:subject m)
+   :fact       (:fact m)
+   :citations  (:citations m)
+   :reason     (:reason m)})
+
+(defn network-set-provider-params
+  "Build the network.setProvider params for a :network client option, or nil
+  when no callback is set.  Each registered callback is marked with an empty
+  object; :scope is \"connection\" (runtime default) or \"runtime\"."
+  [network]
+  (when (map? network)
+    (let [markers (cond-> {}
+                    (:resolve-proxy network)          (assoc :resolveProxy {})
+                    (:authenticate-negotiate network) (assoc :authenticateNegotiate {})
+                    (:authenticate-basic network)     (assoc :authenticateBasic {}))]
+      (when (seq markers)
+        (cond-> markers
+          (:scope network) (assoc :scope (name (:scope network))))))))
+
+(def tool-shell-output-event
+  "Event type of live, append-only shell output chunks (ephemeral)."
+  "tool.shell_output")
+
+(defn tool-shell-output
+  "Parse the data of a tool.shell_output event (or the whole event) into
+  {:tool-call-id :text :sequence :stream}.  :stream is \"stdout\" (also when
+  omitted), \"stderr\", or \"terminal\"."
+  [event-or-data]
+  (let [d (if (= tool-shell-output-event (:type event-or-data))
+            (:data event-or-data)
+            event-or-data)]
+    {:tool-call-id (:toolCallId d)
+     :text         (:text d)
+     :sequence     (:sequence d)
+     :stream       (:stream d)}))
+
+(defn policy-helper-failure
+  "Extract the latest unresolved managed-settings policy helper failure
+  (wire policyHelperFailure) from a refused session.create / session.resume
+  (the thrown ex-info, its ex-data, or the JSON-RPC error :data) or from a
+  managed settings snapshot.  Returns nil when absent.  Helper-authored text
+  is untrusted: render it as plain text.
+
+  Keys: :category :failure-mode :message :previous-policy-retained :reason
+        :authority :code :details :diagnostic :help-link"
+  [x]
+  (let [m (if (map? x) x (ex-data x))
+        f (or (:policyHelperFailure m)
+              (get-in m [:data :policyHelperFailure]))]
+    (when (map? f)
+      {:category                 (:category f)
+       :failure-mode             (:failureMode f)
+       :message                  (:message f)
+       :previous-policy-retained (true? (:previousPolicyRetained f))
+       :reason                   (:reason f)
+       :authority                (:authority f)
+       :code                     (:code f)
+       :details                  (:details f)
+       :diagnostic               (:diagnostic f)
+       :help-link                (:helpLink f)})))
+
+(def permission-mode-refusals
+  "Known refusal reasons of session.permissions.setMode.  :managed-policy
+  (\"managed_policy\"): managed (enterprise) policy does not allow the mode."
+  {:managed-policy "managed_policy"})
+
+(defn permissions-set-mode-result
+  "Parse a session.permissions.setMode result into {:success :mode :reason}.
+  A refused change has :success false and, when known, :reason
+  \"managed_policy\"."
+  [m]
+  {:success (true? (:success m))
+   :mode    (:mode m)
+   :reason  (:reason m)})
 
 ;; ============================================================================
 ;; Session filesystem types
@@ -675,7 +1011,9 @@
   "Construct a model capabilities override map.
 
   `supports` - map of capability flags (e.g. {:vision true})
-  `limits`   - map of limits (e.g. {:max-prompt-tokens 4096})
+  `limits`   - map of limits with snake_case wire keys, e.g.
+               (model-limits-override :max-output-tokens 8192)
+               => {:max_output_tokens 8192}
   `vision`   - optional vision limits map"
   [& {:keys [supports limits vision]}]
   (cond-> {}
@@ -824,7 +1162,15 @@
     :bearer-token-provider - BYOK bearer-token provider map (see bearer-token-provider)
     :builtin-plugin-directories - extra builtin plugin dirs (JSON: builtinPluginDirectories)
     :in-process       - use in-process FFI transport (JSON: inProcess)
-    :request-handler  - CopilotRequestHandler map for outbound HTTP (see copilot-request-handler)"
+    :request-handler  - CopilotRequestHandler map for outbound HTTP (see copilot-request-handler)
+    :client-info      - application identity sent on the connect handshake (see client-info)
+    :mode             - \"coding-agent\" (default) or \"empty\" (see client-modes)
+    :network          - network callbacks registered with network.setProvider:
+                        {:scope \"connection\"|\"runtime\"
+                         :resolve-proxy (fn [{:keys [url]}] -> PAC proxy string or nil)
+                         :authenticate-negotiate (fn [{:keys [spn]}] -> base64 token or nil)
+                         :authenticate-basic (fn [{:keys [proxy realm previous-rejected]}]
+                                               -> {:username u :password p} or nil)}"
   [& {:as opts}]
   (or opts {}))
 

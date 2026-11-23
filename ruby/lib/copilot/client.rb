@@ -47,6 +47,11 @@ module Copilot
     # @param client_info      [ClientInfo, Hash, nil] identity of the integrating application
     #   (application_name, application_version, integration_name, integration_version),
     #   declared on the +connect+ handshake when any field is set
+    # @param mode             [String] client mode: "coding-agent" (default) or "empty"
+    #   (see {ClientMode}); "copilot-cli" is accepted as an alias of "coding-agent"
+    # @param network          [NetworkConfig, Hash, nil] host network callbacks
+    #   (scope, resolve_proxy, authenticate_negotiate, authenticate_basic), registered
+    #   with +network.setProvider+ after connecting
     #
     # @raise [ArgumentError] if mutually exclusive options are provided
     def initialize(
@@ -63,7 +68,9 @@ module Copilot
       github_token: nil,
       use_logged_in_user: nil,
       on_get_trace_context: nil,
-      client_info: nil
+      client_info: nil,
+      mode: ClientMode::CODING_AGENT,
+      network: nil
     )
       # Validate mutually exclusive options
       if cli_url && (use_stdio == false || cli_path)
@@ -92,6 +99,17 @@ module Copilot
 
       client_info = ClientInfo.new(**client_info.transform_keys(&:to_sym)) if client_info.is_a?(Hash)
 
+      mode = (mode || ClientMode::CODING_AGENT).to_s
+      mode = ClientMode::CODING_AGENT if mode == ClientMode::COPILOT_CLI
+      unless [ClientMode::CODING_AGENT, ClientMode::EMPTY].include?(mode)
+        raise ArgumentError, "mode must be \"#{ClientMode::CODING_AGENT}\" or \"#{ClientMode::EMPTY}\""
+      end
+
+      network = NetworkConfig.new(**network.transform_keys(&:to_sym)) if network.is_a?(Hash)
+      if network && !network.scope.nil? && ![NetworkScope::CONNECTION, NetworkScope::RUNTIME].include?(network.scope.to_s)
+        raise ArgumentError, "network scope must be \"#{NetworkScope::CONNECTION}\" or \"#{NetworkScope::RUNTIME}\""
+      end
+
       @options = ClientOptions.new(
         cli_path: cli_path || "copilot",
         cli_args: cli_args,
@@ -107,6 +125,8 @@ module Copilot
         use_logged_in_user: use_logged_in_user,
         on_get_trace_context: on_get_trace_context,
         client_info: client_info,
+        mode: mode,
+        network: network,
       )
 
       @process    = nil
@@ -150,6 +170,7 @@ module Copilot
         connect_to_server
         send_client_info
         verify_protocol_version
+        register_network_provider
         @state = ConnectionState::CONNECTED
       rescue StandardError
         @state = ConnectionState::ERROR
@@ -290,10 +311,13 @@ module Copilot
     # @raise [RuntimeError] if not connected and auto_start is disabled
     def create_session(**config)
       ensure_connected!
+      validate_session_config_for_mode!(config)
 
       registration_id = register_github_token_provider(config, config[:session_id])
       payload = build_create_session_payload(config)
       payload[:gitHubTokenProviderRegistrationId] = registration_id if registration_id
+      payload = Copilot.group_session_params(payload, resume: false)
+      Copilot.apply_empty_mode_session_defaults(payload) if @options.mode == ClientMode::EMPTY
 
       begin
         response = @rpc_client.request("session.create", payload)
@@ -311,6 +335,7 @@ module Copilot
       session._register_user_input_handler(config[:on_user_input_request]) if config[:on_user_input_request]
       session._register_hooks(config[:hooks]) if config[:hooks]
       session._register_exit_plan_mode_handler(config[:on_exit_plan_mode]) if config[:on_exit_plan_mode]
+      register_session_v3_handlers(session, config)
       if @options.on_get_trace_context
         session._register_trace_context_provider(@options.on_get_trace_context)
       end
@@ -327,10 +352,13 @@ module Copilot
     # @return [CopilotSession]
     def resume_session(session_id, **config)
       ensure_connected!
+      validate_session_config_for_mode!(config)
 
       registration_id = register_github_token_provider(config, session_id)
       payload = build_resume_session_payload(session_id, config)
       payload[:gitHubTokenProviderRegistrationId] = registration_id if registration_id
+      payload = Copilot.group_session_params(payload, resume: true)
+      Copilot.apply_empty_mode_session_defaults(payload) if @options.mode == ClientMode::EMPTY
 
       begin
         response = @rpc_client.request("session.resume", payload)
@@ -348,6 +376,7 @@ module Copilot
       session._register_user_input_handler(config[:on_user_input_request]) if config[:on_user_input_request]
       session._register_hooks(config[:hooks]) if config[:hooks]
       session._register_exit_plan_mode_handler(config[:on_exit_plan_mode]) if config[:on_exit_plan_mode]
+      register_session_v3_handlers(session, config)
       if @options.on_get_trace_context
         session._register_trace_context_provider(@options.on_get_trace_context)
       end
@@ -607,7 +636,7 @@ module Copilot
       spawn_env = @options.env ? @options.env.dup : ENV.to_h
       spawn_env["COPILOT_SDK_AUTH_TOKEN"] = @options.github_token if @options.github_token
 
-      cmd = [cli_path] + args
+      cmd = cli_path.end_with?(".js") ? ["node", cli_path] + args : [cli_path] + args
 
       if @options.use_stdio
         @stdin, @stdout, @stderr, wait_thr = Open3.popen3(spawn_env, *cmd, chdir: @options.cwd)
@@ -702,6 +731,21 @@ module Copilot
         handle_github_token_request(params)
       end
 
+      # Shell authentication prompts run off the reader thread so that a
+      # shellAuthentication.cancel can be processed while the handler prompts.
+      @rpc_client.on_request("shellAuthentication.request", async: true) do |params|
+        handle_shell_authentication_request(params)
+      end
+
+      @rpc_client.on_request("shellAuthentication.cancel") do |params|
+        handle_shell_authentication_cancel(params)
+      end
+
+      @rpc_client.on_request("memoryStore.store", async: true) do |params|
+        handle_memory_store_request(params)
+      end
+
+      register_network_handlers
       register_session_fs_handlers
     end
 
@@ -744,15 +788,52 @@ module Copilot
       server_version = result.protocol_version
 
       if server_version.nil?
-        raise "SDK protocol version mismatch: SDK expects version #{expected}, " \
+        raise "SDK protocol version mismatch: SDK supports version #{expected}, " \
               "but server does not report a protocol version. " \
               "Please update your server to ensure compatibility."
       end
 
       if server_version != expected
-        raise "SDK protocol version mismatch: SDK expects version #{expected}, " \
+        raise "SDK protocol version mismatch: SDK supports version #{expected}, " \
               "but server reports version #{server_version}. " \
               "Please update your SDK or server to ensure compatibility."
+      end
+    end
+
+    # Registers the host network callbacks with +network.setProvider+. An empty object
+    # marks each callback the client answers; the scope is sent only when set.
+    def register_network_provider
+      network = @options.network
+      return unless network&.any_callback?
+
+      params = {}
+      params[:scope] = network.scope.to_s if network.scope
+      params[:resolveProxy] = {} if network.resolve_proxy
+      params[:authenticateNegotiate] = {} if network.authenticate_negotiate
+      params[:authenticateBasic] = {} if network.authenticate_basic
+      @rpc_client.request("network.setProvider", params)
+    end
+
+    # Registers the server -> client network callback handlers for the configured
+    # callbacks. They run off the reader thread so slow lookups never stall it.
+    def register_network_handlers
+      network = @options.network
+      return unless network
+
+      if network.resolve_proxy
+        @rpc_client.on_request("network.resolveProxy", async: true) do |params|
+          handle_network_resolve_proxy(params)
+        end
+      end
+      if network.authenticate_negotiate
+        @rpc_client.on_request("network.authenticateNegotiate", async: true) do |params|
+          handle_network_authenticate_negotiate(params)
+        end
+      end
+      if network.authenticate_basic
+        @rpc_client.on_request("network.authenticateBasic", async: true) do |params|
+          handle_network_authenticate_basic(params)
+        end
       end
     end
 
@@ -955,6 +1036,121 @@ module Copilot
       ).to_wire
     end
 
+    # ---- v3.0.0 session callbacks and client mode ----
+
+    # Registers the session's shell authentication and memory store callbacks.
+    def register_session_v3_handlers(session, config)
+      if config[:on_shell_authentication_request]
+        session._register_shell_authentication_handler(config[:on_shell_authentication_request])
+      end
+      session._register_memory_store(config[:store_memory]) if config[:store_memory]
+    end
+
+    # In "empty" mode every session must explicitly opt into its tools.
+    def validate_session_config_for_mode!(config)
+      if config[:on_shell_authentication_request] && !config[:on_shell_authentication_request].respond_to?(:call)
+        raise ArgumentError, "on_shell_authentication_request must respond to #call"
+      end
+      if config[:store_memory] && !config[:store_memory].respond_to?(:call)
+        raise ArgumentError, "store_memory must respond to #call"
+      end
+      return unless @options.mode == ClientMode::EMPTY && config[:available_tools].nil?
+
+      raise ArgumentError,
+            "CopilotClient is in mode \"empty\" but the session config did not specify " \
+            "available_tools. Empty mode requires every session to explicitly opt into " \
+            "the tools it wants."
+    end
+
+    SHELL_AUTHENTICATION_INPUT_KINDS = [
+      ShellAuthenticationInputKind::SECRET,
+      ShellAuthenticationInputKind::TEXT,
+      ShellAuthenticationInputKind::CONFIRM,
+    ].freeze
+    private_constant :SHELL_AUTHENTICATION_INPUT_KINDS
+
+    # Answers +shellAuthentication.request+ with +{ action: "accept", value: }+ or
+    # +{ action: "cancel" }+. Malformed requests and unknown sessions cancel.
+    def handle_shell_authentication_request(params)
+      unless params.is_a?(Hash) && params["sessionId"].is_a?(String) && params["requestId"].is_a?(String) &&
+             params["program"].is_a?(String) && params["prompt"].is_a?(String) &&
+             SHELL_AUTHENTICATION_INPUT_KINDS.include?(params["inputKind"])
+        return { action: "cancel" }
+      end
+
+      session = @sessions_lock.synchronize { @sessions[params["sessionId"]] }
+      return { action: "cancel" } unless session
+
+      session._handle_shell_authentication_request(ShellAuthenticationRequest.from_hash(params))
+    end
+
+    # Handles +shellAuthentication.cancel+ by cancelling the pending prompt, if any.
+    def handle_shell_authentication_cancel(params)
+      if params.is_a?(Hash) && params["sessionId"].is_a?(String) && params["requestId"].is_a?(String)
+        session = @sessions_lock.synchronize { @sessions[params["sessionId"]] }
+        session&._cancel_shell_authentication_request(params["requestId"])
+      end
+      {}
+    end
+
+    # Handles +memoryStore.store+ by invoking the session's +store_memory+ callback.
+    # Answers JSON null on success.
+    def handle_memory_store_request(params)
+      session_id = params.is_a?(Hash) ? params["sessionId"] : nil
+      session = @sessions_lock.synchronize { @sessions[session_id] }
+      raise "Memory store owner is unavailable" unless session
+
+      session._handle_memory_store(StoredMemory.from_hash(params))
+      nil
+    end
+
+    # Answers +network.resolveProxy+ with +{ proxy: }+, or +{}+ to keep the runtime's
+    # own proxy resolution.
+    def handle_network_resolve_proxy(params)
+      request = NetworkResolveProxyRequest.new(url: params["url"])
+      proxy = invoke_network_callback("Proxy resolution") { @options.network.resolve_proxy.call(request) }
+      proxy.nil? || proxy.to_s.empty? ? {} : { proxy: proxy.to_s }
+    end
+
+    # Answers +network.authenticateNegotiate+ with +{ token: }+ or +{}+. The token is never logged.
+    def handle_network_authenticate_negotiate(params)
+      request = NetworkAuthenticateNegotiateRequest.new(spn: params["spn"])
+      token = invoke_network_callback("Negotiate authentication") do
+        @options.network.authenticate_negotiate.call(request)
+      end
+      token.nil? || token.to_s.empty? ? {} : { token: token.to_s }
+    end
+
+    # Answers +network.authenticateBasic+ with +{ username:, password: }+ or +{}+. Only the
+    # credential fields are sent, and they are never logged.
+    def handle_network_authenticate_basic(params)
+      request = NetworkAuthenticateBasicRequest.new(
+        proxy: params["proxy"],
+        realm: params["realm"],
+        previous_rejected: params["previousRejected"] ? true : false
+      )
+      credentials = invoke_network_callback("Basic authentication") do
+        @options.network.authenticate_basic.call(request)
+      end
+      return {} unless credentials
+
+      creds = credentials.respond_to?(:to_h) ? credentials.to_h : {}
+      username = creds[:username] || creds["username"]
+      password = creds[:password] || creds["password"]
+      result = {}
+      result[:username] = username.to_s unless username.nil?
+      result[:password] = password.to_s unless password.nil?
+      result
+    end
+
+    # Runs a network callback. Failures are reported by type only so that secrets in an
+    # error message are never logged or sent back over the wire.
+    def invoke_network_callback(label)
+      yield
+    rescue StandardError => e
+      raise "#{label} callback failed (#{e.class})"
+    end
+
     # ---- SessionFs provider request handlers ----
     #
     # These service the CLI's +sessionFs.*+ callbacks against the real
@@ -1107,6 +1303,11 @@ module Copilot
       payload[:requestExitPlanMode] = true if config[:on_exit_plan_mode]
       payload[:workingDirectory] = config[:working_directory] if config[:working_directory]
       payload[:streaming] = config[:streaming] unless config[:streaming].nil?
+      unless config[:include_sub_agent_streaming_events].nil?
+        payload[:includeSubAgentStreamingEvents] = config[:include_sub_agent_streaming_events]
+      end
+      payload[:enableConfigDiscovery] = config[:enable_config_discovery] unless config[:enable_config_discovery].nil?
+      payload[:instructionDirectories] = config[:instruction_directories] if config[:instruction_directories]
 
       if config[:provider]
         payload[:provider] = config[:provider].respond_to?(:to_wire) ? config[:provider].to_wire : config[:provider]
@@ -1163,7 +1364,12 @@ module Copilot
       payload[:mcpAuthHandler] = true if config[:on_mcp_auth_request]
 
       # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+      # Explicit +capi:+ ({ enabled: }) is merged with the Auto tier / WebSocket options.
       capi = {}
+      if config[:capi]
+        user_capi = config[:capi].respond_to?(:to_wire) ? config[:capi].to_wire : config[:capi]
+        capi.merge!(user_capi.transform_keys(&:to_sym)) if user_capi.is_a?(Hash)
+      end
       capi[:autoTier] = config[:auto_tier] if config[:auto_tier]
       capi[:enableWebSocketResponses] = config[:enable_web_socket_responses] unless config[:enable_web_socket_responses].nil?
       payload[:capi] = capi unless capi.empty?
@@ -1192,6 +1398,22 @@ module Copilot
         ap = config[:autopilot]
         payload[:autopilot] = ap.respond_to?(:to_wire) ? ap.to_wire : ap
       end
+
+      # --- v3.0.0 (SDK protocol 4) session options ---
+      if config[:providers]
+        payload[:providers] = config[:providers].map { |p| p.respond_to?(:to_wire) ? p.to_wire : p }
+      end
+      if config[:models]
+        payload[:models] = config[:models].map { |m| m.respond_to?(:to_wire) ? m.to_wire : m }
+      end
+      # On resume an explicit default_provider: nil clears the session's default provider.
+      if config[:default_provider] || (resume && config.key?(:default_provider))
+        payload[:defaultProvider] = config[:default_provider]
+      end
+      payload[:requestShellAuthentication] = true if config[:on_shell_authentication_request]
+      payload[:hasMemoryStore] = true if config[:store_memory]
+      payload[:permissionMode] = config[:permission_mode] if config[:permission_mode]
+
       unless resume
         # Create-only options.
         payload[:name] = config[:name] if config[:name]
@@ -1212,6 +1434,8 @@ module Copilot
 
     def convert_system_message(msg)
       return msg if msg.is_a?(Hash)
+      # A plain String is appended to the default system message.
+      return { mode: "append", content: msg } if msg.is_a?(String)
 
       msg.respond_to?(:to_h) ? msg.to_h : msg
     end

@@ -49,14 +49,42 @@ typedef void (^CPSessionEventHandler)(CPSessionEvent *event);
          completion:(void (^)(NSString * _Nullable content, NSError * _Nullable error))completion;
 
 /// Aborts the currently processing message in this session.
+/// Failures (for example an unknown session) are reported as errors.
 - (void)abortWithCompletion:(void (^)(NSError * _Nullable error))completion;
 
-/// Disconnects this session from the server.
+/// Disconnects this session from the server (`session.detach`). On-disk session state is
+/// kept, so the session can be resumed later.
 - (void)disconnectWithCompletion:(void (^)(NSError * _Nullable error))completion;
+
+/// Releases this session on the server with `session.detach` (falling back to
+/// `session.destroy` on CLIs that predate it) and drops its GitHub token provider.
+/// The session stays resumable.
+- (void)detachWithCompletion:(void (^)(NSError * _Nullable error))completion;
 
 /// Retrieves metadata for this session.
 - (void)getMetadataWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable metadata,
                                             NSError * _Nullable error))completion;
+
+/// Changes the Auto routing tier (`CPAutoTierFast`, ...) without changing the selected model
+/// (`session.model.switchAutoTier`). Pass nil to return to provider-default routing.
+- (void)setAutoTier:(nullable NSString *)autoTier
+         completion:(void (^)(NSError * _Nullable error))completion;
+
+/// Requests a permission mode (`CPPermissionModeManual`, `CPPermissionModeAssisted`,
+/// `CPPermissionModeAllowAll`) via `session.permissions.setMode`. When managed policy refuses
+/// the change, `result.success` is NO and `result.reason` is `CPPermissionModeRefusalReasonManagedPolicy`.
+- (void)setPermissionMode:(NSString *)mode
+               completion:(void (^)(CPPermissionModeResult * _Nullable result,
+                                    NSError * _Nullable error))completion;
+
+/// Returns the effective managed settings snapshot (`session.managedSettings.get`).
+/// Read a Policy Helper failure from it with `+[CPPolicyHelperFailure failureFromDictionary:]`.
+- (void)getManagedSettingsWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable settings,
+                                                   NSError * _Nullable error))completion;
+
+/// Re-runs the managed-settings Policy Helper (`session.managedSettings.recheckPolicyHelper`).
+- (void)recheckPolicyHelperWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable result,
+                                                    NSError * _Nullable error))completion;
 
 @end
 

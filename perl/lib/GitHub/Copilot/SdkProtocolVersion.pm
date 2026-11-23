@@ -20,7 +20,7 @@ copilot-agent-runtime server.
 
 =cut
 
-our $SDK_PROTOCOL_VERSION = 3;
+our $SDK_PROTOCOL_VERSION = 4;
 
 sub get_sdk_protocol_version {
     return $SDK_PROTOCOL_VERSION;

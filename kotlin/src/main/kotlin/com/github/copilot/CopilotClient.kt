@@ -83,6 +83,7 @@ class CopilotClient(
     private val resolvedUseLoggedInUser: Boolean
     private val resolvedRequestHandler: CopilotRequestHandler?
     private val resolvedBearerTokenProvider: BearerTokenProvider?
+    private val resolvedMode: String
 
     companion object {
         private val PORT_PATTERN = Pattern.compile("listening on port (\\d+)", Pattern.CASE_INSENSITIVE)
@@ -125,6 +126,11 @@ class CopilotClient(
         // Upstream-sync client-side interceptors: consulted by the runtime transport when present.
         resolvedRequestHandler = options.requestHandler
         resolvedBearerTokenProvider = options.bearerTokenProvider
+        resolvedMode = when (options.mode) {
+            ClientMode.CODING_AGENT, ClientMode.COPILOT_CLI -> ClientMode.CODING_AGENT
+            ClientMode.EMPTY -> ClientMode.EMPTY
+            else -> throw IllegalArgumentException("mode must be 'coding-agent' or 'empty', got '${options.mode}'")
+        }
     }
 
     /**
@@ -148,6 +154,7 @@ class CopilotClient(
             connectToServer()
             sendConnectHandshake()
             verifyProtocolVersion()
+            registerNetworkProvider()
 
             // Register session filesystem provider if configured
             options.sessionFs?.let { fs ->
@@ -256,11 +263,14 @@ class CopilotClient(
      */
     suspend fun createSession(config: SessionConfig = SessionConfig()): CopilotSession {
         validateGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider)
+        validateSessionOptions(config.availableTools, config.memory)
         ensureConnected()
         val client = rpcClient ?: throw IllegalStateException("Client not connected")
 
         val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, config.sessionId)
-        val payload = buildCreateSessionPayload(config, registrationId)
+        val payload = applyModeDefaults(
+            groupSessionParams(buildCreateSessionPayload(config, registrationId), resume = false)
+        )
         val response = try {
             client.request("session.create", payload)
         } catch (e: Exception) {
@@ -277,6 +287,8 @@ class CopilotClient(
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
         config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
+        config.onShellAuthenticationRequest?.let { session.registerShellAuthenticationHandler(it) }
+        config.memory?.storeMemory?.let { session.registerMemoryStore(it) }
         commitGitHubTokenProvider(session, registrationId)
         sessions[sessionId] = session
 
@@ -291,11 +303,12 @@ class CopilotClient(
         config: ResumeSessionConfig = ResumeSessionConfig()
     ): CopilotSession {
         validateGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider)
+        validateSessionOptions(config.availableTools, config.memory)
         ensureConnected()
         val client = rpcClient ?: throw IllegalStateException("Client not connected")
 
         val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, sessionId)
-        val payload = buildJsonObject {
+        val flatPayload = buildJsonObject {
             put("sessionId", sessionId)
             config.model?.let { put("model", it) }
             config.reasoningEffort?.let { put("reasoningEffort", json.encodeToJsonElement(ReasoningEffort.serializer(), it)) }
@@ -307,6 +320,8 @@ class CopilotClient(
                             put("name", tool.name)
                             tool.description?.let { put("description", it) }
                             tool.parameters?.let { put("parameters", anyToJsonElement(it)) }
+                            tool.defer?.let { put("defer", it) }
+                            tool.idempotent?.let { put("idempotent", it) }
                         })
                     }
                 })
@@ -329,12 +344,13 @@ class CopilotClient(
             config.modelCapabilities?.let { put("modelCapabilities", anyToJsonElement(it)) }
             config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
-            config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
+            config.commands?.let { put("commands", commandsToJson(it)) }
             if (config.onElicitationRequest != null) put("requestElicitation", true)
             config.disableResume?.let { put("disableResume", it) }
+            config.instructionDirectories?.let { put("instructionDirectories", json.encodeToJsonElement(it)) }
 
             // --- v2.6.0 upstream-sync session options ---
-            capiOptions(config.autoTier, config.enableWebSocketResponses)?.let { put("capi", it) }
+            capiOptions(config.autoTier, config.enableWebSocketResponses, config.capi)?.let { put("capi", it) }
             config.askUserVariant?.let { put("askUserVariant", it) }
             registrationId?.let { put("gitHubTokenProviderRegistrationId", it) }
             config.sandboxConfig?.let { put("sandboxConfig", sandboxConfigToJson(it)) }
@@ -349,7 +365,26 @@ class CopilotClient(
             config.allowTranscriptRecovery?.let { put("allowTranscriptRecovery", it) }
             config.imageGeneration?.let { put("imageGeneration", json.encodeToJsonElement(ImageGenerationConfig.serializer(), it)) }
             config.autopilot?.let { put("autopilot", json.encodeToJsonElement(AutopilotOptions.serializer(), it)) }
+
+            // --- v3.0.0 session options (SDK protocol 4) ---
+            config.suppressResumeEvent?.let { put("suppressResumeEvent", it) }
+            config.continuePendingWork?.let { put("continuePendingWork", it) }
+            putNamedProviders(config.providers, config.models)
+            if (config.defaultProvider != null) {
+                put("defaultProvider", config.defaultProvider)
+            } else if (config.clearDefaultProvider) {
+                put("defaultProvider", JsonNull)
+            }
+            config.memory?.let { mem ->
+                put("memory", buildJsonObject {
+                    mem.enabled?.let { put("enabled", JsonPrimitive(it)) }
+                })
+                if (mem.storeMemory != null) put("hasMemoryStore", true)
+            }
+            if (config.onShellAuthenticationRequest != null) put("requestShellAuthentication", true)
+            config.permissionMode?.let { put("permissionMode", it) }
         }
+        val payload = applyModeDefaults(groupSessionParams(flatPayload, resume = true))
 
         val response = try {
             client.request("session.resume", payload)
@@ -367,6 +402,8 @@ class CopilotClient(
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
         config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
+        config.onShellAuthenticationRequest?.let { session.registerShellAuthenticationHandler(it) }
+        config.memory?.storeMemory?.let { session.registerMemoryStore(it) }
         commitGitHubTokenProvider(session, registrationId)
         sessions[resumedId] = session
 
@@ -576,6 +613,7 @@ class CopilotClient(
                             tool.description?.let { put("description", it) }
                             tool.parameters?.let { put("parameters", anyToJsonElement(it)) }
                             tool.defer?.let { put("defer", it) }
+                            tool.idempotent?.let { put("idempotent", it) }
                         })
                     }
                 })
@@ -583,6 +621,7 @@ class CopilotClient(
             config.systemMessage?.let { put("systemMessage", json.encodeToJsonElement(SystemMessageConfig.serializer(), it)) }
             config.availableTools?.let { put("availableTools", json.encodeToJsonElement(it)) }
             config.excludedTools?.let { put("excludedTools", json.encodeToJsonElement(it)) }
+            // Legacy single BYOK provider: translated to inference.providers/models by groupSessionParams.
             config.provider?.let { put("provider", json.encodeToJsonElement(ProviderConfig.serializer(), it)) }
             if (config.onPermissionRequest != null) put("requestPermission", true)
             if (config.onUserInputRequest != null) put("requestUserInput", true)
@@ -615,7 +654,7 @@ class CopilotClient(
             config.modelCapabilities?.let { put("modelCapabilities", anyToJsonElement(it)) }
             config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
-            config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
+            config.commands?.let { put("commands", commandsToJson(it)) }
             if (config.onElicitationRequest != null) put("requestElicitation", true)
             // Wire sessionIdleTimeoutSeconds (idleTimeout), requestHeaders, imageGeneration / responseFormat
             config.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
@@ -635,22 +674,23 @@ class CopilotClient(
                 })
             }
             config.otlpProtocol?.let { put("otlpProtocol", JsonPrimitive(it)) }
-            config.expAssignments?.let { put("expAssignments", json.encodeToJsonElement(it)) }
+            config.expAssignments?.let { put("expAssignments", anyToJsonElement(it)) }
             config.rewindEnabled?.let { put("rewindEnabled", JsonPrimitive(it)) }
             config.additionalDirectories?.let { put("additionalDirectories", json.encodeToJsonElement(it)) }
             config.disabledMcpServers?.let { put("disabledMcpServers", json.encodeToJsonElement(it)) }
-            config.githubMcpToolConfig?.let { put("githubMcpToolConfig", json.encodeToJsonElement(it)) }
-            config.canvasProvider?.let { put("canvasProvider", json.encodeToJsonElement(it)) }
+            config.githubMcpToolConfig?.let { put("githubMcpToolConfig", anyToJsonElement(it)) }
+            config.canvasProvider?.let { put("canvasProvider", anyToJsonElement(it)) }
             config.customAgentsLocalOnly?.let { put("customAgentsLocalOnly", JsonPrimitive(it)) }
-            config.toolSearch?.let { put("toolSearch", json.encodeToJsonElement(it)) }
-            config.experimentalMode?.let { put("experimentalMode", JsonPrimitive(it)) }
+            config.toolSearch?.let { put("toolSearch", anyToJsonElement(it)) }
+            config.experimentalMode?.let { put("enableExperimentalMode", JsonPrimitive(it)) }
             config.contentExclusion?.let { put("contentExclusion", JsonPrimitive(it)) }
+            config.instructionDirectories?.let { put("instructionDirectories", json.encodeToJsonElement(it)) }
             // MCP OAuth host token handler: signal to the runtime that a handler is registered.
             if (config.onMcpAuthRequest != null) put("mcpAuthHandler", true)
 
             // --- v2.6.0 upstream-sync session options ---
-            // The runtime only accepts autoTier/enableWebSocketResponses under "capi".
-            capiOptions(config.autoTier, config.enableWebSocketResponses)?.let { put("capi", it) }
+            // CAPI provider options (github.capi): explicit CapiConfig members win over the flat fields.
+            capiOptions(config.autoTier, config.enableWebSocketResponses, config.capi)?.let { put("capi", it) }
             config.askUserVariant?.let { put("askUserVariant", it) }
             registrationId?.let { put("gitHubTokenProviderRegistrationId", it) }
             config.sandboxConfig?.let { put("sandboxConfig", sandboxConfigToJson(it)) }
@@ -667,16 +707,122 @@ class CopilotClient(
             config.refreshCustomInstructions?.let { put("refreshCustomInstructions", it) }
             config.imageGeneration?.let { put("imageGeneration", json.encodeToJsonElement(ImageGenerationConfig.serializer(), it)) }
             config.autopilot?.let { put("autopilot", json.encodeToJsonElement(AutopilotOptions.serializer(), it)) }
+
+            // --- v3.0.0 session options (SDK protocol 4) ---
+            putNamedProviders(config.providers, config.models)
+            config.defaultProvider?.let { put("defaultProvider", it) }
+            if (config.memory?.storeMemory != null) put("hasMemoryStore", true)
+            if (config.onShellAuthenticationRequest != null) put("requestShellAuthentication", true)
+            config.permissionMode?.let { put("permissionMode", it) }
         }
     }
 
-    /** Builds the `capi` provider options object, or null when neither field is set. */
-    private fun capiOptions(autoTier: String?, enableWebSocketResponses: Boolean?): JsonObject? {
-        if (autoTier == null && enableWebSocketResponses == null) return null
-        return buildJsonObject {
-            autoTier?.let { put("autoTier", it) }
-            enableWebSocketResponses?.let { put("enableWebSocketResponses", it) }
+    /**
+     * Builds the `capi` provider options object (`github.capi`), or null when nothing is set.
+     * Members of the explicit [capi] options win over the flat [autoTier]/[enableWebSocketResponses] fields.
+     */
+    private fun capiOptions(autoTier: String?, enableWebSocketResponses: Boolean?, capi: CapiConfig? = null): JsonObject? {
+        val members = LinkedHashMap<String, JsonElement>()
+        autoTier?.let { members["autoTier"] = JsonPrimitive(it) }
+        enableWebSocketResponses?.let { members["enableWebSocketResponses"] = JsonPrimitive(it) }
+        capi?.enabled?.let { members["enabled"] = JsonPrimitive(it) }
+        capi?.autoTier?.let { members["autoTier"] = JsonPrimitive(it) }
+        capi?.enableWebSocketResponses?.let { members["enableWebSocketResponses"] = JsonPrimitive(it) }
+        return if (members.isEmpty()) null else JsonObject(members)
+    }
+
+    /** Adds the named BYOK provider connections and model definitions (`inference.providers`/`models`). */
+    private fun JsonObjectBuilder.putNamedProviders(providers: List<NamedProviderConfig>?, models: List<ProviderModelConfig>?) {
+        providers?.let { list -> put("providers", JsonArray(list.map { namedProviderToJson(it) })) }
+        models?.let { list -> put("models", JsonArray(list.map { providerModelToJson(it) })) }
+    }
+
+    /** Encodes slash-command declarations (`interaction.commands`); handlers stay in the client. */
+    private fun commandsToJson(commands: List<CommandDefinition>): JsonArray = buildJsonArray {
+        for (command in commands) {
+            add(buildJsonObject {
+                put("name", command.name)
+                put("description", command.description ?: "")
+            })
         }
+    }
+
+    /** Encodes a [NamedProviderConfig], omitting unset optional fields. */
+    private fun namedProviderToJson(provider: NamedProviderConfig): JsonObject = buildJsonObject {
+        put("name", provider.name)
+        put("baseUrl", provider.baseUrl)
+        provider.type?.let { put("type", it) }
+        provider.apiKey?.let { put("apiKey", it) }
+        provider.apiKeyCommand?.let { put("apiKeyCommand", it) }
+        provider.bearerToken?.let { put("bearerToken", it) }
+        provider.wireApi?.let { put("wireApi", it) }
+        provider.transport?.let { put("transport", it) }
+        provider.azure?.let { put("azure", json.encodeToJsonElement(ProviderConfig.AzureConfig.serializer(), it)) }
+        provider.headers?.let { put("headers", json.encodeToJsonElement(it)) }
+        provider.modelProvider?.let { put("modelProvider", it) }
+    }
+
+    /** Encodes a [ProviderModelConfig], omitting unset optional fields. */
+    private fun providerModelToJson(model: ProviderModelConfig): JsonObject = buildJsonObject {
+        put("provider", model.provider)
+        put("id", model.id)
+        model.modelId?.let { put("modelId", it) }
+        model.wireModel?.let { put("wireModel", it) }
+        model.name?.let { put("name", it) }
+        model.maxPromptTokens?.let { put("maxPromptTokens", it) }
+        model.maxContextWindowTokens?.let { put("maxContextWindowTokens", it) }
+        model.maxOutputTokens?.let { put("maxOutputTokens", it) }
+        model.capabilities?.let { put("capabilities", anyToJsonElement(it)) }
+    }
+
+    /** Rejects session options that cannot work: empty mode without tools, or a memory store without memory. */
+    private fun validateSessionOptions(availableTools: List<String>?, memory: MemoryConfiguration?) {
+        if (resolvedMode == ClientMode.EMPTY && availableTools == null) {
+            throw IllegalArgumentException(
+                "CopilotClient is in mode 'empty' but the session config did not specify availableTools. " +
+                    "Empty mode requires every session to explicitly opt into the tools it wants."
+            )
+        }
+        if (memory != null && memory.storeMemory != null && memory.enabled != true) {
+            throw IllegalArgumentException("memory.storeMemory requires memory.enabled to be true.")
+        }
+    }
+
+    /** Empty mode: applies safe runtime defaults under the caller's values (caller values win). */
+    private fun applyModeDefaults(wire: JsonObject): JsonObject {
+        if (resolvedMode != ClientMode.EMPTY) return wire
+        val root = LinkedHashMap<String, JsonElement>(wire)
+        fun putDefault(group: String, member: String, value: JsonElement) {
+            val existing = root[group] as? JsonObject
+            if (existing?.containsKey(member) == true) return
+            val members = LinkedHashMap<String, JsonElement>(existing ?: emptyMap())
+            members[member] = value
+            root[group] = JsonObject(members)
+        }
+        putDefault("experiments", "enableExperimentalMode", JsonPrimitive(false))
+        putDefault("github", "telemetryEnabled", JsonPrimitive(false))
+        putDefault("mcp", "oauthTokenStorage", JsonPrimitive("in-memory"))
+        putDefault("state", "skipEmbeddingRetrieval", JsonPrimitive(true))
+        putDefault("state", "embeddingCacheStorage", JsonPrimitive("in-memory"))
+        putDefault("state", "enableCrossSessionStore", JsonPrimitive(false))
+        putDefault("state", "memory", buildJsonObject { put("enabled", false) })
+        putDefault("instructions", "onDemandDiscovery", JsonPrimitive(false))
+        putDefault("hooks", "enableRepositoryHooks", JsonPrimitive(false))
+        putDefault("git", "enableHostGitOperations", JsonPrimitive(false))
+        return JsonObject(root)
+    }
+
+    /** Registers the configured network callbacks with `network.setProvider` (no-op without callbacks). */
+    private suspend fun registerNetworkProvider() {
+        val network = options.network ?: return
+        if (!network.hasCallbacks()) return
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        client.request("network.setProvider", buildJsonObject {
+            network.scope?.let { put("scope", it) }
+            if (network.resolveProxy != null) put("resolveProxy", JsonObject(emptyMap()))
+            if (network.authenticateNegotiate != null) put("authenticateNegotiate", JsonObject(emptyMap()))
+            if (network.authenticateBasic != null) put("authenticateBasic", JsonObject(emptyMap()))
+        })
     }
 
     /** Encodes a [SandboxConfig], omitting unset optional fields. */
@@ -768,13 +914,13 @@ class CopilotClient(
 
         if (serverVersion == null) {
             throw RuntimeException(
-                "SDK protocol version mismatch: SDK expects version $expected, " +
+                "SDK protocol version mismatch: SDK supports version $expected, " +
                     "but server does not report a protocol version. Please update your server to ensure compatibility."
             )
         }
         if (serverVersion != expected) {
             throw RuntimeException(
-                "SDK protocol version mismatch: SDK expects version $expected, " +
+                "SDK protocol version mismatch: SDK supports version $expected, " +
                     "but server reports version $serverVersion. Please update your SDK or server to ensure compatibility."
             )
         }
@@ -918,6 +1064,10 @@ class CopilotClient(
         client.setRequestHandler("hooks.invoke") { params -> handleHooksInvoke(params) }
         client.setRequestHandler("elicitation.request") { params -> handleElicitationRequest(params) }
         client.setRequestHandler("gitHubToken.getToken") { params -> handleGitHubTokenRequest(params) }
+        client.setRequestHandler("shellAuthentication.request") { params -> handleShellAuthenticationRequest(params) }
+        client.setRequestHandler("shellAuthentication.cancel") { params -> handleShellAuthenticationCancel(params) }
+        client.setRequestHandler("memoryStore.store") { params -> handleMemoryStoreRequest(params) }
+        setupNetworkHandlers(client)
 
         // Session filesystem provider callbacks. When a provider is registered via
         // sessionFs.setProvider, the CLI drives filesystem access by sending these
@@ -932,6 +1082,66 @@ class CopilotClient(
         client.setRequestHandler("sessionFs.readdirWithTypes") { params -> handleSessionFsReaddirWithTypes(params) }
         client.setRequestHandler("sessionFs.rm") { params -> handleSessionFsRm(params) }
         client.setRequestHandler("sessionFs.rename") { params -> handleSessionFsRename(params) }
+    }
+
+    /** Answers `shellAuthentication.request` with the owning session's handler (`cancel` when unavailable). */
+    private suspend fun handleShellAuthenticationRequest(params: JsonObject): JsonElement {
+        val sessionId = (params["sessionId"] as? JsonPrimitive)?.contentOrNull
+        val session = sessionId?.let { sessions[it] } ?: return buildJsonObject { put("action", "cancel") }
+        return session.handleShellAuthenticationRequest(params)
+    }
+
+    /** Cancels a pending shell authentication prompt; always answers `{}`. */
+    private fun handleShellAuthenticationCancel(params: JsonObject): JsonElement {
+        val sessionId = (params["sessionId"] as? JsonPrimitive)?.contentOrNull
+        val requestId = (params["requestId"] as? JsonPrimitive)?.contentOrNull
+        if (sessionId != null && requestId != null) {
+            sessions[sessionId]?.cancelShellAuthentication(requestId)
+        }
+        return JsonObject(emptyMap())
+    }
+
+    /** Stores a memory through the owning session's callback and answers with a JSON null result. */
+    private suspend fun handleMemoryStoreRequest(params: JsonObject): JsonElement {
+        val sessionId = (params["sessionId"] as? JsonPrimitive)?.contentOrNull
+        val session = sessionId?.let { sessions[it] }
+            ?: throw IllegalStateException("Memory store owner is unavailable")
+        session.handleMemoryStore(params)
+        return JsonNull
+    }
+
+    /** Serves the configured network callbacks. Tokens and passwords are never logged. */
+    private fun setupNetworkHandlers(client: JsonRpcClient) {
+        val network = options.network ?: return
+        network.resolveProxy?.let { resolver ->
+            client.setRequestHandler("network.resolveProxy") { params ->
+                val url = (params["url"] as? JsonPrimitive)?.contentOrNull ?: ""
+                val proxy = resolver(NetworkResolveProxyRequest(url = url))
+                buildJsonObject { proxy?.let { put("proxy", it) } }
+            }
+        }
+        network.authenticateNegotiate?.let { authenticator ->
+            client.setRequestHandler("network.authenticateNegotiate") { params ->
+                val spn = (params["spn"] as? JsonPrimitive)?.contentOrNull ?: ""
+                val token = authenticator(NetworkAuthenticateNegotiateRequest(spn = spn))
+                buildJsonObject { token?.let { put("token", it) } }
+            }
+        }
+        network.authenticateBasic?.let { authenticator ->
+            client.setRequestHandler("network.authenticateBasic") { params ->
+                val request = NetworkAuthenticateBasicRequest(
+                    proxy = (params["proxy"] as? JsonPrimitive)?.contentOrNull ?: "",
+                    realm = (params["realm"] as? JsonPrimitive)?.contentOrNull,
+                    previousRejected = (params["previousRejected"] as? JsonPrimitive)?.booleanOrNull ?: false
+                )
+                val credentials = authenticator(request)
+                // Send only the credential fields.
+                buildJsonObject {
+                    credentials?.username?.let { put("username", it) }
+                    credentials?.password?.let { put("password", it) }
+                }
+            }
+        }
     }
 
     private fun handleSessionEventNotification(params: JsonObject) {
@@ -1317,13 +1527,15 @@ class CopilotClient(
 }
 
 /**
- * Builds the `session.send` JSON-RPC payload, including the upstream-sync
- * message options (agentMode, displayPrompt, requestHeaders, source, responseSchema).
+ * Builds the `session.send` JSON-RPC payload, including the upstream-sync message options
+ * (agentMode, displayPrompt, requestHeaders, source, clientTurnId, responseSchema). The legacy
+ * enum `responseFormat` is not sent: protocol 4 only accepts the structured format.
  */
 internal fun buildSendPayload(sessionId: String, options: MessageOptions, json: Json): JsonObject = buildJsonObject {
     put("sessionId", sessionId)
     put("prompt", options.prompt)
     options.source?.let { put("source", it) }
+    options.clientTurnId?.let { put("clientTurnId", it) }
     options.attachments?.let { put("attachments", json.encodeToJsonElement(it)) }
     options.mode?.let { put("mode", it) }
     options.agentMode?.let { put("agentMode", it) }
@@ -1331,7 +1543,6 @@ internal fun buildSendPayload(sessionId: String, options: MessageOptions, json: 
     options.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
     val responseSchema = options.responseSchema
     if (responseSchema != null) {
-        // Structured output takes the responseFormat slot over the legacy enum format.
         put("responseFormat", buildJsonObject {
             put("type", "json_schema")
             put("jsonSchema", buildJsonObject {
@@ -1340,10 +1551,246 @@ internal fun buildSendPayload(sessionId: String, options: MessageOptions, json: 
                 put("schema", anyToJson(responseSchema))
             })
         })
-    } else {
-        options.responseFormat?.let { put("responseFormat", json.encodeToJsonElement(it)) }
     }
     options.imageOptions?.let { put("imageOptions", json.encodeToJsonElement(it)) }
+}
+
+// ============================================================================
+// SDK protocol 4: grouped session payloads
+// ============================================================================
+
+/** Flat keys that stay at the root of protocol 4 create/resume payloads. */
+private val ROOT_SESSION_KEYS = setOf(
+    "sessionId", "model", "name", "clientName", "workingDirectory", "configDirectory",
+    "enableConfigDiscovery", "systemMessage", "diagnostics", "lifecycleDiagnostics", "cloud",
+    "traceparent", "tracestate", "suppressResumeEvent", "continuePendingWork",
+    "allowTranscriptRecovery", "requestedEnvironmentVariables"
+)
+
+/** Flat keys accepted only by `session.create`; dropped on resume. */
+private val CREATE_ONLY_SESSION_KEYS = setOf("name", "cloud", "trustWorkingDirectory", "refreshCustomInstructions")
+
+/** Flat keys accepted only by `session.resume`; dropped on create. */
+private val RESUME_ONLY_SESSION_KEYS = setOf(
+    "suppressResumeEvent", "continuePendingWork", "allowTranscriptRecovery", "requestedEnvironmentVariables", "openCanvases"
+)
+
+/** Option groups of protocol 4 create/resume payloads. */
+private val SESSION_OPTION_GROUPS = setOf(
+    "inference", "tools", "permissions", "interaction", "events", "agents", "skills", "mcp",
+    "github", "filesystem", "execution", "instructions", "hooks", "git", "state", "plugins",
+    "canvases", "extensions", "experiments", "policy"
+)
+
+/** Flat keys whose JSON null is an explicit clear that must be sent rather than skipped. */
+private val EXPLICIT_NULL_SESSION_KEYS = setOf("defaultProvider")
+
+/** Legacy provider fields that describe the model rather than the connection. */
+private val PROVIDER_MODEL_FIELDS = setOf(
+    "modelId", "wireModel", "maxPromptTokens", "maxContextWindowTokens", "maxOutputTokens", "capabilities"
+)
+
+/** Flat keys mapped to their protocol 4 (group, member) location. */
+private val GROUPED_SESSION_KEYS: Map<String, Pair<String, String>> = mapOf(
+    "reasoningEffort" to ("inference" to "reasoningEffort"),
+    "reasoningSummary" to ("inference" to "reasoningSummary"),
+    "contextTier" to ("inference" to "contextTier"),
+    "allowMultipleToolCalls" to ("inference" to "allowMultipleToolCalls"),
+    "enableCitations" to ("inference" to "enableCitations"),
+    "modelCapabilities" to ("inference" to "capabilities"),
+    "verbosity" to ("inference" to "verbosity"),
+    "providers" to ("inference" to "providers"),
+    "models" to ("inference" to "models"),
+    "defaultProvider" to ("inference" to "defaultProvider"),
+    "tools" to ("tools" to "definitions"),
+    "availableTools" to ("tools" to "availableTools"),
+    "excludedTools" to ("tools" to "excludedTools"),
+    "toolSearch" to ("tools" to "search"),
+    "largeOutput" to ("tools" to "largeOutput"),
+    "imageGeneration" to ("tools" to "imageGeneration"),
+    "manageScheduleEnabled" to ("tools" to "manageScheduleEnabled"),
+    "webSearch" to ("tools" to "webSearch"),
+    "shell" to ("tools" to "shell"),
+    "maxInlineBinaryBytes" to ("tools" to "maxInlineBinaryBytes"),
+    "requestPermission" to ("permissions" to "request"),
+    "sandboxConfig" to ("permissions" to "sandbox"),
+    "sandbox" to ("permissions" to "sandbox"),
+    "permissionMode" to ("permissions" to "mode"),
+    "sandboxConfigSource" to ("permissions" to "sandboxSource"),
+    "commands" to ("interaction" to "commands"),
+    "askUserVariant" to ("interaction" to "askUserVariant"),
+    "requestUserInput" to ("interaction" to "requestUserInput"),
+    "requestElicitation" to ("interaction" to "requestElicitation"),
+    "requestShellAuthentication" to ("interaction" to "requestShellAuthentication"),
+    "requestExitPlanMode" to ("interaction" to "requestExitPlanMode"),
+    "requestAutoModeSwitch" to ("interaction" to "requestAutoModeSwitch"),
+    "requestAutoModeRecovery" to ("interaction" to "requestAutoModeRecovery"),
+    "streaming" to ("events" to "streaming"),
+    "includeSubAgentStreamingEvents" to ("events" to "includeSubAgentStreamingEvents"),
+    "customAgents" to ("agents" to "definitions"),
+    "defaultAgent" to ("agents" to "default"),
+    "agent" to ("agents" to "selected"),
+    "includedBuiltinAgents" to ("agents" to "includedBuiltinAgents"),
+    "excludedBuiltinAgents" to ("agents" to "excludedBuiltinAgents"),
+    "customAgentsLocalOnly" to ("agents" to "localDiscoveryOnly"),
+    "agentDirectories" to ("agents" to "directories"),
+    "skillDirectories" to ("skills" to "directories"),
+    "enableSkills" to ("skills" to "enabled"),
+    "includedBuiltinSkills" to ("skills" to "includedBuiltinSkills"),
+    "disabledSkills" to ("skills" to "disabledSkills"),
+    "hasSkillProvider" to ("skills" to "hasProvider"),
+    "ignoredSkillsLocations" to ("skills" to "ignoredLocations"),
+    "mcpServers" to ("mcp" to "servers"),
+    "disabledMcpServers" to ("mcp" to "disabledServers"),
+    "requestMcpApps" to ("mcp" to "enableApps"),
+    "enableMcpApps" to ("mcp" to "enableApps"),
+    "mcpOAuthTokenStorage" to ("mcp" to "oauthTokenStorage"),
+    "authClientIdMetadataUrl" to ("mcp" to "authClientIdMetadataUrl"),
+    "envValueMode" to ("mcp" to "envValueMode"),
+    "managedMcpServers" to ("mcp" to "managedServers"),
+    "allowAllMcpServerInstructions" to ("mcp" to "allowAllServerInstructions"),
+    "gitHubToken" to ("github" to "token"),
+    "gitHubTokenProviderRegistrationId" to ("github" to "tokenProviderRegistrationId"),
+    "githubMcpToolConfig" to ("github" to "mcp"),
+    "capi" to ("github" to "capi"),
+    "enableSessionTelemetry" to ("github" to "telemetryEnabled"),
+    "enableManagedSettings" to ("github" to "fetchManagedSettings"),
+    "interactiveUser" to ("github" to "interactiveUser"),
+    "enableGitHubTelemetryForwarding" to ("github" to "telemetryForwarding"),
+    "authInfo" to ("github" to "authInfo"),
+    "copilotUrl" to ("github" to "copilotUrl"),
+    "additionalDirectories" to ("filesystem" to "additionalDirectories"),
+    "enableFileChangeTracking" to ("filesystem" to "trackFileChanges"),
+    "trustWorkingDirectory" to ("filesystem" to "trustWorkingDirectory"),
+    "sessionLimits" to ("execution" to "limits"),
+    "autopilot" to ("execution" to "autopilot"),
+    "autopilotContinuation" to ("execution" to "autopilotContinuation"),
+    "instructionDirectories" to ("instructions" to "directories"),
+    "organizationCustomInstructions" to ("instructions" to "organizationText"),
+    "enableOnDemandInstructionDiscovery" to ("instructions" to "onDemandDiscovery"),
+    "skipCustomInstructions" to ("instructions" to "skipCustomInstructions"),
+    "refreshCustomInstructions" to ("instructions" to "refreshCustomInstructions"),
+    "hooks" to ("hooks" to "hasHandlers"),
+    "hookDirectories" to ("hooks" to "directories"),
+    "enableFileHooks" to ("hooks" to "enableRepositoryHooks"),
+    "coauthorEnabled" to ("git" to "coauthorEnabled"),
+    "enableHostGitOperations" to ("git" to "enableHostGitOperations"),
+    "infiniteSessions" to ("state" to "infiniteSessions"),
+    "memory" to ("state" to "memory"),
+    "hasMemoryStore" to ("state" to "hasMemoryStore"),
+    "enableSessionStore" to ("state" to "enableCrossSessionStore"),
+    "skipEmbeddingRetrieval" to ("state" to "skipEmbeddingRetrieval"),
+    "embeddingCacheStorage" to ("state" to "embeddingCacheStorage"),
+    "pluginDirectories" to ("plugins" to "directories"),
+    "installedPlugins" to ("plugins" to "installed"),
+    "canvases" to ("canvases" to "definitions"),
+    "canvasProvider" to ("canvases" to "provider"),
+    "requestCanvasRenderer" to ("canvases" to "requestRenderer"),
+    "openCanvases" to ("canvases" to "open"),
+    "requestExtensions" to ("extensions" to "enabled"),
+    "extensionSdkPath" to ("extensions" to "sdkPath"),
+    "extensionInfo" to ("extensions" to "identity"),
+    "enableExperimentalMode" to ("experiments" to "enableExperimentalMode"),
+    "isExperimentalMode" to ("experiments" to "enableExperimentalMode"),
+    "featureFlags" to ("experiments" to "flags"),
+    "expAssignments" to ("experiments" to "assignments"),
+    "featureFlagConfiguration" to ("experiments" to "configuration"),
+    "allowedModels" to ("policy" to "allowedModels"),
+    "managedSettings" to ("policy" to "managedSettings"),
+    "excludedManagedSettings" to ("policy" to "excludedManagedSettings"),
+    "enforceManagedModelDefaults" to ("policy" to "enforceManagedModelDefaults"),
+)
+
+/**
+ * Converts the flat `session.create`/`session.resume` payload this SDK builds into the SDK
+ * protocol 4 grouped payload. Root keys stay at the top level, known flat keys move to their
+ * option group, unknown keys pass through unchanged, null values are skipped (except explicit
+ * clears such as `defaultProvider`), empty groups are omitted, and members of an already-grouped
+ * object win over flat keys. A legacy single `provider` becomes the named "default" connection.
+ */
+internal fun groupSessionParams(flat: JsonObject, resume: Boolean): JsonObject {
+    val root = LinkedHashMap<String, JsonElement>()
+    val groups = LinkedHashMap<String, LinkedHashMap<String, JsonElement>>()
+    // Already-grouped objects first, so their members win over flat keys.
+    for ((key, value) in flat) {
+        if (key in SESSION_OPTION_GROUPS && value is JsonObject) {
+            val group = groups.getOrPut(key) { LinkedHashMap() }
+            for ((member, memberValue) in value) {
+                if (memberValue !is JsonNull) group[member] = memberValue
+            }
+        }
+    }
+    var legacyProvider: JsonObject? = null
+    for ((flatKey, value) in flat) {
+        if (flatKey in SESSION_OPTION_GROUPS && value is JsonObject) continue
+        if (value is JsonNull && flatKey !in EXPLICIT_NULL_SESSION_KEYS) continue
+        val key = when (flatKey) {
+            "configDir" -> "configDirectory"
+            "disableResume" -> "suppressResumeEvent"
+            else -> flatKey
+        }
+        val dropped = if (resume) key in CREATE_ONLY_SESSION_KEYS else key in RESUME_ONLY_SESSION_KEYS
+        if (dropped) continue
+        if (key == "provider") {
+            legacyProvider = value as? JsonObject
+            continue
+        }
+        val path = if (key in ROOT_SESSION_KEYS) null else GROUPED_SESSION_KEYS[key]
+        if (path == null) {
+            root.putIfAbsent(key, value)
+        } else {
+            groups.getOrPut(path.first) { LinkedHashMap() }.putIfAbsent(path.second, value)
+        }
+    }
+    groups["mcp"]?.let { mcp ->
+        if (mcp.containsKey("servers")) mcp.putIfAbsent("envValueMode", JsonPrimitive("direct"))
+    }
+    legacyProvider?.let { translateLegacyProvider(it, root["model"], groups) }
+    for ((name, members) in groups) {
+        if (members.isNotEmpty()) root[name] = JsonObject(members)
+    }
+    return JsonObject(root)
+}
+
+/**
+ * Translates a legacy single BYOK `provider` into the named "default" connection (plus a model
+ * definition when model-specific fields are present), selects it as the default provider, and
+ * disables Copilot API models as v1 BYOK did. Explicit `providers`, `defaultProvider`, or
+ * `capi.enabled` win: the legacy provider is then dropped.
+ */
+private fun translateLegacyProvider(
+    provider: JsonObject,
+    model: JsonElement?,
+    groups: LinkedHashMap<String, LinkedHashMap<String, JsonElement>>
+) {
+    val inference = groups.getOrPut("inference") { LinkedHashMap() }
+    val github = groups.getOrPut("github") { LinkedHashMap() }
+    val capi = github["capi"] as? JsonObject
+    if (inference.containsKey("providers") || inference.containsKey("defaultProvider") ||
+        capi?.containsKey("enabled") == true
+    ) {
+        return
+    }
+    val connection = LinkedHashMap<String, JsonElement>()
+    connection["name"] = JsonPrimitive("default")
+    val modelFields = LinkedHashMap<String, JsonElement>()
+    for ((field, value) in provider) {
+        if (value is JsonNull || field == "name") continue
+        if (field in PROVIDER_MODEL_FIELDS) modelFields[field] = value else connection[field] = value
+    }
+    inference["providers"] = JsonArray(listOf(JsonObject(connection)))
+    inference["defaultProvider"] = JsonPrimitive("default")
+    if (modelFields.isNotEmpty() && model != null && model !is JsonNull && !inference.containsKey("models")) {
+        val definition = LinkedHashMap<String, JsonElement>()
+        definition["provider"] = JsonPrimitive("default")
+        definition["id"] = model
+        definition.putAll(modelFields)
+        inference["models"] = JsonArray(listOf(JsonObject(definition)))
+    }
+    val capiWire = LinkedHashMap<String, JsonElement>()
+    capi?.let { capiWire.putAll(it) }
+    capiWire["enabled"] = JsonPrimitive(false)
+    github["capi"] = JsonObject(capiWire)
 }
 
 /** Converts plain Kotlin values (maps, lists, primitives, [JsonElement]s) into a [JsonElement]. */

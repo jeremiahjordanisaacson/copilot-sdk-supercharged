@@ -15,6 +15,21 @@ type
   TRequestHandler = reference to function(const Method: string;
     const Params: TJSONValue): TJSONValue;
 
+  // Raised by SendRequest when the server answers with a JSON-RPC error.
+  // SDK protocol 4 reports session.abort, session.delete and
+  // session.setForeground failures this way.
+  EJsonRpcError = class(Exception)
+  private
+    FCode: Integer;
+    FErrorJson: string;
+  public
+    constructor CreateRpc(const AMethod: string; AError: TJSONValue);
+    // JSON-RPC error code (for example -32601 for an unknown method).
+    property Code: Integer read FCode;
+    // Raw JSON of the error object (code, message, data).
+    property ErrorJson: string read FErrorJson;
+  end;
+
   TPendingRequest = class
   private
     FEvent: TEvent;
@@ -69,6 +84,17 @@ implementation
 
 uses
   System.Math;
+
+{ EJsonRpcError }
+
+constructor EJsonRpcError.CreateRpc(const AMethod: string; AError: TJSONValue);
+begin
+  FErrorJson := AError.ToJSON;
+  FCode := 0;
+  if AError is TJSONObject then
+    FCode := TJSONObject(AError).GetValue<Integer>('code', 0);
+  inherited CreateFmt('JSON-RPC error for %s: %s', [AMethod, FErrorJson]);
+end;
 
 { TPendingRequest }
 
@@ -421,8 +447,7 @@ begin
   end;
 
   if Assigned(Pending.Error) then
-    raise Exception.CreateFmt('JSON-RPC error for %s: %s',
-      [Method, Pending.Error.ToJSON]);
+    raise EJsonRpcError.CreateRpc(Method, Pending.Error);
 
   Result := Pending.Result;
 end;

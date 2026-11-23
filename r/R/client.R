@@ -31,6 +31,20 @@ CopilotClient <- R6::R6Class(
     #' @param client_info ClientInfo, named list, or NULL. Identity of the integrating
     #'   application (application_name, application_version, integration_name,
     #'   integration_version), sent on the \code{connect} handshake when any field is set.
+    #' @param mode Character. Client mode: \code{"coding-agent"} (default, CLI-like coding
+    #'   defaults) or \code{"empty"}. Empty mode is enforced by the SDK: every
+    #'   \code{create_session()} / \code{resume_session()} call must pass \code{available_tools},
+    #'   and restrictive defaults (no experimental mode, telemetry, embedding retrieval,
+    #'   cross-session store, memory, on-demand instruction discovery, repository hooks, or host
+    #'   git operations; in-memory OAuth/embedding storage) are applied under explicit options.
+    #'   \code{"copilot-cli"} is accepted as an alias of \code{"coding-agent"}.
+    #' @param network Named list or NULL. Network callbacks registered with
+    #'   \code{network.setProvider} after connecting: \code{scope} (\code{"connection"} or
+    #'   \code{"runtime"}), \code{resolve_proxy = function(request)} returning a PAC-style proxy
+    #'   list (e.g. \code{"PROXY proxy:8080; DIRECT"}) or NULL, \code{authenticate_negotiate =
+    #'   function(request)} returning a base64 SPNEGO token or NULL, and \code{authenticate_basic =
+    #'   function(request)} returning \code{list(username = ..., password = ...)} or NULL.
+    #'   Tokens and passwords are never logged.
     #'
     #' @return A CopilotClient R6 object.
     #'
@@ -43,7 +57,8 @@ CopilotClient <- R6::R6Class(
     initialize = function(cli_path = NULL, cwd = getwd(), log_level = "info",
                           auto_start = TRUE, github_token = NULL,
                           use_logged_in_user = NULL, env = NULL,
-                          session_fs = NULL, client_info = NULL) {
+                          session_fs = NULL, client_info = NULL,
+                          mode = "coding-agent", network = NULL) {
       # Determine CLI path
       if (is.null(cli_path)) {
         cli_path <- Sys.which("copilot")
@@ -65,7 +80,8 @@ CopilotClient <- R6::R6Class(
         github_token = github_token,
         use_logged_in_user = use_logged_in_user,
         env = env,
-        client_info = client_info
+        client_info = client_info,
+        mode = normalize_client_mode(mode)
       )
 
       private$process <- NULL
@@ -76,6 +92,7 @@ CopilotClient <- R6::R6Class(
       private$lifecycle_handlers <- list()
       private$session_fs_config <- session_fs
       private$github_token_providers <- new.env(parent = emptyenv())
+      private$network_config <- network
     },
 
     #' @description Start the CLI server and establish connection.
@@ -95,6 +112,7 @@ CopilotClient <- R6::R6Class(
           private$connect_to_server()
           private$send_connect_handshake()
           private$verify_protocol_version()
+          private$register_network_provider()
 
           # Register session filesystem provider if configured
           if (!is.null(private$session_fs_config)) {
@@ -267,6 +285,20 @@ CopilotClient <- R6::R6Class(
     #' @param refresh_custom_instructions Logical or NULL. Re-read custom instructions.
     #' @param image_generation ImageGenerationConfig, named list, or NULL. Image generation opt-in.
     #' @param autopilot AutopilotOptions, named list, or NULL. Autopilot continuation options.
+    #' @param providers List of NamedProviderConfig (or named lists) or NULL. Named BYOK provider
+    #'   connections; select a registered model with \code{"provider/id"}.
+    #' @param models List of ProviderModelConfig (or named lists) or NULL. BYOK model definitions
+    #'   that reference a provider connection by name.
+    #' @param default_provider Character or NULL. Connection used for unqualified model aliases
+    #'   when Copilot API models are disabled.
+    #' @param capi Named list or NULL. Built-in Copilot API options, e.g.
+    #'   \code{list(enabled = FALSE)} for a BYOK-only catalog.
+    #' @param on_shell_authentication_request Function or NULL. Called with
+    #'   (ShellAuthenticationRequest, context) when a shell command run by the agent asks for a
+    #'   password or other answer; return \code{list(action = "accept", value = "...")} or
+    #'   \code{list(action = "cancel")}.
+    #' @param store_memory Function or NULL. Called with (StoredMemory, context) to store a memory
+    #'   in the application instead of the built-in memory backends.
     #'
     #' @return A CopilotSession R6 object.
     create_session = function(model = NULL, session_id = NULL, tools = NULL,
@@ -325,10 +357,17 @@ CopilotClient <- R6::R6Class(
                               trust_working_directory = NULL,
                               refresh_custom_instructions = NULL,
                               image_generation = NULL,
-                              autopilot = NULL) {
+                              autopilot = NULL,
+                              providers = NULL,
+                              models = NULL,
+                              default_provider = NULL,
+                              capi = NULL,
+                              on_shell_authentication_request = NULL,
+                              store_memory = NULL) {
       if (!is.null(github_token) && !is.null(github_token_provider)) {
         stop("github_token and github_token_provider are mutually exclusive")
       }
+      private$require_available_tools_for_mode(available_tools)
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -338,14 +377,7 @@ CopilotClient <- R6::R6Class(
       }
 
       # Build tool definitions for the wire
-      tool_defs <- list()
-      if (!is.null(tools)) {
-        for (tool in tools) {
-          defn <- list(name = tool$name, description = tool$description)
-          if (!is.null(tool$parameters)) defn$parameters <- tool$parameters
-          tool_defs <- c(tool_defs, list(defn))
-        }
-      }
+      tool_defs <- tool_definitions_to_wire(tools)
 
       # Build payload
       payload <- list()
@@ -353,8 +385,8 @@ CopilotClient <- R6::R6Class(
       if (!is.null(session_id)) payload$sessionId <- session_id
       if (length(tool_defs) > 0) payload$tools <- tool_defs
       if (!is.null(system_message)) payload$systemMessage <- system_message
-      if (!is.null(available_tools)) payload$availableTools <- available_tools
-      if (!is.null(excluded_tools)) payload$excludedTools <- excluded_tools
+      if (!is.null(available_tools)) payload$availableTools <- as.list(available_tools)
+      if (!is.null(excluded_tools)) payload$excludedTools <- as.list(excluded_tools)
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
       if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
@@ -415,9 +447,10 @@ CopilotClient <- R6::R6Class(
         payload$memory <- if (inherits(memory, "MemoryConfiguration")) memory$to_list() else memory
       }
       if (!is.null(otlp_protocol)) payload$otlpProtocol <- otlp_protocol
-      # CAPI transport options: the runtime only accepts enableWebSocketResponses inside `capi`.
-      capi <- build_capi_options(auto_tier, enable_web_socket_responses)
-      if (!is.null(capi)) payload$capi <- capi
+      # CAPI options (moved under `github.capi` on the wire): explicit `capi` members plus the
+      # auto routing tier and WebSocket transport toggles.
+      capi_options <- build_capi_options(auto_tier, enable_web_socket_responses, capi)
+      if (!is.null(capi_options)) payload$capi <- capi_options
       if (!is.null(exp_assignments)) payload$expAssignments <- exp_assignments
       # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
       if (!is.null(rewind_enabled)) payload$rewindEnabled <- rewind_enabled
@@ -440,8 +473,10 @@ CopilotClient <- R6::R6Class(
       if (!is.null(bearer_token_provider)) {
         token <- bearer_token_provider(ProviderTokenArgs$new(session_id = session_id))
         if (!is.null(token)) {
-          if (is.null(payload$provider)) payload$provider <- list()
-          payload$provider$bearerToken <- token
+          legacy_provider <- payload[["provider"]]
+          if (is.null(legacy_provider)) legacy_provider <- list()
+          legacy_provider$bearerToken <- token
+          payload[["provider"]] <- legacy_provider
         }
       }
       # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
@@ -463,7 +498,12 @@ CopilotClient <- R6::R6Class(
         excluded_managed_settings = excluded_managed_settings,
         enforce_managed_model_defaults = enforce_managed_model_defaults,
         image_generation = image_generation,
-        autopilot = autopilot
+        autopilot = autopilot,
+        providers = providers,
+        models = models,
+        default_provider = default_provider,
+        on_shell_authentication_request = on_shell_authentication_request,
+        store_memory = store_memory
       )
       gh_registration_id <- NULL
       if (!is.null(github_token_provider)) {
@@ -472,10 +512,10 @@ CopilotClient <- R6::R6Class(
       }
 
       response <- tryCatch(
-        private$client$request("session.create", payload),
+        private$client$request("session.create", private$to_wire_session_params(payload, FALSE)),
         error = function(e) {
           if (!is.null(gh_registration_id)) private$unregister_github_token_provider(gh_registration_id)
-          stop(e)
+          stop(with_policy_helper_failure(e))
         }
       )
 
@@ -503,6 +543,12 @@ CopilotClient <- R6::R6Class(
       }
       if (!is.null(commands)) {
         session$register_commands(commands)
+      }
+      if (!is.null(on_shell_authentication_request)) {
+        session$register_shell_authentication_handler(on_shell_authentication_request)
+      }
+      if (!is.null(store_memory)) {
+        session$register_memory_store(store_memory)
       }
       if (!is.null(agent_mode) || !is.null(display_prompt)) {
         session$set_default_message_options(agent_mode = agent_mode, display_prompt = display_prompt)
@@ -548,6 +594,17 @@ CopilotClient <- R6::R6Class(
     #' @param allow_transcript_recovery Logical or NULL. Allow recovering from a damaged transcript.
     #' @param image_generation ImageGenerationConfig, named list, or NULL. Image generation opt-in.
     #' @param autopilot AutopilotOptions, named list, or NULL. Autopilot continuation options.
+    #' @param available_tools Character vector or NULL. Tool names to allow (required in
+    #'   \code{"empty"} client mode).
+    #' @param providers List of NamedProviderConfig (or named lists) or NULL. Named BYOK provider
+    #'   connections (re-supply them on cold resume).
+    #' @param models List of ProviderModelConfig (or named lists) or NULL. BYOK model definitions.
+    #' @param default_provider Character, NA, or NULL. Default connection for unqualified model
+    #'   aliases; \code{NA} sends JSON null, which clears the saved default.
+    #' @param capi Named list or NULL. Built-in Copilot API options, e.g. \code{list(enabled = TRUE)}.
+    #' @param on_shell_authentication_request Function or NULL. Shell authentication handler
+    #'   (see create_session).
+    #' @param store_memory Function or NULL. Memory store callback (see create_session).
     #'
     #' @return A CopilotSession R6 object.
     resume_session = function(session_id, model = NULL, tools = NULL,
@@ -577,10 +634,18 @@ CopilotClient <- R6::R6Class(
                               enforce_managed_model_defaults = NULL,
                               allow_transcript_recovery = NULL,
                               image_generation = NULL,
-                              autopilot = NULL) {
+                              autopilot = NULL,
+                              available_tools = NULL,
+                              providers = NULL,
+                              models = NULL,
+                              default_provider = NULL,
+                              capi = NULL,
+                              on_shell_authentication_request = NULL,
+                              store_memory = NULL) {
       if (!is.null(github_token) && !is.null(github_token_provider)) {
         stop("github_token and github_token_provider are mutually exclusive")
       }
+      private$require_available_tools_for_mode(available_tools)
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -589,14 +654,7 @@ CopilotClient <- R6::R6Class(
         }
       }
 
-      tool_defs <- list()
-      if (!is.null(tools)) {
-        for (tool in tools) {
-          defn <- list(name = tool$name, description = tool$description)
-          if (!is.null(tool$parameters)) defn$parameters <- tool$parameters
-          tool_defs <- c(tool_defs, list(defn))
-        }
-      }
+      tool_defs <- tool_definitions_to_wire(tools)
 
       payload <- list(sessionId = session_id)
       if (!is.null(model)) payload$model <- model
@@ -610,7 +668,8 @@ CopilotClient <- R6::R6Class(
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(provider)) payload$provider <- private$convert_provider(provider)
       if (isTRUE(disable_resume)) payload$disableResume <- TRUE
-      if (!is.null(excluded_tools)) payload$excludedTools <- excluded_tools
+      if (!is.null(available_tools)) payload$availableTools <- as.list(available_tools)
+      if (!is.null(excluded_tools)) payload$excludedTools <- as.list(excluded_tools)
       if (!is.null(github_token)) payload$gitHubToken <- github_token
       if (!is.null(model_capabilities)) payload$modelCapabilities <- model_capabilities
       if (!is.null(enable_config_discovery)) payload$enableConfigDiscovery <- enable_config_discovery
@@ -626,8 +685,8 @@ CopilotClient <- R6::R6Class(
         payload$commands <- cmds_list
       }
       # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
-      capi <- build_capi_options(auto_tier, enable_web_socket_responses)
-      if (!is.null(capi)) payload$capi <- capi
+      capi_options <- build_capi_options(auto_tier, enable_web_socket_responses, capi)
+      if (!is.null(capi_options)) payload$capi <- capi_options
       if (!is.null(allow_transcript_recovery)) {
         payload$allowTranscriptRecovery <- allow_transcript_recovery
       }
@@ -644,7 +703,12 @@ CopilotClient <- R6::R6Class(
         excluded_managed_settings = excluded_managed_settings,
         enforce_managed_model_defaults = enforce_managed_model_defaults,
         image_generation = image_generation,
-        autopilot = autopilot
+        autopilot = autopilot,
+        providers = providers,
+        models = models,
+        default_provider = default_provider,
+        on_shell_authentication_request = on_shell_authentication_request,
+        store_memory = store_memory
       )
       gh_registration_id <- NULL
       if (!is.null(github_token_provider)) {
@@ -653,10 +717,10 @@ CopilotClient <- R6::R6Class(
       }
 
       response <- tryCatch(
-        private$client$request("session.resume", payload),
+        private$client$request("session.resume", private$to_wire_session_params(payload, TRUE)),
         error = function(e) {
           if (!is.null(gh_registration_id)) private$unregister_github_token_provider(gh_registration_id)
-          stop(e)
+          stop(with_policy_helper_failure(e))
         }
       )
 
@@ -671,6 +735,10 @@ CopilotClient <- R6::R6Class(
       if (!is.null(hooks)) session$register_hooks(hooks)
       if (!is.null(on_elicitation_request)) session$register_elicitation_handler(on_elicitation_request)
       if (!is.null(commands)) session$register_commands(commands)
+      if (!is.null(on_shell_authentication_request)) {
+        session$register_shell_authentication_handler(on_shell_authentication_request)
+      }
+      if (!is.null(store_memory)) session$register_memory_store(store_memory)
 
       assign(sid, session, envir = private$sessions)
       session
@@ -819,6 +887,49 @@ CopilotClient <- R6::R6Class(
     lifecycle_handlers = NULL,
     session_fs_config = NULL,
     github_token_providers = NULL,
+    network_config = NULL,
+
+    # Empty client mode: every create/resume must declare its tool allowlist.
+    require_available_tools_for_mode = function(available_tools) {
+      if (identical(self$options$mode, "empty") && is.null(available_tools)) {
+        stop(paste0(
+          "Client mode \"empty\" requires available_tools on every create_session() ",
+          "and resume_session() call"
+        ))
+      }
+      invisible(NULL)
+    },
+
+    # Convert the flat session payload to the SDK protocol 4 grouped shape, applying the
+    # empty-mode defaults under explicit options.
+    to_wire_session_params = function(payload, is_resume) {
+      wire <- group_session_params(payload, is_resume = is_resume)
+      if (identical(self$options$mode, "empty")) wire <- apply_empty_mode_defaults(wire)
+      wire
+    },
+
+    # Register the network callbacks (network.setProvider) when any callback is configured.
+    register_network_provider = function() {
+      network <- private$network_config
+      if (is.null(network)) return(invisible(NULL))
+      params <- empty_json_object()
+      if (!is.null(network[["scope"]])) params$scope <- network[["scope"]]
+      registered <- FALSE
+      if (is.function(network[["resolve_proxy"]])) {
+        params$resolveProxy <- empty_json_object()
+        registered <- TRUE
+      }
+      if (is.function(network[["authenticate_negotiate"]])) {
+        params$authenticateNegotiate <- empty_json_object()
+        registered <- TRUE
+      }
+      if (is.function(network[["authenticate_basic"]])) {
+        params$authenticateBasic <- empty_json_object()
+        registered <- TRUE
+      }
+      if (registered) private$client$request("network.setProvider", params)
+      invisible(NULL)
+    },
 
     start_cli_server = function() {
       cli_path <- self$options$cli_path
@@ -835,19 +946,16 @@ CopilotClient <- R6::R6Class(
         args <- c(args, "--no-auto-login")
       }
 
-      # Build environment
-      env <- Sys.getenv()
+      # Build environment: processx needs a named character vector
+      env_vec <- unclass(Sys.getenv())
       if (!is.null(self$options$env)) {
         for (nm in names(self$options$env)) {
-          env[[nm]] <- self$options$env[[nm]]
+          env_vec[[nm]] <- as.character(self$options$env[[nm]])
         }
       }
       if (!is.null(self$options$github_token)) {
-        env[["COPILOT_SDK_AUTH_TOKEN"]] <- self$options$github_token
+        env_vec[["COPILOT_SDK_AUTH_TOKEN"]] <- self$options$github_token
       }
-
-      # Convert env to character vector "KEY=VALUE"
-      env_vec <- paste0(names(env), "=", unname(env))
 
       # Determine if cli_path is a .js file
       if (grepl("\\.js$", cli_path)) {
@@ -886,6 +994,7 @@ CopilotClient <- R6::R6Class(
           if (exists(session_id, envir = private$sessions)) {
             session <- get(session_id, envir = private$sessions)
             session$dispatch_event(event)
+            private$handle_broadcast_event(session_id, session, event_dict)
           }
         } else if (identical(method, "session.lifecycle")) {
           lifecycle_event <- session_lifecycle_event_from_list(params)
@@ -914,6 +1023,55 @@ CopilotClient <- R6::R6Class(
         private$handle_github_token_request(params)
       })
 
+      private$client$set_request_handler("shellAuthentication.request", function(params) {
+        private$handle_shell_authentication_request(params)
+      })
+
+      # R handlers run synchronously, so a cancellation can only arrive after the handler
+      # for that request has already returned; acknowledge it.
+      private$client$set_request_handler("shellAuthentication.cancel", function(params) {
+        empty_json_object()
+      })
+
+      private$client$set_request_handler("memoryStore.store", function(params) {
+        private$handle_memory_store(params)
+      })
+
+      private$client$set_request_handler("network.resolveProxy", function(params) {
+        callback <- private$network_config[["resolve_proxy"]]
+        if (!is.function(callback)) stop("No network resolve_proxy callback is registered")
+        proxy <- callback(list(url = params$url))
+        result <- empty_json_object()
+        if (!is.null(proxy)) result$proxy <- as.character(proxy)[[1]]
+        result
+      })
+
+      private$client$set_request_handler("network.authenticateNegotiate", function(params) {
+        callback <- private$network_config[["authenticate_negotiate"]]
+        if (!is.function(callback)) stop("No network authenticate_negotiate callback is registered")
+        token <- callback(list(spn = params$spn))
+        result <- empty_json_object()
+        if (!is.null(token)) result$token <- as.character(token)[[1]]
+        result
+      })
+
+      private$client$set_request_handler("network.authenticateBasic", function(params) {
+        callback <- private$network_config[["authenticate_basic"]]
+        if (!is.function(callback)) stop("No network authenticate_basic callback is registered")
+        credentials <- callback(list(
+          proxy = params$proxy,
+          realm = params$realm,
+          previous_rejected = isTRUE(params$previousRejected)
+        ))
+        # Send only the credential fields, never other members of the returned list.
+        result <- empty_json_object()
+        if (is.list(credentials)) {
+          if (!is.null(credentials[["username"]])) result$username <- credentials[["username"]]
+          if (!is.null(credentials[["password"]])) result$password <- credentials[["password"]]
+        }
+        result
+      })
+
       private$client$start()
     },
 
@@ -940,7 +1098,7 @@ CopilotClient <- R6::R6Class(
 
       if (is.null(server_version)) {
         stop(paste0(
-          "SDK protocol version mismatch: SDK expects version ", expected,
+          "SDK protocol version mismatch: SDK supports version ", expected,
           ", but server does not report a protocol version. ",
           "Please update your server to ensure compatibility."
         ))
@@ -948,7 +1106,7 @@ CopilotClient <- R6::R6Class(
 
       if (server_version != expected) {
         stop(paste0(
-          "SDK protocol version mismatch: SDK expects version ", expected,
+          "SDK protocol version mismatch: SDK supports version ", expected,
           ", but server reports version ", server_version, ". ",
           "Please update your SDK or server to ensure compatibility."
         ))
@@ -968,6 +1126,12 @@ CopilotClient <- R6::R6Class(
         if (!is.null(provider$azure$api_version)) wire_azure$apiVersion <- provider$azure$api_version
         wire$azure <- wire_azure
       }
+      # Connection extras and model-specific limits, carried into the v4 provider/model split.
+      extras <- provider_config_to_wire(provider[intersect(names(provider), c(
+        "transport", "headers", "local_model", "model_id", "wire_model", "max_prompt_tokens",
+        "max_context_window_tokens", "max_output_tokens", "capabilities"
+      ))])
+      for (key in names(extras)) wire[[key]] <- extras[[key]]
       wire
     },
 
@@ -1070,6 +1234,59 @@ CopilotClient <- R6::R6Class(
       )
     },
 
+    # SDK protocol 4 delivers tool calls and permission prompts as session events
+    # (external_tool.requested, permission.requested), answered with
+    # session.tools.handlePendingToolCall and
+    # session.permissions.handlePendingPermissionRequest. Replies are sent without waiting
+    # for their response because this runs inside the synchronous message loop.
+    handle_broadcast_event = function(session_id, session, event_dict) {
+      type <- event_dict[["type"]]
+      data <- event_dict[["data"]]
+      if (!is.character(type) || !is.list(data)) return(invisible(NULL))
+      request_id <- data[["requestId"]]
+      if (!is.character(request_id)) return(invisible(NULL))
+
+      if (identical(type, "external_tool.requested")) {
+        tool_name <- data[["toolName"]]
+        if (isFALSE(data[["hasHandler"]]) || !is.character(tool_name) ||
+            is.null(session$get_tool_handler(tool_name))) {
+          return(invisible(NULL))
+        }
+        params <- list(sessionId = session_id, requestId = request_id)
+        tryCatch(
+          {
+            outcome <- private$handle_tool_call(list(
+              sessionId = session_id,
+              toolCallId = data[["toolCallId"]] %||% "",
+              toolName = tool_name,
+              arguments = data[["arguments"]]
+            ))
+            result <- outcome[["result"]]
+            if (length(result[["toolTelemetry"]]) == 0) result[["toolTelemetry"]] <- NULL
+            params$result <- result
+          },
+          error = function(e) {
+            params$error <<- conditionMessage(e)
+          }
+        )
+        private$client$request_no_wait("session.tools.handlePendingToolCall", params)
+      } else if (identical(type, "permission.requested")) {
+        if (isTRUE(data[["resolvedByHook"]]) || !session$has_permission_handler()) {
+          return(invisible(NULL))
+        }
+        decision <- permission_decision_to_v4(
+          session$handle_permission_request(data[["permissionRequest"]])
+        )
+        if (!is.null(decision)) {
+          private$client$request_no_wait(
+            "session.permissions.handlePendingPermissionRequest",
+            list(sessionId = session_id, requestId = request_id, result = decision)
+          )
+        }
+      }
+      invisible(NULL)
+    },
+
     handle_user_input_request = function(params) {
       session_id <- params$sessionId
       question <- params$question
@@ -1103,6 +1320,31 @@ CopilotClient <- R6::R6Class(
       session <- get(session_id, envir = private$sessions)
       output <- session$handle_hooks_invoke(hook_type, input_data)
       list(output = output)
+    },
+
+    handle_shell_authentication_request = function(params) {
+      cancel <- list(action = "cancel")
+      session_id <- params$sessionId
+      input_kind <- params$inputKind
+      if (!is.character(session_id) || !is.character(params$requestId) ||
+          !is.character(params$program) || !is.character(params$prompt) ||
+          !is.character(input_kind) || !(input_kind %in% c("secret", "text", "confirm"))) {
+        return(cancel)
+      }
+      if (!exists(session_id, envir = private$sessions, inherits = FALSE)) return(cancel)
+      session <- get(session_id, envir = private$sessions, inherits = FALSE)
+      session$handle_shell_authentication_request(params)
+    },
+
+    handle_memory_store = function(params) {
+      session_id <- params$sessionId
+      if (!is.character(session_id) ||
+          !exists(session_id, envir = private$sessions, inherits = FALSE)) {
+        stop("Memory store owner is unavailable")
+      }
+      session <- get(session_id, envir = private$sessions, inherits = FALSE)
+      session$handle_memory_store(params)
+      json_rpc_null()
     },
 
     # --- GitHub token provider registry (gitHubToken.getToken) ---
@@ -1582,14 +1824,20 @@ client_info_to_wire <- function(info) {
 }
 
 #' Build the \code{capi} create/resume object (only set fields); NULL when empty.
+#' Explicit \code{capi} members (e.g. \code{list(enabled = FALSE)}) are kept; the auto routing
+#' tier and WebSocket toggle are added on top. The translation layer moves it to \code{github.capi}.
 #' @keywords internal
-build_capi_options <- function(auto_tier = NULL, enable_web_socket_responses = NULL) {
-  capi <- list()
-  if (!is.null(auto_tier)) capi$autoTier <- auto_tier
-  if (!is.null(enable_web_socket_responses)) {
-    capi$enableWebSocketResponses <- enable_web_socket_responses
+build_capi_options <- function(auto_tier = NULL, enable_web_socket_responses = NULL, capi = NULL) {
+  result <- list()
+  if (!is.null(capi)) {
+    capi <- config_to_wire(capi)
+    for (key in names(capi)) result[[key]] <- capi[[key]]
   }
-  if (length(capi) == 0) NULL else capi
+  if (!is.null(auto_tier)) result$autoTier <- auto_tier
+  if (!is.null(enable_web_socket_responses)) {
+    result$enableWebSocketResponses <- enable_web_socket_responses
+  }
+  if (length(result) == 0) NULL else result
 }
 
 #' Convert feature flags to a JSON object (an empty input still encodes as \code{{}}).
@@ -1609,7 +1857,11 @@ add_common_session_options <- function(payload, ask_user_variant = NULL, sandbox
                                        interactive_user = NULL,
                                        excluded_managed_settings = NULL,
                                        enforce_managed_model_defaults = NULL,
-                                       image_generation = NULL, autopilot = NULL) {
+                                       image_generation = NULL, autopilot = NULL,
+                                       providers = NULL, models = NULL,
+                                       default_provider = NULL,
+                                       on_shell_authentication_request = NULL,
+                                       store_memory = NULL) {
   if (!is.null(ask_user_variant)) payload$askUserVariant <- ask_user_variant
   if (!is.null(sandbox_config)) payload$sandboxConfig <- config_to_wire(sandbox_config)
   if (!is.null(feature_flags)) payload$featureFlags <- feature_flags_to_wire(feature_flags)
@@ -1628,6 +1880,17 @@ add_common_session_options <- function(payload, ask_user_variant = NULL, sandbox
   }
   if (!is.null(image_generation)) payload$imageGeneration <- config_to_wire(image_generation)
   if (!is.null(autopilot)) payload$autopilot <- config_to_wire(autopilot)
+  # --- v3.0.0 (SDK protocol 4) session options ---
+  if (!is.null(providers)) {
+    payload$providers <- unname(lapply(as_config_list(providers), provider_config_to_wire))
+  }
+  if (!is.null(models)) {
+    payload$models <- unname(lapply(as_config_list(models), provider_config_to_wire))
+  }
+  # NA is sent as JSON null, which clears a saved default provider on resume.
+  if (!is.null(default_provider)) payload$defaultProvider <- default_provider
+  if (!is.null(on_shell_authentication_request)) payload$requestShellAuthentication <- TRUE
+  if (!is.null(store_memory)) payload$hasMemoryStore <- TRUE
   payload
 }
 
@@ -1649,3 +1912,812 @@ github_token_result_to_wire <- function(result) {
   if (!is.null(expires_in)) wire$expiresIn <- expires_in
   wire
 }
+
+
+# ---------------------------------------------------------------------------
+# v3.0.0 (SDK protocol 4) types & helpers
+# ---------------------------------------------------------------------------
+
+#' ClientMode
+#'
+#' Client modes for \code{CopilotClient$new(mode = ...)}. \code{"coding-agent"} (the default)
+#' keeps the CLI-like coding tools and defaults; \code{"empty"} requires an explicit
+#' \code{available_tools} allowlist on every session and applies restrictive defaults. The
+#' legacy \code{"copilot-cli"} value is accepted as an alias of \code{"coding-agent"}.
+#'
+#' @export
+ClientMode <- list(
+  CODING_AGENT = "coding-agent",
+  EMPTY = "empty"
+)
+
+#' Normalize and validate a client mode.
+#' @keywords internal
+normalize_client_mode <- function(mode) {
+  if (is.null(mode)) return(ClientMode$CODING_AGENT)
+  mode <- as.character(mode)[[1]]
+  if (identical(mode, "copilot-cli")) return(ClientMode$CODING_AGENT)
+  if (!(mode %in% unlist(ClientMode))) {
+    stop(paste0("Invalid client mode \"", mode, "\": expected \"coding-agent\" or \"empty\""))
+  }
+  mode
+}
+
+#' Defaults applied (under explicit options) to every session of an \code{"empty"} mode client,
+#' as \code{list(group, member, value)} entries of the grouped protocol 4 payload.
+#' @keywords internal
+EMPTY_MODE_SESSION_DEFAULTS <- list(
+  list("experiments", "enableExperimentalMode", FALSE),
+  list("github", "telemetryEnabled", FALSE),
+  list("mcp", "oauthTokenStorage", "in-memory"),
+  list("state", "skipEmbeddingRetrieval", TRUE),
+  list("state", "embeddingCacheStorage", "in-memory"),
+  list("state", "enableCrossSessionStore", FALSE),
+  list("state", "memory", list(enabled = FALSE)),
+  list("instructions", "onDemandDiscovery", FALSE),
+  list("hooks", "enableRepositoryHooks", FALSE),
+  list("git", "enableHostGitOperations", FALSE)
+)
+
+#' Apply the empty-mode defaults to a grouped payload without overriding explicit members.
+#' @keywords internal
+apply_empty_mode_defaults <- function(params) {
+  for (entry in EMPTY_MODE_SESSION_DEFAULTS) {
+    group <- entry[[1]]
+    member <- entry[[2]]
+    members <- params[[group]]
+    if (is.null(members)) members <- list()
+    if (is.null(members[[member]])) {
+      members[[member]] <- entry[[3]]
+      params[[group]] <- members
+    }
+  }
+  params
+}
+
+#' Option groups of the SDK protocol 4 session.create / session.resume payload.
+#' @keywords internal
+SESSION_OPTION_GROUPS <- c(
+  "inference", "tools", "permissions", "interaction", "events", "agents", "skills", "mcp",
+  "github", "filesystem", "execution", "instructions", "hooks", "git", "state", "plugins",
+  "canvases", "extensions", "experiments", "policy"
+)
+
+#' Flat session payload key -> \code{c(group, member)} in the SDK protocol 4 payload.
+#' Keys not listed here (root keys such as \code{model}, and unknown keys) stay at the root.
+#' @keywords internal
+SESSION_PARAM_GROUPS <- list(
+  reasoningEffort = c("inference", "reasoningEffort"),
+  reasoningSummary = c("inference", "reasoningSummary"),
+  contextTier = c("inference", "contextTier"),
+  allowMultipleToolCalls = c("inference", "allowMultipleToolCalls"),
+  enableCitations = c("inference", "enableCitations"),
+  modelCapabilities = c("inference", "capabilities"),
+  verbosity = c("inference", "verbosity"),
+  providers = c("inference", "providers"),
+  models = c("inference", "models"),
+  defaultProvider = c("inference", "defaultProvider"),
+  tools = c("tools", "definitions"),
+  availableTools = c("tools", "availableTools"),
+  excludedTools = c("tools", "excludedTools"),
+  toolSearch = c("tools", "search"),
+  largeOutput = c("tools", "largeOutput"),
+  imageGeneration = c("tools", "imageGeneration"),
+  manageScheduleEnabled = c("tools", "manageScheduleEnabled"),
+  webSearch = c("tools", "webSearch"),
+  shell = c("tools", "shell"),
+  maxInlineBinaryBytes = c("tools", "maxInlineBinaryBytes"),
+  requestPermission = c("permissions", "request"),
+  sandboxConfig = c("permissions", "sandbox"),
+  sandbox = c("permissions", "sandbox"),
+  permissionMode = c("permissions", "mode"),
+  sandboxConfigSource = c("permissions", "sandboxSource"),
+  commands = c("interaction", "commands"),
+  askUserVariant = c("interaction", "askUserVariant"),
+  requestUserInput = c("interaction", "requestUserInput"),
+  requestElicitation = c("interaction", "requestElicitation"),
+  requestShellAuthentication = c("interaction", "requestShellAuthentication"),
+  requestExitPlanMode = c("interaction", "requestExitPlanMode"),
+  requestAutoModeSwitch = c("interaction", "requestAutoModeSwitch"),
+  requestAutoModeRecovery = c("interaction", "requestAutoModeRecovery"),
+  streaming = c("events", "streaming"),
+  includeSubAgentStreamingEvents = c("events", "includeSubAgentStreamingEvents"),
+  customAgents = c("agents", "definitions"),
+  defaultAgent = c("agents", "default"),
+  agent = c("agents", "selected"),
+  includedBuiltinAgents = c("agents", "includedBuiltinAgents"),
+  excludedBuiltinAgents = c("agents", "excludedBuiltinAgents"),
+  customAgentsLocalOnly = c("agents", "localDiscoveryOnly"),
+  agentDirectories = c("agents", "directories"),
+  skillDirectories = c("skills", "directories"),
+  enableSkills = c("skills", "enabled"),
+  includedBuiltinSkills = c("skills", "includedBuiltinSkills"),
+  disabledSkills = c("skills", "disabledSkills"),
+  hasSkillProvider = c("skills", "hasProvider"),
+  ignoredSkillsLocations = c("skills", "ignoredLocations"),
+  mcpServers = c("mcp", "servers"),
+  disabledMcpServers = c("mcp", "disabledServers"),
+  requestMcpApps = c("mcp", "enableApps"),
+  enableMcpApps = c("mcp", "enableApps"),
+  mcpOAuthTokenStorage = c("mcp", "oauthTokenStorage"),
+  authClientIdMetadataUrl = c("mcp", "authClientIdMetadataUrl"),
+  envValueMode = c("mcp", "envValueMode"),
+  managedMcpServers = c("mcp", "managedServers"),
+  allowAllMcpServerInstructions = c("mcp", "allowAllServerInstructions"),
+  gitHubToken = c("github", "token"),
+  gitHubTokenProviderRegistrationId = c("github", "tokenProviderRegistrationId"),
+  githubMcpToolConfig = c("github", "mcp"),
+  capi = c("github", "capi"),
+  enableSessionTelemetry = c("github", "telemetryEnabled"),
+  enableManagedSettings = c("github", "fetchManagedSettings"),
+  interactiveUser = c("github", "interactiveUser"),
+  enableGitHubTelemetryForwarding = c("github", "telemetryForwarding"),
+  authInfo = c("github", "authInfo"),
+  copilotUrl = c("github", "copilotUrl"),
+  additionalDirectories = c("filesystem", "additionalDirectories"),
+  enableFileChangeTracking = c("filesystem", "trackFileChanges"),
+  trustWorkingDirectory = c("filesystem", "trustWorkingDirectory"),
+  sessionLimits = c("execution", "limits"),
+  autopilot = c("execution", "autopilot"),
+  autopilotContinuation = c("execution", "autopilotContinuation"),
+  instructionDirectories = c("instructions", "directories"),
+  organizationCustomInstructions = c("instructions", "organizationText"),
+  enableOnDemandInstructionDiscovery = c("instructions", "onDemandDiscovery"),
+  skipCustomInstructions = c("instructions", "skipCustomInstructions"),
+  refreshCustomInstructions = c("instructions", "refreshCustomInstructions"),
+  hooks = c("hooks", "hasHandlers"),
+  hookDirectories = c("hooks", "directories"),
+  enableFileHooks = c("hooks", "enableRepositoryHooks"),
+  coauthorEnabled = c("git", "coauthorEnabled"),
+  enableHostGitOperations = c("git", "enableHostGitOperations"),
+  infiniteSessions = c("state", "infiniteSessions"),
+  memory = c("state", "memory"),
+  hasMemoryStore = c("state", "hasMemoryStore"),
+  enableSessionStore = c("state", "enableCrossSessionStore"),
+  skipEmbeddingRetrieval = c("state", "skipEmbeddingRetrieval"),
+  embeddingCacheStorage = c("state", "embeddingCacheStorage"),
+  pluginDirectories = c("plugins", "directories"),
+  installedPlugins = c("plugins", "installed"),
+  canvases = c("canvases", "definitions"),
+  canvasProvider = c("canvases", "provider"),
+  requestCanvasRenderer = c("canvases", "requestRenderer"),
+  openCanvases = c("canvases", "open"),
+  requestExtensions = c("extensions", "enabled"),
+  extensionSdkPath = c("extensions", "sdkPath"),
+  extensionInfo = c("extensions", "identity"),
+  enableExperimentalMode = c("experiments", "enableExperimentalMode"),
+  isExperimentalMode = c("experiments", "enableExperimentalMode"),
+  featureFlags = c("experiments", "flags"),
+  expAssignments = c("experiments", "assignments"),
+  featureFlagConfiguration = c("experiments", "configuration"),
+  allowedModels = c("policy", "allowedModels"),
+  managedSettings = c("policy", "managedSettings"),
+  excludedManagedSettings = c("policy", "excludedManagedSettings"),
+  enforceManagedModelDefaults = c("policy", "enforceManagedModelDefaults")
+)
+
+#' Members of a legacy single \code{provider} that belong to a model definition.
+#' @keywords internal
+LEGACY_PROVIDER_MODEL_KEYS <- c(
+  "modelId", "wireModel", "maxPromptTokens", "maxContextWindowTokens", "maxOutputTokens",
+  "capabilities"
+)
+
+#' Split a legacy single BYOK \code{provider} into a named "default" connection and, when it
+#' carries model-specific members and a session model is set, a model definition.
+#' @keywords internal
+legacy_provider_to_v4 <- function(provider, model = NULL) {
+  provider <- provider[!vapply(provider, is.null, logical(1))]
+  keys <- names(provider)
+  connection <- c(
+    list(name = "default"),
+    provider[setdiff(keys, c(LEGACY_PROVIDER_MODEL_KEYS, "name"))]
+  )
+  result <- list(providers = list(connection))
+  model_keys <- intersect(keys, LEGACY_PROVIDER_MODEL_KEYS)
+  if (length(model_keys) > 0 && !is.null(model)) {
+    result$models <- list(c(list(provider = "default", id = model), provider[model_keys]))
+  }
+  result
+}
+
+#' Convert a flat session.create / session.resume payload to the SDK protocol 4 grouped shape.
+#'
+#' Root keys (\code{sessionId}, \code{model}, \code{systemMessage}, ...) and unknown keys stay at
+#' the top level; every other known flat key moves into its option group (for example
+#' \code{streaming} becomes \code{events.streaming} and \code{hooks = TRUE} becomes
+#' \code{hooks.hasHandlers}). Already-grouped objects are merged with their explicit members
+#' winning, empty groups are not emitted, \code{configDir} becomes \code{configDirectory}, and
+#' \code{disableResume} becomes \code{suppressResumeEvent} on resume. A legacy single
+#' \code{provider} becomes the named "default" connection with Copilot API models disabled,
+#' unless named providers, a default provider, or \code{capi.enabled} are set explicitly.
+#'
+#' @param flat Named list. The flat payload.
+#' @param is_resume Logical. TRUE for session.resume (drops create-only members).
+#' @return Named list. The grouped payload.
+#' @keywords internal
+group_session_params <- function(flat, is_resume = FALSE) {
+  root <- list()
+  groups <- list()
+  explicit <- list()
+  set_member <- function(group, member, value) {
+    members <- groups[[group]]
+    if (is.null(members)) members <- list()
+    members[[member]] <- value
+    groups[[group]] <<- members
+  }
+
+  for (key in names(flat)) {
+    value <- flat[[key]]
+    if (is.null(value) || identical(key, "provider")) next
+    if (key %in% SESSION_OPTION_GROUPS && is.list(value) && !is.null(names(value))) {
+      explicit[[key]] <- value
+      next
+    }
+    if (identical(key, "configDir")) {
+      if (is.null(flat[["configDirectory"]])) root$configDirectory <- value
+      next
+    }
+    if (identical(key, "disableResume")) {
+      if (isTRUE(is_resume) && is.null(flat[["suppressResumeEvent"]])) {
+        root$suppressResumeEvent <- value
+      }
+      next
+    }
+    if (isTRUE(is_resume) && key %in% c("trustWorkingDirectory", "refreshCustomInstructions")) next
+    if (!isTRUE(is_resume) && identical(key, "openCanvases")) next
+    path <- SESSION_PARAM_GROUPS[[key]]
+    if (is.null(path)) {
+      root[[key]] <- value
+    } else {
+      set_member(path[[1]], path[[2]], value)
+    }
+  }
+
+  for (group in names(explicit)) {
+    for (member in names(explicit[[group]])) {
+      value <- explicit[[group]][[member]]
+      if (!is.null(value)) set_member(group, member, value)
+    }
+  }
+
+  provider <- flat[["provider"]]
+  if (is.list(provider) && length(provider) > 0) {
+    inference <- groups[["inference"]]
+    capi <- groups[["github"]][["capi"]]
+    explicit_routing <- !is.null(inference[["providers"]]) ||
+      !is.null(inference[["defaultProvider"]]) || !is.null(capi[["enabled"]])
+    if (!explicit_routing) {
+      translated <- legacy_provider_to_v4(provider, flat[["model"]])
+      set_member("inference", "providers", translated$providers)
+      set_member("inference", "defaultProvider", "default")
+      if (!is.null(translated$models) && is.null(inference[["models"]])) {
+        set_member("inference", "models", translated$models)
+      }
+      if (is.null(capi)) capi <- list()
+      capi$enabled <- FALSE
+      set_member("github", "capi", capi)
+    }
+  }
+
+  if (!is.null(groups[["mcp"]][["servers"]]) && is.null(groups[["mcp"]][["envValueMode"]])) {
+    set_member("mcp", "envValueMode", "direct")
+  }
+
+  for (group in names(groups)) {
+    if (length(groups[[group]]) > 0) root[[group]] <- groups[[group]]
+  }
+  if (length(root) == 0) return(empty_json_object())
+  root
+}
+
+#' Build the wire tool definitions (\code{tools.definitions}) for a list of Tool objects.
+#' @keywords internal
+tool_definitions_to_wire <- function(tools) {
+  tool_defs <- list()
+  if (is.null(tools)) return(tool_defs)
+  for (tool in tools) {
+    defn <- list(name = tool$name, description = tool$description)
+    if (!is.null(tool$parameters)) defn$parameters <- tool$parameters
+    if (!is.null(tool$idempotent)) defn$idempotent <- isTRUE(tool$idempotent)
+    if (isTRUE(tool$skip_permission)) defn$skipPermission <- TRUE
+    tool_defs <- c(tool_defs, list(defn))
+  }
+  tool_defs
+}
+
+#' Wire (camelCase) names of NamedProviderConfig / ProviderModelConfig members.
+#' @keywords internal
+PROVIDER_WIRE_KEYS <- c(
+  base_url = "baseUrl", api_key = "apiKey", api_key_command = "apiKeyCommand",
+  bearer_token = "bearerToken", wire_api = "wireApi", model_provider = "modelProvider",
+  local_model = "localModel", model_id = "modelId", wire_model = "wireModel",
+  max_prompt_tokens = "maxPromptTokens", max_context_window_tokens = "maxContextWindowTokens",
+  max_output_tokens = "maxOutputTokens"
+)
+
+#' Convert a provider connection or model definition (R6 object, or a named list with snake_case
+#' or camelCase names) to its wire list. NULL members are dropped.
+#' @keywords internal
+provider_config_to_wire <- function(config) {
+  if (inherits(config, "R6") && is.function(config$to_list)) return(config$to_list())
+  config <- as.list(config)
+  config <- config[!vapply(config, is.null, logical(1))]
+  keys <- names(config)
+  if (is.null(keys)) return(config)
+  renamed <- keys %in% names(PROVIDER_WIRE_KEYS)
+  keys[renamed] <- unname(PROVIDER_WIRE_KEYS[keys[renamed]])
+  names(config) <- keys
+  azure <- config[["azure"]]
+  if (is.list(azure) && !is.null(azure[["api_version"]])) {
+    azure[["apiVersion"]] <- azure[["api_version"]]
+    azure[["api_version"]] <- NULL
+    config[["azure"]] <- azure
+  }
+  config
+}
+
+#' Wrap a single provider/model config so a list of configs can be iterated.
+#' @keywords internal
+as_config_list <- function(x) {
+  if (inherits(x, "R6")) return(list(x))
+  single_keys <- c("name", "id", "provider", "base_url", "baseUrl")
+  if (is.list(x) && !is.null(names(x)) && any(single_keys %in% names(x))) return(list(x))
+  as.list(x)
+}
+
+#' NamedProviderConfig
+#'
+#' A named BYOK provider connection (wire \code{inference.providers[]}). Model definitions
+#' reference it by \code{name}; select a registered model with \code{"<name>/<id>"}.
+#'
+#' @field name Character. Stable connection name (must not contain "/").
+#' @field base_url Character. API endpoint URL.
+#' @field type Character or NULL. "openai" (default), "azure", or "anthropic".
+#' @field api_key Character or NULL. Static API key.
+#' @field api_key_command Character or NULL. Command run before each request for a fresh key.
+#' @field bearer_token Character or NULL. Static bearer token (takes precedence over api_key).
+#' @field wire_api Character or NULL. "completions" (default) or "responses".
+#' @field transport Character or NULL. "http" (default) or "websockets".
+#' @field azure Named list or NULL. Azure options, e.g. \code{list(api_version = "2024-10-21")}.
+#' @field headers Named list or NULL. Extra HTTP headers sent with every provider request.
+#' @field model_provider Character or NULL. Product serving the models (telemetry only).
+#' @export
+NamedProviderConfig <- R6::R6Class(
+  "NamedProviderConfig",
+  public = list(
+    name = NULL,
+    base_url = NULL,
+    type = NULL,
+    api_key = NULL,
+    api_key_command = NULL,
+    bearer_token = NULL,
+    wire_api = NULL,
+    transport = NULL,
+    azure = NULL,
+    headers = NULL,
+    model_provider = NULL,
+
+    #' @description Create a new NamedProviderConfig.
+    #' @param name Character.
+    #' @param base_url Character.
+    #' @param type Character or NULL.
+    #' @param api_key Character or NULL.
+    #' @param api_key_command Character or NULL.
+    #' @param bearer_token Character or NULL.
+    #' @param wire_api Character or NULL.
+    #' @param transport Character or NULL.
+    #' @param azure Named list or NULL.
+    #' @param headers Named list or NULL.
+    #' @param model_provider Character or NULL.
+    initialize = function(name, base_url, type = NULL, api_key = NULL, api_key_command = NULL,
+                          bearer_token = NULL, wire_api = NULL, transport = NULL, azure = NULL,
+                          headers = NULL, model_provider = NULL) {
+      self$name <- name
+      self$base_url <- base_url
+      self$type <- type
+      self$api_key <- api_key
+      self$api_key_command <- api_key_command
+      self$bearer_token <- bearer_token
+      self$wire_api <- wire_api
+      self$transport <- transport
+      self$azure <- azure
+      self$headers <- headers
+      self$model_provider <- model_provider
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      provider_config_to_wire(list(
+        name = self$name, type = self$type, base_url = self$base_url,
+        api_key = self$api_key, api_key_command = self$api_key_command,
+        bearer_token = self$bearer_token, wire_api = self$wire_api,
+        transport = self$transport, azure = self$azure, headers = self$headers,
+        model_provider = self$model_provider
+      ))
+    }
+  )
+)
+
+#' ProviderModelConfig
+#'
+#' A BYOK model definition (wire \code{inference.models[]}) served by a NamedProviderConfig.
+#'
+#' @field provider Character. Name of the NamedProviderConfig serving the model.
+#' @field id Character. Provider-local model id; select it with \code{"<provider>/<id>"}.
+#' @field model_id Character or NULL. Well-known base model for capability lookup.
+#' @field wire_model Character or NULL. Model or deployment name sent to the provider API.
+#' @field name Character or NULL. Display name.
+#' @field max_prompt_tokens Integer or NULL.
+#' @field max_context_window_tokens Integer or NULL.
+#' @field max_output_tokens Integer or NULL.
+#' @field capabilities Named list or NULL. Capability overrides (wire keys as documented upstream).
+#' @export
+ProviderModelConfig <- R6::R6Class(
+  "ProviderModelConfig",
+  public = list(
+    provider = NULL,
+    id = NULL,
+    model_id = NULL,
+    wire_model = NULL,
+    name = NULL,
+    max_prompt_tokens = NULL,
+    max_context_window_tokens = NULL,
+    max_output_tokens = NULL,
+    capabilities = NULL,
+
+    #' @description Create a new ProviderModelConfig.
+    #' @param provider Character.
+    #' @param id Character.
+    #' @param model_id Character or NULL.
+    #' @param wire_model Character or NULL.
+    #' @param name Character or NULL.
+    #' @param max_prompt_tokens Integer or NULL.
+    #' @param max_context_window_tokens Integer or NULL.
+    #' @param max_output_tokens Integer or NULL.
+    #' @param capabilities Named list or NULL.
+    initialize = function(provider, id, model_id = NULL, wire_model = NULL, name = NULL,
+                          max_prompt_tokens = NULL, max_context_window_tokens = NULL,
+                          max_output_tokens = NULL, capabilities = NULL) {
+      self$provider <- provider
+      self$id <- id
+      self$model_id <- model_id
+      self$wire_model <- wire_model
+      self$name <- name
+      self$max_prompt_tokens <- max_prompt_tokens
+      self$max_context_window_tokens <- max_context_window_tokens
+      self$max_output_tokens <- max_output_tokens
+      self$capabilities <- capabilities
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      provider_config_to_wire(list(
+        provider = self$provider, id = self$id, model_id = self$model_id,
+        wire_model = self$wire_model, name = self$name,
+        max_prompt_tokens = self$max_prompt_tokens,
+        max_context_window_tokens = self$max_context_window_tokens,
+        max_output_tokens = self$max_output_tokens, capabilities = self$capabilities
+      ))
+    }
+  )
+)
+
+#' SessionEventType
+#'
+#' Common session event type names. Events of other (including future) types are still
+#' delivered unchanged; \code{tool.execution_partial_result} is no longer emitted by protocol 4
+#' runtimes but is tolerated when received.
+#'
+#' @export
+SessionEventType <- list(
+  ASSISTANT_MESSAGE = "assistant.message",
+  ASSISTANT_MESSAGE_DELTA = "assistant.message_delta",
+  SESSION_IDLE = "session.idle",
+  SESSION_ERROR = "session.error",
+  TOOL_SHELL_OUTPUT = "tool.shell_output",
+  TOOL_EXECUTION_PARTIAL_RESULT = "tool.execution_partial_result"
+)
+
+#' ShellOutputEventData
+#'
+#' Data of a \code{tool.shell_output} event: a chunk of output streamed by a shell tool call.
+#'
+#' @field tool_call_id Character. Tool call that produced the output.
+#' @field text Character. Output text chunk.
+#' @field sequence Integer. Chunk sequence number within the tool call.
+#' @field stream Character or NULL. "stdout", "stderr", or NULL when not reported.
+#' @export
+ShellOutputEventData <- R6::R6Class(
+  "ShellOutputEventData",
+  public = list(
+    tool_call_id = NULL,
+    text = NULL,
+    sequence = NULL,
+    stream = NULL,
+
+    #' @description Create a new ShellOutputEventData.
+    #' @param tool_call_id Character.
+    #' @param text Character.
+    #' @param sequence Integer.
+    #' @param stream Character or NULL.
+    initialize = function(tool_call_id = NULL, text = NULL, sequence = NULL, stream = NULL) {
+      self$tool_call_id <- tool_call_id
+      self$text <- text
+      self$sequence <- sequence
+      self$stream <- stream
+    }
+  )
+)
+
+#' Parse the data of a \code{tool.shell_output} event.
+#'
+#' @param event SessionEvent, or the event's \code{data} named list.
+#' @return A ShellOutputEventData, or NULL when the event is not a shell output event.
+#' @export
+shell_output_event_data <- function(event) {
+  data <- event
+  if (inherits(event, "SessionEvent")) {
+    if (!identical(event$type, SessionEventType$TOOL_SHELL_OUTPUT)) return(NULL)
+    data <- event$data
+  }
+  if (!is.list(data)) return(NULL)
+  ShellOutputEventData$new(
+    tool_call_id = data[["toolCallId"]],
+    text = data[["text"]],
+    sequence = data[["sequence"]],
+    stream = data[["stream"]]
+  )
+}
+
+#' ShellAuthenticationRequest
+#'
+#' A password or other answer that a shell command run by the agent asks for (for example
+#' \code{sudo -A}, \code{ssh}, or \code{git} over HTTPS). The answer goes only to the program
+#' that asked; it is not shown to the model or recorded in session events. Never log it.
+#'
+#' @field request_id Character. Request identifier (a cancellation carries the same id).
+#' @field program Character. The program that asked, such as "sudo", "ssh", or "git".
+#' @field prompt Character. Prompt text supplied by the program.
+#' @field input_kind Character. "secret" (mask input), "text", or "confirm" (answer "yes").
+#' @field command Character. Shell command that triggered the prompt.
+#' @field cwd Character. Working directory of the command.
+#' @export
+ShellAuthenticationRequest <- R6::R6Class(
+  "ShellAuthenticationRequest",
+  public = list(
+    request_id = NULL,
+    program = NULL,
+    prompt = NULL,
+    input_kind = NULL,
+    command = NULL,
+    cwd = NULL,
+
+    #' @description Create a new ShellAuthenticationRequest.
+    #' @param request_id Character.
+    #' @param program Character.
+    #' @param prompt Character.
+    #' @param input_kind Character.
+    #' @param command Character.
+    #' @param cwd Character.
+    initialize = function(request_id, program, prompt, input_kind, command = "", cwd = "") {
+      self$request_id <- request_id
+      self$program <- program
+      self$prompt <- prompt
+      self$input_kind <- input_kind
+      self$command <- command
+      self$cwd <- cwd
+    }
+  )
+)
+
+#' StoredMemory
+#'
+#' A memory the agent asked to store (after runtime validation, secret filtering, and approval),
+#' passed to a session's \code{store_memory} callback.
+#'
+#' @field session_id Character. Session that stored the memory.
+#' @field subject Character. Short topic of the memory.
+#' @field fact Character. The fact to remember.
+#' @field citations Character. Sources supporting the fact.
+#' @field reason Character. Why the fact is worth remembering.
+#' @export
+StoredMemory <- R6::R6Class(
+  "StoredMemory",
+  public = list(
+    session_id = NULL,
+    subject = NULL,
+    fact = NULL,
+    citations = NULL,
+    reason = NULL,
+
+    #' @description Create a new StoredMemory.
+    #' @param session_id Character.
+    #' @param subject Character.
+    #' @param fact Character.
+    #' @param citations Character.
+    #' @param reason Character.
+    initialize = function(session_id = NULL, subject = NULL, fact = NULL, citations = NULL,
+                          reason = NULL) {
+      self$session_id <- session_id
+      self$subject <- subject
+      self$fact <- fact
+      self$citations <- citations
+      self$reason <- reason
+    }
+  )
+)
+
+#' PolicyHelperFailure
+#'
+#' Structured Policy Helper failure reported by the runtime, either in the \code{data} of a failed
+#' session.create / session.resume (available as \code{e$policy_helper_failure} on the error) or on
+#' a managed settings snapshot. Helper-authored text is untrusted: render it as plain text.
+#'
+#' @field category Character. Runtime classification (for example "timeout" or "spawn").
+#' @field failure_mode Character. "ignore" or "failClosed".
+#' @field message Character. Primary plain-text explanation.
+#' @field previous_policy_retained Logical. Whether an earlier helper layer still applies.
+#' @field reason Character. Invocation reason (for example "sessionStart").
+#' @field severity Character or NULL. "warning" or "error".
+#' @field authority Character or NULL. Managed authority that registered the helper.
+#' @field code Character or NULL. Helper-defined error identifier.
+#' @field details List or NULL. Field-specific findings (\code{message}, optional \code{path}).
+#' @field diagnostic Character or NULL. Secondary troubleshooting text.
+#' @field help_link Named list or NULL. Validated link (\code{url}, optional \code{label}).
+#' @field remediation Character or NULL. Recovery guidance (never execute it automatically).
+#' @export
+PolicyHelperFailure <- R6::R6Class(
+  "PolicyHelperFailure",
+  public = list(
+    category = NULL,
+    failure_mode = NULL,
+    message = NULL,
+    previous_policy_retained = FALSE,
+    reason = NULL,
+    severity = NULL,
+    authority = NULL,
+    code = NULL,
+    details = NULL,
+    diagnostic = NULL,
+    help_link = NULL,
+    remediation = NULL,
+
+    #' @description Create a new PolicyHelperFailure.
+    #' @param category Character.
+    #' @param failure_mode Character.
+    #' @param message Character.
+    #' @param previous_policy_retained Logical.
+    #' @param reason Character.
+    #' @param severity Character or NULL.
+    #' @param authority Character or NULL.
+    #' @param code Character or NULL.
+    #' @param details List or NULL.
+    #' @param diagnostic Character or NULL.
+    #' @param help_link Named list or NULL.
+    #' @param remediation Character or NULL.
+    initialize = function(category = NULL, failure_mode = NULL, message = NULL,
+                          previous_policy_retained = FALSE, reason = NULL, severity = NULL,
+                          authority = NULL, code = NULL, details = NULL, diagnostic = NULL,
+                          help_link = NULL, remediation = NULL) {
+      self$category <- category
+      self$failure_mode <- failure_mode
+      self$message <- message
+      self$previous_policy_retained <- isTRUE(previous_policy_retained)
+      self$reason <- reason
+      self$severity <- severity
+      self$authority <- authority
+      self$code <- code
+      self$details <- details
+      self$diagnostic <- diagnostic
+      self$help_link <- help_link
+      self$remediation <- remediation
+    }
+  )
+)
+
+#' Parse a \code{policyHelperFailure} wire object.
+#'
+#' @param obj Named list (parsed JSON) or NULL.
+#' @return A PolicyHelperFailure, or NULL when \code{obj} is not an object.
+#' @export
+policy_helper_failure_from_list <- function(obj) {
+  if (!is.list(obj) || is.null(names(obj))) return(NULL)
+  PolicyHelperFailure$new(
+    category = obj[["category"]],
+    failure_mode = obj[["failureMode"]],
+    message = obj[["message"]],
+    previous_policy_retained = obj[["previousPolicyRetained"]],
+    reason = obj[["reason"]],
+    severity = obj[["severity"]],
+    authority = obj[["authority"]],
+    code = obj[["code"]],
+    details = obj[["details"]],
+    diagnostic = obj[["diagnostic"]],
+    help_link = obj[["helpLink"]],
+    remediation = obj[["remediation"]]
+  )
+}
+
+#' Attach the PolicyHelperFailure carried in a JSON-RPC error's \code{data} (as
+#' \code{policy_helper_failure}) so callers of create/resume can inspect it.
+#' @keywords internal
+with_policy_helper_failure <- function(e) {
+  data <- if (inherits(e, "json_rpc_error")) e$data else NULL
+  if (is.list(data)) {
+    failure <- policy_helper_failure_from_list(data[["policyHelperFailure"]])
+    if (!is.null(failure)) e$policy_helper_failure <- failure
+  }
+  e
+}
+
+#' Map a permission handler result to an SDK protocol 4 permission decision
+#'
+#' Protocol 4 kinds ("approve-once", "approve-for-session", "approve-permanently", "reject",
+#' "user-not-available") are sent as given. Earlier kinds are mapped: "approved" to
+#' "approve-once", "denied-interactively-by-user" to "reject", and the other "denied-*"
+#' kinds to "user-not-available". \code{TRUE} / \code{FALSE} approve once or reject.
+#' "no-result" returns \code{NULL}, leaving the request pending for another client.
+#'
+#' @param result Handler result: a list with \code{kind}, a single string, or a logical.
+#' @return Named list or NULL.
+#' @keywords internal
+permission_decision_to_v4 <- function(result) {
+  if (isTRUE(result)) return(list(kind = "approve-once"))
+  if (isFALSE(result)) return(list(kind = "reject"))
+  if (is.character(result) && length(result) == 1L) result <- list(kind = result)
+  if (!is.list(result) || !is.character(result[["kind"]])) {
+    return(list(kind = "user-not-available"))
+  }
+  kind <- result[["kind"]]
+  if (identical(kind, "no-result")) return(NULL)
+  legacy <- c(
+    "approved" = "approve-once",
+    "denied-interactively-by-user" = "reject",
+    "denied-by-rules" = "user-not-available",
+    "denied-no-approval-rule-and-could-not-request-from-user" = "user-not-available",
+    "denied-by-content-exclusion-policy" = "user-not-available"
+  )
+  if (kind %in% names(legacy)) {
+    return(list(kind = legacy[[kind]]))
+  }
+  result
+}
+
+#' PermissionModeRefusalReason
+#'
+#' Known values of \code{PermissionModeSetResult$reason}, explaining why a requested permission
+#' mode was refused.
+#'
+#' @export
+PermissionModeRefusalReason <- list(
+  MANAGED_POLICY = "managed_policy"
+)
+
+#' PermissionModeSetResult
+#'
+#' Result of \code{session$set_permission_mode()}.
+#'
+#' @field success Logical. Whether the requested mode was applied.
+#' @field mode Character. Authoritative permission mode after the request.
+#' @field reason Character or NULL. Why the mode was refused when known (for example
+#'   \code{PermissionModeRefusalReason$MANAGED_POLICY}).
+#' @export
+PermissionModeSetResult <- R6::R6Class(
+  "PermissionModeSetResult",
+  public = list(
+    success = FALSE,
+    mode = NULL,
+    reason = NULL,
+
+    #' @description Create a new PermissionModeSetResult.
+    #' @param success Logical.
+    #' @param mode Character.
+    #' @param reason Character or NULL.
+    initialize = function(success = FALSE, mode = NULL, reason = NULL) {
+      self$success <- isTRUE(success)
+      self$mode <- mode
+      self$reason <- reason
+    }
+  )
+)

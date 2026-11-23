@@ -21,7 +21,7 @@ namespace eval ::copilot::client {
                      delete_session list_sessions destroy_session \
                      define_tool get_status get_auth_status ping \
                      list_models get_last_session_id get_session_metadata \
-                     set_session_fs_provider
+                     set_session_fs_provider clear_managed_settings_cache
 }
 
 # ---- Resolve the CLI path ---------------------------------------------------
@@ -32,10 +32,10 @@ proc ::copilot::client::_resolve_cli_path {opts} {
         return $cli_path
     }
 
-    # Check environment variable
+    # Check environment variable (used when the file exists)
     set env_path ""
     catch { set env_path $::env(COPILOT_CLI_PATH) }
-    if {$env_path ne ""} {
+    if {$env_path ne "" && [file exists $env_path]} {
         return $env_path
     }
 
@@ -133,7 +133,13 @@ proc ::copilot::client::_spawn_process {handle} {
     set cli_path [_resolve_cli_path $opts]
     set log_level [dict get $opts log_level]
 
-    set cmd [list $cli_path --stdio]
+    # A .js entry point (for example npm-loader.js) is run with node; other paths
+    # (such as node_modules/.bin/copilot) are executed directly.
+    if {[string match -nocase *.js $cli_path]} {
+        set cmd [list node $cli_path --headless --no-auto-update --stdio]
+    } else {
+        set cmd [list $cli_path --headless --no-auto-update --stdio]
+    }
     if {$log_level ne ""} {
         lappend cmd "--log-level" $log_level
     }
@@ -180,67 +186,89 @@ proc ::copilot::client::_connect_url {handle url} {
 
 # ---- Initialization handshake -----------------------------------------------
 
+# Declares the integrating application with connect (when client_info is set;
+# CLIs without connect are tolerated), then verifies with ping that the server
+# speaks exactly this SDK's protocol version, and registers network callbacks.
 proc ::copilot::client::_do_initialize {handle write_ch read_ch} {
-    set sdk_version [::copilot::version::get]
-    set sdk_name    [::copilot::version::get_name]
-    set min_proto   [::copilot::version::get_min_protocol]
+    variable clients
+    set opts [dict get [dict get $clients $handle] opts]
+    set expected [::copilot::version::get_protocol]
 
-    set params [dict create \
-        clientInfo [dict create \
-            name    $sdk_name \
-            version $sdk_version \
-        ] \
-    ]
-
-    set req_id [::copilot::jsonrpc::send_request $write_ch "initialize" $params]
-    ::copilot::jsonrpc::register_pending $req_id
-
-    # Wait for the initialize response
-    set timeout_ms 30000
-    set start_time [clock milliseconds]
-
-    while {![::copilot::jsonrpc::is_resolved $req_id]} {
-        if {[clock milliseconds] - $start_time > $timeout_ms} {
-            ::copilot::jsonrpc::reject_pending $req_id "Initialize timed out"
-            break
-        }
-
-        set msg [::copilot::jsonrpc::read_message $read_ch]
-        if {$msg eq ""} {
-            ::copilot::jsonrpc::reject_pending $req_id "Connection closed during initialize"
-            break
-        }
-
-        if {[dict exists $msg id]} {
-            set msg_id [dict get $msg id]
-            if {[dict exists $msg result]} {
-                ::copilot::jsonrpc::resolve_pending $msg_id [dict get $msg result]
-            } elseif {[dict exists $msg error]} {
-                set err_info [dict get $msg error]
-                set err_msg "Initialize error"
-                if {[dict exists $err_info message]} {
-                    set err_msg [dict get $err_info message]
-                }
-                ::copilot::jsonrpc::reject_pending $msg_id $err_msg
+    set client_info [::copilot::types::client_info_json [dict get $opts client_info]]
+    if {$client_info ne ""} {
+        set params [::copilot::jsonrpc::json_raw "{\"clientInfo\":$client_info}"]
+        if {[catch {_rpc $write_ch $read_ch "connect" $params} err err_opts]} {
+            set last $::copilot::session::last_rpc_error
+            set method_not_found [expr {[dict exists $last code] && [dict get $last code] == -32601}]
+            if {!$method_not_found && ![string match "*Unhandled method connect*" $err]} {
+                return -options $err_opts $err
             }
         }
     }
 
-    set result [::copilot::jsonrpc::get_result $req_id]
-    ::copilot::jsonrpc::remove_pending $req_id
-
-    # Verify protocol version
-    if {[dict exists $result protocolVersion]} {
-        set proto_ver [dict get $result protocolVersion]
-        if {$proto_ver < $min_proto} {
-            error "Server protocol version $proto_ver is below minimum $min_proto"
-        }
+    set result [_rpc $write_ch $read_ch "ping" [dict create message "ping"]]
+    if {![dict exists $result protocolVersion] || [dict get $result protocolVersion] eq "null"} {
+        error "SDK protocol version mismatch: SDK supports version $expected, but server does not report a protocol version. Please update your server to ensure compatibility."
+    }
+    set server_version [dict get $result protocolVersion]
+    if {$server_version != $expected} {
+        error "SDK protocol version mismatch: SDK supports version $expected, but server reports version $server_version. Please update your SDK or server to ensure compatibility."
     }
 
-    # Send initialized notification
-    ::copilot::jsonrpc::send_notification $write_ch "initialized" [dict create]
+    # Register network callbacks (network.setProvider) when any is configured
+    set network [dict get $opts network]
+    ::copilot::session::set_network_callbacks $network
+    set provider [dict create]
+    foreach {name wire} {resolve_proxy resolveProxy authenticate_negotiate authenticateNegotiate
+            authenticate_basic authenticateBasic} {
+        if {$network ne "" && [dict exists $network $name] && [dict get $network $name] ne ""} {
+            dict set provider $wire "\{\}"
+        }
+    }
+    if {[dict size $provider] > 0} {
+        if {[dict exists $network scope] && [dict get $network scope] ne ""} {
+            dict set provider scope [::copilot::jsonrpc::json_string [dict get $network scope]]
+        }
+        _rpc $write_ch $read_ch "network.setProvider" \
+            [::copilot::jsonrpc::json_raw [::copilot::jsonrpc::json_object $provider]]
+    }
 
     return $result
+}
+
+# Send a request and wait for its result (raises on a JSON-RPC error).
+proc ::copilot::client::_rpc {write_ch read_ch method params} {
+    set req_id [::copilot::jsonrpc::send_request $write_ch $method $params]
+    ::copilot::jsonrpc::register_pending $req_id
+    return [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+}
+
+# Send a request on a client's connection and wait for its result.
+proc ::copilot::client::_client_rpc {handle method params} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+    set cdata [dict get $clients $handle]
+    return [_rpc [dict get $cdata write_ch] [dict get $cdata read_ch] $method $params]
+}
+
+# Clear the runtime's cached managed (enterprise) settings so they are re-read.
+proc ::copilot::client::clear_managed_settings_cache {handle} {
+    return [_client_rpc $handle "managedSettings.clearCache" [::copilot::jsonrpc::json_raw "\{\}"]]
+}
+
+# The PolicyHelperFailure dict carried by a failed create_session/resume_session
+# error (catch it with an options variable), or "" when there is none.
+proc ::copilot::client::policy_helper_failure {error_options} {
+    if {![dict exists $error_options -errorcode]} {
+        return ""
+    }
+    set code [dict get $error_options -errorcode]
+    if {[lindex $code 0] eq "COPILOT" && [lindex $code 1] eq "POLICY_HELPER_FAILURE"} {
+        return [lindex $code 2]
+    }
+    return ""
 }
 
 # ---- Stop the client --------------------------------------------------------
@@ -303,9 +331,10 @@ proc ::copilot::client::create_session {handle args} {
     set config [::copilot::types::make_session_config {*}$args]
     set write_ch [dict get $cdata write_ch]
     set read_ch  [dict get $cdata read_ch]
+    set mode     [dict get [dict get $cdata opts] mode]
 
     # Delegates to session module which sends "session.create" via JSON-RPC
-    set sess_handle [::copilot::session::create_session $write_ch $read_ch $config]
+    set sess_handle [::copilot::session::create_session $write_ch $read_ch $config $mode]
 
     # Register exit plan mode handler if configured
     set epm_handler [dict get $config on_exit_plan_mode]
@@ -494,12 +523,17 @@ proc ::copilot::client::resume_session {handle session_id args} {
 
     set write_ch [dict get $cdata write_ch]
     set read_ch  [dict get $cdata read_ch]
+    set config   [::copilot::types::make_session_config {*}$args]
+    set mode     [dict get [dict get $cdata opts] mode]
 
-    set params [dict create sessionId $session_id]
-    set req_id [::copilot::jsonrpc::send_request $write_ch "session.resume" $params]
-    ::copilot::jsonrpc::register_pending $req_id
+    # Sends the grouped SDK protocol 4 session.resume payload; the result also
+    # carries "handle", the local session handle for the resumed session.
+    set result [::copilot::session::resume_session $write_ch $read_ch $session_id $config $mode]
 
-    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    set sessions [dict get $cdata sessions]
+    lappend sessions [dict get $result handle]
+    dict set cdata sessions $sessions
+    dict set clients $handle $cdata
     return $result
 }
 

@@ -64,6 +64,143 @@ client$stop()
 - Protocol version verification
 - R6 class-based API throughout
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older
+CLIs are rejected at `client$start()` with a protocol version mismatch error. Every existing
+option keeps working: you still pass the same flat parameters to `create_session()` and
+`resume_session()`, and the SDK translates them to the grouped v4 `session.create` /
+`session.resume` payload (for example `streaming` becomes `events.streaming`, `hooks` becomes
+`hooks.hasHandlers`, and `disable_resume` becomes `suppressResumeEvent`). A legacy single
+`provider` is sent as a named `"default"` connection with Copilot API models disabled, which
+preserves the v1 BYOK behavior.
+
+New in this release:
+
+- **Named BYOK providers**: `providers`, `models`, `default_provider` (`NA` clears a saved default on resume), and `capi` on `create_session()` / `resume_session()`.
+- **Idempotent tools**: `define_tool(..., idempotent = TRUE)`.
+- **Client turn ID**: `client_turn_id` on `send()`, `send_and_wait()`, and `send_and_wait_structured()`.
+- **Client mode**: `CopilotClient$new(mode = "coding-agent")` (default) or `mode = "empty"`.
+- **Shell output events**: `SessionEventType$TOOL_SHELL_OUTPUT` and `shell_output_event_data(event)`.
+- **Shell authentication**: `on_shell_authentication_request` session option.
+- **Memory store**: `store_memory` session option.
+- **Network callbacks**: `CopilotClient$new(network = list(...))`.
+- **Policy helper failure**: `e$policy_helper_failure` on a failed create/resume, plus `policy_helper_failure_from_list()`.
+- **Permission mode refusal reason**: `session$set_permission_mode(mode)` returns a `PermissionModeSetResult` whose `reason` can be `PermissionModeRefusalReason$MANAGED_POLICY`.
+- **Protocol 4 tool calls and permission prompts**: custom tools and `on_permission_request` are now answered through the protocol 4 `external_tool.requested` and `permission.requested` events. Permission handlers may return protocol 4 kinds (`"approve-once"`, `"approve-for-session"`, `"reject"`, `"user-not-available"`), and existing results such as `list(kind = "approved")` keep working. Without `on_permission_request` the runtime denies operations that need approval, including custom tools, unless a tool is defined with `skip_permission = TRUE`.
+
+```r
+lookup <- define_tool(
+  name = "lookup_order", description = "Look up an order by ID",
+  parameters = list(type = "object", properties = list(id = list(type = "string"))),
+  handler = function(invocation) paste("Order", invocation$arguments$id, "shipped")
+)
+session <- client$create_session(
+  tools = list(lookup),
+  on_permission_request = function(request, context) {
+    if (identical(request$kind, "custom-tool")) list(kind = "approve-once") else list(kind = "reject")
+  }
+)
+```
+
+### Named BYOK providers
+
+```r
+session <- client$create_session(
+  model = "gateway/chat",
+  providers = list(NamedProviderConfig$new(
+    name = "gateway",
+    base_url = "https://models.example.com/v1",
+    api_key = Sys.getenv("MODEL_API_KEY")
+  )),
+  models = list(ProviderModelConfig$new(
+    provider = "gateway", id = "chat", model_id = "gpt-4o", wire_model = "deployment"
+  )),
+  capi = list(enabled = FALSE)
+)
+
+# Re-enable Copilot API models and clear the saved default connection on resume.
+resumed <- client$resume_session(
+  session$session_id,
+  model = "gpt-5", capi = list(enabled = TRUE), default_provider = NA
+)
+```
+
+### Idempotent tools and client turn IDs
+
+```r
+lookup <- define_tool(
+  name = "lookup_order",
+  description = "Look up an order by ID",
+  parameters = list(type = "object", properties = list(id = list(type = "string"))),
+  handler = function(invocation) paste("Order", invocation$arguments$id, "shipped"),
+  idempotent = TRUE
+)
+session <- client$create_session(tools = list(lookup))
+session$send("Where is order 42?", client_turn_id = "turn-42")
+```
+
+### Client mode
+
+```r
+# Empty mode: no ambient tools; every session must declare its tool allowlist.
+client <- CopilotClient$new(mode = "empty")
+session <- client$create_session(available_tools = c("view", "grep"))
+```
+
+### Shell output, shell authentication, and memory store
+
+```r
+session <- client$create_session(
+  on_shell_authentication_request = function(request, context) {
+    if (request$input_kind == "confirm") return(list(action = "cancel"))
+    list(action = "accept", value = Sys.getenv("SUDO_PASSWORD"))
+  },
+  store_memory = function(memory, context) {
+    cat(memory$subject, ": ", memory$fact, "\n", sep = "", file = "memories.txt", append = TRUE)
+  }
+)
+session$on(function(event) {
+  chunk <- shell_output_event_data(event)
+  if (!is.null(chunk)) cat(chunk$text)
+})
+```
+
+### Network callbacks
+
+```r
+client <- CopilotClient$new(network = list(
+  scope = "connection",
+  resolve_proxy = function(request) "PROXY proxy.example:8080; DIRECT",
+  authenticate_basic = function(request) {
+    list(username = "svc-build", password = Sys.getenv("PROXY_PASSWORD"))
+  }
+))
+```
+
+### Policy helper failures and permission modes
+
+```r
+session <- tryCatch(
+  client$create_session(),
+  json_rpc_error = function(e) {
+    if (!is.null(e$policy_helper_failure)) message(e$policy_helper_failure$message)
+    stop(e)
+  }
+)
+
+result <- session$set_permission_mode("allow-all")
+if (!result$success && identical(result$reason, PermissionModeRefusalReason$MANAGED_POLICY)) {
+  message("Blocked by managed policy; mode stays ", result$mode)
+}
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI over stdio. The existing `in_process` option is unchanged.
+- R handlers run synchronously on the polling loop, so a `shellAuthentication.cancel` can only arrive after the handler for that request has returned; it is acknowledged without further action.
+
 ## API Reference
 
 ### CopilotClient

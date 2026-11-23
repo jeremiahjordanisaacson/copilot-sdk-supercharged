@@ -42,17 +42,18 @@ static NSString *RepoRoot(void) {
     [self.proxy configureWithFilePath:relativePath workDir:self.repoRoot];
 }
 
-/// Creates a `CPCopilotClient` pointed at the running proxy.
+/// Creates a `CPCopilotClient` that spawns the discovered CLI. The CLI reaches the replay
+/// proxy through `COPILOT_API_URL`, which `-[CPCapiProxy start]` exports.
 - (CPCopilotClient *)makeClient {
     CPCopilotClientOptions *opts = [CPCopilotClientOptions defaultOptions];
-    opts.cliUrl = self.proxy.proxyUrl;
+    opts.cliPath = [CPCapiProxy cliPathWithRepoRoot:self.repoRoot];
     return [[CPCopilotClient alloc] initWithOptions:opts];
 }
 
 /// Creates a client with a custom `CPSessionFsConfig`.
 - (CPCopilotClient *)makeClientWithSessionFs:(CPSessionFsConfig *)fsConfig {
     CPCopilotClientOptions *opts = [CPCopilotClientOptions defaultOptions];
-    opts.cliUrl = self.proxy.proxyUrl;
+    opts.cliPath = [CPCapiProxy cliPathWithRepoRoot:self.repoRoot];
     opts.sessionFs = fsConfig;
     return [[CPCopilotClient alloc] initWithOptions:opts];
 }

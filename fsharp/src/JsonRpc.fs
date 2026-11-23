@@ -57,6 +57,9 @@ type JsonRpcException(code: int, message: string, data: JsonElement option) =
     inherit Exception(sprintf "JSON-RPC error %d: %s" code message)
     member _.Code = code
     member _.ErrorData = data
+    /// Policy Helper failure attached to the error data (`error.data.policyHelperFailure`),
+    /// for example when session.create or session.resume is blocked by managed policy.
+    member _.PolicyHelperFailure : PolicyHelperFailure option = PolicyHelperFailure.tryFromErrorData data
 
 /// Low-level JSON-RPC transport over streams with Content-Length framing.
 type JsonRpcTransport(input: Stream, output: Stream) =

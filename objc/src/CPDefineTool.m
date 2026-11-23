@@ -25,3 +25,9 @@ NSDictionary<NSString *, id> *CPDefineSimpleTool(
 ) {
     return CPDefineTool(name, description, nil, handler);
 }
+
+NSDictionary<NSString *, id> *CPIdempotentTool(NSDictionary<NSString *, id> *tool) {
+    NSMutableDictionary *marked = [tool mutableCopy];
+    marked[@"idempotent"] = @YES;
+    return [marked copy];
+}

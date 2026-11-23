@@ -14,6 +14,42 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HARNESS_SERVER="$REPO_ROOT/test/harness/server.ts"
 
 # ---------------------------------------------------------------------------
+# Locate the Copilot CLI (SDK protocol 4 needs CLI 1.0.113 or newer):
+#   1. COPILOT_CLI_PATH when set and the file exists
+#   2. nodejs/node_modules/@github/copilot/npm-loader.js (run with node)
+#   3. legacy nodejs/node_modules/@github/copilot-*/index.js or
+#      nodejs/node_modules/@github/copilot/index.js
+# COPILOT-CLIENT runs .js entry points through node and any other path
+# (for example node_modules/.bin/copilot) directly.
+# ---------------------------------------------------------------------------
+find_cli_path() {
+    if [ -n "${COPILOT_CLI_PATH:-}" ] && [ -f "$COPILOT_CLI_PATH" ]; then
+        echo "$COPILOT_CLI_PATH"
+        return 0
+    fi
+    local modules="$REPO_ROOT/nodejs/node_modules/@github"
+    if [ -f "$modules/copilot/npm-loader.js" ]; then
+        echo "$modules/copilot/npm-loader.js"
+        return 0
+    fi
+    local legacy
+    for legacy in "$modules"/copilot-*/index.js "$modules/copilot/index.js"; do
+        if [ -f "$legacy" ]; then
+            echo "$legacy"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if CLI_PATH="$(find_cli_path)"; then
+    export COPILOT_CLI_PATH="$CLI_PATH"
+    echo "[cobol-e2e] Copilot CLI: $COPILOT_CLI_PATH"
+else
+    echo "[cobol-e2e] WARNING: Copilot CLI not found; set COPILOT_CLI_PATH" >&2
+fi
+
+# ---------------------------------------------------------------------------
 # Start the replaying CAPI proxy
 # ---------------------------------------------------------------------------
 echo "[cobol-e2e] Starting replay proxy..."

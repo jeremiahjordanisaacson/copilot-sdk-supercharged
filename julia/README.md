@@ -61,6 +61,173 @@ disconnect(session)
 stop!(client)
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**; the
+startup `ping` check rejects any other protocol version. Existing options keep working: you
+still pass flat keyword options to `create_session` / `resume_session`, and the SDK
+translates them into the grouped protocol 4 payload (`group_session_params`), for example
+`streaming` becomes `events.streaming` and `hooks` becomes `hooks.hasHandlers`. The free-form
+`instructions` option is sent as organization custom instructions
+(`instructions.organizationText`).
+
+Permission handlers now answer protocol 4 `permission.requested` events: the request has a
+`kind` (such as `"write"`, `"shell"`, or `"mcp"`), a `tool_call_id`, and the full request in
+`details`. Return `true`/`"allow"` (approve once), `false`/`"deny"` (reject), or a decision
+such as `(kind="reject", feedback="Not now")`. Without `on_permission_request` the runtime
+denies operations that need approval, including custom tools, unless a tool is defined with
+`skip_permission=true`.
+
+### Client options
+
+```julia
+client = CopilotClient(
+    # Identify your integration on the connect handshake
+    client_info = ClientInfo(editor_name="MyEditor", editor_version="1.2.0"),
+    # "coding-agent" (default) or "empty": empty mode requires available_tools on every
+    # create/resume and applies restrictive defaults ("copilot-cli" is an alias of the default)
+    mode = CLIENT_MODE_CODING_AGENT,
+    # Proxy and authentication callbacks (registered with network.setProvider)
+    network = NetworkConfig(
+        scope = "connection",
+        resolve_proxy = req -> "PROXY proxy.example:8080; DIRECT",
+        authenticate_basic = req -> (username="me", password=ENV["PROXY_PASSWORD"]),
+    ),
+)
+start!(client)
+clear_managed_settings_cache(client)   # managedSettings.clearCache
+```
+
+```julia
+client = CopilotClient(mode=CLIENT_MODE_EMPTY)
+session = create_session(client; available_tools=["view", "grep"], on_permission_request=approve_all)
+```
+
+### Named BYOK providers and models
+
+```julia
+session = create_session(client;
+    model = "azure/gpt-5",                      # "provider/id"
+    providers = [NamedProviderConfig(name="azure", type="azure",
+        base_url="https://my-resource.openai.azure.com",
+        api_key_command="az account get-access-token --query accessToken -o tsv")],
+    models = [ProviderModelConfig(provider="azure", id="gpt-5", wire_model="my-deployment",
+        max_output_tokens=16384)],
+    default_provider = "azure",
+    capi = Dict{String, Any}("enabled" => false),  # hide Copilot API models
+    on_permission_request = approve_all,
+)
+
+# The legacy single provider still works (sent as the "default" connection)
+session = create_session(client;
+    model = "my-model",
+    provider = ProviderConfig(type="openai", base_url="http://localhost:11434/v1",
+        api_key_command="get-key", max_output_tokens=4096),
+    on_permission_request = approve_all,
+)
+
+# Clear a saved default provider on resume
+session = resume_session(client, session_id; default_provider=missing, on_permission_request=approve_all)
+```
+
+### Session options
+
+```julia
+session = create_session(client;
+    auto_tier = "balance",                          # Auto routing tier
+    ask_user_variant = "elicitation",               # or "legacy"
+    sandbox_config = SandboxConfig(allow_bypass=true),
+    feature_flags = Dict{String, Any}("some_flag" => true),
+    allowed_models = ["claude-sonnet-4.5"],
+    auth_client_id_metadata_url = "https://example.com/oauth/client.json",
+    model_capabilities = Dict{String, Any}("limits" => Dict{String, Any}("max_output_tokens" => 4096)),
+    agent_directories = ["./agents"],
+    hook_directories = ["./hooks"],
+    trust_working_directory = "session",            # create only ("session" or "user")
+    image_generation = ImageGenerationConfig(enabled=true, save_to_disk=false),
+    autopilot = AutopilotOptions(continuation_enabled=true, max_continues=3),
+    on_subagent_start = input -> @info("subagent started", input),
+    on_subagent_stop = input -> @info("subagent stopped", input),
+    on_permission_request = approve_all,
+)
+
+session = resume_session(client, session_id;
+    allow_transcript_recovery = true,               # resume only
+    on_permission_request = approve_all,
+)
+```
+
+### Callbacks: GitHub tokens, shell authentication, memory
+
+```julia
+memories = StoredMemory[]
+session = create_session(client;
+    # Answers gitHubToken.getToken; mutually exclusive with github_token
+    github_token_provider = args -> (kind="token", access_token=fetch_token(args.host), expires_in=28800),
+    # Passwords and other answers requested by shell commands (sudo -A, ssh, git)
+    on_shell_authentication_request = req ->
+        req.input_kind == "secret" ? (action="accept", value=ENV["SUDO_PASSWORD"]) : (action="cancel",),
+    # Memories the agent asks to store
+    store_memory = m -> push!(memories, m),
+    on_permission_request = approve_all,
+)
+```
+
+### Messages, tools, and events
+
+```julia
+lookup = define_tool("lookup", "Look up a record"; idempotent=true) do inv
+    ToolResult(text_result_for_llm="42")
+end
+
+id = send(session, MessageOptions(
+    prompt = "Summarize the release as JSON",
+    source = message_source_agent("release-bot"),   # or MESSAGE_SOURCE_USER / MESSAGE_SOURCE_SYSTEM
+    client_turn_id = "turn-42",
+    response_schema = Dict{String, Any}("type" => "object",
+        "properties" => Dict{String, Any}("summary" => Dict{String, Any}("type" => "string"))),
+))
+
+on(session) do event
+    if event.type == EVENT_TOOL_SHELL_OUTPUT
+        data = shell_output_event_data(event)
+        print(data.stream == "stderr" ? stderr : stdout, data.text)
+    end
+end
+```
+
+### Session control and managed policy
+
+```julia
+switch_auto_tier(session, "fast")                  # session.model.switchAutoTier
+result = set_permission_mode(session, "allow-all")
+if !result.success && result.reason == PERMISSION_MODE_REFUSAL_MANAGED_POLICY
+    @warn "Permission mode is locked by managed policy"
+end
+settings = get_managed_settings(session)
+recheck_policy_helper(session)
+detach_session(session)                            # session.detach (disconnect also detaches)
+
+try
+    create_session(client; on_permission_request=approve_all)
+catch err
+    failure = policy_helper_failure(err)           # PolicyHelperFailure or nothing
+    failure === nothing || @error "Policy helper failed" failure.category failure.message
+    rethrow()
+end
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not
+  implemented: it is an experimental upstream surface that depends on the runtime's in-process
+  hosting library.
+- In-process native runtime hosting is not the default connection: this SDK keeps spawning the
+  CLI over stdio (or connecting over TCP with `cli_url`); the existing `in_process` option is
+  unchanged.
+- `send_and_wait` returns on `session.idle`; a `session.error` event is delivered to listeners
+  but does not raise.
+
 ## API Reference
 
 ### CopilotClient
@@ -88,9 +255,11 @@ client = CopilotClient(cli_url="localhost:3000")
 | `start!(client)` | Start/connect the CLI server |
 | `stop!(client)` | Stop the server and disconnect all sessions |
 | `create_session(client; kwargs...)` | Create a new conversation session |
+| `resume_session(client, session_id; kwargs...)` | Resume an existing session |
 | `get_status(client)` | Query server version and auth status |
 | `get_models(client)` | List available models |
 | `list_sessions(client)` | List known sessions on the server |
+| `clear_managed_settings_cache(client)` | Re-read managed (enterprise) settings |
 
 ### CopilotSession
 
@@ -113,6 +282,11 @@ session = create_session(client;
 | `send(session, prompt)` | Send a message (non-blocking) |
 | `send_and_wait(session, prompt; timeout=120)` | Send and block until idle |
 | `disconnect(session)` | Disconnect the session |
+| `detach_session(session)` | Detach the session (it can be resumed later) |
+| `switch_auto_tier(session, tier)` | Change the Auto routing tier |
+| `set_permission_mode(session, mode)` | Change the permission mode (`PermissionModeSetResult`) |
+| `get_managed_settings(session)` | Managed settings resolved for the session |
+| `recheck_policy_helper(session)` | Re-run the managed-settings policy helper |
 
 #### Do-block syntax
 
@@ -162,7 +336,7 @@ session = create_session(client; on_permission_request=deny_all)
 # Custom logic
 session = create_session(client;
     on_permission_request=req -> begin
-        if req.tool_name in ("read_file", "search")
+        if req.kind == "read" || req.tool_name in ("read_file", "search")
             return "allow"
         end
         return "deny"
@@ -183,6 +357,8 @@ Events are dispatched to handlers registered with `on()`:
 | `session.idle` | Session finished processing |
 | `session.error` | An error occurred |
 | `permission.requested` | Permission prompt (handled via callback) |
+| `tool.shell_output` | Shell command output chunk (`shell_output_event_data`) |
+| `external_tool.requested` | Tool call for a registered tool (answered automatically) |
 
 ### Types
 
@@ -199,6 +375,12 @@ Events are dispatched to handlers registered with `on()`:
 | `ServerStatus` | Server status info |
 | `ModelInfo` | Model metadata |
 | `SessionMetadata` | Session listing metadata |
+| `ClientInfo`, `NetworkConfig` | Client handshake identity and network callbacks |
+| `ProviderConfig`, `NamedProviderConfig`, `ProviderModelConfig` | BYOK provider connections and models |
+| `SandboxConfig`, `ImageGenerationConfig`, `AutopilotOptions` | Session option groups |
+| `ShellAuthenticationRequest`, `StoredMemory`, `GitHubTokenProviderArgs` | Callback arguments |
+| `ShellOutputEventData` | Data of a `tool.shell_output` event |
+| `PermissionModeSetResult`, `PolicyHelperFailure` | Permission mode result and Policy Helper failure |
 
 ## Recent Features (v2.4–v2.5)
 

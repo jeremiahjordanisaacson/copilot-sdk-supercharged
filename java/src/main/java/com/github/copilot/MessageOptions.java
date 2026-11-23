@@ -13,6 +13,11 @@ public class MessageOptions {
     private String prompt;
     private List<Map<String, Object>> attachments;
     private String mode;
+    /**
+     * Legacy per-message response format ({@code "text"}, {@code "image"}, {@code "json_object"}).
+     * No longer sent: protocol 4 only accepts the structured {@link #responseSchema(Map)} format.
+     * Use {@code SessionConfig.imageGeneration} for images.
+     */
     private String responseFormat;
     private Types.ImageOptions imageOptions;
     /** Custom HTTP headers to include in outbound model requests for this turn. */
@@ -25,6 +30,8 @@ public class MessageOptions {
     private String source;
     /** JSON Schema for structured output; sent as a {@code json_schema} response format when set. */
     private Map<String, Object> responseSchema;
+    /** Opaque caller-chosen identifier for this turn, echoed on the turn's events. */
+    private String clientTurnId;
 
     /**
      * Creates message options for the given prompt.
@@ -47,6 +54,7 @@ public class MessageOptions {
         this.displayPrompt = other.displayPrompt;
         this.source = other.source;
         this.responseSchema = other.responseSchema;
+        this.clientTurnId = other.clientTurnId;
     }
 
     public MessageOptions prompt(String prompt) { this.prompt = prompt; return this; }
@@ -59,6 +67,7 @@ public class MessageOptions {
     public MessageOptions displayPrompt(String displayPrompt) { this.displayPrompt = displayPrompt; return this; }
     public MessageOptions source(String source) { this.source = source; return this; }
     public MessageOptions responseSchema(Map<String, Object> schema) { this.responseSchema = schema; return this; }
+    public MessageOptions clientTurnId(String clientTurnId) { this.clientTurnId = clientTurnId; return this; }
 
     public String getPrompt() { return prompt; }
     public List<Map<String, Object>> getAttachments() { return attachments; }
@@ -70,4 +79,5 @@ public class MessageOptions {
     public String getDisplayPrompt() { return displayPrompt; }
     public String getSource() { return source; }
     public Map<String, Object> getResponseSchema() { return responseSchema; }
+    public String getClientTurnId() { return clientTurnId; }
 }

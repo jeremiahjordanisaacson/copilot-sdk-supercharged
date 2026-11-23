@@ -8,7 +8,7 @@ A native D language SDK for the [GitHub Copilot CLI](https://github.com/github/c
 
 - **D compiler** (DMD, LDC, or GDC)
 - **DUB** package manager (ships with DMD)
-- **Copilot CLI** installed and on `PATH`, or specify `cliPath` / `cliUrl`
+- **Copilot CLI 1.0.113 or newer** installed and on `PATH`, or specify `cliPath` / `COPILOT_CLI_PATH`
 
 ### Installation
 
@@ -55,6 +55,177 @@ void main()
 }
 ```
 
+## What's New in v3.0.0
+
+**SDK protocol 4.** The SDK now speaks SDK protocol 4 (`SdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. `start()` checks the version reported by `connect` / `ping` and rejects older CLIs with an `SDK protocol version mismatch` error. Existing options keep working: `SessionConfig` and `ResumeSessionConfig` still produce the same flat options, and the client translates them into the grouped protocol 4 payload (`groupSessionParams`) right before `session.create` and `session.resume`. A legacy single `provider` is translated into a named `"default"` provider automatically. Session events now arrive through `session.event` notifications, and `send` / `abort` use the `session.send` / `session.abort` requests, so runtime refusals surface as `JsonRpcError`.
+
+New client options and methods:
+
+```d
+CopilotClientOptions opts;
+opts.mode = ClientMode.codingAgent; // default; ClientMode.empty requires availableTools
+opts.clientInfo = ClientInfo("my-editor", "1.2.0", "my-extension", "0.3.0");
+opts.network.scope_ = "connection";
+opts.network.resolveProxy = (string url) => Nullable!string("PROXY proxy.example:8080; DIRECT");
+opts.network.authenticateBasic = (NetworkBasicAuthRequest req) =>
+    Nullable!NetworkBasicCredentials(NetworkBasicCredentials("user", environment["PROXY_PASSWORD"]));
+auto client = new CopilotClient(opts);
+client.clearManagedSettingsCache(); // managedSettings.clearCache
+```
+
+With `ClientMode.empty`, every session must set `availableTools`, and conservative defaults (no telemetry, in-memory OAuth and embedding storage, no repository hooks, no host git operations) are applied beneath your own values:
+
+```d
+CopilotClientOptions emptyOpts;
+emptyOpts.mode = ClientMode.empty;
+auto minimalClient = new CopilotClient(emptyOpts);
+SessionConfig minimal;
+minimal.availableTools = ["view", "grep"];
+auto minimalSession = minimalClient.createSession(minimal);
+```
+
+New session options:
+
+```d
+SessionConfig config;
+config.model = "gateway/chat";
+config.autoTier = AutoTier.balance;
+config.askUserVariant = AskUserVariant.elicitation;
+config.featureFlags = ["my_flag": true];
+config.allowedModels = ["gpt-5", "claude-sonnet-4.5"];
+config.authClientIdMetadataUrl = "https://example.com/oauth/client.json";
+config.agentDirectories = ["./agents"];
+config.hookDirectories = ["./hooks"];
+config.trustWorkingDirectory = TrustWorkingDirectory.session;
+
+SandboxConfig sandbox;
+sandbox.enabled = true;
+sandbox.allowBypass = true;
+config.sandboxConfig = sandbox;
+
+ModelLimitsOverride limits;
+limits.maxOutputTokens = 4096; // sent as limits.max_output_tokens
+config.modelCapabilities = limits.toModelCapabilities();
+
+ImageGenerationConfig images;
+images.enabled = true;
+images.saveToDisk = false;
+config.imageGeneration = images;
+
+AutopilotConfig autopilot;
+autopilot.continuationEnabled = true;
+autopilot.maxContinues = 3;
+config.autopilot = autopilot;
+```
+
+Named BYOK providers (select a registered model with `"provider/id"`), with `apiKeyCommand` for fresh keys:
+
+```d
+NamedProviderConfig gateway;
+gateway.name = "gateway";
+gateway.type = "openai";
+gateway.baseUrl = "https://models.example.com/v1";
+gateway.apiKeyCommand = "get-model-key";
+
+ProviderModelConfig chat;
+chat.provider = "gateway";
+chat.id = "chat";
+chat.wireModel = "gpt-5";
+
+SessionConfig byok;
+byok.model = "gateway/chat";
+byok.providers = [gateway];
+byok.models = [chat];
+byok.defaultProvider = "gateway";
+byok.capiEnabled = false;
+
+// The legacy single provider still works and gains apiKeyCommand:
+ProviderConfig legacy;
+legacy.type = "openai";
+legacy.baseUrl = "https://models.example.com/v1";
+legacy.apiKeyCommand = "get-model-key";
+SessionConfig legacySession;
+legacySession.model = "my-deployment";
+legacySession.provider = legacy;
+```
+
+Callbacks: GitHub token provider (mutually exclusive with `gitHubToken`), subagent lifecycle hooks, shell authentication, and memory store:
+
+```d
+config.gitHubTokenProvider = (GitHubTokenProviderArgs args) =>
+    GitHubTokenProviderResult.token(environment["GH_TOKEN"], 7200);
+config.onSubagentStart = (SubagentStartHookInput input) {
+    SubagentStartHookOutput output;
+    output.additionalContext = "Focus on " ~ input.agentName;
+    return output;
+};
+config.onSubagentStop = (SubagentStopHookInput input) => SubagentStopHookOutput.init;
+config.onShellAuthenticationRequest = (ShellAuthenticationRequest req) =>
+    req.program == "sudo"
+        ? ShellAuthenticationResponse.accept(environment["SUDO_PASSWORD"])
+        : ShellAuthenticationResponse.cancel();
+config.onStoreMemory = (StoredMemory memory) {
+    writeln("remember: ", memory.subject, " = ", memory.fact);
+};
+```
+
+Idempotent tools and message options (source, client turn id, structured output):
+
+```d
+auto lookup = defineTool("lookup", "Look up a record",
+    `{"type":"object","properties":{"id":{"type":"string"}}}`,
+    (string callId, JSONValue args) @safe => successResult(callId, "found"));
+lookup.tool.idempotent = true;
+auto session = client.createSession(config, [lookup]);
+
+MessageOptions msg;
+msg.source = MessageSource.system; // or MessageSource.agent("reviewer")
+msg.clientTurnId = "turn-42";
+msg.responseSchema = parseJSON(`{"type":"object","properties":{"colors":{"type":"array"}}}`);
+session.send("List three colors", msg);
+```
+
+Session methods, resume options, shell output events, and Policy Helper failures:
+
+```d
+session.setAutoTier(AutoTier.balance); // session.model.switchAutoTier
+session.recheckPolicyHelper();         // session.managedSettings.recheckPolicyHelper
+auto modeResult = session.setPermissionMode("yolo");
+if (!modeResult.success && !modeResult.reason.isNull
+    && modeResult.reason.get == permissionModeRefusalManagedPolicy)
+    writeln("Blocked by managed policy");
+
+session.addEventListener((SessionEvent ev) {
+    if (ev.type == SessionEventType.toolShellOutput)
+        write(ShellOutputData.fromEvent(ev).text);
+});
+session.detach(); // session.detach
+
+ResumeSessionConfig resume;
+resume.sessionId = "existing-session-id";
+resume.allowTranscriptRecovery = true;
+resume.disableResume = true; // sent as suppressResumeEvent
+auto resumed = client.resumeSession(resume);
+
+try
+{
+    client.createSession(config);
+}
+catch (JsonRpcError e)
+{
+    auto failure = e.policyHelperFailure();
+    if (!failure.isNull)
+        writeln("Policy Helper: ", failure.get.message);
+}
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection. The SDK keeps spawning the Copilot CLI over stdio; `cliUrl` (TCP) is still not implemented.
+- Server requests are answered on the reader thread one at a time, so `shellAuthentication.cancel` cannot interrupt a handler that is already running; the cancellation is acknowledged.
+- The `connect` handshake is only sent when `clientInfo` is set; otherwise the SDK uses `ping`.
+
 ## Architecture
 
 ```
@@ -84,6 +255,7 @@ The SDK spawns the Copilot CLI as a child process and communicates over JSON-RPC
 | `getStatus()` | Get CLI status and version |
 | `listModels()` | List available LLM models |
 | `getAuthStatus()` | Check authentication status |
+| `clearManagedSettingsCache()` | Clear the runtime's managed-settings cache |
 
 ### CopilotClientOptions
 
@@ -101,16 +273,25 @@ The SDK spawns the Copilot CLI as a child process and communicates over JSON-RPC
 | `env` | `string[string]` | empty | Extra environment variables |
 | `gitHubToken` | `Nullable!string` | null | GitHub auth token |
 | `useLoggedInUser` | `bool` | `true` | Use logged-in GitHub user |
-| `sessionFs` | `Nullable!string` | null | Session persistence path |
+| `sessionFs` | `Nullable!SessionFsConfig` | null | Session filesystem provider |
 | `sessionIdleTimeoutSeconds` | `Nullable!uint` | null | Idle timeout |
+| `mode` | `ClientMode` | `codingAgent` | `codingAgent` or `empty` |
+| `clientInfo` | `ClientInfo` | empty | Application identity sent on `connect` |
+| `network` | `NetworkOptions` | empty | Proxy and proxy-authentication callbacks |
+
+When `cliPath` is left at its default, the client uses `COPILOT_CLI_PATH` if it is set. A path ending in `.js` (for example `npm-loader.js`) runs under `node`.
 
 ### CopilotSession
 
 | Method | Description |
 |---|---|
-| `send(message, opts)` | Send a message (fire-and-forget) |
+| `send(message, opts)` | Send a message (`session.send`); returns once the runtime accepts it |
 | `sendAndWait(message, opts)` | Send and block until session is idle; returns collected events |
 | `abort()` | Abort the current in-flight request |
+| `disconnect()` / `detach()` | Release the session (`session.detach`); it can be resumed later |
+| `setAutoTier(tier)` | Switch the Auto routing tier |
+| `recheckPolicyHelper()` | Re-run the managed-settings Policy Helper |
+| `setPermissionMode(mode)` | Set the permission mode; returns `PermissionModeResult` |
 | `addEventListener(listener)` | Register an event listener |
 | `registerTool(ToolBinding)` | Register a tool handler |
 | `registerTools(ToolBinding[])` | Register multiple tool handlers |
@@ -131,6 +312,7 @@ The SDK spawns the Copilot CLI as a child process and communicates over JSON-RPC
 | `sessionEnd` | `session.end` |
 | `compactionStart` | `session.compaction_start` |
 | `compactionComplete` | `session.compaction_complete` |
+| `toolShellOutput` | `tool.shell_output` |
 
 ### Tool Definition
 
@@ -167,6 +349,8 @@ auto session = client.createSession(SessionConfig.init, [weatherTool]);
 | `copilot.types` | Structs: options, configs, events, responses |
 | `copilot.jsonrpc` | JSON-RPC 2.0 client with Content-Length framing |
 | `copilot.tools` | `defineTool`, `ToolBinding`, result helpers |
+| `copilot.session_params` | `groupSessionParams`: protocol 4 session payload translation |
+| `copilot.sdk_protocol_version` | `SdkProtocolVersion` (4) |
 | `copilot` | Package re-export of all public modules |
 
 ## Testing

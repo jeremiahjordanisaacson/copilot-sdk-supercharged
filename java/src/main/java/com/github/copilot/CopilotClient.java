@@ -4,6 +4,7 @@
 package com.github.copilot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.github.copilot.Types.*;
 import com.github.copilot.internal.JsonRpcClient;
 
@@ -84,6 +85,10 @@ public class CopilotClient {
     private Types.BearerTokenProvider bearerTokenProvider;
     /** Integrating application identity sent on the {@code connect} handshake, when configured. */
     private Types.ClientInfo clientInfo;
+    /** Client mode: {@code "coding-agent"} (default) or {@code "empty"}. */
+    private String mode = Types.ClientMode.CODING_AGENT;
+    /** Network callbacks registered with {@code network.setProvider} after connecting, when configured. */
+    private Types.NetworkConfig network;
     /** Session GitHub token providers keyed by opaque registration ID (served via {@code gitHubToken.getToken}). */
     private final ConcurrentHashMap<String, GitHubTokenRegistration> githubTokenProviders = new ConcurrentHashMap<>();
 
@@ -138,6 +143,8 @@ public class CopilotClient {
             if (options.getRequestHandler() != null) this.requestHandler = options.getRequestHandler();
             if (options.getBearerTokenProvider() != null) this.bearerTokenProvider = options.getBearerTokenProvider();
             if (options.getClientInfo() != null) this.clientInfo = options.getClientInfo();
+            if (options.getMode() != null) this.mode = normalizeMode(options.getMode());
+            if (options.getNetwork() != null) this.network = options.getNetwork();
         }
 
         this.isExternalServer = external;
@@ -147,6 +154,15 @@ public class CopilotClient {
         if (envCliPath != null && !envCliPath.isEmpty()) {
             this.cliPath = envCliPath;
         }
+    }
+
+    /** Validates a client mode, mapping the legacy {@code "copilot-cli"} alias to {@code "coding-agent"}. */
+    private static String normalizeMode(String mode) {
+        if (Types.ClientMode.CODING_AGENT.equals(mode) || Types.ClientMode.COPILOT_CLI.equals(mode)) {
+            return Types.ClientMode.CODING_AGENT;
+        }
+        if (Types.ClientMode.EMPTY.equals(mode)) return Types.ClientMode.EMPTY;
+        throw new IllegalArgumentException("mode must be 'coding-agent' or 'empty', got '" + mode + "'");
     }
 
     private int[] parseCliUrl(String url) {
@@ -178,6 +194,7 @@ public class CopilotClient {
             connectToServer();
             sendConnectHandshake();
             verifyProtocolVersion();
+            registerNetworkProvider();
 
             // If a session filesystem provider was configured, register it
             if (sessionFsConfig != null) {
@@ -258,14 +275,17 @@ public class CopilotClient {
     public CopilotSession createSession(SessionConfig config) throws Exception {
         if (config == null) config = new SessionConfig();
         validateGitHubTokenOptions(config);
+        validateSessionOptions(config);
         ensureConnected();
 
         String registrationId = registerGitHubTokenProvider(config.getGitHubTokenProvider(), config.getSessionId());
         Map<String, Object> payload = buildCreateSessionPayload(config, false);
         if (registrationId != null) payload.put("gitHubTokenProviderRegistrationId", registrationId);
+        Map<String, Object> wire = groupSessionParams(payload, false);
+        applyModeDefaults(wire);
         Map<String, Object> response;
         try {
-            response = rpcClient.request("session.create", payload);
+            response = rpcClient.request("session.create", wire);
         } catch (Exception e) {
             if (registrationId != null) githubTokenProviders.remove(registrationId);
             throw e;
@@ -274,10 +294,7 @@ public class CopilotClient {
         String sessionId = (String) response.get("sessionId");
         String workspacePath = (String) response.get("workspacePath");
         CopilotSession session = new CopilotSession(sessionId, rpcClient, workspacePath);
-        session.registerTools(config.getTools());
-        if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
-        if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
-        if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        registerSessionHandlers(session, config);
         commitGitHubTokenProvider(session, registrationId);
         sessions.put(sessionId, session);
         return session;
@@ -295,15 +312,18 @@ public class CopilotClient {
     public CopilotSession resumeSession(String sessionId, SessionConfig config) throws Exception {
         if (config == null) config = new SessionConfig();
         validateGitHubTokenOptions(config);
+        validateSessionOptions(config);
         ensureConnected();
 
         String registrationId = registerGitHubTokenProvider(config.getGitHubTokenProvider(), sessionId);
         Map<String, Object> payload = buildCreateSessionPayload(config, true);
         payload.put("sessionId", sessionId);
         if (registrationId != null) payload.put("gitHubTokenProviderRegistrationId", registrationId);
+        Map<String, Object> wire = groupSessionParams(payload, true);
+        applyModeDefaults(wire);
         Map<String, Object> response;
         try {
-            response = rpcClient.request("session.resume", payload);
+            response = rpcClient.request("session.resume", wire);
         } catch (Exception e) {
             if (registrationId != null) githubTokenProviders.remove(registrationId);
             throw e;
@@ -312,10 +332,7 @@ public class CopilotClient {
         String resumedId = (String) response.get("sessionId");
         String workspacePath = (String) response.get("workspacePath");
         CopilotSession session = new CopilotSession(resumedId, rpcClient, workspacePath);
-        session.registerTools(config.getTools());
-        if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
-        if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
-        if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        registerSessionHandlers(session, config);
         commitGitHubTokenProvider(session, registrationId);
         sessions.put(resumedId, session);
         return session;
@@ -334,7 +351,17 @@ public class CopilotClient {
         Map<String, Object> result = rpcClient.request("ping", Map.of("message", message != null ? message : ""));
         PingResponse resp = new PingResponse();
         resp.message = (String) result.get("message");
-        resp.timestamp = ((Number) result.get("timestamp")).longValue();
+        // Protocol 4 runtimes report an ISO-8601 timestamp; older ones reported epoch milliseconds.
+        Object timestamp = result.get("timestamp");
+        if (timestamp instanceof Number) {
+            resp.timestamp = ((Number) timestamp).longValue();
+        } else if (timestamp instanceof String) {
+            try {
+                resp.timestamp = java.time.Instant.parse((String) timestamp).toEpochMilli();
+            } catch (java.time.format.DateTimeParseException ignored) {
+                // Leave the timestamp unset when the runtime reports an unexpected format.
+            }
+        }
         if (result.containsKey("protocolVersion")) {
             resp.protocolVersion = ((Number) result.get("protocolVersion")).intValue();
         }
@@ -487,6 +514,42 @@ public class CopilotClient {
         }
     }
 
+    private void validateSessionOptions(SessionConfig config) {
+        if (Types.ClientMode.EMPTY.equals(mode) && config.getAvailableTools() == null) {
+            throw new IllegalArgumentException("CopilotClient is in mode 'empty' but the session config did not specify "
+                + "availableTools. Empty mode requires every session to explicitly opt into the tools it wants.");
+        }
+        Types.MemoryConfiguration memory = config.getMemory();
+        if (memory != null && memory.storeMemory != null && !Boolean.TRUE.equals(memory.enabled)) {
+            throw new IllegalArgumentException("memory.storeMemory requires memory.enabled to be true.");
+        }
+    }
+
+    /** Registers the session's local handlers (tools, permission, input, hooks, shell authentication, memory store). */
+    private static void registerSessionHandlers(CopilotSession session, SessionConfig config) {
+        session.registerTools(config.getTools());
+        if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
+        if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
+        if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        if (config.getOnShellAuthenticationRequest() != null) {
+            session.registerShellAuthenticationHandler(config.getOnShellAuthenticationRequest());
+        }
+        if (config.getMemory() != null && config.getMemory().storeMemory != null) {
+            session.registerMemoryStore(config.getMemory().storeMemory);
+        }
+    }
+
+    /** Registers the configured network callbacks with {@code network.setProvider} (no-op without callbacks). */
+    private void registerNetworkProvider() throws Exception {
+        if (network == null || !network.hasCallbacks()) return;
+        Map<String, Object> params = new HashMap<>();
+        if (network.scope != null) params.put("scope", network.scope);
+        if (network.resolveProxy != null) params.put("resolveProxy", new HashMap<String, Object>());
+        if (network.authenticateNegotiate != null) params.put("authenticateNegotiate", new HashMap<String, Object>());
+        if (network.authenticateBasic != null) params.put("authenticateBasic", new HashMap<String, Object>());
+        rpcClient.request("network.setProvider", params);
+    }
+
     private String registerGitHubTokenProvider(GitHubTokenProvider provider, String sessionId) {
         if (provider == null) return null;
         String registrationId = UUID.randomUUID().toString();
@@ -558,6 +621,7 @@ public class CopilotClient {
                 if (tool.description != null) def.put("description", tool.description);
                 if (tool.parameters != null) def.put("parameters", tool.parameters);
                 if (tool.defer != null) def.put("defer", tool.defer);
+                if (tool.idempotent != null) def.put("idempotent", tool.idempotent);
                 toolDefs.add(def);
             }
             payload.put("tools", toolDefs);
@@ -565,7 +629,8 @@ public class CopilotClient {
         if (config.getSystemMessage() != null) payload.put("systemMessage", config.getSystemMessage());
         if (config.getAvailableTools() != null) payload.put("availableTools", config.getAvailableTools());
         if (config.getExcludedTools() != null) payload.put("excludedTools", config.getExcludedTools());
-        if (config.getProvider() != null) payload.put("provider", config.getProvider());
+        // Legacy single BYOK provider: translated to inference.providers/models by groupSessionParams.
+        if (config.getProvider() != null) payload.put("provider", MAPPER.convertValue(config.getProvider(), Map.class));
         if (config.getOnPermissionRequest() != null) payload.put("requestPermission", true);
         if (config.getOnUserInputRequest() != null) payload.put("requestUserInput", true);
         if (config.getHooks() != null && config.getHooks().hasAnyHook()) {
@@ -637,16 +702,18 @@ public class CopilotClient {
         if (config.getCanvasProvider() != null) payload.put("canvasProvider", config.getCanvasProvider());
         if (config.getCustomAgentsLocalOnly() != null) payload.put("customAgentsLocalOnly", config.getCustomAgentsLocalOnly());
         if (config.getToolSearch() != null) payload.put("toolSearch", config.getToolSearch());
-        if (config.getExperimentalMode() != null) payload.put("experimentalMode", config.getExperimentalMode());
+        if (config.getExperimentalMode() != null) payload.put("enableExperimentalMode", config.getExperimentalMode());
         if (config.getContentExclusion() != null) payload.put("contentExclusion", config.getContentExclusion());
+        if (config.getInstructionDirectories() != null) payload.put("instructionDirectories", config.getInstructionDirectories());
         // MCP OAuth host token handler: signal to the runtime that a handler is registered.
         if (config.getOnMcpAuthRequest() != null) payload.put("mcpAuthHandler", true);
 
         // --- v2.6.0 upstream-sync session options ---
-        // CAPI provider options: the runtime only accepts autoTier/enableWebSocketResponses under "capi".
+        // CAPI provider options (github.capi): explicit CapiConfig members win over the flat setters.
         Map<String, Object> capi = new HashMap<>();
         if (config.getAutoTier() != null) capi.put("autoTier", config.getAutoTier());
         if (config.getEnableWebSocketResponses() != null) capi.put("enableWebSocketResponses", config.getEnableWebSocketResponses());
+        if (config.getCapi() != null) capi.putAll(config.getCapi().toMap());
         if (!capi.isEmpty()) payload.put("capi", capi);
         if (config.getAskUserVariant() != null) payload.put("askUserVariant", config.getAskUserVariant());
         if (config.getSandboxConfig() != null) payload.put("sandboxConfig", config.getSandboxConfig().toMap());
@@ -660,8 +727,30 @@ public class CopilotClient {
         if (config.getEnforceManagedModelDefaults() != null) payload.put("enforceManagedModelDefaults", config.getEnforceManagedModelDefaults());
         if (config.getImageGeneration() != null) payload.put("imageGeneration", config.getImageGeneration().toMap());
         if (config.getAutopilot() != null) payload.put("autopilot", config.getAutopilot().toMap());
+
+        // --- v3.0.0 session options (SDK protocol 4) ---
+        if (config.getProviders() != null) {
+            List<Map<String, Object>> providerDefs = new ArrayList<>();
+            for (Types.NamedProviderConfig provider : config.getProviders()) providerDefs.add(provider.toMap());
+            payload.put("providers", providerDefs);
+        }
+        if (config.getModels() != null) {
+            List<Map<String, Object>> modelDefs = new ArrayList<>();
+            for (Types.ProviderModelConfig model : config.getModels()) modelDefs.add(model.toMap());
+            payload.put("models", modelDefs);
+        }
+        if (config.getDefaultProvider() != null) {
+            payload.put("defaultProvider", config.getDefaultProvider());
+        } else if (resume && config.isDefaultProviderSet()) {
+            payload.put("defaultProvider", EXPLICIT_NULL);
+        }
+        if (config.getOnShellAuthenticationRequest() != null) payload.put("requestShellAuthentication", true);
+        if (config.getMemory() != null && config.getMemory().storeMemory != null) payload.put("hasMemoryStore", true);
+        if (config.getPermissionMode() != null) payload.put("permissionMode", config.getPermissionMode());
         if (resume) {
             if (config.getAllowTranscriptRecovery() != null) payload.put("allowTranscriptRecovery", config.getAllowTranscriptRecovery());
+            if (config.getSuppressResumeEvent() != null) payload.put("suppressResumeEvent", config.getSuppressResumeEvent());
+            if (config.getContinuePendingWork() != null) payload.put("continuePendingWork", config.getContinuePendingWork());
         } else {
             if (config.getName() != null) payload.put("name", config.getName());
             if (config.getTrustWorkingDirectory() != null) payload.put("trustWorkingDirectory", config.getTrustWorkingDirectory());
@@ -670,22 +759,294 @@ public class CopilotClient {
         return payload;
     }
 
+    // --- SDK protocol 4: grouped session payloads ---
+
+    /** Serializes as JSON {@code null}: an explicit clear (for example of a default provider) that grouping keeps. */
+    static final Object EXPLICIT_NULL = NullNode.getInstance();
+
+    /** Flat keys that stay at the root of protocol 4 create/resume payloads. */
+    private static final Set<String> ROOT_SESSION_KEYS = Set.of(
+        "sessionId", "model", "name", "clientName", "workingDirectory", "configDirectory",
+        "enableConfigDiscovery", "systemMessage", "diagnostics", "lifecycleDiagnostics", "cloud",
+        "traceparent", "tracestate", "suppressResumeEvent", "continuePendingWork",
+        "allowTranscriptRecovery", "requestedEnvironmentVariables");
+
+    /** Flat keys accepted only by {@code session.create}; dropped on resume. */
+    private static final Set<String> CREATE_ONLY_SESSION_KEYS = Set.of(
+        "name", "cloud", "trustWorkingDirectory", "refreshCustomInstructions");
+
+    /** Flat keys accepted only by {@code session.resume}; dropped on create. */
+    private static final Set<String> RESUME_ONLY_SESSION_KEYS = Set.of(
+        "suppressResumeEvent", "continuePendingWork", "allowTranscriptRecovery",
+        "requestedEnvironmentVariables", "openCanvases");
+
+    /** Option groups of protocol 4 create/resume payloads. */
+    private static final Set<String> SESSION_OPTION_GROUPS = Set.of(
+        "inference", "tools", "permissions", "interaction", "events", "agents", "skills", "mcp",
+        "github", "filesystem", "execution", "instructions", "hooks", "git", "state", "plugins",
+        "canvases", "extensions", "experiments", "policy");
+
+    /** Legacy provider fields that describe the model rather than the connection. */
+    private static final Set<String> PROVIDER_MODEL_FIELDS = Set.of(
+        "modelId", "wireModel", "maxPromptTokens", "maxContextWindowTokens", "maxOutputTokens", "capabilities");
+
+    /** Flat keys mapped to their protocol 4 {@code {group, member}} location. */
+    private static final Map<String, String[]> GROUPED_SESSION_KEYS = new HashMap<>();
+
+    static {
+        String[][] table = {
+            {"reasoningEffort", "inference", "reasoningEffort"},
+            {"reasoningSummary", "inference", "reasoningSummary"},
+            {"contextTier", "inference", "contextTier"},
+            {"allowMultipleToolCalls", "inference", "allowMultipleToolCalls"},
+            {"enableCitations", "inference", "enableCitations"},
+            {"modelCapabilities", "inference", "capabilities"},
+            {"verbosity", "inference", "verbosity"},
+            {"providers", "inference", "providers"},
+            {"models", "inference", "models"},
+            {"defaultProvider", "inference", "defaultProvider"},
+            {"tools", "tools", "definitions"},
+            {"availableTools", "tools", "availableTools"},
+            {"excludedTools", "tools", "excludedTools"},
+            {"toolSearch", "tools", "search"},
+            {"largeOutput", "tools", "largeOutput"},
+            {"imageGeneration", "tools", "imageGeneration"},
+            {"manageScheduleEnabled", "tools", "manageScheduleEnabled"},
+            {"webSearch", "tools", "webSearch"},
+            {"shell", "tools", "shell"},
+            {"maxInlineBinaryBytes", "tools", "maxInlineBinaryBytes"},
+            {"requestPermission", "permissions", "request"},
+            {"sandboxConfig", "permissions", "sandbox"},
+            {"sandbox", "permissions", "sandbox"},
+            {"permissionMode", "permissions", "mode"},
+            {"sandboxConfigSource", "permissions", "sandboxSource"},
+            {"commands", "interaction", "commands"},
+            {"askUserVariant", "interaction", "askUserVariant"},
+            {"requestUserInput", "interaction", "requestUserInput"},
+            {"requestElicitation", "interaction", "requestElicitation"},
+            {"requestShellAuthentication", "interaction", "requestShellAuthentication"},
+            {"requestExitPlanMode", "interaction", "requestExitPlanMode"},
+            {"requestAutoModeSwitch", "interaction", "requestAutoModeSwitch"},
+            {"requestAutoModeRecovery", "interaction", "requestAutoModeRecovery"},
+            {"streaming", "events", "streaming"},
+            {"includeSubAgentStreamingEvents", "events", "includeSubAgentStreamingEvents"},
+            {"customAgents", "agents", "definitions"},
+            {"defaultAgent", "agents", "default"},
+            {"agent", "agents", "selected"},
+            {"includedBuiltinAgents", "agents", "includedBuiltinAgents"},
+            {"excludedBuiltinAgents", "agents", "excludedBuiltinAgents"},
+            {"customAgentsLocalOnly", "agents", "localDiscoveryOnly"},
+            {"agentDirectories", "agents", "directories"},
+            {"skillDirectories", "skills", "directories"},
+            {"enableSkills", "skills", "enabled"},
+            {"includedBuiltinSkills", "skills", "includedBuiltinSkills"},
+            {"disabledSkills", "skills", "disabledSkills"},
+            {"hasSkillProvider", "skills", "hasProvider"},
+            {"ignoredSkillsLocations", "skills", "ignoredLocations"},
+            {"mcpServers", "mcp", "servers"},
+            {"disabledMcpServers", "mcp", "disabledServers"},
+            {"requestMcpApps", "mcp", "enableApps"},
+            {"enableMcpApps", "mcp", "enableApps"},
+            {"mcpOAuthTokenStorage", "mcp", "oauthTokenStorage"},
+            {"authClientIdMetadataUrl", "mcp", "authClientIdMetadataUrl"},
+            {"envValueMode", "mcp", "envValueMode"},
+            {"managedMcpServers", "mcp", "managedServers"},
+            {"allowAllMcpServerInstructions", "mcp", "allowAllServerInstructions"},
+            {"gitHubToken", "github", "token"},
+            {"gitHubTokenProviderRegistrationId", "github", "tokenProviderRegistrationId"},
+            {"githubMcpToolConfig", "github", "mcp"},
+            {"capi", "github", "capi"},
+            {"enableSessionTelemetry", "github", "telemetryEnabled"},
+            {"enableManagedSettings", "github", "fetchManagedSettings"},
+            {"interactiveUser", "github", "interactiveUser"},
+            {"enableGitHubTelemetryForwarding", "github", "telemetryForwarding"},
+            {"authInfo", "github", "authInfo"},
+            {"copilotUrl", "github", "copilotUrl"},
+            {"additionalDirectories", "filesystem", "additionalDirectories"},
+            {"enableFileChangeTracking", "filesystem", "trackFileChanges"},
+            {"trustWorkingDirectory", "filesystem", "trustWorkingDirectory"},
+            {"sessionLimits", "execution", "limits"},
+            {"autopilot", "execution", "autopilot"},
+            {"autopilotContinuation", "execution", "autopilotContinuation"},
+            {"instructionDirectories", "instructions", "directories"},
+            {"organizationCustomInstructions", "instructions", "organizationText"},
+            {"enableOnDemandInstructionDiscovery", "instructions", "onDemandDiscovery"},
+            {"skipCustomInstructions", "instructions", "skipCustomInstructions"},
+            {"refreshCustomInstructions", "instructions", "refreshCustomInstructions"},
+            {"hooks", "hooks", "hasHandlers"},
+            {"hookDirectories", "hooks", "directories"},
+            {"enableFileHooks", "hooks", "enableRepositoryHooks"},
+            {"coauthorEnabled", "git", "coauthorEnabled"},
+            {"enableHostGitOperations", "git", "enableHostGitOperations"},
+            {"infiniteSessions", "state", "infiniteSessions"},
+            {"memory", "state", "memory"},
+            {"hasMemoryStore", "state", "hasMemoryStore"},
+            {"enableSessionStore", "state", "enableCrossSessionStore"},
+            {"skipEmbeddingRetrieval", "state", "skipEmbeddingRetrieval"},
+            {"embeddingCacheStorage", "state", "embeddingCacheStorage"},
+            {"pluginDirectories", "plugins", "directories"},
+            {"installedPlugins", "plugins", "installed"},
+            {"canvases", "canvases", "definitions"},
+            {"canvasProvider", "canvases", "provider"},
+            {"requestCanvasRenderer", "canvases", "requestRenderer"},
+            {"openCanvases", "canvases", "open"},
+            {"requestExtensions", "extensions", "enabled"},
+            {"extensionSdkPath", "extensions", "sdkPath"},
+            {"extensionInfo", "extensions", "identity"},
+            {"enableExperimentalMode", "experiments", "enableExperimentalMode"},
+            {"isExperimentalMode", "experiments", "enableExperimentalMode"},
+            {"featureFlags", "experiments", "flags"},
+            {"expAssignments", "experiments", "assignments"},
+            {"featureFlagConfiguration", "experiments", "configuration"},
+            {"allowedModels", "policy", "allowedModels"},
+            {"managedSettings", "policy", "managedSettings"},
+            {"excludedManagedSettings", "policy", "excludedManagedSettings"},
+            {"enforceManagedModelDefaults", "policy", "enforceManagedModelDefaults"},
+        };
+        for (String[] row : table) GROUPED_SESSION_KEYS.put(row[0], new String[]{row[1], row[2]});
+    }
+
+    /**
+     * Converts the flat {@code session.create}/{@code session.resume} payload this SDK builds into
+     * the SDK protocol 4 grouped payload. Root keys stay at the top level, known flat keys move to
+     * their option group, unknown keys pass through unchanged, null values are skipped, empty groups
+     * are omitted, and members of an already-grouped object win over flat keys. A legacy single
+     * {@code provider} becomes the named {@code "default"} connection.
+     *
+     * @param flat the flat payload
+     * @param resume whether the payload is for {@code session.resume}
+     * @return the grouped payload
+     */
+    static Map<String, Object> groupSessionParams(Map<String, Object> flat, boolean resume) {
+        Map<String, Object> root = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> groups = new LinkedHashMap<>();
+        // Already-grouped objects first, so their members win over flat keys.
+        for (Map.Entry<String, Object> entry : flat.entrySet()) {
+            if (SESSION_OPTION_GROUPS.contains(entry.getKey()) && entry.getValue() instanceof Map) {
+                Map<String, Object> group = groups.computeIfAbsent(entry.getKey(), k -> new LinkedHashMap<>());
+                for (Map.Entry<?, ?> member : ((Map<?, ?>) entry.getValue()).entrySet()) {
+                    if (member.getValue() != null) group.put(String.valueOf(member.getKey()), member.getValue());
+                }
+            }
+        }
+        Object legacyProvider = null;
+        for (Map.Entry<String, Object> entry : flat.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            if (value == null || (SESSION_OPTION_GROUPS.contains(key) && value instanceof Map)) continue;
+            if ("configDir".equals(key)) key = "configDirectory";
+            else if ("disableResume".equals(key)) key = "suppressResumeEvent";
+            if (resume ? CREATE_ONLY_SESSION_KEYS.contains(key) : RESUME_ONLY_SESSION_KEYS.contains(key)) continue;
+            if ("provider".equals(key)) {
+                legacyProvider = value;
+                continue;
+            }
+            String[] path = ROOT_SESSION_KEYS.contains(key) ? null : GROUPED_SESSION_KEYS.get(key);
+            if (path == null) {
+                root.putIfAbsent(key, value);
+            } else {
+                groups.computeIfAbsent(path[0], k -> new LinkedHashMap<>()).putIfAbsent(path[1], value);
+            }
+        }
+        Map<String, Object> mcp = groups.get("mcp");
+        if (mcp != null && mcp.containsKey("servers")) mcp.putIfAbsent("envValueMode", "direct");
+        if (legacyProvider instanceof Map) translateLegacyProvider((Map<?, ?>) legacyProvider, root.get("model"), groups);
+        for (Map.Entry<String, Map<String, Object>> group : groups.entrySet()) {
+            if (!group.getValue().isEmpty()) root.put(group.getKey(), group.getValue());
+        }
+        return root;
+    }
+
+    /**
+     * Translates a legacy single BYOK {@code provider} into the named {@code "default"} connection
+     * (plus a model definition when model-specific fields are present), selects it as the default
+     * provider, and disables Copilot API models as v1 BYOK did. Explicit {@code providers},
+     * {@code defaultProvider}, or {@code capi.enabled} win: the legacy provider is then dropped.
+     */
+    @SuppressWarnings("unchecked")
+    private static void translateLegacyProvider(Map<?, ?> provider, Object model, Map<String, Map<String, Object>> groups) {
+        Map<String, Object> inference = groups.computeIfAbsent("inference", k -> new LinkedHashMap<>());
+        Map<String, Object> github = groups.computeIfAbsent("github", k -> new LinkedHashMap<>());
+        Object capi = github.get("capi");
+        if (inference.containsKey("providers") || inference.containsKey("defaultProvider")
+            || (capi instanceof Map && ((Map<?, ?>) capi).containsKey("enabled"))) {
+            return;
+        }
+        Map<String, Object> connection = new LinkedHashMap<>();
+        connection.put("name", "default");
+        Map<String, Object> modelFields = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> field : provider.entrySet()) {
+            String name = String.valueOf(field.getKey());
+            if (field.getValue() == null || "name".equals(name)) continue;
+            if (PROVIDER_MODEL_FIELDS.contains(name)) {
+                modelFields.put(name, field.getValue());
+            } else {
+                connection.put(name, field.getValue());
+            }
+        }
+        inference.put("providers", List.of(connection));
+        inference.put("defaultProvider", "default");
+        if (!modelFields.isEmpty() && model != null && !inference.containsKey("models")) {
+            Map<String, Object> definition = new LinkedHashMap<>();
+            definition.put("provider", "default");
+            definition.put("id", model);
+            definition.putAll(modelFields);
+            inference.put("models", List.of(definition));
+        }
+        Map<String, Object> capiWire = new LinkedHashMap<>();
+        if (capi instanceof Map) capiWire.putAll((Map<String, Object>) capi);
+        capiWire.put("enabled", false);
+        github.put("capi", capiWire);
+    }
+
+    /**
+     * Empty mode: applies safe runtime defaults under the caller's values (caller values win).
+     * No-op in the default {@code "coding-agent"} mode.
+     */
+    private void applyModeDefaults(Map<String, Object> wire) {
+        if (!Types.ClientMode.EMPTY.equals(mode)) return;
+        putGroupDefault(wire, "experiments", "enableExperimentalMode", false);
+        putGroupDefault(wire, "github", "telemetryEnabled", false);
+        putGroupDefault(wire, "mcp", "oauthTokenStorage", "in-memory");
+        putGroupDefault(wire, "state", "skipEmbeddingRetrieval", true);
+        putGroupDefault(wire, "state", "embeddingCacheStorage", "in-memory");
+        putGroupDefault(wire, "state", "enableCrossSessionStore", false);
+        putGroupDefault(wire, "state", "memory", Map.of("enabled", false));
+        putGroupDefault(wire, "instructions", "onDemandDiscovery", false);
+        putGroupDefault(wire, "hooks", "enableRepositoryHooks", false);
+        putGroupDefault(wire, "git", "enableHostGitOperations", false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void putGroupDefault(Map<String, Object> wire, String group, String member, Object value) {
+        Object existing = wire.get(group);
+        Map<String, Object> target;
+        if (existing instanceof Map) {
+            target = (Map<String, Object>) existing;
+        } else {
+            target = new LinkedHashMap<>();
+            wire.put(group, target);
+        }
+        target.putIfAbsent(member, value);
+    }
+
     /**
      * Builds the {@code session.send} JSON-RPC payload, including the upstream-sync
-     * message options (agentMode, displayPrompt, requestHeaders, source, responseSchema).
+     * message options (agentMode, displayPrompt, requestHeaders, source, clientTurnId, responseSchema).
+     * The legacy string {@code responseFormat} is not sent: protocol 4 only accepts the structured format.
      */
     static Map<String, Object> buildSendPayload(String sessionId, MessageOptions options) {
         Map<String, Object> params = new HashMap<>();
         params.put("sessionId", sessionId);
         params.put("prompt", options.getPrompt());
         if (options.getSource() != null) params.put("source", options.getSource());
+        if (options.getClientTurnId() != null) params.put("clientTurnId", options.getClientTurnId());
         if (options.getAttachments() != null) params.put("attachments", options.getAttachments());
         if (options.getMode() != null) params.put("mode", options.getMode());
         if (options.getAgentMode() != null) params.put("agentMode", options.getAgentMode());
         if (options.getDisplayPrompt() != null) params.put("displayPrompt", options.getDisplayPrompt());
         if (options.getRequestHeaders() != null) params.put("requestHeaders", options.getRequestHeaders());
         if (options.getResponseSchema() != null) {
-            // Structured output takes the responseFormat slot over the legacy string format.
             Map<String, Object> jsonSchema = new HashMap<>();
             jsonSchema.put("name", "response");
             jsonSchema.put("strict", true);
@@ -694,8 +1055,6 @@ public class CopilotClient {
             responseFormat.put("type", "json_schema");
             responseFormat.put("jsonSchema", jsonSchema);
             params.put("responseFormat", responseFormat);
-        } else if (options.getResponseFormat() != null) {
-            params.put("responseFormat", options.getResponseFormat());
         }
         if (options.getImageOptions() != null) params.put("imageOptions", options.getImageOptions());
         return params;
@@ -735,12 +1094,13 @@ public class CopilotClient {
         int expected = SdkProtocolVersion.get();
         PingResponse ping = ping(null);
         if (ping.protocolVersion == null) {
-            throw new RuntimeException("SDK protocol version mismatch: SDK expects version " + expected
-                + ", but server does not report a protocol version.");
+            throw new RuntimeException("SDK protocol version mismatch: SDK supports version " + expected
+                + ", but server does not report a protocol version. Please update your server to ensure compatibility.");
         }
         if (ping.protocolVersion != expected) {
-            throw new RuntimeException("SDK protocol version mismatch: SDK expects version " + expected
-                + ", but server reports version " + ping.protocolVersion + ".");
+            throw new RuntimeException("SDK protocol version mismatch: SDK supports version " + expected
+                + ", but server reports version " + ping.protocolVersion
+                + ". Please update your SDK or server to ensure compatibility.");
         }
     }
 
@@ -870,6 +1230,86 @@ public class CopilotClient {
         rpcClient.setRequestHandler("userInput.request", params -> handleUserInputRequest(params));
         rpcClient.setRequestHandler("hooks.invoke", params -> handleHooksInvoke(params));
         rpcClient.setRequestHandler("gitHubToken.getToken", params -> handleGitHubTokenRequest(params));
+        rpcClient.setRequestHandler("shellAuthentication.request", params -> handleShellAuthenticationRequest(params));
+        rpcClient.setRequestHandler("shellAuthentication.cancel", params -> handleShellAuthenticationCancel(params));
+        rpcClient.setRequestHandler("memoryStore.store", params -> handleMemoryStoreRequest(params));
+        setupNetworkHandlers();
+    }
+
+    /** Answers {@code shellAuthentication.request} with the owning session's handler ({@code cancel} when unavailable). */
+    private Map<String, Object> handleShellAuthenticationRequest(Map<String, Object> params) {
+        Object sessionId = params.get("sessionId");
+        CopilotSession session = sessionId instanceof String ? sessions.get((String) sessionId) : null;
+        if (session == null) {
+            Map<String, Object> cancel = new HashMap<>();
+            cancel.put("action", "cancel");
+            return cancel;
+        }
+        return session.handleShellAuthenticationRequest(params);
+    }
+
+    /** Cancels a pending shell authentication prompt; always answers {@code {}}. */
+    private Map<String, Object> handleShellAuthenticationCancel(Map<String, Object> params) {
+        Object sessionId = params.get("sessionId");
+        Object requestId = params.get("requestId");
+        CopilotSession session = sessionId instanceof String ? sessions.get((String) sessionId) : null;
+        if (session != null && requestId instanceof String) session.cancelShellAuthentication((String) requestId);
+        return new HashMap<>();
+    }
+
+    /** Stores a memory through the owning session's callback and answers with a JSON {@code null} result. */
+    private Map<String, Object> handleMemoryStoreRequest(Map<String, Object> params) throws Exception {
+        Object sessionId = params.get("sessionId");
+        CopilotSession session = sessionId instanceof String ? sessions.get((String) sessionId) : null;
+        if (session == null) throw new IllegalStateException("Memory store owner is unavailable");
+        session.handleMemoryStore(params);
+        return JsonRpcClient.NULL_RESULT;
+    }
+
+    /** Serves the configured network callbacks. Tokens and passwords are never logged. */
+    private void setupNetworkHandlers() {
+        Types.NetworkConfig config = network;
+        if (config == null) return;
+        if (config.resolveProxy != null) {
+            Types.ProxyResolver resolver = config.resolveProxy;
+            rpcClient.setRequestHandler("network.resolveProxy", params -> {
+                Object url = params.get("url");
+                String proxy = resolver.resolveProxy(new Types.NetworkResolveProxyRequest(url instanceof String ? (String) url : ""));
+                Map<String, Object> result = new HashMap<>();
+                if (proxy != null) result.put("proxy", proxy);
+                return result;
+            });
+        }
+        if (config.authenticateNegotiate != null) {
+            Types.NegotiateAuthenticator authenticator = config.authenticateNegotiate;
+            rpcClient.setRequestHandler("network.authenticateNegotiate", params -> {
+                Object spn = params.get("spn");
+                String token = authenticator.authenticateNegotiate(
+                    new Types.NetworkAuthenticateNegotiateRequest(spn instanceof String ? (String) spn : ""));
+                Map<String, Object> result = new HashMap<>();
+                if (token != null) result.put("token", token);
+                return result;
+            });
+        }
+        if (config.authenticateBasic != null) {
+            Types.BasicAuthenticator authenticator = config.authenticateBasic;
+            rpcClient.setRequestHandler("network.authenticateBasic", params -> {
+                Types.NetworkAuthenticateBasicRequest request = new Types.NetworkAuthenticateBasicRequest();
+                Object proxy = params.get("proxy");
+                Object realm = params.get("realm");
+                request.proxy = proxy instanceof String ? (String) proxy : "";
+                request.realm = realm instanceof String ? (String) realm : null;
+                request.previousRejected = Boolean.TRUE.equals(params.get("previousRejected"));
+                Types.NetworkBasicCredentials credentials = authenticator.authenticateBasic(request);
+                // Send only the credential fields.
+                Map<String, Object> result = new HashMap<>();
+                if (credentials != null) {
+                    if (credentials.username != null) result.put("username", credentials.username);
+                    if (credentials.password != null) result.put("password", credentials.password);
+                }
+                return result;
+            });
+        }
     }
 
     @SuppressWarnings("unchecked")

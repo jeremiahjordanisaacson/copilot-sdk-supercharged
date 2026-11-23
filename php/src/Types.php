@@ -163,12 +163,15 @@ class Tool
      * @param string|null $description Tool description
      * @param array|null $parameters JSON Schema parameters
      * @param callable $handler Function(mixed $args, ToolInvocation $invocation): mixed
+     * @param bool|null $idempotent True when repeating a call with the same arguments has no
+     *        additional effect, so the runtime may safely retry it
      */
     public function __construct(
         public readonly string $name,
         public readonly ?string $description = null,
         public readonly ?array $parameters = null,
         public /* readonly */ $handler = null,
+        public readonly ?bool $idempotent = null,
     ) {}
 
     public function toServerFormat(): array
@@ -179,6 +182,9 @@ class Tool
         }
         if ($this->parameters !== null) {
             $result['parameters'] = $this->parameters;
+        }
+        if ($this->idempotent !== null) {
+            $result['idempotent'] = $this->idempotent;
         }
         return $result;
     }
@@ -829,6 +835,23 @@ final class WireFormat
         }
         return $value;
     }
+
+    /**
+     * Unwrap a typed config object (toArray()), a plain object or a wire array into an
+     * array; null becomes an empty array.
+     *
+     * @return array<string,mixed>
+     */
+    public static function toArray(mixed $value): array
+    {
+        if (is_object($value) && method_exists($value, 'toArray')) {
+            $value = $value->toArray();
+        }
+        if ($value instanceof \stdClass) {
+            return get_object_vars($value);
+        }
+        return is_array($value) ? $value : [];
+    }
 }
 
 /**
@@ -1121,6 +1144,422 @@ class ModelLimitsOverride
 }
 
 // ============================================================================
+// v3.0.0 feature types (SDK protocol 4, parity with the Microsoft Copilot SDK 2.0)
+// ============================================================================
+
+/**
+ * Client mode (CopilotClientOptions::$mode). "coding-agent" (the default) keeps the
+ * CLI-like coding tools and defaults. "empty" requires every session to set
+ * $availableTools and applies conservative session defaults (no telemetry, in-memory
+ * OAuth and embedding storage, no cross-session store or memory, no on-demand
+ * instruction discovery, repository hooks or host git operations).
+ */
+final class ClientMode
+{
+    public const CODING_AGENT = 'coding-agent';
+    public const EMPTY = 'empty';
+    /** Legacy alias of CODING_AGENT. */
+    public const COPILOT_CLI = 'copilot-cli';
+}
+
+/**
+ * A named BYOK provider connection (SessionConfig::$providers). Select a registered
+ * model with "provider/id" (see ProviderModelConfig) or set $defaultProvider to route
+ * unqualified model names through this connection.
+ */
+class NamedProviderConfig
+{
+    /**
+     * @param array<string,string>|null $headers Extra HTTP headers sent to the provider
+     */
+    public function __construct(
+        public readonly string $name,
+        public readonly ?string $baseUrl = null,
+        public readonly ?string $type = null,
+        public readonly ?string $apiKey = null,
+        public readonly ?string $apiKeyCommand = null,
+        public readonly ?string $bearerToken = null,
+        public readonly ?string $wireApi = null,
+        public readonly ?string $transport = null,
+        public readonly ?AzureProviderOptions $azure = null,
+        public readonly ?array $headers = null,
+        public readonly ?string $modelProvider = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['name' => $this->name];
+        $fields = [
+            'type' => $this->type,
+            'baseUrl' => $this->baseUrl,
+            'apiKey' => $this->apiKey,
+            'apiKeyCommand' => $this->apiKeyCommand,
+            'bearerToken' => $this->bearerToken,
+            'wireApi' => $this->wireApi,
+            'transport' => $this->transport,
+            'modelProvider' => $this->modelProvider,
+        ];
+        foreach ($fields as $key => $value) {
+            if ($value !== null) {
+                $result[$key] = $value;
+            }
+        }
+        if ($this->azure !== null && $this->azure->toArray() !== []) {
+            $result['azure'] = $this->azure->toArray();
+        }
+        if ($this->headers !== null) {
+            $result['headers'] = (object) $this->headers;
+        }
+        return $result;
+    }
+}
+
+/**
+ * A model registered under a named provider (SessionConfig::$models). The canonical
+ * selection id is "provider/id"; $modelId is the known base model and $wireModel the
+ * name sent to the provider API (both default to $id).
+ */
+class ProviderModelConfig
+{
+    /**
+     * @param array<string,mixed>|null $capabilities Capability overrides (limits use snake_case keys)
+     */
+    public function __construct(
+        public readonly string $provider,
+        public readonly string $id,
+        public readonly ?string $modelId = null,
+        public readonly ?string $wireModel = null,
+        public readonly ?string $name = null,
+        public readonly ?int $maxPromptTokens = null,
+        public readonly ?int $maxContextWindowTokens = null,
+        public readonly ?int $maxOutputTokens = null,
+        public readonly ?array $capabilities = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['provider' => $this->provider, 'id' => $this->id];
+        $fields = [
+            'modelId' => $this->modelId,
+            'wireModel' => $this->wireModel,
+            'name' => $this->name,
+            'maxPromptTokens' => $this->maxPromptTokens,
+            'maxContextWindowTokens' => $this->maxContextWindowTokens,
+            'maxOutputTokens' => $this->maxOutputTokens,
+        ];
+        foreach ($fields as $key => $value) {
+            if ($value !== null) {
+                $result[$key] = $value;
+            }
+        }
+        if ($this->capabilities !== null) {
+            $result['capabilities'] = (object) $this->capabilities;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Copilot API (CAPI) routing policy (SessionConfig::$capi). Set $enabled to false for a
+ * BYOK-only model catalog.
+ */
+class CapiConfig
+{
+    public function __construct(
+        public readonly ?bool $enabled = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        return $this->enabled === null ? [] : ['enabled' => $this->enabled];
+    }
+}
+
+/**
+ * Data of a live "tool.shell_output" session event.
+ */
+class ShellOutputData
+{
+    /** Session event type carrying this data. */
+    public const EVENT_TYPE = 'tool.shell_output';
+    public const STREAM_STDOUT = 'stdout';
+    public const STREAM_STDERR = 'stderr';
+
+    /**
+     * @param int $sequence Zero-based publication order across both streams of the tool call
+     * @param string|null $stream "stdout", "stderr" or null (stdout)
+     */
+    public function __construct(
+        public readonly string $toolCallId,
+        public readonly string $text,
+        public readonly int $sequence,
+        public readonly ?string $stream = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            toolCallId: (string) ($data['toolCallId'] ?? ''),
+            text: (string) ($data['text'] ?? ''),
+            sequence: (int) ($data['sequence'] ?? 0),
+            stream: isset($data['stream']) ? (string) $data['stream'] : null,
+        );
+    }
+}
+
+/**
+ * A shell program asking for credentials (SessionConfig::$onShellAuthenticationRequest).
+ */
+class ShellAuthenticationRequest
+{
+    public const INPUT_SECRET = 'secret';
+    public const INPUT_TEXT = 'text';
+    public const INPUT_CONFIRM = 'confirm';
+
+    /**
+     * @param string $inputKind "secret", "text" or "confirm"
+     */
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $requestId,
+        public readonly string $program,
+        public readonly string $prompt,
+        public readonly string $inputKind,
+        public readonly string $command = '',
+        public readonly string $cwd = '',
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: (string) ($data['sessionId'] ?? ''),
+            requestId: (string) ($data['requestId'] ?? ''),
+            program: (string) ($data['program'] ?? ''),
+            prompt: (string) ($data['prompt'] ?? ''),
+            inputKind: (string) ($data['inputKind'] ?? ''),
+            command: is_string($data['command'] ?? null) ? $data['command'] : '',
+            cwd: is_string($data['cwd'] ?? null) ? $data['cwd'] : '',
+        );
+    }
+}
+
+/**
+ * Answer to a ShellAuthenticationRequest: "accept" with a value, or "cancel".
+ * Handlers may also return the wire array or null (cancel).
+ */
+class ShellAuthenticationResponse
+{
+    public function __construct(
+        public readonly string $action,
+        public readonly ?string $value = null,
+    ) {}
+
+    public static function accept(string $value): self
+    {
+        return new self('accept', $value);
+    }
+
+    public static function cancel(): self
+    {
+        return new self('cancel');
+    }
+
+    public function toArray(): array
+    {
+        if ($this->action === 'accept' && $this->value !== null) {
+            return ['action' => 'accept', 'value' => $this->value];
+        }
+        return ['action' => 'cancel'];
+    }
+}
+
+/**
+ * A memory the agent asked to store (SessionConfig::$storeMemory callback).
+ */
+class StoredMemory
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $subject,
+        public readonly string $fact,
+        public readonly mixed $citations = null,
+        public readonly ?string $reason = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: (string) ($data['sessionId'] ?? ''),
+            subject: (string) ($data['subject'] ?? ''),
+            fact: (string) ($data['fact'] ?? ''),
+            citations: $data['citations'] ?? null,
+            reason: isset($data['reason']) ? (string) $data['reason'] : null,
+        );
+    }
+}
+
+/**
+ * Traffic served by the NetworkConfig callbacks.
+ */
+final class NetworkScope
+{
+    public const CONNECTION = 'connection';
+    public const RUNTIME = 'runtime';
+}
+
+/**
+ * Host network callbacks (CopilotClientOptions::$network). Each callback is optional:
+ * $resolveProxy receives a NetworkResolveProxyRequest and returns a PAC-style proxy
+ * list string (or null to keep the runtime's own resolution); $authenticateNegotiate
+ * receives a NetworkAuthenticateNegotiateRequest and returns a base64 SPNEGO token or
+ * null; $authenticateBasic receives a NetworkAuthenticateBasicRequest and returns
+ * ['username' => ..., 'password' => ...] or null. Tokens and passwords are never logged.
+ */
+class NetworkConfig
+{
+    /**
+     * @param string|null $scope "connection" (default) or "runtime" (see NetworkScope)
+     * @param callable|null $resolveProxy fn(NetworkResolveProxyRequest): ?string
+     * @param callable|null $authenticateNegotiate fn(NetworkAuthenticateNegotiateRequest): ?string
+     * @param callable|null $authenticateBasic fn(NetworkAuthenticateBasicRequest): ?array
+     */
+    public function __construct(
+        public readonly ?string $scope = null,
+        public /* readonly */ $resolveProxy = null,
+        public /* readonly */ $authenticateNegotiate = null,
+        public /* readonly */ $authenticateBasic = null,
+    ) {}
+
+    public function hasAnyCallback(): bool
+    {
+        return $this->resolveProxy !== null || $this->authenticateNegotiate !== null
+            || $this->authenticateBasic !== null;
+    }
+}
+
+/**
+ * Request target passed to NetworkConfig::$resolveProxy.
+ */
+class NetworkResolveProxyRequest
+{
+    public function __construct(
+        public readonly string $url,
+    ) {}
+}
+
+/**
+ * Kerberos service principal passed to NetworkConfig::$authenticateNegotiate.
+ */
+class NetworkAuthenticateNegotiateRequest
+{
+    public function __construct(
+        public readonly string $spn,
+    ) {}
+}
+
+/**
+ * Proxy Basic challenge passed to NetworkConfig::$authenticateBasic.
+ */
+class NetworkAuthenticateBasicRequest
+{
+    public function __construct(
+        public readonly string $proxy,
+        public readonly ?string $realm,
+        public readonly bool $previousRejected,
+    ) {}
+}
+
+/**
+ * Structured Policy Helper failure attached to a failed session.create / session.resume
+ * as `error.data.policyHelperFailure` (see JsonRpcException::getPolicyHelperFailure()).
+ * Helper-authored text is untrusted: render it as plain text and never execute it.
+ */
+class PolicyHelperFailure
+{
+    /**
+     * @param array<int,array<string,mixed>>|null $details
+     * @param array<string,mixed>|null $helpLink
+     */
+    public function __construct(
+        public readonly string $category,
+        public readonly string $failureMode,
+        public readonly string $message,
+        public readonly bool $previousPolicyRetained,
+        public readonly string $reason,
+        public readonly ?string $authority = null,
+        public readonly ?string $code = null,
+        public readonly ?array $details = null,
+        public readonly ?string $diagnostic = null,
+        public readonly ?array $helpLink = null,
+        public readonly ?string $remediation = null,
+        public readonly ?string $severity = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            category: (string) ($data['category'] ?? ''),
+            failureMode: (string) ($data['failureMode'] ?? ''),
+            message: (string) ($data['message'] ?? ''),
+            previousPolicyRetained: (bool) ($data['previousPolicyRetained'] ?? false),
+            reason: (string) ($data['reason'] ?? ''),
+            authority: isset($data['authority']) ? (string) $data['authority'] : null,
+            code: isset($data['code']) ? (string) $data['code'] : null,
+            details: is_array($data['details'] ?? null) ? $data['details'] : null,
+            diagnostic: isset($data['diagnostic']) ? (string) $data['diagnostic'] : null,
+            helpLink: is_array($data['helpLink'] ?? null) ? $data['helpLink'] : null,
+            remediation: isset($data['remediation']) ? (string) $data['remediation'] : null,
+            severity: isset($data['severity']) ? (string) $data['severity'] : null,
+        );
+    }
+}
+
+/**
+ * Session permission modes (SessionConfig::$permissionMode, CopilotSession::setPermissionMode()).
+ */
+final class PermissionMode
+{
+    public const MANUAL = 'manual';
+    public const ASSISTED = 'assisted';
+    public const ALLOW_ALL = 'allow-all';
+}
+
+/**
+ * Known reasons a permission-mode change was refused.
+ */
+final class PermissionModeRefusalReason
+{
+    public const MANAGED_POLICY = 'managed_policy';
+}
+
+/**
+ * Result of CopilotSession::setPermissionMode(). $reason explains a refusal when known
+ * (see PermissionModeRefusalReason, currently "managed_policy").
+ */
+class PermissionModeSetResult
+{
+    public function __construct(
+        public readonly bool $success,
+        public readonly ?string $mode = null,
+        public readonly ?string $reason = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            success: (bool) ($data['success'] ?? false),
+            mode: isset($data['mode']) ? (string) $data['mode'] : null,
+            reason: isset($data['reason']) ? (string) $data['reason'] : null,
+        );
+    }
+
+    public function isRefusedByManagedPolicy(): bool
+    {
+        return $this->reason === PermissionModeRefusalReason::MANAGED_POLICY;
+    }
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -1258,6 +1697,21 @@ class SessionConfig
         public readonly ImageGenerationConfig|array|null $imageGeneration = null,
         /** Autopilot continuation options (AutopilotOptions or wire array). */
         public readonly AutopilotOptions|array|null $autopilot = null,
+        // --- v3.0.0 (SDK protocol 4) options ---
+        /** @var array<NamedProviderConfig|array<string,mixed>>|null $providers Named BYOK provider connections */
+        public readonly ?array $providers = null,
+        /** @var array<ProviderModelConfig|array<string,mixed>>|null $models Models registered under named providers (select with "provider/id") */
+        public readonly ?array $models = null,
+        /** Named provider that serves unqualified model names. */
+        public readonly ?string $defaultProvider = null,
+        /** Copilot API routing policy (CapiConfig or wire array such as ['enabled' => false]). */
+        public readonly CapiConfig|array|null $capi = null,
+        /** @var callable|null $onShellAuthenticationRequest fn(ShellAuthenticationRequest, array{sessionId:string}): ShellAuthenticationResponse|array|null */
+        public /* readonly */ $onShellAuthenticationRequest = null,
+        /** @var callable|null $storeMemory fn(StoredMemory, array{sessionId:string}): void */
+        public /* readonly */ $storeMemory = null,
+        /** Permission mode: "manual", "assisted" or "allow-all" (see PermissionMode). */
+        public readonly ?string $permissionMode = null,
     ) {}
 
     public function toServerParams(): array
@@ -1404,7 +1858,8 @@ class SessionConfig
             $params['mcpAuthHandler'] = true;
         }
         // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
-        $capi = [];
+        // An explicit capi (['enabled' => ...]) is merged with the Auto tier / WebSocket options.
+        $capi = WireFormat::toArray($this->capi);
         if ($this->autoTier !== null) {
             $capi['autoTier'] = $this->autoTier;
         }
@@ -1458,6 +1913,25 @@ class SessionConfig
         }
         if ($this->autopilot !== null) {
             $params['autopilot'] = WireFormat::toObject($this->autopilot);
+        }
+        // --- v3.0.0 (SDK protocol 4) session options ---
+        if ($this->providers !== null) {
+            $params['providers'] = array_map(fn($p) => WireFormat::toObject($p), $this->providers);
+        }
+        if ($this->models !== null) {
+            $params['models'] = array_map(fn($m) => WireFormat::toObject($m), $this->models);
+        }
+        if ($this->defaultProvider !== null) {
+            $params['defaultProvider'] = $this->defaultProvider;
+        }
+        if ($this->onShellAuthenticationRequest !== null) {
+            $params['requestShellAuthentication'] = true;
+        }
+        if ($this->storeMemory !== null) {
+            $params['hasMemoryStore'] = true;
+        }
+        if ($this->permissionMode !== null) {
+            $params['permissionMode'] = $this->permissionMode;
         }
         return $params;
     }
@@ -1553,6 +2027,23 @@ class ResumeSessionConfig
         public readonly ImageGenerationConfig|array|null $imageGeneration = null,
         /** Autopilot continuation options (AutopilotOptions or wire array). */
         public readonly AutopilotOptions|array|null $autopilot = null,
+        // --- v3.0.0 (SDK protocol 4) options ---
+        /** @var array<NamedProviderConfig|array<string,mixed>>|null $providers Named BYOK provider connections */
+        public readonly ?array $providers = null,
+        /** @var array<ProviderModelConfig|array<string,mixed>>|null $models Models registered under named providers (select with "provider/id") */
+        public readonly ?array $models = null,
+        /** Named provider that serves unqualified model names. */
+        public readonly ?string $defaultProvider = null,
+        /** Send `defaultProvider: null` to clear the session's default provider (ignored when $defaultProvider is set). */
+        public readonly bool $clearDefaultProvider = false,
+        /** Copilot API routing policy (CapiConfig or wire array such as ['enabled' => true]). */
+        public readonly CapiConfig|array|null $capi = null,
+        /** @var callable|null $onShellAuthenticationRequest fn(ShellAuthenticationRequest, array{sessionId:string}): ShellAuthenticationResponse|array|null */
+        public /* readonly */ $onShellAuthenticationRequest = null,
+        /** @var callable|null $storeMemory fn(StoredMemory, array{sessionId:string}): void */
+        public /* readonly */ $storeMemory = null,
+        /** Permission mode: "manual", "assisted" or "allow-all" (see PermissionMode). */
+        public readonly ?string $permissionMode = null,
     ) {}
 
     public function toServerParams(string $sessionId): array
@@ -1635,7 +2126,8 @@ class ResumeSessionConfig
             $params['disableResume'] = $this->disableResume;
         }
         // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
-        $capi = [];
+        // An explicit capi (['enabled' => ...]) is merged with the Auto tier / WebSocket options.
+        $capi = WireFormat::toArray($this->capi);
         if ($this->autoTier !== null) {
             $capi['autoTier'] = $this->autoTier;
         }
@@ -1683,6 +2175,27 @@ class ResumeSessionConfig
         }
         if ($this->autopilot !== null) {
             $params['autopilot'] = WireFormat::toObject($this->autopilot);
+        }
+        // --- v3.0.0 (SDK protocol 4) session options ---
+        if ($this->providers !== null) {
+            $params['providers'] = array_map(fn($p) => WireFormat::toObject($p), $this->providers);
+        }
+        if ($this->models !== null) {
+            $params['models'] = array_map(fn($m) => WireFormat::toObject($m), $this->models);
+        }
+        if ($this->defaultProvider !== null) {
+            $params['defaultProvider'] = $this->defaultProvider;
+        } elseif ($this->clearDefaultProvider) {
+            $params['defaultProvider'] = null;
+        }
+        if ($this->onShellAuthenticationRequest !== null) {
+            $params['requestShellAuthentication'] = true;
+        }
+        if ($this->storeMemory !== null) {
+            $params['hasMemoryStore'] = true;
+        }
+        if ($this->permissionMode !== null) {
+            $params['permissionMode'] = $this->permissionMode;
         }
         return $params;
     }
@@ -1894,6 +2407,7 @@ class MessageOptions
      * @param string|null $source Message provenance: "user", "system" or "agent-<id>" (see MessageSource)
      * @param array<string,mixed>|object|null $responseSchema JSON Schema requesting structured output;
      *        sent as a json_schema responseFormat and takes precedence over $responseFormat
+     * @param string|null $clientTurnId Opaque caller-chosen turn identifier, echoed on the turn's events
      */
     public function __construct(
         public readonly string $prompt,
@@ -1906,6 +2420,7 @@ class MessageOptions
         public readonly ?string $displayPrompt = null,
         public readonly ?string $source = null,
         public readonly array|object|null $responseSchema = null,
+        public readonly ?string $clientTurnId = null,
     ) {}
 
     public function toArray(): array
@@ -1913,6 +2428,9 @@ class MessageOptions
         $result = ['prompt' => $this->prompt];
         if ($this->source !== null) {
             $result['source'] = $this->source;
+        }
+        if ($this->clientTurnId !== null) {
+            $result['clientTurnId'] = $this->clientTurnId;
         }
         if ($this->attachments !== null) {
             $result['attachments'] = array_map(
@@ -2803,5 +3321,9 @@ class CopilotClientOptions
         /** @var callable|null $bearerTokenProvider BYOK bearer-token provider fn(ProviderTokenArgs): string */
         public /* readonly */ $bearerTokenProvider = null,
         public readonly ClientInfo|array|null $clientInfo = null,
+        /** Client mode: "coding-agent" (default) or "empty" (see ClientMode); "copilot-cli" is an alias of "coding-agent". */
+        public readonly string $mode = 'coding-agent',
+        /** Host network callbacks registered with `network.setProvider` after connecting. */
+        public readonly ?NetworkConfig $network = null,
     ) {}
 }

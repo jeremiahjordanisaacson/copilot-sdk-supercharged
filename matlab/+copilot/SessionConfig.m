@@ -145,6 +145,92 @@ classdef SessionConfig
 
         % Enable content exclusion policy enforcement (wire: contentExclusion).
         ContentExclusion (1,1) logical = false
+
+        % --- SDK protocol 4 / v3.0.0 session configuration ---
+
+        % Tool allowlist (cell of char) (wire: tools.availableTools).  Required
+        % on every create/resume when the client Mode is 'empty'.
+        AvailableTools (1,:) cell = {}
+
+        % Working directory of the session (wire: workingDirectory).
+        WorkingDirectory (1,:) char = ''
+
+        % Ask-user tool variant: 'legacy' or 'elicitation' (wire: askUserVariant).
+        AskUserVariant (1,:) char = ''
+
+        % GitHub token provider (function handle).  Called with the
+        % gitHubToken.getToken request struct (registrationId, host,
+        % sessionId, reason); return a token char, a struct with
+        % accessToken / tokenType / expiresIn, or [] to cancel.
+        GitHubTokenProvider
+
+        % Command sandbox (copilot.SandboxConfig or struct) (wire: permissions.sandbox).
+        Sandbox
+
+        % Feature flag overrides (struct or containers.Map of logical) (wire: featureFlags).
+        FeatureFlags
+
+        % Model allowlist (cell of model ids) (wire: allowedModels).
+        AllowedModels (1,:) cell = {}
+
+        % OAuth client id metadata document URL for MCP servers.
+        AuthClientIdMetadataUrl (1,:) char = ''
+
+        % Model capabilities override limits.max_output_tokens (0 = unset).
+        MaxOutputTokens (1,1) double = 0
+
+        % Extra agent / hook directories (cell of char).
+        AgentDirectories (1,:) cell = {}
+        HookDirectories (1,:) cell = {}
+
+        % Grant directory trust at creation: 'session' or 'user' (create only).
+        TrustWorkingDirectory (1,:) char = ''
+
+        % Image generation (copilot.ImageGenerationConfig or struct).
+        ImageGeneration
+
+        % Autopilot continuation (copilot.AutopilotConfig or struct).
+        Autopilot
+
+        % Sub-agent lifecycle hooks (function handles).  Called with the hook
+        % input struct; return a struct output (or []).
+        OnSubagentStart
+        OnSubagentStop
+
+        % Legacy single BYOK provider (copilot.ProviderConfig or struct).
+        Provider
+
+        % Named BYOK providers / models (cells of copilot.ProviderConfig and
+        % copilot.ProviderModelConfig, or structs).
+        Providers (1,:) cell = {}
+        Models (1,:) cell = {}
+
+        % Default named provider (wire: defaultProvider).
+        DefaultProvider (1,:) char = ''
+
+        % On resume, send an explicit null defaultProvider to clear it.
+        ClearDefaultProvider (1,1) logical = false
+
+        % Copilot API models: false disables them (BYOK only), [] = default.
+        CapiEnabled = []
+
+        % Shell authentication handler (function handle).  Called with the
+        % shellAuthentication.request struct; return the value char to
+        % accept, or [] to cancel.
+        OnShellAuthenticationRequest
+
+        % Memory store callback (function handle) called with the
+        % memoryStore.store request struct (subject, fact, citations, reason).
+        StoreMemory
+
+        % Resume only: do not emit a session.resume event (wire: suppressResumeEvent).
+        DisableResume (1,1) logical = false
+
+        % Resume only: continue work pending when the session was saved.
+        ContinuePendingWork (1,1) logical = false
+
+        % Resume only: rebuild a damaged session from its transcript.
+        AllowTranscriptRecovery (1,1) logical = false
     end
 
     methods
@@ -201,6 +287,33 @@ classdef SessionConfig
             p.addParameter('InProcess',                obj.InProcess);
             p.addParameter('ExperimentalMode',         obj.ExperimentalMode);
             p.addParameter('ContentExclusion',         obj.ContentExclusion);
+            p.addParameter('AvailableTools',           obj.AvailableTools);
+            p.addParameter('WorkingDirectory',         obj.WorkingDirectory);
+            p.addParameter('AskUserVariant',           obj.AskUserVariant);
+            p.addParameter('GitHubTokenProvider',      []);
+            p.addParameter('Sandbox',                  []);
+            p.addParameter('FeatureFlags',             []);
+            p.addParameter('AllowedModels',            obj.AllowedModels);
+            p.addParameter('AuthClientIdMetadataUrl',  obj.AuthClientIdMetadataUrl);
+            p.addParameter('MaxOutputTokens',          obj.MaxOutputTokens);
+            p.addParameter('AgentDirectories',         obj.AgentDirectories);
+            p.addParameter('HookDirectories',          obj.HookDirectories);
+            p.addParameter('TrustWorkingDirectory',    obj.TrustWorkingDirectory);
+            p.addParameter('ImageGeneration',          []);
+            p.addParameter('Autopilot',                []);
+            p.addParameter('OnSubagentStart',          []);
+            p.addParameter('OnSubagentStop',           []);
+            p.addParameter('Provider',                 []);
+            p.addParameter('Providers',                obj.Providers);
+            p.addParameter('Models',                   obj.Models);
+            p.addParameter('DefaultProvider',          obj.DefaultProvider);
+            p.addParameter('ClearDefaultProvider',     obj.ClearDefaultProvider);
+            p.addParameter('CapiEnabled',              []);
+            p.addParameter('OnShellAuthenticationRequest', []);
+            p.addParameter('StoreMemory',              []);
+            p.addParameter('DisableResume',            obj.DisableResume);
+            p.addParameter('ContinuePendingWork',      obj.ContinuePendingWork);
+            p.addParameter('AllowTranscriptRecovery',  obj.AllowTranscriptRecovery);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -249,6 +362,33 @@ classdef SessionConfig
             obj.InProcess                = p.Results.InProcess;
             obj.ExperimentalMode         = p.Results.ExperimentalMode;
             obj.ContentExclusion         = p.Results.ContentExclusion;
+            obj.AvailableTools           = p.Results.AvailableTools;
+            obj.WorkingDirectory         = p.Results.WorkingDirectory;
+            obj.AskUserVariant           = p.Results.AskUserVariant;
+            obj.GitHubTokenProvider      = p.Results.GitHubTokenProvider;
+            obj.Sandbox                  = p.Results.Sandbox;
+            obj.FeatureFlags             = p.Results.FeatureFlags;
+            obj.AllowedModels            = p.Results.AllowedModels;
+            obj.AuthClientIdMetadataUrl  = p.Results.AuthClientIdMetadataUrl;
+            obj.MaxOutputTokens          = p.Results.MaxOutputTokens;
+            obj.AgentDirectories         = p.Results.AgentDirectories;
+            obj.HookDirectories          = p.Results.HookDirectories;
+            obj.TrustWorkingDirectory    = p.Results.TrustWorkingDirectory;
+            obj.ImageGeneration          = p.Results.ImageGeneration;
+            obj.Autopilot                = p.Results.Autopilot;
+            obj.OnSubagentStart          = p.Results.OnSubagentStart;
+            obj.OnSubagentStop           = p.Results.OnSubagentStop;
+            obj.Provider                 = p.Results.Provider;
+            obj.Providers                = p.Results.Providers;
+            obj.Models                   = p.Results.Models;
+            obj.DefaultProvider          = p.Results.DefaultProvider;
+            obj.ClearDefaultProvider     = p.Results.ClearDefaultProvider;
+            obj.CapiEnabled              = p.Results.CapiEnabled;
+            obj.OnShellAuthenticationRequest = p.Results.OnShellAuthenticationRequest;
+            obj.StoreMemory              = p.Results.StoreMemory;
+            obj.DisableResume            = p.Results.DisableResume;
+            obj.ContinuePendingWork      = p.Results.ContinuePendingWork;
+            obj.AllowTranscriptRecovery  = p.Results.AllowTranscriptRecovery;
         end
 
         function s = toStruct(obj)
@@ -358,18 +498,105 @@ classdef SessionConfig
             if ~isempty(obj.OnMcpAuthRequest)
                 s.mcpAuthHandler = true;
             end
-            hooks = struct();
-            if ~isempty(obj.OnPostToolUse)
-                hooks.postToolUse = true;
+            % SDK protocol 4 signals registered hook handlers with a single
+            % flag (hooks.hasHandlers); handlers run through hooks.invoke.
+            if ~isempty(obj.OnPostToolUse) || ~isempty(obj.OnPreMcpToolCall) ...
+                    || ~isempty(obj.OnUserPromptTransformed) ...
+                    || ~isempty(obj.OnSubagentStart) || ~isempty(obj.OnSubagentStop)
+                s.hooks = true;
             end
-            if ~isempty(obj.OnPreMcpToolCall)
-                hooks.preMcpToolCall = true;
+
+            % --- SDK protocol 4 / v3.0.0 options (flat keys; the client groups
+            %     them with copilot.groupSessionParams before sending) ---
+            if ~isempty(obj.AvailableTools)
+                s.availableTools = obj.AvailableTools;
             end
-            if ~isempty(obj.OnUserPromptTransformed)
-                hooks.userPromptTransformed = true;
+            if ~isempty(obj.WorkingDirectory)
+                s.workingDirectory = obj.WorkingDirectory;
             end
-            if ~isempty(fieldnames(hooks))
-                s.hooks = hooks;
+            if ~isempty(obj.AskUserVariant)
+                s.askUserVariant = obj.AskUserVariant;
+            end
+            if ~isempty(obj.Sandbox)
+                s.sandbox = copilot.SessionConfig.wireValue(obj.Sandbox);
+            end
+            if ~isempty(obj.FeatureFlags)
+                s.featureFlags = obj.FeatureFlags;
+            end
+            if ~isempty(obj.AllowedModels)
+                s.allowedModels = obj.AllowedModels;
+            end
+            if ~isempty(obj.AuthClientIdMetadataUrl)
+                s.authClientIdMetadataUrl = obj.AuthClientIdMetadataUrl;
+            end
+            caps = obj.ModelCapabilities;
+            if obj.MaxOutputTokens > 0
+                if ~isstruct(caps)
+                    caps = struct();
+                end
+                if ~isfield(caps, 'limits') || ~isstruct(caps.limits)
+                    caps.limits = struct();
+                end
+                % The capabilities limits object uses snake_case wire keys.
+                caps.limits.max_output_tokens = obj.MaxOutputTokens;
+            end
+            if (isstruct(caps) && ~isempty(fieldnames(caps))) ...
+                    || (isa(caps, 'containers.Map') && caps.Count > 0)
+                s.modelCapabilities = caps;
+            end
+            if ~isempty(obj.AgentDirectories)
+                s.agentDirectories = obj.AgentDirectories;
+            end
+            if ~isempty(obj.HookDirectories)
+                s.hookDirectories = obj.HookDirectories;
+            end
+            if ~isempty(obj.TrustWorkingDirectory)
+                s.trustWorkingDirectory = obj.TrustWorkingDirectory;
+            end
+            imageGeneration = copilot.SessionConfig.wireValue(obj.ImageGeneration);
+            if isstruct(imageGeneration) && ~isempty(fieldnames(imageGeneration))
+                s.imageGeneration = imageGeneration;
+            end
+            autopilot = copilot.SessionConfig.wireValue(obj.Autopilot);
+            if isstruct(autopilot) && ~isempty(fieldnames(autopilot))
+                s.autopilot = autopilot;
+            end
+            if ~isempty(obj.Provider)
+                s.provider = copilot.SessionConfig.wireValue(obj.Provider);
+            end
+            if ~isempty(obj.Providers)
+                s.providers = copilot.SessionConfig.wireList(obj.Providers);
+            end
+            if ~isempty(obj.Models)
+                s.models = copilot.SessionConfig.wireList(obj.Models);
+            end
+            if ~isempty(obj.DefaultProvider)
+                s.defaultProvider = obj.DefaultProvider;
+            end
+            if ~isempty(obj.CapiEnabled)
+                s.capi = struct('enabled', logical(obj.CapiEnabled));
+            end
+            if ~isempty(obj.OnShellAuthenticationRequest)
+                s.requestShellAuthentication = true;
+            end
+            if ~isempty(obj.StoreMemory)
+                s.hasMemoryStore = true;
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        function value = wireValue(value)
+            %wireValue  Serialize SDK option objects that define toStruct().
+            if isobject(value) && ismethod(value, 'toStruct')
+                value = value.toStruct();
+            end
+        end
+
+        function items = wireList(items)
+            %wireList  Serialize each element of a cell array of options.
+            for i = 1:numel(items)
+                items{i} = copilot.SessionConfig.wireValue(items{i});
             end
         end
     end

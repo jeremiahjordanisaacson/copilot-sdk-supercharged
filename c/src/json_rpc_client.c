@@ -8,7 +8,8 @@
  */
 
 #ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 199309L
+/* 200809L declares strdup() under strict C11 (it is also a superset of 199309L). */
+#define _POSIX_C_SOURCE 200809L
 #endif
 
 #include "json_rpc_client.h"
@@ -149,6 +150,7 @@ static void pending_request_free(pending_request_t *pr)
     if (!pr) return;
     free(pr->id);
     if (pr->result) cJSON_Delete(pr->result);
+    if (pr->error_data) cJSON_Delete(pr->error_data);
     free(pr->error_message);
     pthread_mutex_destroy(&pr->mutex);
     pthread_cond_destroy(&pr->cond);
@@ -256,8 +258,10 @@ static void handle_response(json_rpc_client_t *client, cJSON *message)
     if (error && cJSON_IsObject(error)) {
         cJSON *code = cJSON_GetObjectItem(error, "code");
         cJSON *msg = cJSON_GetObjectItem(error, "message");
+        cJSON *data = cJSON_GetObjectItem(error, "data");
         pr->error_code = code ? code->valueint : -1;
         pr->error_message = msg && cJSON_IsString(msg) ? strdup(msg->valuestring) : strdup("Unknown error");
+        pr->error_data = (data && !cJSON_IsNull(data)) ? cJSON_Duplicate(data, 1) : NULL;
         pr->result = NULL;
     } else {
         cJSON *result = cJSON_GetObjectItem(message, "result");
@@ -529,6 +533,20 @@ cJSON *json_rpc_client_request(
     int *out_error_code,
     char **out_error_message)
 {
+    return json_rpc_client_request_ex(client, method, params, timeout_ms,
+                                      out_error_code, out_error_message, NULL);
+}
+
+cJSON *json_rpc_client_request_ex(
+    json_rpc_client_t *client,
+    const char *method,
+    cJSON *params,
+    int timeout_ms,
+    int *out_error_code,
+    char **out_error_message,
+    cJSON **out_error_data)
+{
+    if (out_error_data) *out_error_data = NULL;
     if (!client || !method) return NULL;
 
     if (timeout_ms <= 0) {
@@ -606,6 +624,8 @@ cJSON *json_rpc_client_request(
     int err_code = pr->error_code;
     char *err_msg = pr->error_message;
     pr->error_message = NULL;  /* Transfer ownership */
+    cJSON *err_data = pr->error_data;
+    pr->error_data = NULL;  /* Transfer ownership */
 
     pthread_mutex_unlock(&pr->mutex);
     remove_pending(client, pr);
@@ -615,10 +635,13 @@ cJSON *json_rpc_client_request(
         if (out_error_code) *out_error_code = err_code;
         if (out_error_message) *out_error_message = err_msg;
         else free(err_msg);
+        if (out_error_data) *out_error_data = err_data;
+        else if (err_data) cJSON_Delete(err_data);
         return NULL;
     }
 
     free(err_msg);
+    if (err_data) cJSON_Delete(err_data);
     return result;
 }
 

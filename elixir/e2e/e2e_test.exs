@@ -797,37 +797,40 @@ defmodule CopilotE2E.E2ETest do
   # Helpers
   # ---------------------------------------------------------------------------
 
+  # CLI lookup: COPILOT_CLI_PATH (when the file exists; CI points it at
+  # nodejs/node_modules/.bin/copilot), then the CLI 1.0.113+ npm-loader.js,
+  # then the legacy index.js entry points. Copilot.Client runs `.js` paths with
+  # node and executes any other path directly.
   defp find_cli_path! do
-    case System.get_env("COPILOT_CLI_PATH") do
-      path when is_binary(path) and path != "" ->
-        if File.exists?(path), do: Path.expand(path), else: raise("COPILOT_CLI_PATH not found: #{path}")
+    github_modules = Path.expand("../../nodejs/node_modules/@github", __DIR__)
 
-      _ ->
-        # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-        # package (e.g. @github/copilot-linux-x64); prefer it when present.
-        github_modules = Path.expand("../../nodejs/node_modules/@github", __DIR__)
+    from_env =
+      case System.get_env("COPILOT_CLI_PATH") do
+        path when is_binary(path) and path != "" -> [Path.expand(path)]
+        _ -> []
+      end
 
-        platform_cli =
-          Path.wildcard(Path.join(github_modules, "copilot-*/index.js"))
-          |> Enum.reject(&String.contains?(&1, "language-server"))
-          |> Enum.find(&File.exists?/1)
+    legacy_platform =
+      Path.wildcard(Path.join(github_modules, "copilot-*/index.js"))
+      |> Enum.reject(&String.contains?(&1, "language-server"))
+      |> Enum.sort()
 
-        base = Path.join(github_modules, "copilot/index.js")
+    candidates =
+      from_env ++
+        [Path.join(github_modules, "copilot/npm-loader.js")] ++
+        legacy_platform ++
+        [Path.join(github_modules, "copilot/index.js")]
 
-        cond do
-          platform_cli != nil ->
-            platform_cli
+    case Enum.find(candidates, &File.regular?/1) do
+      nil ->
+        raise """
+        CLI not found for E2E tests.
+        Set COPILOT_CLI_PATH or run `npm install` in the nodejs/ directory.
+        Looked at: #{Enum.join(candidates, ", ")}
+        """
 
-          File.exists?(base) ->
-            base
-
-          true ->
-            raise """
-            CLI not found for E2E tests.
-            Set COPILOT_CLI_PATH or run `npm install` in the nodejs/ directory.
-            Looked at: #{base}
-            """
-        end
+      path ->
+        path
     end
   end
 

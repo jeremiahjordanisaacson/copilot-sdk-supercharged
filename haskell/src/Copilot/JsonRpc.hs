@@ -110,12 +110,16 @@ startClient client = do
   atomically $ writeTVar (jrcReaderThread client) (Just tid)
 
 -- | Stop the client and kill the reader thread.
+--
+-- The kill is delivered asynchronously: on Windows a reader blocked in a pipe
+-- read cannot receive it until the read returns, which happens once the CLI
+-- process exits.
 stopClient :: JsonRpcClient -> IO ()
 stopClient client = do
   atomically $ writeTVar (jrcRunning client) False
   mTid <- atomically $ readTVar (jrcReaderThread client)
   case mTid of
-    Just tid -> killThread tid
+    Just tid -> void $ forkIO $ killThread tid
     Nothing  -> pure ()
   -- Fail all pending requests
   pending <- atomically $ do

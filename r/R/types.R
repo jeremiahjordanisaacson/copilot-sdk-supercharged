@@ -1456,6 +1456,10 @@ ToolInvocation <- R6::R6Class(
 #' @field description Character. Tool description shown to the LLM.
 #' @field handler Function. The handler function(invocation) -> ToolResultObject or list.
 #' @field parameters Named list or NULL. JSON schema for parameters.
+#' @field idempotent Logical or NULL. Whether repeated calls with the same arguments are safe
+#'   (sent as \code{idempotent} in the tool definition).
+#' @field skip_permission Logical or NULL. Run without a permission prompt (sent as
+#'   \code{skipPermission}).
 #' @export
 Tool <- R6::R6Class(
   "Tool",
@@ -1464,17 +1468,24 @@ Tool <- R6::R6Class(
     description = NULL,
     handler = NULL,
     parameters = NULL,
+    idempotent = NULL,
+    skip_permission = NULL,
 
     #' @description Create a new Tool.
     #' @param name Character. Tool name.
     #' @param description Character. Tool description.
     #' @param handler Function accepting a ToolInvocation, returning a ToolResultObject or list.
     #' @param parameters Named list or NULL. JSON schema for parameters.
-    initialize = function(name, description, handler, parameters = NULL) {
+    #' @param idempotent Logical or NULL. Mark the tool as safe to repeat.
+    #' @param skip_permission Logical or NULL. Run without a permission prompt.
+    initialize = function(name, description, handler, parameters = NULL, idempotent = NULL,
+                          skip_permission = NULL) {
       self$name <- name
       self$description <- description
       self$handler <- handler
       self$parameters <- parameters
+      self$idempotent <- idempotent
+      self$skip_permission <- skip_permission
     }
   )
 )
@@ -1496,6 +1507,7 @@ Tool <- R6::R6Class(
 #' @field request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
 #' @field source Character or NULL. Message source (see \code{MessageSource}).
 #' @field response_schema Named list or NULL. JSON Schema for a structured response.
+#' @field client_turn_id Character or NULL. Opaque caller-chosen ID for this turn.
 #' @export
 MessageOptions <- R6::R6Class(
   "MessageOptions",
@@ -1508,6 +1520,7 @@ MessageOptions <- R6::R6Class(
     request_headers = NULL,
     source = NULL,
     response_schema = NULL,
+    client_turn_id = NULL,
 
     #' @description Create new MessageOptions.
     #' @param prompt Character. The prompt text.
@@ -1518,9 +1531,11 @@ MessageOptions <- R6::R6Class(
     #' @param request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
     #' @param source Character or NULL. Message source ("user", "system", or "agent-<id>").
     #' @param response_schema Named list or NULL. JSON Schema for a structured response.
+    #' @param client_turn_id Character or NULL. Opaque caller-chosen ID for this turn.
     initialize = function(prompt, attachments = NULL, mode = NULL,
                           response_format = NULL, image_options = NULL,
-                          request_headers = NULL, source = NULL, response_schema = NULL) {
+                          request_headers = NULL, source = NULL, response_schema = NULL,
+                          client_turn_id = NULL) {
       self$prompt <- prompt
       self$attachments <- attachments
       self$mode <- mode
@@ -1529,12 +1544,14 @@ MessageOptions <- R6::R6Class(
       self$request_headers <- request_headers
       self$source <- source
       self$response_schema <- response_schema
+      self$client_turn_id <- client_turn_id
     },
 
     #' @description Convert to list.
     to_list = function() {
       result <- list(prompt = self$prompt)
       if (!is.null(self$source)) result$source <- self$source
+      if (!is.null(self$client_turn_id)) result$clientTurnId <- self$client_turn_id
       if (!is.null(self$attachments)) result$attachments <- self$attachments
       if (!is.null(self$mode)) result$mode <- self$mode
       if (!is.null(self$response_format)) result$responseFormat <- self$response_format

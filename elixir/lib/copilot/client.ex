@@ -56,7 +56,10 @@ defmodule Copilot.Client do
             sessions: %{String.t() => pid()},
             connection_state: :disconnected | :connecting | :connected | :error,
             models_cache: [ModelInfo.t()] | nil,
-            lifecycle_handlers: [fun()]
+            lifecycle_handlers: [fun()],
+            mode: :coding_agent | :empty,
+            token_providers: :ets.tid() | nil,
+            shell_auth_requests: :ets.tid() | nil
           }
     defstruct options: %CopilotClientOptions{},
               port: nil,
@@ -64,7 +67,13 @@ defmodule Copilot.Client do
               sessions: %{},
               connection_state: :disconnected,
               models_cache: nil,
-              lifecycle_handlers: []
+              lifecycle_handlers: [],
+              # Client mode: :coding_agent (default) or :empty
+              mode: :coding_agent,
+              # GitHub token providers: {registration_id, provider, session_id | nil}
+              token_providers: nil,
+              # Pending shell authentication prompts: {{session_id, request_id}, waiter, ref}
+              shell_auth_requests: nil
   end
 
   # ---------------------------------------------------------------------------
@@ -216,13 +225,31 @@ defmodule Copilot.Client do
     GenServer.call(client, {:subscribe_lifecycle, handler})
   end
 
+  @doc "Clear the runtime's cached managed (enterprise) settings (`managedSettings.clearCache`)."
+  @spec clear_managed_settings_cache(GenServer.server()) :: :ok | {:error, any()}
+  def clear_managed_settings_cache(client) do
+    GenServer.call(client, :clear_managed_settings_cache, 10_000)
+  end
+
   # ---------------------------------------------------------------------------
   # GenServer Callbacks
   # ---------------------------------------------------------------------------
 
   @impl true
   def init(options) do
-    {:ok, %State{options: options}}
+    case Types.ClientMode.parse(Map.get(options, :mode)) do
+      {:ok, mode} ->
+        {:ok,
+         %State{
+           options: options,
+           mode: mode,
+           token_providers: :ets.new(:copilot_github_token_providers, [:set, :public]),
+           shell_auth_requests: :ets.new(:copilot_shell_auth_requests, [:set, :public])
+         }}
+
+      {:error, reason} ->
+        {:stop, {:invalid_config, reason}}
+    end
   end
 
   @impl true
@@ -290,69 +317,111 @@ defmodule Copilot.Client do
   def handle_call({:create_session, config}, _from, state) do
     state = maybe_auto_start(state)
 
-    params = build_create_params(config)
+    case validate_session_config(config, state) do
+      :ok ->
+        registration_id =
+          register_github_token_provider(state, config.github_token_provider, config.session_id)
 
-    case JsonRpcClient.request(state.rpc, "session.create", params, 30_000) do
-      {:ok, %{"sessionId" => session_id} = resp} ->
-        workspace_path = resp["workspacePath"]
+        params =
+          config
+          |> build_create_params()
+          |> put_if("gitHubTokenProviderRegistrationId", registration_id)
+          |> group_session_params(:create)
+          |> apply_mode_defaults(state.mode)
 
-        {:ok, session_pid} =
-          Session.start_link(
-            session_id: session_id,
-            rpc: state.rpc,
-            workspace_path: workspace_path,
-            tools: config.tools,
-            on_permission_request: config.on_permission_request,
-            on_user_input_request: config.on_user_input_request,
-            hooks: config.hooks,
-            trace_context_provider: state.options.on_get_trace_context
-          )
+        case JsonRpcClient.request(state.rpc, "session.create", params, 30_000) do
+          {:ok, %{"sessionId" => session_id} = resp} ->
+            workspace_path = resp["workspacePath"]
+            assign_github_token_provider(state, registration_id, session_id)
 
-        sessions = Map.put(state.sessions, session_id, session_pid)
-        {:reply, {:ok, session_pid}, %{state | sessions: sessions}}
+            {:ok, session_pid} =
+              Session.start_link(
+                session_id: session_id,
+                rpc: state.rpc,
+                workspace_path: workspace_path,
+                tools: config.tools,
+                on_permission_request: config.on_permission_request,
+                on_user_input_request: config.on_user_input_request,
+                hooks: config.hooks,
+                trace_context_provider: state.options.on_get_trace_context,
+                on_shell_authentication_request: config.on_shell_authentication_request,
+                store_memory: config.store_memory,
+                github_token_registration: registration_id,
+                token_providers: state.token_providers
+              )
 
-      {:error, _} = err ->
-        {:reply, err, state}
+            sessions = Map.put(state.sessions, session_id, session_pid)
+            {:reply, {:ok, session_pid}, %{state | sessions: sessions}}
+
+          {:error, _} = err ->
+            # A refusing managed-settings policy helper is available through
+            # Copilot.Types.PolicyHelperFailure.from_error(err).
+            unregister_github_token_provider(state, registration_id)
+            {:reply, err, state}
+        end
+
+      {:error, _} = invalid ->
+        {:reply, invalid, state}
     end
   end
 
   def handle_call({:resume_session, session_id, config}, _from, state) do
     state = maybe_auto_start(state)
 
-    params = build_resume_params(session_id, config)
+    case validate_session_config(config, state) do
+      :ok ->
+        registration_id =
+          register_github_token_provider(state, config.github_token_provider, session_id)
 
-    case JsonRpcClient.request(state.rpc, "session.resume", params, 30_000) do
-      {:ok, %{"sessionId" => sid} = resp} ->
-        workspace_path = resp["workspacePath"]
+        params =
+          session_id
+          |> build_resume_params(config)
+          |> put_if("gitHubTokenProviderRegistrationId", registration_id)
+          |> group_session_params(:resume)
+          |> apply_mode_defaults(state.mode)
 
-        {:ok, session_pid} =
-          Session.start_link(
-            session_id: sid,
-            rpc: state.rpc,
-            workspace_path: workspace_path,
-            tools: config.tools,
-            on_permission_request: config.on_permission_request,
-            on_user_input_request: config.on_user_input_request,
-            hooks: config.hooks,
-            trace_context_provider: state.options.on_get_trace_context
-          )
+        case JsonRpcClient.request(state.rpc, "session.resume", params, 30_000) do
+          {:ok, %{"sessionId" => sid} = resp} ->
+            workspace_path = resp["workspacePath"]
+            assign_github_token_provider(state, registration_id, sid)
 
-        sessions = Map.put(state.sessions, sid, session_pid)
-        {:reply, {:ok, session_pid}, %{state | sessions: sessions}}
+            {:ok, session_pid} =
+              Session.start_link(
+                session_id: sid,
+                rpc: state.rpc,
+                workspace_path: workspace_path,
+                tools: config.tools,
+                on_permission_request: config.on_permission_request,
+                on_user_input_request: config.on_user_input_request,
+                hooks: config.hooks,
+                trace_context_provider: state.options.on_get_trace_context,
+                on_shell_authentication_request: config.on_shell_authentication_request,
+                store_memory: config.store_memory,
+                github_token_registration: registration_id,
+                token_providers: state.token_providers
+              )
 
-      {:error, _} = err ->
-        {:reply, err, state}
+            sessions = Map.put(state.sessions, sid, session_pid)
+            {:reply, {:ok, session_pid}, %{state | sessions: sessions}}
+
+          {:error, _} = err ->
+            unregister_github_token_provider(state, registration_id)
+            {:reply, err, state}
+        end
+
+      {:error, _} = invalid ->
+        {:reply, invalid, state}
     end
   end
 
   def handle_call({:delete_session, session_id}, _from, state) do
     case JsonRpcClient.request(state.rpc, "session.delete", %{"sessionId" => session_id}) do
-      {:ok, %{"success" => true}} ->
+      {:ok, %{"success" => false} = resp} ->
+        {:reply, {:error, resp["error"] || "Failed to delete session #{session_id}"}, state}
+
+      {:ok, _} ->
         sessions = Map.delete(state.sessions, session_id)
         {:reply, :ok, %{state | sessions: sessions}}
-
-      {:ok, %{"success" => false, "error" => err}} ->
-        {:reply, {:error, err}, state}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -444,7 +513,25 @@ defmodule Copilot.Client do
     {:reply, ref, %{state | lifecycle_handlers: handlers}}
   end
 
+  def handle_call(:clear_managed_settings_cache, _from, state) do
+    state = maybe_auto_start(state)
+
+    case JsonRpcClient.request(state.rpc, "managedSettings.clearCache", %{}) do
+      {:ok, _} -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call(:get_sessions, _from, state) do
+    {:reply, state.sessions, state}
+  end
+
   @impl true
+  def handle_info({:copilot_notification, method, params}, state) do
+    handle_notification(method, params, state)
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -497,41 +584,50 @@ defmodule Copilot.Client do
         opts.env || []
       end
 
+    # JavaScript entry points (npm-loader.js, legacy index.js) run under node;
+    # any other path (a native binary or the node_modules/.bin/copilot shim) is
+    # executed directly.
+    {executable, launch_args} =
+      if String.downcase(Path.extname(cli_path)) in [".js", ".mjs", ".cjs"] do
+        {System.find_executable("node") || "node", [cli_path | args]}
+      else
+        {cli_path, args}
+      end
+
     port_opts = [
       :binary,
       :exit_status,
       :use_stdio,
-      {:args, args},
+      {:args, launch_args},
       {:cd, String.to_charlist(cwd)},
       {:env, Enum.map(env, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)}
     ]
 
     try do
-      port = Port.open({:spawn_executable, String.to_charlist(cli_path)}, port_opts)
+      port = Port.open({:spawn_executable, String.to_charlist(executable)}, port_opts)
       {:ok, rpc} = JsonRpcClient.start_link(port)
 
-      # Register request handlers for tool.call, permission.request, etc.
-      JsonRpcClient.set_request_handler(rpc, "tool.call", fn params ->
-        handle_tool_call(state.sessions, params)
-      end)
-
-      # We need to update state first so we can reference sessions in handlers.
-      # Handlers will be re-registered after sessions map is populated.
       new_state = %{state | port: port, rpc: rpc, connection_state: :connected}
 
       # Register all server-to-client request handlers
       register_rpc_handlers(rpc, new_state)
 
-      # Register notification handler
+      # Route notifications through this GenServer so they are dispatched with
+      # the current sessions map (events raised while session.create is in
+      # flight are delivered once the session is registered).
+      client_pid = self()
+
       JsonRpcClient.set_notification_handler(rpc, fn method, params ->
-        handle_notification(method, params, new_state)
+        send(client_pid, {:copilot_notification, method, params})
+        :ok
       end)
 
-      # Verify protocol version
-      case verify_protocol_version(rpc) do
-        :ok ->
-          {:ok, new_state}
-
+      # Optional connect handshake (clientInfo), protocol check, then network callbacks
+      with :ok <- send_client_info(rpc, opts.client_info),
+           :ok <- verify_protocol_version(rpc),
+           :ok <- register_network_provider(rpc, opts.network) do
+        {:ok, new_state}
+      else
         {:error, reason} ->
           do_stop(new_state)
           {:error, reason}
@@ -569,6 +665,11 @@ defmodule Copilot.Client do
       end
     end
 
+    # Drop GitHub token provider registrations and pending shell prompts
+    for table <- [state.token_providers, state.shell_auth_requests], table != nil do
+      :ets.delete_all_objects(table)
+    end
+
     %{state | port: nil, rpc: nil, sessions: %{}, connection_state: :disconnected, models_cache: nil}
   end
 
@@ -594,15 +695,15 @@ defmodule Copilot.Client do
       {:ok, %{"protocolVersion" => ^expected}} ->
         :ok
 
-      {:ok, %{"protocolVersion" => server_version}} ->
+      {:ok, %{"protocolVersion" => server_version}} when not is_nil(server_version) ->
         {:error,
-         "SDK protocol version mismatch: SDK expects version #{expected}, " <>
+         "SDK protocol version mismatch: SDK supports version #{expected}, " <>
            "but server reports version #{server_version}. " <>
            "Please update your SDK or server to ensure compatibility."}
 
       {:ok, _} ->
         {:error,
-         "SDK protocol version mismatch: SDK expects version #{expected}, " <>
+         "SDK protocol version mismatch: SDK supports version #{expected}, " <>
            "but server does not report a protocol version. " <>
            "Please update your server to ensure compatibility."}
 
@@ -611,14 +712,57 @@ defmodule Copilot.Client do
     end
   end
 
+  # Declares the integrating application (clientInfo) on a `connect` request
+  # before the ping handshake. Skipped when every clientInfo field is empty;
+  # older CLIs without `connect` (-32601 / "Unhandled method connect") are tolerated.
+  defp send_client_info(rpc, client_info) do
+    case Types.ClientInfo.to_wire(client_info) do
+      nil ->
+        :ok
+
+      wire ->
+        case JsonRpcClient.request(rpc, "connect", %{"clientInfo" => wire}) do
+          {:ok, _} ->
+            :ok
+
+          {:error, %{"code" => -32601}} ->
+            :ok
+
+          {:error, %{"message" => message} = error} when is_binary(message) ->
+            if String.contains?(message, "Unhandled method connect"),
+              do: :ok,
+              else: {:error, "connect failed: #{inspect(error)}"}
+
+          {:error, reason} ->
+            {:error, "connect failed: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  # Registers the client network callbacks after the protocol check.
+  defp register_network_provider(rpc, network) do
+    case Types.NetworkConfig.set_provider_params(network) do
+      nil ->
+        :ok
+
+      params ->
+        case JsonRpcClient.request(rpc, "network.setProvider", params) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, "Failed to register network callbacks: #{inspect(reason)}"}
+        end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Internal: RPC request handlers
   # ---------------------------------------------------------------------------
 
-  defp register_rpc_handlers(rpc, _state) do
+  defp register_rpc_handlers(rpc, state) do
     # We use a closure over `self()` so the handler can ask the GenServer
     # for the current sessions map (which changes over time).
     client_pid = self()
+    token_providers = state.token_providers
+    shell_auth_requests = state.shell_auth_requests
 
     JsonRpcClient.set_request_handler(rpc, "tool.call", fn params ->
       sessions = get_sessions(client_pid)
@@ -644,6 +788,28 @@ defmodule Copilot.Client do
       sessions = get_sessions(client_pid)
       handle_exit_plan_mode_request(sessions, params)
     end)
+
+    # The token registry is read directly (no GenServer round-trip), so a
+    # token request raised while session.create is in flight can be answered.
+    JsonRpcClient.set_request_handler(rpc, "gitHubToken.getToken", fn params ->
+      handle_github_token_request(token_providers, params)
+    end)
+
+    JsonRpcClient.set_request_handler(rpc, "shellAuthentication.request", fn params ->
+      sessions = get_sessions(client_pid)
+      handle_shell_authentication_request(sessions, shell_auth_requests, params)
+    end)
+
+    JsonRpcClient.set_request_handler(rpc, "shellAuthentication.cancel", fn params ->
+      cancel_shell_authentication(shell_auth_requests, params)
+    end)
+
+    JsonRpcClient.set_request_handler(rpc, "memoryStore.store", fn params ->
+      sessions = get_sessions(client_pid)
+      handle_memory_store(sessions, params)
+    end)
+
+    register_network_handlers(rpc, state.options.network)
   end
 
   defp get_sessions(client_pid) do
@@ -652,11 +818,6 @@ defmodule Copilot.Client do
     catch
       _, _ -> %{}
     end
-  end
-
-  @impl true
-  def handle_call(:get_sessions, _from, state) do
-    {:reply, state.sessions, state}
   end
 
   # ---------------------------------------------------------------------------
@@ -786,6 +947,190 @@ defmodule Copilot.Client do
   end
 
   # ---------------------------------------------------------------------------
+  # Internal: GitHub token provider (gitHubToken.getToken)
+  # ---------------------------------------------------------------------------
+
+  defp handle_github_token_request(table, params) do
+    registration_id = params["registrationId"]
+
+    case :ets.lookup(table, registration_id) do
+      [{^registration_id, provider, registered_session_id}] ->
+        args = %{
+          host: params["host"],
+          session_id: params["sessionId"] || registered_session_id,
+          reason: params["reason"]
+        }
+
+        Types.GitHubToken.to_wire(provider.(args))
+
+      [] ->
+        raise "No GitHub token provider registered for registration ID #{inspect(registration_id)}"
+    end
+  end
+
+  defp register_github_token_provider(_state, nil, _session_id), do: nil
+
+  defp register_github_token_provider(state, provider, session_id) do
+    registration_id = new_registration_id()
+    :ets.insert(state.token_providers, {registration_id, provider, session_id})
+    registration_id
+  end
+
+  defp assign_github_token_provider(_state, nil, _session_id), do: :ok
+
+  defp assign_github_token_provider(state, registration_id, session_id) do
+    :ets.update_element(state.token_providers, registration_id, {3, session_id})
+    :ok
+  end
+
+  defp unregister_github_token_provider(_state, nil), do: :ok
+
+  defp unregister_github_token_provider(state, registration_id) do
+    :ets.delete(state.token_providers, registration_id)
+    :ok
+  end
+
+  # Random (version 4) UUID used as the provider registration ID.
+  defp new_registration_id do
+    <<a::32, b::16, _::4, c::12, _::2, d::14, e::48>> = :rand.bytes(16)
+
+    :io_lib.format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b", [a, b, c, d + 0x8000, e])
+    |> IO.iodata_to_binary()
+  end
+
+  # ---------------------------------------------------------------------------
+  # Internal: Shell authentication (shellAuthentication.request / .cancel)
+  # ---------------------------------------------------------------------------
+
+  # The handler runs in a worker process so that a shellAuthentication.cancel
+  # can answer the pending request with `cancel` while the handler still waits.
+  defp handle_shell_authentication_request(sessions, pending, params) do
+    session_id = params["sessionId"]
+
+    handler =
+      case Map.get(sessions, session_id) do
+        nil -> nil
+        session_pid -> Session.shell_authentication_handler(session_pid)
+      end
+
+    unless is_function(handler, 1) do
+      raise "Shell authentication requested but no handler registered for session #{session_id}"
+    end
+
+    request = Types.ShellAuthenticationRequest.from_map(params)
+    key = {session_id, params["requestId"]}
+    ref = make_ref()
+    waiter = self()
+    :ets.insert(pending, {key, waiter, ref})
+
+    {worker, monitor_ref} =
+      spawn_monitor(fn -> send(waiter, {ref, {:answer, handler.(request)}}) end)
+
+    reply =
+      receive do
+        {^ref, {:answer, answer}} ->
+          Process.demonitor(monitor_ref, [:flush])
+          {:ok, Types.ShellAuthenticationRequest.response_to_wire(answer)}
+
+        {^ref, :cancel} ->
+          Process.demonitor(monitor_ref, [:flush])
+          Process.exit(worker, :kill)
+          {:ok, Types.ShellAuthenticationRequest.response_to_wire(:cancel)}
+
+        {:DOWN, ^monitor_ref, :process, ^worker, reason} ->
+          {:failed, reason}
+      end
+
+    :ets.delete(pending, key)
+
+    case reply do
+      {:ok, wire} -> wire
+      {:failed, reason} -> raise "Shell authentication handler failed: #{inspect(reason)}"
+    end
+  end
+
+  defp cancel_shell_authentication(pending, params) do
+    key = {params["sessionId"], params["requestId"]}
+
+    case :ets.take(pending, key) do
+      [{_key, waiter, ref}] -> send(waiter, {ref, :cancel})
+      [] -> :ok
+    end
+
+    %{}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Internal: Memory store (memoryStore.store)
+  # ---------------------------------------------------------------------------
+
+  defp handle_memory_store(sessions, params) do
+    session_id = params["sessionId"]
+
+    store =
+      case Map.get(sessions, session_id) do
+        nil -> nil
+        session_pid -> Session.memory_store(session_pid)
+      end
+
+    unless is_function(store, 1) do
+      raise "Memory store requested but no store registered for session #{session_id}"
+    end
+
+    case store.(Types.StoredMemory.from_map(params)) do
+      {:error, reason} -> raise "Memory store failed: #{inspect(reason)}"
+      _ -> :null
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Internal: Network callbacks (network.resolveProxy / authenticate*)
+  # ---------------------------------------------------------------------------
+
+  defp register_network_handlers(_rpc, nil), do: :ok
+
+  defp register_network_handlers(rpc, %Types.NetworkConfig{} = network) do
+    if is_function(network.resolve_proxy, 1) do
+      JsonRpcClient.set_request_handler(rpc, "network.resolveProxy", fn params ->
+        case network.resolve_proxy.(%{url: params["url"]}) do
+          proxy when is_binary(proxy) and proxy != "" -> %{"proxy" => proxy}
+          _ -> %{}
+        end
+      end)
+    end
+
+    # Tokens and passwords are never logged.
+    if is_function(network.authenticate_negotiate, 1) do
+      JsonRpcClient.set_request_handler(rpc, "network.authenticateNegotiate", fn params ->
+        case network.authenticate_negotiate.(%{spn: params["spn"]}) do
+          token when is_binary(token) and token != "" -> %{"token" => token}
+          _ -> %{}
+        end
+      end)
+    end
+
+    if is_function(network.authenticate_basic, 1) do
+      JsonRpcClient.set_request_handler(rpc, "network.authenticateBasic", fn params ->
+        request = %{
+          proxy: params["proxy"],
+          realm: params["realm"],
+          previous_rejected: params["previousRejected"] == true
+        }
+
+        case network.authenticate_basic.(request) do
+          %{username: username} = credentials when is_binary(username) ->
+            Types.compact(%{"username" => username, "password" => Map.get(credentials, :password)})
+
+          _ ->
+            %{}
+        end
+      end)
+    end
+
+    :ok
+  end
+
+  # ---------------------------------------------------------------------------
   # Internal: Notification handling
   # ---------------------------------------------------------------------------
 
@@ -887,7 +1232,6 @@ defmodule Copilot.Client do
     params = put_if(params, "enableCitations", c.enable_citations)
     params = put_if(params, "excludedBuiltinAgents", c.excluded_builtin_agents)
     params = put_if(params, "otlpProtocol", c.otlp_protocol)
-    params = put_if(params, "enableWebSocketResponses", c.enable_web_socket_responses)
     params = put_if(params, "expAssignments", c.exp_assignments)
     params = put_if(params, "rewindEnabled", c.rewind_enabled)
     params = put_if(params, "additionalDirectories", c.additional_directories)
@@ -920,7 +1264,13 @@ defmodule Copilot.Client do
         params
       end
 
-    params
+    # Options accepted only by session.create
+    params = put_if(params, "name", c.name)
+    params = put_if(params, "trustWorkingDirectory", c.trust_working_directory)
+    params = put_if(params, "refreshCustomInstructions", c.refresh_custom_instructions)
+    params = put_if(params, "defaultProvider", c.default_provider)
+
+    put_shared_options(params, c)
   end
 
   defp build_resume_params(session_id, %ResumeSessionConfig{} = c) do
@@ -982,7 +1332,413 @@ defmodule Copilot.Client do
         params
       end
 
+    # Options accepted only by session.resume
+    params = put_if(params, "allowTranscriptRecovery", c.allow_transcript_recovery)
+
+    # `default_provider: :clear` sends null, which clears the default connection.
+    params =
+      case c.default_provider do
+        :clear -> Map.put(params, "defaultProvider", nil)
+        provider -> put_if(params, "defaultProvider", provider)
+      end
+
+    put_shared_options(params, c)
+  end
+
+  # Flat options shared by SessionConfig and ResumeSessionConfig (v2.6.0 / v3.0.0).
+  defp put_shared_options(params, c) do
     params
+    |> put_if("modelCapabilities", c.model_capabilities)
+    |> put_if("enableConfigDiscovery", c.enable_config_discovery)
+    |> put_if("includeSubAgentStreamingEvents", c.include_sub_agent_streaming_events)
+    |> put_if("gitHubToken", c.github_token)
+    |> put_if("instructionDirectories", c.instruction_directories)
+    |> put_if("askUserVariant", c.ask_user_variant)
+    |> put_if("sandboxConfig", to_wire_map(c.sandbox_config))
+    |> put_if("featureFlags", c.feature_flags)
+    |> put_if("allowedModels", c.allowed_models)
+    |> put_if("authClientIdMetadataUrl", c.auth_client_id_metadata_url)
+    |> put_if("agentDirectories", c.agent_directories)
+    |> put_if("hookDirectories", c.hook_directories)
+    |> put_if("interactiveUser", c.interactive_user)
+    |> put_if("excludedManagedSettings", c.excluded_managed_settings)
+    |> put_if("enforceManagedModelDefaults", c.enforce_managed_model_defaults)
+    |> put_if("imageGeneration", to_wire_map(c.image_generation))
+    |> put_if("autopilot", to_wire_map(c.autopilot))
+    |> put_if("providers", to_wire_list(c.providers))
+    |> put_if("models", to_wire_list(c.models))
+    |> put_if("capi", capi_to_map(c))
+    |> put_if("requestShellAuthentication", if(c.on_shell_authentication_request, do: true))
+    |> put_if("hasMemoryStore", if(c.store_memory, do: true))
+  end
+
+  defp to_wire_map(nil), do: nil
+  defp to_wire_map(%Types.SandboxConfig{} = s), do: Types.SandboxConfig.to_map(s)
+  defp to_wire_map(%Types.ImageGenerationConfig{} = i), do: Types.ImageGenerationConfig.to_map(i)
+  defp to_wire_map(%Types.AutopilotOptions{} = a), do: Types.AutopilotOptions.to_map(a)
+  defp to_wire_map(%Types.NamedProviderConfig{} = p), do: Types.NamedProviderConfig.to_map(p)
+  defp to_wire_map(%Types.ProviderModelConfig{} = m), do: Types.ProviderModelConfig.to_map(m)
+  defp to_wire_map(map) when is_map(map), do: map
+
+  defp to_wire_list(nil), do: nil
+  defp to_wire_list(items) when is_list(items), do: Enum.map(items, &to_wire_map/1)
+
+  # Auto routing tier, WebSocket transport and the CAPI catalog switch travel
+  # together in the `capi` object (grouped as github.capi).
+  defp capi_to_map(c) do
+    enabled =
+      case c.capi do
+        %Types.CapiConfig{enabled: enabled} -> enabled
+        %{} = capi -> Map.get(capi, :enabled, Map.get(capi, "enabled"))
+        _ -> nil
+      end
+
+    capi =
+      Types.compact(%{
+        "enabled" => enabled,
+        "autoTier" => c.auto_tier,
+        "enableWebSocketResponses" => c.enable_web_socket_responses
+      })
+
+    if map_size(capi) == 0, do: nil, else: capi
+  end
+
+  defp validate_session_config(config, state) do
+    cond do
+      config.github_token != nil and config.github_token_provider != nil ->
+        {:error, "github_token and github_token_provider are mutually exclusive"}
+
+      config.github_token_provider != nil and not is_function(config.github_token_provider, 1) ->
+        {:error, "github_token_provider must be a function of arity 1"}
+
+      state.mode == :empty and config.available_tools == nil ->
+        {:error,
+         "CopilotClient is in mode \"empty\" but the session config did not specify " <>
+           "available_tools. Empty mode requires every session to explicitly opt into " <>
+           "the tools it wants."}
+
+      true ->
+        :ok
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SDK protocol 4: grouped session payloads
+  # ---------------------------------------------------------------------------
+
+  @session_option_groups ~w(inference tools permissions interaction events agents skills mcp
+                            github filesystem execution instructions hooks git state plugins
+                            canvases extensions experiments policy)
+
+  # Flat session option key => {group, member}. Keys not listed here (sessionId,
+  # model, name, clientName, workingDirectory, configDirectory,
+  # enableConfigDiscovery, systemMessage, allowTranscriptRecovery, ...) stay at
+  # the root.
+  @session_option_paths %{
+    "reasoningEffort" => {"inference", "reasoningEffort"},
+    "reasoningSummary" => {"inference", "reasoningSummary"},
+    "contextTier" => {"inference", "contextTier"},
+    "allowMultipleToolCalls" => {"inference", "allowMultipleToolCalls"},
+    "enableCitations" => {"inference", "enableCitations"},
+    "modelCapabilities" => {"inference", "capabilities"},
+    "verbosity" => {"inference", "verbosity"},
+    "providers" => {"inference", "providers"},
+    "models" => {"inference", "models"},
+    "defaultProvider" => {"inference", "defaultProvider"},
+    "tools" => {"tools", "definitions"},
+    "availableTools" => {"tools", "availableTools"},
+    "excludedTools" => {"tools", "excludedTools"},
+    "toolSearch" => {"tools", "search"},
+    "largeOutput" => {"tools", "largeOutput"},
+    "imageGeneration" => {"tools", "imageGeneration"},
+    "manageScheduleEnabled" => {"tools", "manageScheduleEnabled"},
+    "webSearch" => {"tools", "webSearch"},
+    "shell" => {"tools", "shell"},
+    "maxInlineBinaryBytes" => {"tools", "maxInlineBinaryBytes"},
+    "requestPermission" => {"permissions", "request"},
+    "sandboxConfig" => {"permissions", "sandbox"},
+    "sandbox" => {"permissions", "sandbox"},
+    "permissionMode" => {"permissions", "mode"},
+    "sandboxConfigSource" => {"permissions", "sandboxSource"},
+    "commands" => {"interaction", "commands"},
+    "askUserVariant" => {"interaction", "askUserVariant"},
+    "requestUserInput" => {"interaction", "requestUserInput"},
+    "requestElicitation" => {"interaction", "requestElicitation"},
+    "requestShellAuthentication" => {"interaction", "requestShellAuthentication"},
+    "requestExitPlanMode" => {"interaction", "requestExitPlanMode"},
+    "requestAutoModeSwitch" => {"interaction", "requestAutoModeSwitch"},
+    "requestAutoModeRecovery" => {"interaction", "requestAutoModeRecovery"},
+    "streaming" => {"events", "streaming"},
+    "includeSubAgentStreamingEvents" => {"events", "includeSubAgentStreamingEvents"},
+    "customAgents" => {"agents", "definitions"},
+    "defaultAgent" => {"agents", "default"},
+    "agent" => {"agents", "selected"},
+    "includedBuiltinAgents" => {"agents", "includedBuiltinAgents"},
+    "excludedBuiltinAgents" => {"agents", "excludedBuiltinAgents"},
+    "customAgentsLocalOnly" => {"agents", "localDiscoveryOnly"},
+    "agentDirectories" => {"agents", "directories"},
+    "skillDirectories" => {"skills", "directories"},
+    "enableSkills" => {"skills", "enabled"},
+    "includedBuiltinSkills" => {"skills", "includedBuiltinSkills"},
+    "disabledSkills" => {"skills", "disabledSkills"},
+    "hasSkillProvider" => {"skills", "hasProvider"},
+    "ignoredSkillsLocations" => {"skills", "ignoredLocations"},
+    "mcpServers" => {"mcp", "servers"},
+    "disabledMcpServers" => {"mcp", "disabledServers"},
+    "requestMcpApps" => {"mcp", "enableApps"},
+    "enableMcpApps" => {"mcp", "enableApps"},
+    "mcpOAuthTokenStorage" => {"mcp", "oauthTokenStorage"},
+    "authClientIdMetadataUrl" => {"mcp", "authClientIdMetadataUrl"},
+    "envValueMode" => {"mcp", "envValueMode"},
+    "managedMcpServers" => {"mcp", "managedServers"},
+    "allowAllMcpServerInstructions" => {"mcp", "allowAllServerInstructions"},
+    "gitHubToken" => {"github", "token"},
+    "gitHubTokenProviderRegistrationId" => {"github", "tokenProviderRegistrationId"},
+    "githubMcpToolConfig" => {"github", "mcp"},
+    "capi" => {"github", "capi"},
+    "enableSessionTelemetry" => {"github", "telemetryEnabled"},
+    "enableManagedSettings" => {"github", "fetchManagedSettings"},
+    "interactiveUser" => {"github", "interactiveUser"},
+    "enableGitHubTelemetryForwarding" => {"github", "telemetryForwarding"},
+    "authInfo" => {"github", "authInfo"},
+    "copilotUrl" => {"github", "copilotUrl"},
+    "additionalDirectories" => {"filesystem", "additionalDirectories"},
+    "enableFileChangeTracking" => {"filesystem", "trackFileChanges"},
+    "trustWorkingDirectory" => {"filesystem", "trustWorkingDirectory"},
+    "sessionLimits" => {"execution", "limits"},
+    "autopilot" => {"execution", "autopilot"},
+    "autopilotContinuation" => {"execution", "autopilotContinuation"},
+    "instructionDirectories" => {"instructions", "directories"},
+    "organizationCustomInstructions" => {"instructions", "organizationText"},
+    "enableOnDemandInstructionDiscovery" => {"instructions", "onDemandDiscovery"},
+    "skipCustomInstructions" => {"instructions", "skipCustomInstructions"},
+    "refreshCustomInstructions" => {"instructions", "refreshCustomInstructions"},
+    "hooks" => {"hooks", "hasHandlers"},
+    "hookDirectories" => {"hooks", "directories"},
+    "enableFileHooks" => {"hooks", "enableRepositoryHooks"},
+    "coauthorEnabled" => {"git", "coauthorEnabled"},
+    "enableHostGitOperations" => {"git", "enableHostGitOperations"},
+    "infiniteSessions" => {"state", "infiniteSessions"},
+    "memory" => {"state", "memory"},
+    "hasMemoryStore" => {"state", "hasMemoryStore"},
+    "enableSessionStore" => {"state", "enableCrossSessionStore"},
+    "skipEmbeddingRetrieval" => {"state", "skipEmbeddingRetrieval"},
+    "embeddingCacheStorage" => {"state", "embeddingCacheStorage"},
+    "pluginDirectories" => {"plugins", "directories"},
+    "installedPlugins" => {"plugins", "installed"},
+    "canvases" => {"canvases", "definitions"},
+    "canvasProvider" => {"canvases", "provider"},
+    "requestCanvasRenderer" => {"canvases", "requestRenderer"},
+    "openCanvases" => {"canvases", "open"},
+    "requestExtensions" => {"extensions", "enabled"},
+    "extensionSdkPath" => {"extensions", "sdkPath"},
+    "extensionInfo" => {"extensions", "identity"},
+    "enableExperimentalMode" => {"experiments", "enableExperimentalMode"},
+    "isExperimentalMode" => {"experiments", "enableExperimentalMode"},
+    # This SDK historically sent the experimental-mode flag as experimentalMode.
+    "experimentalMode" => {"experiments", "enableExperimentalMode"},
+    "featureFlags" => {"experiments", "flags"},
+    "expAssignments" => {"experiments", "assignments"},
+    "featureFlagConfiguration" => {"experiments", "configuration"},
+    "allowedModels" => {"policy", "allowedModels"},
+    "managedSettings" => {"policy", "managedSettings"},
+    "excludedManagedSettings" => {"policy", "excludedManagedSettings"},
+    "enforceManagedModelDefaults" => {"policy", "enforceManagedModelDefaults"}
+  }
+
+  # Keys valid only on the other lifecycle method.
+  @create_only_keys ~w(name cloud trustWorkingDirectory refreshCustomInstructions)
+  @resume_only_keys ~w(suppressResumeEvent continuePendingWork allowTranscriptRecovery
+                       requestedEnvironmentVariables openCanvases)
+
+  # Legacy BYOK provider fields that describe the model, not the connection.
+  @legacy_provider_model_fields ~w(modelId wireModel maxPromptTokens maxContextWindowTokens
+                                   maxOutputTokens capabilities)
+
+  @empty_mode_defaults [
+    {"experiments", "enableExperimentalMode", false},
+    {"github", "telemetryEnabled", false},
+    {"mcp", "oauthTokenStorage", "in-memory"},
+    {"state", "skipEmbeddingRetrieval", true},
+    {"state", "embeddingCacheStorage", "in-memory"},
+    {"state", "enableCrossSessionStore", false},
+    {"state", "memory", %{"enabled" => false}},
+    {"instructions", "onDemandDiscovery", false},
+    {"hooks", "enableRepositoryHooks", false},
+    {"git", "enableHostGitOperations", false}
+  ]
+
+  @doc false
+  # Converts the flat session payload built by build_create_params/1 and
+  # build_resume_params/2 into the SDK protocol 4 grouped payload sent with
+  # session.create (`:create`) and session.resume (`:resume`).
+  #
+  # Protocol 4 runtimes reject the flat keys and unknown group members, while
+  # unknown root keys are tolerated. Known flat keys therefore move to their
+  # exact group member (for example "streaming" to events.streaming and
+  # "hooks" => true to hooks.hasHandlers); root keys and unrecognized keys stay
+  # at the top level; nil values are skipped (except an explicit
+  # "defaultProvider" => nil on resume, which clears the default provider);
+  # members invalid for the method are dropped; empty groups are not emitted.
+  # Already-grouped objects are merged and their members win. The legacy
+  # single "provider" becomes the named "default" connection unless providers,
+  # defaultProvider or capi.enabled are given explicitly.
+  @spec group_session_params(map(), :create | :resume) :: map()
+  def group_session_params(flat, mode) when is_map(flat) and mode in [:create, :resume] do
+    excluded = if mode == :resume, do: @create_only_keys, else: @resume_only_keys
+
+    {root, groups, explicit, provider} =
+      Enum.reduce(flat, {%{}, %{}, %{}, nil}, fn {key, value}, {root, groups, explicit, provider} = acc ->
+        cond do
+          is_nil(value) and not (mode == :resume and key == "defaultProvider") ->
+            acc
+
+          key in excluded ->
+            acc
+
+          key == "provider" ->
+            {root, groups, explicit, value}
+
+          key == "configDir" ->
+            {Map.put_new(root, "configDirectory", value), groups, explicit, provider}
+
+          key == "disableResume" and mode == :resume ->
+            {Map.put_new(root, "suppressResumeEvent", value), groups, explicit, provider}
+
+          key == "disableResume" ->
+            acc
+
+          key in @session_option_groups and is_map(value) ->
+            {root, groups, Map.put(explicit, key, value), provider}
+
+          Map.has_key?(@session_option_paths, key) ->
+            {group, member} = Map.fetch!(@session_option_paths, key)
+            {root, put_group_member(groups, group, member, value), explicit, provider}
+
+          true ->
+            {Map.put(root, key, value), groups, explicit, provider}
+        end
+      end)
+
+    # Explicitly grouped members win over members moved from flat keys.
+    groups =
+      Enum.reduce(explicit, groups, fn {group, members}, acc ->
+        kept =
+          members
+          |> Enum.reject(fn {member, value} ->
+            is_nil(value) and
+              not (mode == :resume and group == "inference" and member == "defaultProvider")
+          end)
+          |> Map.new()
+
+        Map.update(acc, group, kept, &Map.merge(&1, kept))
+      end)
+
+    groups
+    |> translate_legacy_provider(provider, Map.get(root, "model"))
+    |> ensure_mcp_env_value_mode()
+    |> drop_lifecycle_members(mode)
+    |> Enum.reject(fn {_group, members} -> members == %{} end)
+    |> Map.new()
+    |> then(&Map.merge(root, &1))
+  end
+
+  @doc false
+  # Applies the client mode defaults under the caller's grouped values: in
+  # :empty mode ambient capabilities default off; :coding_agent leaves the
+  # payload unchanged.
+  @spec apply_mode_defaults(map(), :coding_agent | :empty) :: map()
+  def apply_mode_defaults(params, :empty) do
+    Enum.reduce(@empty_mode_defaults, params, fn {group, member, default}, acc ->
+      members = Map.get(acc, group, %{})
+
+      if is_nil(Map.get(members, member)) do
+        Map.put(acc, group, Map.put(members, member, default))
+      else
+        acc
+      end
+    end)
+  end
+
+  def apply_mode_defaults(params, _mode), do: params
+
+  defp put_group_member(groups, group, member, value) do
+    Map.update(groups, group, %{member => value}, &Map.put(&1, member, value))
+  end
+
+  # The legacy single `provider` becomes the named "default" connection
+  # (inference.providers), selected by inference.defaultProvider, with CAPI
+  # disabled (github.capi.enabled = false) as v1 BYOK did. Model-specific
+  # fields move to an inference.models entry for the session model.
+  defp translate_legacy_provider(groups, provider, model) when is_map(provider) do
+    inference = Map.get(groups, "inference", %{})
+    github = Map.get(groups, "github", %{})
+
+    explicit_capi =
+      case Map.get(github, "capi") do
+        %{} = capi -> Map.has_key?(capi, "enabled")
+        _ -> false
+      end
+
+    if Map.has_key?(inference, "providers") or Map.has_key?(inference, "defaultProvider") or
+         explicit_capi do
+      groups
+    else
+      present =
+        provider
+        |> Enum.reject(fn {key, value} -> is_nil(value) or key == "name" end)
+        |> Map.new()
+
+      {model_fields, connection} = Map.split(present, @legacy_provider_model_fields)
+
+      inference =
+        inference
+        |> Map.put("providers", [Map.put(connection, "name", "default")])
+        |> Map.put("defaultProvider", "default")
+
+      inference =
+        if map_size(model_fields) > 0 and is_binary(model) do
+          definition = model_fields |> Map.put("provider", "default") |> Map.put("id", model)
+          Map.put(inference, "models", [definition])
+        else
+          inference
+        end
+
+      capi =
+        case Map.get(github, "capi") do
+          %{} = existing -> Map.put(existing, "enabled", false)
+          _ -> %{"enabled" => false}
+        end
+
+      groups
+      |> Map.put("inference", inference)
+      |> Map.put("github", Map.put(github, "capi", capi))
+    end
+  end
+
+  defp translate_legacy_provider(groups, _provider, _model), do: groups
+
+  # mcp.envValueMode is "direct" whenever MCP servers are sent.
+  defp ensure_mcp_env_value_mode(%{"mcp" => %{"servers" => _} = mcp} = groups),
+    do: Map.put(groups, "mcp", Map.put_new(mcp, "envValueMode", "direct"))
+
+  defp ensure_mcp_env_value_mode(groups), do: groups
+
+  # Protocol 4 runtimes reject members that are invalid for the lifecycle method.
+  defp drop_lifecycle_members(groups, :resume) do
+    groups
+    |> drop_group_member("filesystem", "trustWorkingDirectory")
+    |> drop_group_member("instructions", "refreshCustomInstructions")
+  end
+
+  defp drop_lifecycle_members(groups, :create),
+    do: drop_group_member(groups, "canvases", "open")
+
+  defp drop_group_member(groups, group, member) do
+    case groups do
+      %{^group => %{} = members} -> Map.put(groups, group, Map.delete(members, member))
+      _ -> groups
+    end
   end
 
   defp put_if(map, _key, nil), do: map
@@ -1002,6 +1758,10 @@ defmodule Copilot.Client do
     m = put_if(m, "apiKey", p.api_key)
     m = put_if(m, "bearerToken", p.bearer_token)
     m = put_if(m, "azure", p.azure)
+    m = put_if(m, "apiKeyCommand", p.api_key_command)
+    m = put_if(m, "modelProvider", p.model_provider)
+    m = put_if(m, "transport", p.transport)
+    m = put_if(m, "headers", p.headers)
     m
   end
 

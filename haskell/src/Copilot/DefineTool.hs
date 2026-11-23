@@ -65,6 +65,7 @@ defineTool name desc params handler = Tool
   , toolDescription = desc
   , toolParameters  = params
   , toolHandler     = handler
+  , toolIdempotent  = Nothing
   }
 
 -- | Define a simple tool with typed argument parsing.
@@ -96,4 +97,5 @@ defineSimpleTool name desc params handler = Tool
             , troSessionLog          = Nothing
             , troToolTelemetry       = Nothing
             }
+  , toolIdempotent  = Nothing
   }

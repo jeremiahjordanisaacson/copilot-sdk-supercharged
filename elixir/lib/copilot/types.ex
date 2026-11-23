@@ -128,21 +128,28 @@ defmodule Copilot.Types do
   @type tool_handler :: (any(), ToolInvocation.t() -> any())
 
   defmodule Tool do
-    @moduledoc "Definition of a tool exposed to the Copilot CLI."
+    @moduledoc """
+    Definition of a tool exposed to the Copilot CLI.
+
+    Set `idempotent: true` to mark a tool as safe to retry (repeated calls with
+    the same arguments have no additional side effects).
+    """
     @type t :: %__MODULE__{
             name: String.t(),
             description: String.t() | nil,
             parameters: map() | nil,
-            handler: Copilot.Types.tool_handler()
+            handler: Copilot.Types.tool_handler(),
+            idempotent: boolean() | nil
           }
-    defstruct [:name, :description, :parameters, :handler]
+    defstruct [:name, :description, :parameters, :handler, :idempotent]
 
-    @doc "Serialize to the map sent in session.create / session.resume."
+    @doc "Serialize to the map sent in session.create / session.resume (`tools.definitions[]`)."
     @spec to_wire(t()) :: map()
     def to_wire(%__MODULE__{} = tool) do
       m = %{"name" => tool.name}
       m = if tool.description, do: Map.put(m, "description", tool.description), else: m
       m = if tool.parameters, do: Map.put(m, "parameters", tool.parameters), else: m
+      m = if is_boolean(tool.idempotent), do: Map.put(m, "idempotent", tool.idempotent), else: m
       m
     end
   end
@@ -350,7 +357,9 @@ defmodule Copilot.Types do
             on_user_prompt_transformed: (map(), map() -> map() | nil) | nil,
             on_session_start: (map(), map() -> map() | nil) | nil,
             on_session_end: (map(), map() -> map() | nil) | nil,
-            on_error_occurred: (map(), map() -> map() | nil) | nil
+            on_error_occurred: (map(), map() -> map() | nil) | nil,
+            on_subagent_start: (map(), map() -> map() | nil) | nil,
+            on_subagent_stop: (map(), map() -> map() | nil) | nil
           }
     defstruct [
       :on_pre_tool_use,
@@ -360,7 +369,14 @@ defmodule Copilot.Types do
       :on_user_prompt_transformed,
       :on_session_start,
       :on_session_end,
-      :on_error_occurred
+      :on_error_occurred,
+      # Sub-agent lifecycle hooks (hook types "subagentStart" / "subagentStop").
+      # subagentStart input: timestamp, cwd, transcriptPath, agentName,
+      # agentDisplayName, agentDescription; output: additionalContext.
+      # subagentStop input adds agentId, agentType, stopReason, response;
+      # output: decision ("block" | "allow"), reason, modifiedResponse.
+      :on_subagent_start,
+      :on_subagent_stop
     ]
 
     @doc "Returns true if any hook handler is set."
@@ -373,7 +389,9 @@ defmodule Copilot.Types do
         h.on_user_prompt_transformed != nil or
         h.on_session_start != nil or
         h.on_session_end != nil or
-        h.on_error_occurred != nil
+        h.on_error_occurred != nil or
+        h.on_subagent_start != nil or
+        h.on_subagent_stop != nil
     end
 
     @doc "Look up a handler by hook type string."
@@ -388,6 +406,8 @@ defmodule Copilot.Types do
         "sessionStart" -> h.on_session_start
         "sessionEnd" -> h.on_session_end
         "errorOccurred" -> h.on_error_occurred
+        "subagentStart" -> h.on_subagent_start
+        "subagentStop" -> h.on_subagent_stop
         _ -> nil
       end
     end
@@ -530,16 +550,575 @@ defmodule Copilot.Types do
   # ---------------------------------------------------------------------------
 
   defmodule ProviderConfig do
-    @moduledoc "Configuration for a custom API provider (BYOK)."
+    @moduledoc """
+    Configuration for a custom API provider (legacy single BYOK provider).
+
+    On SDK protocol 4 the SDK sends it as the named `"default"` connection in
+    `inference.providers`, selects it with `inference.defaultProvider`, and
+    disables Copilot API models (`github.capi.enabled: false`), preserving v1
+    behavior. Prefer `providers` / `models` (`NamedProviderConfig`,
+    `ProviderModelConfig`) for new code.
+
+    `api_key_command` is a command whose stdout is used as the API key;
+    `model_provider` is one of `"openai"`, `"anthropic"`, `"azure_openai"`,
+    `"ollama"`, `"lm_studio"`, `"foundry_local"` or `"llama_cpp"`.
+    """
     @type t :: %__MODULE__{
             type: String.t() | nil,
             wire_api: String.t() | nil,
             base_url: String.t(),
             api_key: String.t() | nil,
             bearer_token: String.t() | nil,
-            azure: map() | nil
+            azure: map() | nil,
+            api_key_command: String.t() | nil,
+            model_provider: String.t() | nil,
+            transport: String.t() | nil,
+            headers: map() | nil
           }
-    defstruct [:type, :wire_api, :base_url, :api_key, :bearer_token, :azure]
+    defstruct [
+      :type,
+      :wire_api,
+      :base_url,
+      :api_key,
+      :bearer_token,
+      :azure,
+      :api_key_command,
+      :model_provider,
+      :transport,
+      :headers
+    ]
+  end
+
+  # ---------------------------------------------------------------------------
+  # v2.6.0 Session Option Types
+  # ---------------------------------------------------------------------------
+
+  defmodule ClientInfo do
+    @moduledoc """
+    Identity of the integrating application, declared on the `connect`
+    handshake (`clientInfo`). Empty fields are dropped; when every field is
+    empty, `connect` is not sent.
+    """
+    @type t :: %__MODULE__{
+            editor_name: String.t() | nil,
+            editor_version: String.t() | nil,
+            extension_name: String.t() | nil,
+            extension_version: String.t() | nil
+          }
+    defstruct [:editor_name, :editor_version, :extension_name, :extension_version]
+
+    @doc "Wire map for `connect` (`clientInfo`); `nil` when every field is empty."
+    @spec to_wire(t() | nil) :: map() | nil
+    def to_wire(nil), do: nil
+
+    def to_wire(%__MODULE__{} = info) do
+      wire =
+        [
+          {"editorName", info.editor_name},
+          {"editorVersion", info.editor_version},
+          {"extensionName", info.extension_name},
+          {"extensionVersion", info.extension_version}
+        ]
+        |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+        |> Map.new()
+
+      if map_size(wire) == 0, do: nil, else: wire
+    end
+  end
+
+  defmodule SandboxConfig do
+    @moduledoc """
+    Sandbox configuration (`permissions.sandbox`). `allow_bypass: true` lets the
+    agent ask to run an individual command outside the sandbox; the request
+    goes through the normal permission flow.
+    """
+    @type t :: %__MODULE__{
+            enabled: boolean(),
+            user_policy: map() | nil,
+            add_current_working_directory: boolean() | nil,
+            sandbox_mcp_servers: boolean() | nil,
+            sandbox_lsp_servers: boolean() | nil,
+            sandbox_extensions: boolean() | nil,
+            allow_bypass: boolean() | nil
+          }
+    defstruct [
+      enabled: true,
+      user_policy: nil,
+      add_current_working_directory: nil,
+      sandbox_mcp_servers: nil,
+      sandbox_lsp_servers: nil,
+      sandbox_extensions: nil,
+      allow_bypass: nil
+    ]
+
+    @spec to_map(t()) :: map()
+    def to_map(%__MODULE__{} = s) do
+      Copilot.Types.compact(%{
+        "enabled" => s.enabled,
+        "userPolicy" => s.user_policy,
+        "addCurrentWorkingDirectory" => s.add_current_working_directory,
+        "sandboxMcpServers" => s.sandbox_mcp_servers,
+        "sandboxLspServers" => s.sandbox_lsp_servers,
+        "sandboxExtensions" => s.sandbox_extensions,
+        "allowBypass" => s.allow_bypass
+      })
+    end
+  end
+
+  defmodule ImageGenerationConfig do
+    @moduledoc "Image generation opt-in (`tools.imageGeneration`)."
+    @type t :: %__MODULE__{
+            enabled: boolean() | nil,
+            watermark: boolean() | nil,
+            save_to_disk: boolean() | nil
+          }
+    defstruct [:enabled, :watermark, :save_to_disk]
+
+    @spec to_map(t()) :: map()
+    def to_map(%__MODULE__{} = c) do
+      Copilot.Types.compact(%{
+        "enabled" => c.enabled,
+        "watermark" => c.watermark,
+        "saveToDisk" => c.save_to_disk
+      })
+    end
+  end
+
+  defmodule AutopilotOptions do
+    @moduledoc "Autopilot continuation options (`execution.autopilot`)."
+    @type t :: %__MODULE__{
+            continuation_enabled: boolean() | nil,
+            max_continues: non_neg_integer() | nil
+          }
+    defstruct [:continuation_enabled, :max_continues]
+
+    @spec to_map(t()) :: map()
+    def to_map(%__MODULE__{} = a) do
+      Copilot.Types.compact(%{
+        "continuationEnabled" => a.continuation_enabled,
+        "maxContinues" => a.max_continues
+      })
+    end
+  end
+
+  defmodule MessageSource do
+    @moduledoc ~S|Message provenance for the `source` message option: `"user"`, `"system"`, or `"agent-<id>"`.|
+    @spec user() :: String.t()
+    def user, do: "user"
+    @spec system() :: String.t()
+    def system, do: "system"
+    @spec agent(String.t()) :: String.t()
+    def agent(agent_id), do: "agent-" <> agent_id
+  end
+
+  defmodule GitHubToken do
+    @moduledoc """
+    A GitHub token returned by a session's `github_token_provider`
+    (`gitHubToken.getToken` reply `{kind: "token", accessToken, tokenType?, expiresIn}`).
+    A provider may also return `:cancelled` to decline.
+
+    `expires_in` is the remaining lifetime in seconds. The runtime requires more
+    than one hour; it defaults to 28800 (8 hours, the typical GitHub token
+    lifetime).
+    """
+    @type t :: %__MODULE__{
+            access_token: String.t(),
+            token_type: String.t() | nil,
+            expires_in: non_neg_integer()
+          }
+    defstruct [:access_token, :token_type, expires_in: 28_800]
+
+    @doc "Encode a provider result as the `gitHubToken.getToken` reply."
+    @spec to_wire(t() | :cancelled | map() | String.t()) :: map()
+    def to_wire(:cancelled), do: %{"kind" => "cancelled"}
+
+    def to_wire(token) when is_binary(token), do: to_wire(%__MODULE__{access_token: token})
+
+    def to_wire(%__MODULE__{} = t) do
+      Copilot.Types.compact(%{
+        "kind" => "token",
+        "accessToken" => t.access_token,
+        "tokenType" => t.token_type,
+        "expiresIn" => t.expires_in
+      })
+    end
+
+    def to_wire(%{access_token: token} = m) do
+      to_wire(%__MODULE__{
+        access_token: token,
+        token_type: Map.get(m, :token_type),
+        expires_in: Map.get(m, :expires_in, 28_800)
+      })
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # v3.0.0 Types (SDK protocol 4)
+  # ---------------------------------------------------------------------------
+
+  defmodule ClientMode do
+    @moduledoc """
+    Client modes. `coding_agent/0` (`"coding-agent"`, the default) keeps the
+    CLI-like coding tools and defaults; `empty/0` (`"empty"`) enables only what
+    each session asks for. The legacy name `"copilot-cli"` is an alias of
+    `"coding-agent"`.
+    """
+    @spec coding_agent() :: String.t()
+    def coding_agent, do: "coding-agent"
+    @spec empty() :: String.t()
+    def empty, do: "empty"
+
+    @doc "Normalize a mode option to `:coding_agent` or `:empty`."
+    @spec parse(term()) :: {:ok, :coding_agent | :empty} | {:error, String.t()}
+    def parse(nil), do: {:ok, :coding_agent}
+    def parse(:coding_agent), do: {:ok, :coding_agent}
+    def parse(:empty), do: {:ok, :empty}
+    def parse("coding-agent"), do: {:ok, :coding_agent}
+    def parse("copilot-cli"), do: {:ok, :coding_agent}
+    def parse("empty"), do: {:ok, :empty}
+
+    def parse(other),
+      do: {:error, "invalid client mode #{inspect(other)}: expected \"coding-agent\" or \"empty\""}
+  end
+
+  defmodule NamedProviderConfig do
+    @moduledoc """
+    A named BYOK provider connection (`inference.providers[]`). Model
+    definitions reference it by `name` (which cannot contain `/`).
+    """
+    @type t :: %__MODULE__{
+            name: String.t(),
+            type: String.t() | nil,
+            base_url: String.t(),
+            api_key: String.t() | nil,
+            api_key_command: String.t() | nil,
+            bearer_token: String.t() | nil,
+            wire_api: String.t() | nil,
+            transport: String.t() | nil,
+            azure: map() | nil,
+            headers: map() | nil,
+            model_provider: String.t() | nil
+          }
+    defstruct [
+      :name,
+      :type,
+      :base_url,
+      :api_key,
+      :api_key_command,
+      :bearer_token,
+      :wire_api,
+      :transport,
+      :azure,
+      :headers,
+      :model_provider
+    ]
+
+    @spec to_map(t()) :: map()
+    def to_map(%__MODULE__{} = p) do
+      Copilot.Types.compact(%{
+        "name" => p.name,
+        "type" => p.type,
+        "baseUrl" => p.base_url,
+        "apiKey" => p.api_key,
+        "apiKeyCommand" => p.api_key_command,
+        "bearerToken" => p.bearer_token,
+        "wireApi" => p.wire_api,
+        "transport" => p.transport,
+        "azure" => p.azure,
+        "headers" => p.headers,
+        "modelProvider" => p.model_provider
+      })
+    end
+  end
+
+  defmodule ProviderModelConfig do
+    @moduledoc """
+    A model served by a named provider (`inference.models[]`). Select it with
+    the canonical `"<provider>/<id>"` model name.
+    """
+    @type t :: %__MODULE__{
+            provider: String.t(),
+            id: String.t(),
+            model_id: String.t() | nil,
+            wire_model: String.t() | nil,
+            name: String.t() | nil,
+            max_prompt_tokens: non_neg_integer() | nil,
+            max_context_window_tokens: non_neg_integer() | nil,
+            max_output_tokens: non_neg_integer() | nil,
+            capabilities: map() | nil
+          }
+    defstruct [
+      :provider,
+      :id,
+      :model_id,
+      :wire_model,
+      :name,
+      :max_prompt_tokens,
+      :max_context_window_tokens,
+      :max_output_tokens,
+      :capabilities
+    ]
+
+    @spec to_map(t()) :: map()
+    def to_map(%__MODULE__{} = m) do
+      Copilot.Types.compact(%{
+        "provider" => m.provider,
+        "id" => m.id,
+        "modelId" => m.model_id,
+        "wireModel" => m.wire_model,
+        "name" => m.name,
+        "maxPromptTokens" => m.max_prompt_tokens,
+        "maxContextWindowTokens" => m.max_context_window_tokens,
+        "maxOutputTokens" => m.max_output_tokens,
+        "capabilities" => m.capabilities
+      })
+    end
+  end
+
+  defmodule CapiConfig do
+    @moduledoc """
+    Built-in Copilot API (CAPI) policy (`github.capi`). `enabled: false` keeps a
+    BYOK-only model catalog.
+    """
+    @type t :: %__MODULE__{enabled: boolean() | nil}
+    defstruct [:enabled]
+  end
+
+  defmodule ShellAuthenticationRequest do
+    @moduledoc """
+    A password or other answer that a shell command run by the agent asks for
+    (`shellAuthentication.request`). `input_kind` is `"secret"` (mask the
+    input), `"text"`, or `"confirm"` (answer `"yes"` or cancel). The handler
+    returns `{:accept, value}` or `:cancel`.
+    """
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            request_id: String.t(),
+            program: String.t(),
+            prompt: String.t(),
+            input_kind: String.t(),
+            command: String.t(),
+            cwd: String.t()
+          }
+    defstruct [:session_id, :request_id, :program, :prompt, :input_kind, :command, :cwd]
+
+    @spec from_map(map()) :: t()
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        session_id: m["sessionId"],
+        request_id: m["requestId"],
+        program: m["program"],
+        prompt: m["prompt"],
+        input_kind: m["inputKind"],
+        command: m["command"],
+        cwd: m["cwd"]
+      }
+    end
+
+    @doc "Encode a handler answer: `{:accept, value}` or anything else (`:cancel`)."
+    @spec response_to_wire(term()) :: map()
+    def response_to_wire({:accept, value}) when is_binary(value),
+      do: %{"action" => "accept", "value" => value}
+
+    def response_to_wire(_cancel), do: %{"action" => "cancel"}
+  end
+
+  defmodule StoredMemory do
+    @moduledoc """
+    A memory the agent asked to store (`memoryStore.store`), after the
+    runtime's validation, secret filtering and approval. The `store_memory`
+    callback returns `:ok` or `{:error, reason}`.
+    """
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            subject: String.t(),
+            fact: String.t(),
+            citations: String.t(),
+            reason: String.t()
+          }
+    defstruct [:session_id, :subject, :fact, :citations, :reason]
+
+    @spec from_map(map()) :: t()
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        session_id: m["sessionId"],
+        subject: m["subject"],
+        fact: m["fact"],
+        citations: m["citations"],
+        reason: m["reason"]
+      }
+    end
+  end
+
+  defmodule NetworkConfig do
+    @moduledoc """
+    Client network callbacks registered with `network.setProvider`:
+
+      * `resolve_proxy` - `fn %{url: url} -> proxy_list | nil end` (PAC-style,
+        for example `"PROXY proxy.example:8080; DIRECT"`; `nil` leaves the
+        request to the runtime's own proxy resolution)
+      * `authenticate_negotiate` - `fn %{spn: spn} -> base64_token | nil end`
+      * `authenticate_basic` - `fn %{proxy: p, realm: r, previous_rejected: b} ->
+        %{username: u, password: p} | nil end`
+
+    `scope` is `"connection"` (runtime default) or `"runtime"`. Tokens and
+    passwords are never logged.
+    """
+    @type t :: %__MODULE__{
+            scope: String.t() | atom() | nil,
+            resolve_proxy: (map() -> String.t() | nil) | nil,
+            authenticate_negotiate: (map() -> String.t() | nil) | nil,
+            authenticate_basic: (map() -> map() | nil) | nil
+          }
+    defstruct [:scope, :resolve_proxy, :authenticate_negotiate, :authenticate_basic]
+
+    @doc "The `network.setProvider` params, or `nil` when no callback is set."
+    @spec set_provider_params(t() | nil) :: map() | nil
+    def set_provider_params(nil), do: nil
+
+    def set_provider_params(%__MODULE__{} = n) do
+      markers =
+        [
+          {"resolveProxy", n.resolve_proxy},
+          {"authenticateNegotiate", n.authenticate_negotiate},
+          {"authenticateBasic", n.authenticate_basic}
+        ]
+        |> Enum.filter(fn {_key, callback} -> is_function(callback, 1) end)
+        |> Map.new(fn {key, _callback} -> {key, %{}} end)
+
+      cond do
+        map_size(markers) == 0 -> nil
+        n.scope == nil -> markers
+        true -> Map.put(markers, "scope", to_string(n.scope))
+      end
+    end
+  end
+
+  defmodule ToolShellOutput do
+    @moduledoc """
+    Data of a `tool.shell_output` event: one chunk of live shell output.
+    `stream` is `"stdout"` (also when omitted), `"stderr"`, or `"terminal"`.
+    """
+    @type t :: %__MODULE__{
+            tool_call_id: String.t(),
+            text: String.t(),
+            sequence: non_neg_integer(),
+            stream: String.t() | nil
+          }
+    defstruct [:tool_call_id, :text, :sequence, :stream]
+
+    @doc "Decode the `data` of a `tool.shell_output` event (or the whole event)."
+    @spec from_map(map()) :: t()
+    def from_map(%{"type" => "tool.shell_output", "data" => data}) when is_map(data),
+      do: from_map(data)
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        tool_call_id: m["toolCallId"],
+        text: m["text"],
+        sequence: m["sequence"],
+        stream: m["stream"]
+      }
+    end
+  end
+
+  defmodule SessionEventType do
+    @moduledoc "Session event type identifiers. Unknown event types are delivered unchanged."
+    def assistant_message, do: "assistant.message"
+    def assistant_message_delta, do: "assistant.message_delta"
+    def session_idle, do: "session.idle"
+    def session_error, do: "session.error"
+    def tool_execution_start, do: "tool.execution_start"
+    def tool_execution_complete, do: "tool.execution_complete"
+    @doc "Removed in SDK protocol 4; still delivered if an older runtime sends it."
+    def tool_execution_partial_result, do: "tool.execution_partial_result"
+    @doc "Live, append-only shell output (ephemeral)."
+    def tool_shell_output, do: "tool.shell_output"
+  end
+
+  defmodule PolicyHelperFailure do
+    @moduledoc """
+    The latest unresolved managed-settings policy helper failure
+    (`policyHelperFailure`), reported in the JSON-RPC error data of a refused
+    `session.create` / `session.resume` and on managed settings snapshots.
+    Helper-authored text is untrusted: render it as plain text.
+    """
+    @type t :: %__MODULE__{
+            category: String.t(),
+            failure_mode: String.t(),
+            message: String.t(),
+            previous_policy_retained: boolean(),
+            reason: String.t(),
+            authority: String.t() | nil,
+            code: String.t() | nil,
+            details: [map()] | nil,
+            diagnostic: String.t() | nil,
+            help_link: map() | nil
+          }
+    defstruct [
+      :category,
+      :failure_mode,
+      :message,
+      :reason,
+      :authority,
+      :code,
+      :details,
+      :diagnostic,
+      :help_link,
+      previous_policy_retained: false
+    ]
+
+    @doc """
+    Extract the failure from a `{:error, rpc_error}` result, the RPC error map,
+    its `"data"`, or a managed settings snapshot. Returns `nil` when absent.
+    """
+    @spec from_error(term()) :: t() | nil
+    def from_error({:error, error}), do: from_error(error)
+    def from_error(%{"data" => data}) when is_map(data), do: from_error(data)
+
+    def from_error(%{"policyHelperFailure" => f}) when is_map(f) do
+      %__MODULE__{
+        category: f["category"],
+        failure_mode: f["failureMode"],
+        message: f["message"],
+        previous_policy_retained: f["previousPolicyRetained"] == true,
+        reason: f["reason"],
+        authority: f["authority"],
+        code: f["code"],
+        details: f["details"],
+        diagnostic: f["diagnostic"],
+        help_link: f["helpLink"]
+      }
+    end
+
+    def from_error(_other), do: nil
+  end
+
+  defmodule PermissionModeRefusal do
+    @moduledoc "Known refusal reasons of `session.permissions.setMode`."
+    @doc ~S|Managed (enterprise) policy does not allow the requested mode: `"managed_policy"`.|
+    @spec managed_policy() :: String.t()
+    def managed_policy, do: "managed_policy"
+  end
+
+  defmodule PermissionsSetModeResult do
+    @moduledoc """
+    Result of `Copilot.Session.set_permission_mode/2`. A refused change has
+    `success: false` and, when known, `reason: "managed_policy"`.
+    """
+    @type t :: %__MODULE__{success: boolean(), mode: String.t() | nil, reason: String.t() | nil}
+    defstruct [:mode, :reason, success: false]
+
+    @spec from_map(map()) :: t()
+    def from_map(m) when is_map(m) do
+      %__MODULE__{success: m["success"] == true, mode: m["mode"], reason: m["reason"]}
+    end
+  end
+
+  @doc false
+  @spec compact(map()) :: map()
+  def compact(map) when is_map(map) do
+    map |> Enum.reject(fn {_key, value} -> is_nil(value) end) |> Map.new()
   end
 
   # ---------------------------------------------------------------------------
@@ -650,7 +1229,32 @@ defmodule Copilot.Types do
             custom_agents_local_only: boolean() | nil,
             tool_search: map() | nil,
             experimental_mode: boolean() | nil,
-            content_exclusion: boolean() | nil
+            content_exclusion: boolean() | nil,
+            auto_tier: String.t() | nil,
+            ask_user_variant: String.t() | nil,
+            github_token_provider: (map() -> Copilot.Types.GitHubToken.t() | :cancelled | map()) | nil,
+            sandbox_config: Copilot.Types.SandboxConfig.t() | map() | nil,
+            feature_flags: %{optional(String.t()) => boolean()} | nil,
+            allowed_models: [String.t()] | nil,
+            auth_client_id_metadata_url: String.t() | nil,
+            name: String.t() | nil,
+            agent_directories: [String.t()] | nil,
+            hook_directories: [String.t()] | nil,
+            interactive_user: boolean() | nil,
+            excluded_managed_settings: [String.t()] | nil,
+            enforce_managed_model_defaults: boolean() | nil,
+            trust_working_directory: String.t() | nil,
+            refresh_custom_instructions: boolean() | nil,
+            image_generation: Copilot.Types.ImageGenerationConfig.t() | map() | nil,
+            autopilot: Copilot.Types.AutopilotOptions.t() | map() | nil,
+            providers: [Copilot.Types.NamedProviderConfig.t()] | nil,
+            models: [Copilot.Types.ProviderModelConfig.t()] | nil,
+            default_provider: String.t() | nil,
+            capi: Copilot.Types.CapiConfig.t() | nil,
+            on_shell_authentication_request:
+              (Copilot.Types.ShellAuthenticationRequest.t() -> {:accept, String.t()} | :cancel)
+              | nil,
+            store_memory: (Copilot.Types.StoredMemory.t() -> :ok | {:error, any()}) | nil
           }
     defstruct [
       :session_id,
@@ -721,7 +1325,55 @@ defmodule Copilot.Types do
       # Enable experimental mode
       :experimental_mode,
       # Enable content exclusion enforcement
-      :content_exclusion
+      :content_exclusion,
+      # --- v2.6.0 session options ---
+      # Auto routing tier ("efficiency" | "balance" | "intelligence" | "fast"), sent in github.capi
+      :auto_tier,
+      # Ask-user surface: "legacy" or "elicitation"
+      :ask_user_variant,
+      # GitHub token provider (answers gitHubToken.getToken); exclusive with github_token
+      :github_token_provider,
+      # Sandbox configuration (Copilot.Types.SandboxConfig)
+      :sandbox_config,
+      # Runtime feature-flag overrides
+      :feature_flags,
+      # Model allowlist
+      :allowed_models,
+      # OAuth client-ID metadata document URL for MCP auth
+      :auth_client_id_metadata_url,
+      # Human-readable session name (create only)
+      :name,
+      # Directories to load custom agents from
+      :agent_directories,
+      # Directories to load file-based hooks from
+      :hook_directories,
+      # Whether a human is interactively driving the session
+      :interactive_user,
+      # Managed settings to ignore for this session
+      :excluded_managed_settings,
+      # Enforce managed model defaults
+      :enforce_managed_model_defaults,
+      # Trust the working directory: "session" or "user" (create only)
+      :trust_working_directory,
+      # Reload custom instructions when the session starts (create only)
+      :refresh_custom_instructions,
+      # Image generation opt-in (Copilot.Types.ImageGenerationConfig)
+      :image_generation,
+      # Autopilot continuation options (Copilot.Types.AutopilotOptions)
+      :autopilot,
+      # --- v3.0.0 session options (SDK protocol 4) ---
+      # Named BYOK provider connections (Copilot.Types.NamedProviderConfig)
+      :providers,
+      # Model definitions for the named providers (Copilot.Types.ProviderModelConfig)
+      :models,
+      # Provider connection used for unqualified model names
+      :default_provider,
+      # Built-in Copilot API policy (Copilot.Types.CapiConfig)
+      :capi,
+      # Shell authentication handler (shellAuthentication.request)
+      :on_shell_authentication_request,
+      # Application memory store callback (memoryStore.store)
+      :store_memory
     ]
   end
 
@@ -753,7 +1405,31 @@ defmodule Copilot.Types do
             github_token: String.t() | nil,
             commands: [Copilot.Types.CommandDefinition.t()] | nil,
             on_elicitation_request: Copilot.Types.elicitation_handler() | nil,
-            instruction_directories: [String.t()] | nil
+            instruction_directories: [String.t()] | nil,
+            enable_web_socket_responses: boolean() | nil,
+            auto_tier: String.t() | nil,
+            ask_user_variant: String.t() | nil,
+            github_token_provider: (map() -> Copilot.Types.GitHubToken.t() | :cancelled | map()) | nil,
+            sandbox_config: Copilot.Types.SandboxConfig.t() | map() | nil,
+            feature_flags: %{optional(String.t()) => boolean()} | nil,
+            allowed_models: [String.t()] | nil,
+            auth_client_id_metadata_url: String.t() | nil,
+            agent_directories: [String.t()] | nil,
+            hook_directories: [String.t()] | nil,
+            interactive_user: boolean() | nil,
+            excluded_managed_settings: [String.t()] | nil,
+            enforce_managed_model_defaults: boolean() | nil,
+            allow_transcript_recovery: boolean() | nil,
+            image_generation: Copilot.Types.ImageGenerationConfig.t() | map() | nil,
+            autopilot: Copilot.Types.AutopilotOptions.t() | map() | nil,
+            providers: [Copilot.Types.NamedProviderConfig.t()] | nil,
+            models: [Copilot.Types.ProviderModelConfig.t()] | nil,
+            default_provider: String.t() | :clear | nil,
+            capi: Copilot.Types.CapiConfig.t() | nil,
+            on_shell_authentication_request:
+              (Copilot.Types.ShellAuthenticationRequest.t() -> {:accept, String.t()} | :cancel)
+              | nil,
+            store_memory: (Copilot.Types.StoredMemory.t() -> :ok | {:error, any()}) | nil
           }
     defstruct [
       :model,
@@ -788,7 +1464,34 @@ defmodule Copilot.Types do
       # Handler for elicitation requests from the server
       :on_elicitation_request,
       # Directories to search for instruction files
-      :instruction_directories
+      :instruction_directories,
+      # Stream model responses over a WebSocket transport (sent in github.capi)
+      :enable_web_socket_responses,
+      # --- v2.6.0 session options ---
+      :auto_tier,
+      :ask_user_variant,
+      :github_token_provider,
+      :sandbox_config,
+      :feature_flags,
+      :allowed_models,
+      :auth_client_id_metadata_url,
+      :agent_directories,
+      :hook_directories,
+      :interactive_user,
+      :excluded_managed_settings,
+      :enforce_managed_model_defaults,
+      # Allow recovering the conversation from the transcript (resume only)
+      :allow_transcript_recovery,
+      :image_generation,
+      :autopilot,
+      # --- v3.0.0 session options (SDK protocol 4) ---
+      :providers,
+      :models,
+      # Default provider connection; :clear sends null to clear it
+      :default_provider,
+      :capi,
+      :on_shell_authentication_request,
+      :store_memory
     ]
   end
 
@@ -831,7 +1534,15 @@ defmodule Copilot.Types do
   # ---------------------------------------------------------------------------
 
   defmodule MessageOptions do
-    @moduledoc "Options for sending a message to a session."
+    @moduledoc """
+    Options for sending a message to a session.
+
+      * `source` - message provenance: `"user"`, `"system"`, or `"agent-<id>"`
+        (see `Copilot.Types.MessageSource`)
+      * `response_schema` - JSON Schema for structured output; sent as
+        `responseFormat: %{type: "json_schema", jsonSchema: %{name: "response", strict: true, schema: ...}}`
+      * `client_turn_id` - opaque caller-chosen turn identifier (`clientTurnId`)
+    """
     @type t :: %__MODULE__{
             prompt: String.t(),
             attachments: [map()] | nil,
@@ -840,7 +1551,10 @@ defmodule Copilot.Types do
             display_prompt: String.t() | nil,
             response_format: Copilot.Types.response_format() | nil,
             image_options: Copilot.Types.image_options() | nil,
-            request_headers: %{optional(String.t()) => String.t()} | nil
+            request_headers: %{optional(String.t()) => String.t()} | nil,
+            source: String.t() | nil,
+            response_schema: map() | nil,
+            client_turn_id: String.t() | nil
           }
     defstruct [
       :prompt,
@@ -853,7 +1567,13 @@ defmodule Copilot.Types do
       :response_format,
       :image_options,
       # Custom HTTP headers for outbound model requests
-      :request_headers
+      :request_headers,
+      # Message provenance ("user", "system", or "agent-<id>")
+      :source,
+      # JSON Schema for structured output (responseFormat json_schema)
+      :response_schema,
+      # Opaque caller-chosen turn identifier (clientTurnId)
+      :client_turn_id
     ]
   end
 
@@ -921,7 +1641,11 @@ defmodule Copilot.Types do
             request_handler: Copilot.Types.copilot_request_handler() | nil,
             bearer_token_provider: Copilot.Types.bearer_token_provider() | nil,
             builtin_plugin_directories: [String.t()] | nil,
-            in_process: boolean() | nil
+            in_process: boolean() | nil,
+            client_info: Copilot.Types.ClientInfo.t() | nil,
+            mode: String.t() | atom(),
+            network: Copilot.Types.NetworkConfig.t() | nil,
+            on_get_trace_context: (-> map()) | nil
           }
     defstruct [
       cli_path: nil,
@@ -948,7 +1672,15 @@ defmodule Copilot.Types do
       # Directories to search for built-in plugins (wire: "builtinPluginDirectories")
       builtin_plugin_directories: nil,
       # Use in-process FFI transport instead of spawning a CLI (wire: "inProcess")
-      in_process: nil
+      in_process: nil,
+      # Application identity sent on the `connect` handshake (clientInfo)
+      client_info: nil,
+      # "coding-agent" (default) or "empty" (see Copilot.Types.ClientMode)
+      mode: "coding-agent",
+      # Network callbacks registered with network.setProvider
+      network: nil,
+      # Returns %{traceparent: ..., tracestate: ...} for W3C trace propagation
+      on_get_trace_context: nil
     ]
   end
 
@@ -1034,18 +1766,24 @@ defmodule Copilot.Types do
   end
 
   defmodule ModelLimits do
-    @moduledoc "Model limits."
+    @moduledoc """
+    Model limits. To override the output limit for a session, set
+    `model_capabilities: %{"limits" => %{"max_output_tokens" => n}}` (the wire
+    keys inside capability limits are snake_case).
+    """
     @type t :: %__MODULE__{
             max_prompt_tokens: integer() | nil,
             max_context_window_tokens: integer() | nil,
+            max_output_tokens: integer() | nil,
             vision: ModelVisionLimits.t() | nil
           }
-    defstruct [:max_prompt_tokens, :max_context_window_tokens, :vision]
+    defstruct [:max_prompt_tokens, :max_context_window_tokens, :max_output_tokens, :vision]
 
     def from_map(m) when is_map(m) do
       %__MODULE__{
         max_prompt_tokens: m["max_prompt_tokens"],
         max_context_window_tokens: m["max_context_window_tokens"],
+        max_output_tokens: m["max_output_tokens"],
         vision: ModelVisionLimits.from_map(m["vision"])
       }
     end

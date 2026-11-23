@@ -11,7 +11,7 @@ module test_harness
   implicit none
   private
 
-  public :: capi_proxy, proxy_start, proxy_stop, proxy_configure
+  public :: capi_proxy, proxy_start, proxy_stop, proxy_configure, find_cli_path
 
   integer, parameter :: URL_LEN  = 256
   integer, parameter :: PATH_LEN = 512
@@ -20,6 +20,8 @@ module test_harness
   type :: capi_proxy
     integer            :: pid       = -1
     character(len=URL_LEN) :: proxy_url = ''
+    !> Copilot CLI entry point found by find_cli_path ('' when none was found).
+    character(len=PATH_LEN) :: cli_path = ''
     logical            :: running   = .false.
   end type capi_proxy
 
@@ -105,7 +107,61 @@ contains
     ! ---- Export the URL so the CLI can discover it --------------------------
     call set_env('COPILOT_API_URL', trim(proxy%proxy_url))
 
+    ! ---- Locate the Copilot CLI the SDK client should spawn ------------------
+    proxy%cli_path = find_cli_path()
+    if (len_trim(proxy%cli_path) > 0) then
+      call set_env('COPILOT_CLI_PATH', trim(proxy%cli_path))
+    else
+      write(error_unit, '(A)') 'test_harness: Copilot CLI not found; set COPILOT_CLI_PATH'
+    end if
+
   end subroutine proxy_start
+
+  ! ==========================================================================
+  !  Locate the Copilot CLI
+  ! ==========================================================================
+
+  !> Find the Copilot CLI entry point for the E2E tests, in this order:
+  !! 1. COPILOT_CLI_PATH, when set and the file exists (for example nodejs/node_modules/.bin/copilot);
+  !! 2. nodejs/node_modules/@github/copilot/npm-loader.js (CLI 1.0.113 and newer, run with node);
+  !! 3. the legacy nodejs/node_modules/@github/copilot-<platform>/index.js and
+  !!    nodejs/node_modules/@github/copilot/index.js.
+  !! The SDK runs a .js entry point with node and any other path directly.
+  function find_cli_path() result(path)
+    character(len=:), allocatable :: path
+    character(len=*), parameter :: roots(2) = [character(len=8) :: '../..', '../../..']
+    character(len=*), parameter :: entries(7) = [character(len=64) :: &
+      'nodejs/node_modules/@github/copilot/npm-loader.js', &
+      'nodejs/node_modules/@github/copilot-linux-x64/index.js', &
+      'nodejs/node_modules/@github/copilot-linux-arm64/index.js', &
+      'nodejs/node_modules/@github/copilot-darwin-arm64/index.js', &
+      'nodejs/node_modules/@github/copilot-darwin-x64/index.js', &
+      'nodejs/node_modules/@github/copilot-win32-x64/index.js', &
+      'nodejs/node_modules/@github/copilot/index.js']
+    character(len=PATH_LEN) :: env_value
+    integer :: i, j, length, status
+    logical :: exists
+
+    path = ''
+    call get_environment_variable('COPILOT_CLI_PATH', env_value, length, status)
+    if (status == 0 .and. length > 0) then
+      inquire(file=trim(env_value), exist=exists)
+      if (exists) then
+        path = trim(env_value)
+        return
+      end if
+    end if
+
+    do j = 1, size(entries)
+      do i = 1, size(roots)
+        inquire(file=trim(roots(i)) // '/' // trim(entries(j)), exist=exists)
+        if (exists) then
+          path = trim(roots(i)) // '/' // trim(entries(j))
+          return
+        end if
+      end do
+    end do
+  end function find_cli_path
 
   ! ==========================================================================
   !  Stop the replay proxy

@@ -6,6 +6,7 @@ package com.github.copilot
 import com.github.copilot.Types.*
 import spock.lang.Specification
 import spock.lang.Shared
+import spock.util.concurrent.PollingConditions
 
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -19,8 +20,83 @@ class CopilotClientTest extends Specification {
 
     def 'SdkProtocolVersion returns expected version'() {
         expect:
-        SdkProtocolVersion.get() == 3
-        SdkProtocolVersion.SDK_PROTOCOL_VERSION == 3
+        SdkProtocolVersion.get() == 4
+        SdkProtocolVersion.SDK_PROTOCOL_VERSION == 4
+    }
+
+    // --- Protocol 4 grouped session payloads ---
+
+    def 'groupSessionParams groups flat options and translates the legacy provider'() {
+        given:
+        Map<String, Object> flat = [
+            model                : 'my-model',
+            streaming            : true,
+            requestPermission    : true,
+            hooks                : true,
+            hookTypes            : ['preToolUse'],
+            tools                : [[name: 'lookup']],
+            mcpServers           : [srv: [command: 'srv']],
+            configDir            : '/cfg',
+            disableResume        : true,
+            trustWorkingDirectory: 'session',
+            reasoningEffort      : null,
+            provider             : [type: 'openai', baseUrl: 'http://localhost/v1', maxOutputTokens: 512]
+        ] as Map<String, Object>
+
+        when:
+        Map<String, Object> created = CopilotClient.groupSessionParams(flat, false)
+        Map<String, Object> resumed = CopilotClient.groupSessionParams(flat, true)
+
+        then:
+        created.model == 'my-model'
+        created.configDirectory == '/cfg'
+        created.hookTypes == ['preToolUse']
+        created.events == [streaming: true]
+        created.permissions == [request: true]
+        created.hooks == [hasHandlers: true]
+        created.tools == [definitions: [[name: 'lookup']]]
+        created.mcp == [servers: [srv: [command: 'srv']], envValueMode: 'direct']
+        created.filesystem == [trustWorkingDirectory: 'session']
+        created.inference == [
+            providers      : [[name: 'default', type: 'openai', baseUrl: 'http://localhost/v1']],
+            defaultProvider: 'default',
+            models         : [[provider: 'default', id: 'my-model', maxOutputTokens: 512]]
+        ]
+        created.github == [capi: [enabled: false]]
+        !created.keySet().any { it in ['streaming', 'provider', 'configDir', 'suppressResumeEvent', 'reasoningEffort'] }
+
+        resumed.suppressResumeEvent == true
+        !resumed.containsKey('filesystem')
+
+        when: 'explicit providers are passed and the default provider is cleared on resume'
+        Map<String, Object> explicit = CopilotClient.groupSessionParams(
+            [model: 'm', provider: [type: 'openai'], providers: [[name: 'gw', baseUrl: 'u']]] as Map<String, Object>, false)
+        Map<String, Object> cleared = CopilotClient.groupSessionParams([defaultProvider: null] as Map<String, Object>, true)
+
+        then:
+        explicit.inference == [providers: [[name: 'gw', baseUrl: 'u']]]
+        !explicit.containsKey('github')
+        cleared.inference.containsKey('defaultProvider')
+        cleared.inference.defaultProvider == null
+        CopilotClient.groupSessionParams([defaultProvider: null] as Map<String, Object>, false).isEmpty()
+    }
+
+    def 'buildSendPayload sends v3 message options and drops the legacy string response format'() {
+        when:
+        Map<String, Object> params = CopilotClient.buildSendPayload('s1', [
+            prompt        : 'hi',
+            source        : MessageSource.agent('planner'),
+            clientTurnId  : 'turn-1',
+            responseFormat: 'json_object'
+        ] as Map<String, Object>)
+        Map<String, Object> structured = CopilotClient.buildSendPayload('s1', [
+            prompt        : 'hi',
+            responseSchema: [type: 'object']
+        ] as Map<String, Object>)
+
+        then:
+        params == [sessionId: 's1', prompt: 'hi', source: 'agent-planner', clientTurnId: 'turn-1']
+        structured.responseFormat == [type: 'json_schema', jsonSchema: [name: 'response', strict: true, schema: [type: 'object']]]
     }
 
     // --- Types ---
@@ -337,6 +413,26 @@ class CopilotClientTest extends Specification {
         ex.code == -32601
         ex.message.contains('-32601')
         ex.message.contains('Method not found')
+    }
+
+    def 'JsonRpcClient answers server requests with the id exactly as received'() {
+        given:
+        String body = '{"jsonrpc":"2.0","id":7,"method":"hooks.invoke","params":{}}'
+        byte[] frame = "Content-Length: ${body.getBytes('UTF-8').length}\r\n\r\n${body}".toString().getBytes('UTF-8')
+        def output = new ByteArrayOutputStream()
+        def rpc = new JsonRpcClient(new ByteArrayInputStream(frame), output)
+        rpc.setRequestHandler('hooks.invoke') { Map params -> [ok: true] }
+
+        when:
+        rpc.start()
+
+        then:
+        new PollingConditions(timeout: 5).eventually {
+            assert output.toString('UTF-8').contains('"id":7,')
+        }
+
+        cleanup:
+        rpc.stop()
     }
 
     // --- CopilotClient stop() ---

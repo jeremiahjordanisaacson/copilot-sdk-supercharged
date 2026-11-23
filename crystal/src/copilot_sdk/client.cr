@@ -43,6 +43,8 @@ module CopilotSDK
   class CopilotClient
     getter state : ConnectionState
     getter options : CopilotClientOptions
+    # Resolved session defaults profile (`ClientMode::CODING_AGENT` or `ClientMode::EMPTY`).
+    getter mode : String
 
     @rpc : JsonRpcClient?
     @cli_process : Process?
@@ -52,6 +54,7 @@ module CopilotSDK
     @is_external_server : Bool
     @process_stdin : IO?
     @process_stdout : IO?
+    @github_token_providers : Hash(String, GitHubTokenProvider)
 
     def initialize(@options = CopilotClientOptions.new)
       @state = ConnectionState::Disconnected
@@ -63,11 +66,30 @@ module CopilotSDK
       @is_external_server = false
       @process_stdin = nil
       @process_stdout = nil
+      @github_token_providers = {} of String => GitHubTokenProvider
+      @mode = CopilotClient.resolve_mode(@options.mode)
+    end
+
+    # Resolves `CopilotClientOptions#mode`; `"copilot-cli"` is an alias of
+    # `"coding-agent"`.
+    def self.resolve_mode(mode : String?) : String
+      case mode
+      when nil, ClientMode::CODING_AGENT, ClientMode::COPILOT_CLI
+        ClientMode::CODING_AGENT
+      when ClientMode::EMPTY
+        ClientMode::EMPTY
+      else
+        raise CopilotError.new("Unsupported client mode '#{mode}'; use 'coding-agent' or 'empty'")
+      end
     end
 
     # Start the connection to the Copilot CLI server.
     # If `cli_url` is set, connects to an existing server via TCP.
     # Otherwise, spawns a new CLI process using stdio.
+    #
+    # The handshake declares `client_info` (`connect`, when configured),
+    # verifies that the server speaks SDK protocol 4, and registers the network
+    # callbacks (`network.setProvider`, when configured).
     def start : Nil
       raise CopilotError.new("Already connected") if @state == ConnectionState::Connected
 
@@ -83,7 +105,9 @@ module CopilotSDK
         register_rpc_handlers
         rpc.start
 
+        send_client_info
         verify_protocol_version
+        register_network_provider
 
         @state = ConnectionState::Connected
 
@@ -92,6 +116,8 @@ module CopilotSDK
           set_session_fs_provider(fs)
         end
       rescue ex
+        # Do not keep talking to a server that failed the handshake.
+        stop
         @state = ConnectionState::Error
         raise CopilotError.new("Failed to start: #{ex.message}")
       end
@@ -108,7 +134,10 @@ module CopilotSDK
           # Best-effort cleanup
         end
       end
-      @mutex.synchronize { @sessions.clear }
+      @mutex.synchronize do
+        @sessions.clear
+        @github_token_providers.clear
+      end
 
       # Stop the RPC client
       if r = @rpc
@@ -135,35 +164,70 @@ module CopilotSDK
     end
 
     # Create a new conversation session.
+    #
+    # The flat options are grouped into the SDK protocol 4 payload right before
+    # `session.create` is sent. A failure raises `JsonRpcError`; its
+    # `policy_helper_failure` exposes a managed-policy Policy Helper failure.
     def create_session(config : SessionConfig = SessionConfig.new) : CopilotSession
+      validate_session_options(config.github_token, config.github_token_provider,
+        config.available_tools, config.memory_config)
       ensure_connected!
 
-      params = JSON.parse(config.to_json)
-      result = rpc.send_request("session.create", params, @options.request_timeout)
+      registration_id = config.github_token_provider ? UUID.random.to_s : nil
+      flat = JSON.parse(config.to_json).as_h
+      payload = prepare_session_payload(flat, false, config.hooks,
+        config.on_shell_authentication_request, config.memory_config, registration_id)
+      result = send_session_request("session.create", payload, registration_id,
+        config.github_token_provider)
 
       session_id = result["sessionId"]?.try(&.as_s) || raise CopilotError.new("No sessionId in response")
       model = result["model"]?.try(&.as_s) || config.model
 
       session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
-      @mutex.synchronize { @sessions[session_id] = session }
-
+      attach_session(session, registration_id, config.hooks,
+        config.on_shell_authentication_request, config.memory_config)
       session
     end
 
     # Resume an existing session by ID.
+    #
+    # The flat options are grouped into the SDK protocol 4 payload right before
+    # `session.resume` is sent (`suppress_resume_event`, alias
+    # `disable_resume`, and `allow_transcript_recovery` stay top level).
     def resume_session(config : ResumeSessionConfig) : CopilotSession
+      validate_session_options(config.github_token, config.github_token_provider,
+        config.available_tools, config.memory_config)
       ensure_connected!
 
-      params = JSON.parse(config.to_json)
-      result = rpc.send_request("session.resume", params, @options.request_timeout)
+      registration_id = config.github_token_provider ? UUID.random.to_s : nil
+      flat = JSON.parse(config.to_json).as_h
+      if (legacy = flat.delete("disableResume")) && !flat.has_key?("suppressResumeEvent")
+        flat["suppressResumeEvent"] = legacy
+      end
+      if config.default_provider.nil? && config.clear_default_provider
+        flat["defaultProvider"] = JSON::Any.new(nil)
+      end
+      payload = prepare_session_payload(flat, true, config.hooks,
+        config.on_shell_authentication_request, config.memory_config, registration_id)
+      result = send_session_request("session.resume", payload, registration_id,
+        config.github_token_provider)
 
-      session_id = config.session_id
+      session_id = result["sessionId"]?.try(&.as_s?) || config.session_id
       model = result["model"]?.try(&.as_s) || config.model
 
       session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
-      @mutex.synchronize { @sessions[session_id] = session }
-
+      attach_session(session, registration_id, config.hooks,
+        config.on_shell_authentication_request, config.memory_config)
       session
+    end
+
+    # Clear the runtime's cached managed (enterprise) settings so they are
+    # fetched again (`managedSettings.clearCache`).
+    def clear_managed_settings_cache : Nil
+      ensure_connected!
+      rpc.send_request("managedSettings.clearCache", JSON::Any.new({} of String => JSON::Any),
+        @options.request_timeout)
+      nil
     end
 
     # Get the status of the connected server.
@@ -290,10 +354,16 @@ module CopilotSDK
     private def spawn_cli_process : Nil
       cli_path = @options.cli_path || find_cli_path
 
-      args = ["--stdio"]
+      args = ["--headless", "--no-auto-update", "--stdio"]
+      command = cli_path
+      if cli_path.ends_with?(".js")
+        # Node entry points (for example `@github/copilot/npm-loader.js`) run with node.
+        args.unshift(cli_path)
+        command = "node"
+      end
 
       process = Process.new(
-        cli_path,
+        command,
         args: args,
         input: Process::Redirect::Pipe,
         output: Process::Redirect::Pipe,
@@ -321,6 +391,8 @@ module CopilotSDK
       @rpc = JsonRpcClient.new(reader: socket, writer: socket)
     end
 
+    # Resolves the CLI: `COPILOT_CLI_PATH`, then `@github/copilot/npm-loader.js`
+    # (Copilot CLI 1.0.113+, run with node), then the legacy entry points.
     private def find_cli_path : String
       # Check environment variable
       if env_path = ENV["COPILOT_CLI_PATH"]?
@@ -329,6 +401,7 @@ module CopilotSDK
 
       # Check common locations
       candidates = [
+        File.join(Dir.current, "node_modules", "@github", "copilot", "npm-loader.js"),
         File.join(Dir.current, "node_modules", ".bin", "copilot-cli"),
         File.join(Dir.current, "node_modules", "@github", "copilot", "index.js"),
       ]
@@ -343,15 +416,165 @@ module CopilotSDK
       )
     end
 
+    # Verifies that the server speaks SDK protocol 4 (`ping` reports the version).
     private def verify_protocol_version : Nil
-      status = get_status
-      if version = status.protocol_version
-        if version < MIN_PROTOCOL_VERSION
-          raise CopilotError.new(
-            "Server protocol version #{version} is below minimum #{MIN_PROTOCOL_VERSION}"
-          )
-        end
+      result = rpc.send_request("ping", JSON::Any.new({"message" => JSON::Any.new("ping")}),
+        @options.request_timeout)
+      version = result.as_h?.try(&.["protocolVersion"]?).try(&.as_i?)
+      unless version
+        raise CopilotError.new(
+          "SDK protocol version mismatch: SDK supports version #{SDK_PROTOCOL_VERSION}, " \
+          "but server does not report a protocol version. " \
+          "Please update your server to ensure compatibility."
+        )
       end
+      if version < MIN_PROTOCOL_VERSION || version > SDK_PROTOCOL_VERSION
+        raise CopilotError.new(
+          "SDK protocol version mismatch: SDK supports version #{SDK_PROTOCOL_VERSION}, " \
+          "but server reports version #{version}. " \
+          "Please update your SDK or server to ensure compatibility."
+        )
+      end
+    end
+
+    # Declares `CopilotClientOptions#client_info` on the `connect` handshake.
+    # Runtimes without `connect` are tolerated.
+    private def send_client_info : Nil
+      wire = @options.client_info.try(&.to_wire)
+      return unless wire
+      begin
+        rpc.send_request("connect", JSON::Any.new({"clientInfo" => JSON::Any.new(wire)}),
+          @options.request_timeout)
+      rescue ex : JsonRpcError
+        raise ex unless ex.method_not_found?
+      end
+    end
+
+    # Calls `network.setProvider` when any network callback is configured,
+    # marking each registered callback with an empty object.
+    private def register_network_provider : Nil
+      network = @options.network
+      return unless network && network.has_callbacks?
+      params = {} of String => JSON::Any
+      if scope = network.scope
+        params["scope"] = JSON::Any.new(scope)
+      end
+      marker = JSON::Any.new({} of String => JSON::Any)
+      params["resolveProxy"] = marker if network.resolve_proxy
+      params["authenticateNegotiate"] = marker if network.authenticate_negotiate
+      params["authenticateBasic"] = marker if network.authenticate_basic
+      rpc.send_request("network.setProvider", JSON::Any.new(params), @options.request_timeout)
+    end
+
+    # Validates options shared by `create_session` and `resume_session`.
+    private def validate_session_options(github_token : String?,
+                                         github_token_provider : GitHubTokenProvider?,
+                                         available_tools : Array(String)?,
+                                         memory : MemoryConfiguration?) : Nil
+      if github_token && github_token_provider
+        raise CopilotError.new("github_token and github_token_provider are mutually exclusive")
+      end
+      if @mode == ClientMode::EMPTY && available_tools.nil?
+        raise CopilotError.new(
+          "CopilotClient is in mode 'empty' but the session config did not specify " \
+          "'available_tools'. Empty mode requires every session to opt into the tools it wants."
+        )
+      end
+      if memory && memory.store_memory && memory.enabled == false
+        raise CopilotError.new("memory_config.store_memory requires memory_config.enabled to be true.")
+      end
+    end
+
+    # Adds the handler-derived options to the flat payload, groups it for SDK
+    # protocol 4, and applies the empty-mode defaults under the caller's values.
+    private def prepare_session_payload(flat : Hash(String, JSON::Any), resume : Bool,
+                                        hooks : SessionHooks?,
+                                        shell_auth : ShellAuthenticationHandler?,
+                                        memory : MemoryConfiguration?,
+                                        registration_id : String?) : Hash(String, JSON::Any)
+      # Protocol 4 takes a system message object; a plain string is appended.
+      if system_message = flat["systemMessage"]?.try(&.as_s?)
+        flat["systemMessage"] = JSON::Any.new({
+          "mode"    => JSON::Any.new("append"),
+          "content" => JSON::Any.new(system_message),
+        })
+      end
+      # The legacy WebSocket option lives in `github.capi` on protocol 4.
+      if web_socket = flat.delete("enableWebSocketResponses")
+        capi = flat["capi"]?.try(&.as_h?) || {} of String => JSON::Any
+        capi["enableWebSocketResponses"] = web_socket unless capi.has_key?("enableWebSocketResponses")
+        flat["capi"] = JSON::Any.new(capi)
+      end
+      flat["hooks"] = JSON::Any.new(true) if hooks && hooks.any?
+      flat["requestShellAuthentication"] = JSON::Any.new(true) if shell_auth
+      if memory && memory.store_memory
+        flat["hasMemoryStore"] = JSON::Any.new(true)
+        wire_memory = flat["memory"]?.try(&.as_h?) || {} of String => JSON::Any
+        wire_memory["enabled"] = JSON::Any.new(true) unless wire_memory.has_key?("enabled")
+        flat["memory"] = JSON::Any.new(wire_memory)
+      end
+      if registration_id
+        flat["gitHubTokenProviderRegistrationId"] = JSON::Any.new(registration_id)
+      end
+
+      payload = CopilotSDK.group_session_params(flat, resume)
+      payload = CopilotSDK.apply_empty_mode_session_defaults(payload) if @mode == ClientMode::EMPTY
+      payload
+    end
+
+    # Sends `session.create` / `session.resume` with the GitHub token provider
+    # registered, since the runtime validates it while creating the session.
+    private def send_session_request(method : String, payload : Hash(String, JSON::Any),
+                                     registration_id : String?,
+                                     provider : GitHubTokenProvider?) : JSON::Any
+      if registration_id && provider
+        @mutex.synchronize { @github_token_providers[registration_id] = provider }
+      end
+      begin
+        rpc.send_request(method, JSON::Any.new(payload), @options.request_timeout)
+      rescue ex
+        if registration_id
+          @mutex.synchronize { @github_token_providers.delete(registration_id) }
+        end
+        raise ex
+      end
+    end
+
+    # Registers the session and its handlers; detaching the session unregisters
+    # it (and its GitHub token provider) from this client.
+    private def attach_session(session : CopilotSession, registration_id : String?,
+                               hooks : SessionHooks?, shell_auth : ShellAuthenticationHandler?,
+                               memory : MemoryConfiguration?) : Nil
+      session.register_hooks(hooks)
+      session.register_shell_authentication_handler(shell_auth)
+      session.register_memory_store(memory.try(&.store_memory))
+      session_id = session.session_id
+      session.on_close = -> {
+        @mutex.synchronize do
+          if (current = @sessions[session_id]?) && current.same?(session)
+            @sessions.delete(session_id)
+          end
+          @github_token_providers.delete(registration_id) if registration_id
+        end
+        nil
+      }
+      @mutex.synchronize { @sessions[session_id] = session }
+    end
+
+    # Answers `gitHubToken.getToken` with the provider registered for the
+    # request's `registrationId`.
+    private def handle_github_token_request(params : JSON::Any) : JSON::Any
+      registration_id = params["registrationId"]?.try(&.as_s?) || ""
+      provider = @mutex.synchronize { @github_token_providers[registration_id]? }
+      unless provider
+        raise CopilotError.new("No GitHub token provider registered for \"#{registration_id}\"")
+      end
+      result = provider.call(GitHubTokenRequest.new(
+        host: params["host"]?.try(&.as_s?) || "",
+        session_id: params["sessionId"]?.try(&.as_s?),
+        reason: params["reason"]?.try(&.as_s?) || ""
+      ))
+      result.to_json_any
     end
 
     private def register_rpc_handlers : Nil
@@ -397,6 +620,28 @@ module CopilotSDK
       end
 
       # Handle session events (notifications) from the server
+      r.on_notification("session.event") do |params|
+        session_id = params["sessionId"]?.try(&.as_s?)
+        event_json = params["event"]?
+        event_type = event_json.try(&.as_h?).try(&.["type"]?).try(&.as_s?)
+
+        if session_id && event_json && event_type
+          event = SessionEvent.new(
+            type: event_type,
+            data: event_json["data"]?,
+            id: event_json["id"]?.try(&.as_s?),
+            timestamp: event_json["timestamp"]?.try(&.as_s?),
+            parent_id: event_json["parentId"]?.try(&.as_s?),
+            agent_id: event_json["agentId"]?.try(&.as_s?),
+            ephemeral: event_json["ephemeral"]?.try(&.as_bool?)
+          )
+          if session = @mutex.synchronize { @sessions[session_id]? }
+            session.dispatch_event(event)
+          end
+        end
+      end
+
+      # Legacy session event notification shape.
       r.on_notification("session/event") do |params|
         session_id = params["sessionId"]?.try(&.as_s)
         event_type = params["type"]?.try(&.as_s)
@@ -417,6 +662,95 @@ module CopilotSDK
           if session = @mutex.synchronize { @sessions[session_id]? }
             session.dispatch_event(event)
           end
+        end
+      end
+
+      # Hook handlers (including subagentStart / subagentStop)
+      r.on_request("hooks.invoke") do |params|
+        session_id = params["sessionId"]?.try(&.as_s?) || ""
+        hook_type = params["hookType"]?.try(&.as_s?) || ""
+        session = @mutex.synchronize { @sessions[session_id]? }
+        output = session.try &.handle_hooks_invoke(hook_type, params["input"]? || JSON::Any.new(nil))
+        JSON::Any.new({"output" => output || JSON::Any.new({} of String => JSON::Any)})
+      end
+
+      # GitHub token provider callbacks
+      r.on_request("gitHubToken.getToken") do |params|
+        handle_github_token_request(params)
+      end
+
+      # Shell authentication prompts and their cancellation
+      r.on_request("shellAuthentication.request") do |params|
+        request = ShellAuthenticationRequest.from_json(params.to_json)
+        session = @mutex.synchronize { @sessions[request.session_id]? }
+        response = session ? session.handle_shell_authentication_request(request) : ShellAuthenticationResponse.cancel
+        response.to_json_any
+      end
+
+      r.on_request("shellAuthentication.cancel") do |params|
+        session_id = params["sessionId"]?.try(&.as_s?)
+        request_id = params["requestId"]?.try(&.as_s?)
+        if session_id && request_id
+          if session = @mutex.synchronize { @sessions[session_id]? }
+            session.cancel_shell_authentication_request(request_id)
+          end
+        end
+        JSON::Any.new({} of String => JSON::Any)
+      end
+
+      # App-side memory store (replied to with null)
+      r.on_request("memoryStore.store") do |params|
+        memory = StoredMemory.from_json(params.to_json)
+        session = @mutex.synchronize { @sessions[memory.session_id]? }
+        raise CopilotError.new("Memory store owner is unavailable") unless session
+        session.handle_memory_store(memory)
+        JSON::Any.new(nil)
+      end
+
+      register_network_handlers(r)
+    end
+
+    # Registers the `network.*` request handlers for the configured callbacks.
+    # Tokens and passwords are never logged.
+    private def register_network_handlers(r : JsonRpcClient) : Nil
+      network = @options.network
+      return unless network
+
+      if resolve_proxy = network.resolve_proxy
+        r.on_request("network.resolveProxy") do |params|
+          proxy = resolve_proxy.call(params["url"]?.try(&.as_s?) || "")
+          result = {} of String => JSON::Any
+          result["proxy"] = JSON::Any.new(proxy) if proxy && !proxy.empty?
+          JSON::Any.new(result)
+        end
+      end
+
+      if authenticate_negotiate = network.authenticate_negotiate
+        r.on_request("network.authenticateNegotiate") do |params|
+          token = authenticate_negotiate.call(params["spn"]?.try(&.as_s?) || "")
+          result = {} of String => JSON::Any
+          result["token"] = JSON::Any.new(token) if token && !token.empty?
+          JSON::Any.new(result)
+        end
+      end
+
+      if authenticate_basic = network.authenticate_basic
+        r.on_request("network.authenticateBasic") do |params|
+          request = NetworkAuthenticateBasicRequest.new(
+            proxy: params["proxy"]?.try(&.as_s?) || "",
+            realm: params["realm"]?.try(&.as_s?),
+            previous_rejected: params["previousRejected"]?.try(&.as_bool?) || false
+          )
+          result = {} of String => JSON::Any
+          if credentials = authenticate_basic.call(request)
+            if username = credentials.username
+              result["username"] = JSON::Any.new(username)
+            end
+            if password = credentials.password
+              result["password"] = JSON::Any.new(password)
+            end
+          end
+          JSON::Any.new(result)
         end
       end
     end

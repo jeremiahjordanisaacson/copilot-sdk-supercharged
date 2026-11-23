@@ -92,6 +92,212 @@ begin
 end.
 ```
 
+## What's New in v3.0.0
+
+The Delphi SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
+protocol). It requires **Copilot CLI 1.0.113 or newer**: `Start` rejects older
+CLIs with `SDK protocol version mismatch: SDK supports version 4, but server
+reports version N. Please update your SDK or server to ensure compatibility.`
+
+Existing options keep working. `CreateSession` and `ResumeSession` take the same
+`TSessionConfig` fields; `GroupSessionParams` (unit `Copilot.SessionParams`)
+converts the flat payload into the protocol 4 grouped shape (`inference`,
+`tools`, `permissions`, `events`, ...) right before `session.create` and
+`session.resume` are sent. JSON-RPC errors (including `session.abort`,
+`session.delete` and `session.setForeground` failures) raise `EJsonRpcError`.
+
+### Client options
+
+```pascal
+var
+  Opts: TCopilotClientOptions;
+begin
+  Opts := Default(TCopilotClientOptions);
+  // Client info handshake: sent as clientInfo on connect.
+  Opts.ClientInfo.EditorName := 'MyEditor';
+  Opts.ClientInfo.EditorVersion := '1.2.0';
+  Opts.ClientInfo.ExtensionName := 'my-extension';
+  Opts.ClientInfo.ExtensionVersion := '0.1.0';
+  // Client mode: 'coding-agent' (default) or 'empty'. Empty mode requires
+  // AvailableTools on every session and turns off ambient features.
+  Opts.Mode := ClientModeEmpty;
+  // Network callbacks (network.setProvider).
+  Opts.Network.Scope := 'connection';
+  Opts.Network.ResolveProxy :=
+    function(const Url: string): string
+    begin
+      Result := 'http://proxy.local:8080';
+    end;
+  Client := TCopilotClient.Create(Opts);
+  Client.Start;
+  Client.ClearManagedSettingsCache; // managedSettings.clearCache
+end;
+```
+
+### Session options
+
+```pascal
+Config := Default(TSessionConfig);
+Config.AvailableTools := ['view', 'grep'];
+Config.AskUserVariant := AskUserVariantElicitation;
+Config.Sandbox.Enabled := True;
+Config.Sandbox.AllowBypass := True;
+Config.FeatureFlags := TDictionary<string, Boolean>.Create;
+Config.FeatureFlags.Add('my-flag', True);
+Config.AllowedModels := ['claude-sonnet-4.5'];
+Config.AuthClientIdMetadataUrl := 'https://example.com/client.json';
+Config.MaxOutputTokens := 4096; // limits.max_output_tokens
+Config.AgentDirectories := ['C:\repo\.agents'];
+Config.HookDirectories := ['C:\repo\.hooks'];
+Config.WorkingDirectory := 'C:\repo';
+Config.TrustWorkingDirectory := WorkingDirectoryTrustSession; // create only
+Config.ImageGeneration.Enabled := obTrue;
+Config.ImageGeneration.SaveToDisk := obFalse;
+Config.Autopilot.ContinuationEnabled := obTrue;
+Config.Autopilot.MaxContinues := 5;
+Session := Client.CreateSession(Config);
+```
+
+### Named BYOK providers
+
+```pascal
+var
+  Local: TNamedProviderConfig;
+  Llama: TProviderModelConfig;
+begin
+  Local := Default(TNamedProviderConfig);
+  Local.Name := 'local';
+  Local.ProviderType := 'openai';
+  Local.BaseUrl := 'http://localhost:11434/v1';
+  Local.ApiKeyCommand := 'type C:\keys\local.txt'; // apiKeyCommand
+  Llama := Default(TProviderModelConfig);
+  Llama.Provider := 'local';
+  Llama.Id := 'llama3';
+  Llama.MaxOutputTokens := 2048;
+  Config.Providers := [Local];
+  Config.Models := [Llama];
+  Config.DefaultProvider := 'local';
+  Config.Model := 'local/llama3';
+  Config.CapiEnabled := obFalse; // BYOK only
+end;
+```
+
+The legacy single provider still works: `Config.Provider.BaseUrl` (plus
+`ApiKey` or `ApiKeyCommand`) is sent as the named provider `"default"`.
+
+### Idempotent tools and message options
+
+```pascal
+Tool := DefineTool('lookup', 'Read-only lookup', Params, Handler);
+Tool.Idempotent := True; // safe to retry
+Config.Tools := [Tool];
+
+Opts := Default(TMessageOptions);
+Opts.Prompt := 'Summarize the diff';
+Opts.Source := 'agent-reviewer';  // MessageSource: user, system or agent-<id>
+Opts.ClientTurnId := 'turn-42';
+Opts.ResponseSchema := TJSONObject.ParseJSONValue(
+  '{"type":"object","properties":{"summary":{"type":"string"}}}') as TJSONObject;
+Session.Send(Opts); // responseFormat json_schema
+```
+
+### Session methods
+
+```pascal
+Session.SwitchAutoTier(AutoTierBalance); // session.model.switchAutoTier
+Snapshot := Session.RecheckPolicyHelper; // caller frees
+try
+  ModeResult := Session.SetPermissionMode('allow-all');
+  if ModeResult.Reason = PermissionModeReasonManagedPolicy then
+    WriteLn('Blocked by enterprise policy');
+finally
+  Snapshot.Free;
+end;
+Session.Detach; // session.detach
+```
+
+### Resume options
+
+```pascal
+Resume := Default(TResumeSessionConfig);
+Resume.SessionId := SavedId;
+Resume.Streaming := True;
+Resume.DisableResume := True;            // suppressResumeEvent
+Resume.AllowTranscriptRecovery := True;
+Resume.Options.AvailableTools := ['view'];
+Session := Client.ResumeSession(Resume);
+```
+
+### Callbacks
+
+```pascal
+Config.GitHubTokenProvider :=
+  function(const Request: TGitHubTokenRequest): TGitHubTokenResult
+  begin
+    Result := Default(TGitHubTokenResult);
+    Result.AccessToken := GetEnvironmentVariable('GH_TOKEN');
+    Result.TokenType := 'Bearer';
+    Result.ExpiresIn := 3600;
+  end;
+Config.OnShellAuthenticationRequest :=
+  function(const Request: TShellAuthenticationRequest): TShellAuthenticationResponse
+  begin
+    Result.Accepted := Request.InputKind = 'secret';
+    Result.Value := GetEnvironmentVariable('SUDO_PASSWORD');
+  end;
+Config.StoreMemory :=
+  procedure(const Memory: TStoredMemory)
+  begin
+    WriteLn('Remember: ', Memory.Fact);
+  end;
+Config.Hooks.OnSubagentStart :=
+  function(const Input: TSubagentHookInput; const SessionId: string): string
+  begin
+    Result := 'Be concise.';
+  end;
+Config.Hooks.OnSubagentStop :=
+  function(const Input: TSubagentHookInput; const SessionId: string): TSubagentStopDecision
+  begin
+    Result := Default(TSubagentStopDecision);
+    Result.ModifiedResponse := Input.Response;
+  end;
+```
+
+`GitHubTokenProvider` answers `gitHubToken.getToken`, is mutually exclusive with
+`GithubToken`, and is released when the session is detached.
+
+### Events and errors
+
+```pascal
+Session.OnEvent(EventToolShellOutput,
+  procedure(const Event: TSessionEvent)
+  begin
+    Write(TCopilotSession.ParseShellOutput(Event.Data).Text);
+  end);
+
+try
+  Session := Client.CreateSession(Config);
+except
+  on E: EJsonRpcError do
+    if Client.LastPolicyHelperFailure.Present then
+      WriteLn('Policy helper: ', Client.LastPolicyHelperFailure.Message);
+end;
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*`) is not
+  available: it is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: the Delphi
+  SDK spawns the Copilot CLI over stdio (Windows) or needs an external server.
+- `TSessionConfig.Instructions` (free-form strings) has no protocol 4
+  equivalent and is not sent; use `InstructionDirectories`.
+- Shell authentication prompts are answered synchronously, so
+  `shellAuthentication.cancel` is acknowledged without further action.
+- The SDK targets Delphi 10.3 or newer (`System.JSON`, inline variables,
+  anonymous methods); Free Pascal cannot build the `src` units.
+
 ## Architecture
 
 The SDK mirrors the architecture of all other SDKs in this repository:
@@ -124,16 +330,22 @@ Content-Length: <byte-count>\r\n
 ### JSON-RPC Methods
 
 **Client -> Server (requests):**
+- `connect` - Handshake (clientInfo, protocol version); falls back to `ping`
 - `ping` - Verify connectivity and protocol version
-- `session.create` - Create a new session
-- `session.resume` - Resume an existing session
+- `session.create` - Create a new session (protocol 4 grouped payload)
+- `session.resume` - Resume an existing session (protocol 4 grouped payload)
 - `session.send` - Send a message to a session
 - `session.getMessages` - Get session history
-- `session.destroy` - Destroy a session
+- `session.detach` - Detach from a session (`Disconnect` / `Detach`)
 - `session.abort` - Abort current processing
 - `session.delete` - Delete a session permanently
 - `session.list` - List all sessions
 - `session.setForeground` - Set foreground session (TUI mode)
+- `session.model.switchAutoTier` - Request an Auto routing tier
+- `session.managedSettings.recheckPolicyHelper` - Re-run the Policy Helper
+- `session.permissions.setMode` - Change the permission mode
+- `managedSettings.clearCache` - Clear cached managed settings
+- `network.setProvider` - Register network callbacks
 
 **Server -> Client (notifications):**
 - `session.event` - Session events (assistant.message, session.idle, etc.)
@@ -143,7 +355,11 @@ Content-Length: <byte-count>\r\n
 - `tool.call` - Execute a registered tool
 - `permission.request` - Request permission for an operation
 - `userInput.request` - Request input from the user
-- `hooks.invoke` - Invoke a hook handler
+- `hooks.invoke` - Invoke a hook handler (including `subagentStart` / `subagentStop`)
+- `gitHubToken.getToken` - Mint a GitHub token (`GitHubTokenProvider`)
+- `shellAuthentication.request` / `shellAuthentication.cancel` - Shell authentication prompts
+- `memoryStore.store` - Store a memory (`StoreMemory`)
+- `network.resolveProxy` / `network.authenticateNegotiate` / `network.authenticateBasic` - Network callbacks
 
 ## API Reference
 
@@ -186,6 +402,8 @@ end;
 | `ListSessions` / `ListSessions(Filter)` | List sessions |
 | `DeleteSession(Id)` | Permanently delete a session |
 | `OnLifecycle(Handler)` | Subscribe to lifecycle events |
+| `ClearManagedSettingsCache` | Clear cached enterprise managed settings |
+| `LastPolicyHelperFailure` | Policy Helper failure of the last failed create/resume |
 
 ### TCopilotSession
 
@@ -230,11 +448,15 @@ end;
 
 | Method | Description |
 |--------|-------------|
-| `Send(Options)` | Send a message (non-blocking) |
+| `Send(Options)` | Send a message (returns once admitted) |
 | `SendAndWait(Options, Timeout)` | Send and wait for response |
-| `Abort` | Abort current processing |
+| `Abort` | Abort current processing (errors are raised) |
 | `GetMessages` | Get message history |
-| `Disconnect` | Destroy the session |
+| `Disconnect` | Detach from the session |
+| `Detach` | Detach from the session (`session.detach`) |
+| `SwitchAutoTier(Tier)` | Request an Auto routing tier |
+| `RecheckPolicyHelper` | Re-run the enterprise Policy Helper |
+| `SetPermissionMode(Mode)` | Change the permission mode |
 | `On_(Handler)` | Subscribe to all events |
 | `OnEvent(Type, Handler)` | Subscribe to specific event type |
 | `Off(HandlerId)` | Remove a handler |
@@ -568,7 +790,7 @@ Session := Client.CreateSession(Config);
 
 ## Protocol Version
 
-The SDK verifies protocol compatibility on connection. The expected protocol version is defined in `Copilot.SdkProtocolVersion.pas`. If the server reports a version below the minimum, an exception is raised during `Start`.
+The SDK speaks SDK protocol 4 (`Copilot.SdkProtocolVersion.pas`). `Start` sends `connect` (falling back to `ping` on runtimes without it) and accepts exactly protocol version 4; any other version, or a server that reports none, raises `SDK protocol version mismatch: ...` during `Start`.
 
 ## Unit Structure
 
@@ -576,9 +798,10 @@ The SDK verifies protocol compatibility on connection. The expected protocol ver
 |------|-------------|
 | `Copilot.Client` | Main client class, process management |
 | `Copilot.Session` | Session class, event handling |
-| `Copilot.JsonRpc` | JSON-RPC 2.0 transport layer |
+| `Copilot.JsonRpc` | JSON-RPC 2.0 transport layer (`EJsonRpcError`) |
 | `Copilot.Types` | All type definitions, records, callbacks |
 | `Copilot.DefineTool` | Tool definition helpers |
+| `Copilot.SessionParams` | SDK protocol 4 grouped session payloads (`GroupSessionParams`) |
 | `Copilot.SdkProtocolVersion` | Protocol version constant |
 
 ## Platform Support

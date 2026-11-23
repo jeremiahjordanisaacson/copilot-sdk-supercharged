@@ -56,6 +56,189 @@ Session.destroy(session)
 Client.stop(client)
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime, and requires **Copilot CLI 1.0.113 or newer**: older CLIs fail `Client.start/1` with a protocol mismatch error. Existing options keep working. You fill `%SessionConfig{}` and `%ResumeSessionConfig{}` exactly as before, and `Copilot.Client` converts the flat payload into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, `hooks` becomes `hooks.hasHandlers`, and `disable_resume` becomes `suppressResumeEvent`). The legacy single `provider` becomes a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) now runs under `node`.
+
+This release also brings the Elixir SDK up to the v2.6.0 feature set and fixes session event delivery: notifications are now dispatched with the client's current session list, so events reach every session.
+
+New in this release:
+
+* **Client info**: `%CopilotClientOptions{client_info: %ClientInfo{editor_name: ..., editor_version: ..., extension_name: ..., extension_version: ...}}` is sent on a `connect` handshake before the protocol check (older CLIs without `connect` are tolerated).
+* **Auto routing tier** (experimental): the `auto_tier` session option (sent in `github.capi`) and `Session.switch_auto_tier/2` (`session.model.switchAutoTier`; pass `nil` to return to default routing).
+* **Ask-user variant**: `ask_user_variant: "legacy"` or `"elicitation"`.
+* **GitHub token provider**: `github_token_provider` answers the runtime's `gitHubToken.getToken` requests with a `%GitHubToken{}` (or `:cancelled`). It is mutually exclusive with `github_token`, and the registration is dropped when the session is destroyed or detached.
+* **Sandbox**: `sandbox_config: %SandboxConfig{enabled: true, allow_bypass: true}`.
+* **Feature flags and model allowlist**: `feature_flags` and `allowed_models`.
+* **Session detach**: `Session.detach/1` sends `session.detach` (falling back to `session.destroy`); the session can be resumed later.
+* **Message options**: `source` (`MessageSource.user/0`, `system/0`, `agent/1`), `response_schema` (structured output as `responseFormat` `json_schema`), and `client_turn_id` (`clientTurnId`).
+* **Managed settings**: `Client.clear_managed_settings_cache/1`, `Session.get_managed_settings/1`, and `Session.recheck_policy_helper/1`.
+* **OAuth client metadata URL**: `auth_client_id_metadata_url`.
+* **Max output tokens**: `ModelLimits.max_output_tokens`. Override it with `model_capabilities: %{"limits" => %{"max_output_tokens" => 8192}}`, which is now sent as `inference.capabilities`.
+* **Directories and trust**: `agent_directories`, `hook_directories`, create-only `name`, `trust_working_directory`, and `refresh_custom_instructions`, and resume-only `allow_transcript_recovery`.
+* **Image generation and autopilot**: `image_generation: %ImageGenerationConfig{}` (`enabled`, `watermark`, `save_to_disk`) and `autopilot: %AutopilotOptions{}` (`continuation_enabled`, `max_continues`).
+* **Sub-agent hooks**: `SessionHooks` `on_subagent_start` and `on_subagent_stop` (hook types `subagentStart` and `subagentStop`, delivered through `hooks.invoke`).
+* **BYOK API key command**: `ProviderConfig` `api_key_command` and `model_provider`.
+* **Named BYOK providers**: `providers` (`%NamedProviderConfig{}`), `models` (`%ProviderModelConfig{}`), `default_provider`, and `capi` (`%CapiConfig{enabled: false}`). Select a registered model as `"<provider>/<id>"`. On resume, `default_provider: :clear` sends `null` to clear the default connection.
+* **Idempotent tools**: `%Tool{idempotent: true}` or `DefineTool.define(name, idempotent: true, ...)`.
+* **Client mode**: `%CopilotClientOptions{mode: "coding-agent"}` (the default, unchanged behavior) or `mode: "empty"`; `"copilot-cli"` is an alias of `"coding-agent"`. In empty mode every create and resume must set `available_tools` (otherwise `{:error, reason}`), and safe defaults are applied under your values: experimental mode, telemetry, cross-session store, memory, on-demand instructions, repository hooks, and host Git operations off; in-memory MCP OAuth token and embedding cache storage; embedding retrieval skipped.
+* **Shell output events**: `SessionEventType.tool_shell_output/0` (`"tool.shell_output"`) and `ToolShellOutput.from_map/1` (`tool_call_id`, `text`, `sequence`, `stream`).
+* **Shell authentication**: `on_shell_authentication_request` receives a `%ShellAuthenticationRequest{}` (`program`, `prompt`, `input_kind`, `command`, `cwd`) and returns `{:accept, value}` or `:cancel`. When the runtime sends `shellAuthentication.cancel`, the pending prompt is answered with `cancel`.
+* **Memory store**: `store_memory` receives each approved `%StoredMemory{}` (`subject`, `fact`, `citations`, `reason`) through `memoryStore.store` and returns `:ok` or `{:error, reason}`.
+* **Network callbacks**: `%CopilotClientOptions{network: %NetworkConfig{}}` with `resolve_proxy`, `authenticate_negotiate`, and `authenticate_basic`, registered with `network.setProvider` after connecting. Tokens and passwords are never logged.
+* **Policy helper failure**: `PolicyHelperFailure.from_error/1` reads `policyHelperFailure` from a failed `create_session` / `resume_session` result or a managed settings snapshot.
+* **Permission mode refusal reason**: `Session.set_permission_mode/2` returns `%PermissionsSetModeResult{success, mode, reason}`; `PermissionModeRefusal.managed_policy/0` is `"managed_policy"`.
+
+Run a shared service in empty mode with client info and proxy callbacks:
+
+```elixir
+alias Copilot.{Client, Session, DefineTool}
+
+alias Copilot.Types.{
+  CapiConfig,
+  ClientInfo,
+  CopilotClientOptions,
+  GitHubToken,
+  MessageOptions,
+  MessageSource,
+  NamedProviderConfig,
+  NetworkConfig,
+  PermissionModeRefusal,
+  PolicyHelperFailure,
+  ProviderModelConfig,
+  ResumeSessionConfig,
+  SandboxConfig,
+  SessionConfig,
+  SessionEventType,
+  ToolShellOutput
+}
+
+{:ok, client} =
+  Client.start_link(%CopilotClientOptions{
+    mode: "empty",
+    client_info: %ClientInfo{editor_name: "acme-portal", editor_version: "2.4.0"},
+    network: %NetworkConfig{
+      resolve_proxy: fn %{url: url} ->
+        if String.contains?(url, ".internal.example"),
+          do: "DIRECT",
+          else: "PROXY proxy.example:8080"
+      end,
+      authenticate_basic: fn
+        %{previous_rejected: true} -> nil
+        _request -> %{username: "svc-proxy", password: System.get_env("PROXY_PASSWORD")}
+      end
+    }
+  })
+```
+
+Use named providers, an idempotent tool, a GitHub token provider, shell authentication, and an application memory store:
+
+```elixir
+lookup_order =
+  DefineTool.define("lookup_order",
+    description: "Look up an order by ID",
+    parameters: %{"type" => "object", "properties" => %{"id" => %{"type" => "string"}}},
+    idempotent: true,
+    handler: fn %{"id" => id}, _invocation -> "Order #{id} shipped" end
+  )
+
+{:ok, session} =
+  Client.create_session(client, %SessionConfig{
+    model: "gateway/chat",
+    available_tools: ["view", "lookup_order"],
+    tools: [lookup_order],
+    providers: [
+      %NamedProviderConfig{
+        name: "gateway",
+        type: "openai",
+        base_url: "https://models.example.com/v1",
+        api_key_command: "print-gateway-key"
+      }
+    ],
+    models: [
+      %ProviderModelConfig{
+        provider: "gateway",
+        id: "chat",
+        wire_model: "deployment-1",
+        max_output_tokens: 8192
+      }
+    ],
+    capi: %CapiConfig{enabled: false},
+    sandbox_config: %SandboxConfig{enabled: true, allow_bypass: true},
+    github_token_provider: fn %{host: _host, reason: _reason} ->
+      %GitHubToken{access_token: System.fetch_env!("GH_TOKEN"), expires_in: 8 * 3600}
+    end,
+    on_shell_authentication_request: fn
+      %{input_kind: "confirm"} -> :cancel
+      %{program: "sudo"} -> {:accept, System.get_env("SUDO_PASSWORD", "")}
+      _request -> :cancel
+    end,
+    store_memory: fn memory ->
+      IO.puts("remember [#{memory.subject}]: #{memory.fact}")
+      :ok
+    end
+  })
+```
+
+Stream shell output, tag a turn, switch the Auto tier, and change the permission mode:
+
+```elixir
+Session.on(session, SessionEventType.tool_shell_output(), fn event ->
+  IO.write(ToolShellOutput.from_map(event).text)
+end)
+
+{:ok, _message_id} =
+  Session.send(session, %MessageOptions{
+    prompt: "Run the test suite",
+    source: MessageSource.agent("planner"),
+    client_turn_id: "turn-42"
+  })
+
+{:ok, _ack} = Session.switch_auto_tier(session, "intelligence")
+
+managed_policy = PermissionModeRefusal.managed_policy()
+
+case Session.set_permission_mode(session, "allow-all") do
+  {:ok, %{success: false, reason: ^managed_policy, mode: mode}} ->
+    IO.puts("Managed policy keeps the session in #{mode} mode")
+
+  {:ok, _applied} ->
+    :ok
+end
+```
+
+Inspect a policy helper failure, and clear the default provider on resume:
+
+```elixir
+case Client.create_session(client, %SessionConfig{available_tools: ["view"]}) do
+  {:ok, _session} ->
+    :ok
+
+  {:error, _} = error ->
+    case PolicyHelperFailure.from_error(error) do
+      %PolicyHelperFailure{category: category, message: message} ->
+        IO.puts("Policy helper failed (#{category}): #{message}")
+
+      nil ->
+        error
+    end
+end
+
+{:ok, _resumed} =
+  Client.resume_session(client, session_id, %ResumeSessionConfig{
+    available_tools: ["view"],
+    default_provider: :clear,
+    allow_transcript_recovery: true
+  })
+```
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI over stdio. The existing `in_process` option is unchanged.
+* Session callbacks (`tool.call`, `hooks.invoke`, shell authentication, memory store) look up the session through the client process. A callback that the runtime raises while `create_session/2` or `resume_session/3` is still in flight (for example a `sessionStart` hook) waits for that call to return, and is answered with no output if it cannot be routed within 5 seconds.
+* Option keys this SDK sent before v3.0.0 that have no protocol 4 equivalent (`rewindEnabled`, `otlpProtocol`, `contentExclusion`, `mcpAuthHandler`) are kept unchanged at the top level of the payload for forward compatibility.
+
 ## Architecture
 
 The SDK consists of the following modules:
@@ -365,7 +548,7 @@ BYOK bearer-token provider and in-process transport (client options):
 
 ## Protocol Version
 
-The SDK protocol version must match the CLI server's version. The current version is **2**. Version mismatches will produce a clear error message on connection.
+The SDK speaks SDK protocol **4**, which requires Copilot CLI 1.0.113 or newer. A server that reports another version (or none) fails `Client.start/1` with `{:error, "SDK protocol version mismatch: SDK supports version 4, but server reports version N. Please update your SDK or server to ensure compatibility."}`.
 
 ## Running the Example
 

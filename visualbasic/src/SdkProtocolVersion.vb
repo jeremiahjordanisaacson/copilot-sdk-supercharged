@@ -9,15 +9,15 @@ Namespace GitHub.Copilot.SDK
     Public Module SdkProtocolVersion
 
         ''' <summary>
-        ''' The SDK protocol version string.
+        ''' The SDK protocol version. The client accepts only servers that report this version.
         ''' </summary>
-        Public Const Version As String = "2"
+        Public Const Version As Integer = 4
 
         ''' <summary>
         ''' Gets the protocol version as an integer.
         ''' </summary>
         Public Function GetVersion() As Integer
-            Return Integer.Parse(Version)
+            Return Version
         End Function
 
     End Module

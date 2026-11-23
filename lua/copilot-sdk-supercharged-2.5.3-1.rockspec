@@ -32,6 +32,7 @@ build = {
         ["copilot.json_rpc_client"]      = "copilot/json_rpc_client.lua",
         ["copilot.client"]               = "copilot/client.lua",
         ["copilot.session"]              = "copilot/session.lua",
+        ["copilot.session_params"]       = "copilot/session_params.lua",
         ["copilot.define_tool"]          = "copilot/define_tool.lua",
     },
 }

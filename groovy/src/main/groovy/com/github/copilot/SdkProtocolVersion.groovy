@@ -10,10 +10,11 @@ import groovy.transform.CompileStatic
 /**
  * The SDK protocol version.
  * This must match the version expected by the copilot-agent-runtime server.
+ * Protocol 4 (Copilot CLI 1.0.113 and newer) uses grouped session.create/session.resume payloads.
  */
 @CompileStatic
 final class SdkProtocolVersion {
-    static final int SDK_PROTOCOL_VERSION = 3
+    static final int SDK_PROTOCOL_VERSION = 4
 
     private SdkProtocolVersion() {}
 

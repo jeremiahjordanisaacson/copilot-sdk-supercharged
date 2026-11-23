@@ -76,6 +76,227 @@ program hello_copilot
 end program
 ```
 
+## What's New in v3.0.0
+
+- **SDK protocol v4.** The client now requires the server to report protocol version 4, so it
+  needs Copilot CLI 1.0.113 or newer. Older CLIs are rejected at start with
+  `SDK protocol version mismatch: SDK supports version 4, but server reports version N. ...`
+  (`client%last_error`, `iostat = COPILOT_IOSTAT_PROTOCOL_MISMATCH`).
+- **Existing options keep working.** Keep setting the same `session_config` fields. Right before
+  `session.create` and `session.resume`, `group_session_params` (module `copilot_session_wire`)
+  converts the flat payload into the grouped v4 shape (for example `streaming` becomes
+  `events.streaming` and `reasoning_effort` becomes `inference.reasoningEffort`). Only members the
+  runtime accepts are sent; create-only and resume-only members are honored. The legacy single
+  `config%provider` is translated to a named `"default"` provider.
+- String values in the session payload are now JSON-escaped, and `session.send` sends the
+  message as `prompt`.
+
+The examples below use these callbacks (all procedures are module procedures):
+
+```fortran
+module my_callbacks
+  use copilot_types
+  implicit none
+contains
+  function github_token(args) result(token)
+    type(github_token_provider_args), intent(in) :: args
+    type(github_token_result) :: token
+    if (args%host == 'github.com') token%access_token = 'gho_example'
+    token%expires_in = 28800                         ! seconds, must exceed one hour
+  end function github_token
+
+  function shell_auth(request) result(response)
+    type(shell_authentication_request), intent(in) :: request
+    type(shell_authentication_result) :: response
+    response%accepted = request%input_kind == SHELL_AUTH_INPUT_CONFIRM
+  end function shell_auth
+
+  subroutine store_memory(memory)
+    type(stored_memory), intent(in) :: memory
+    print *, 'remember: ', memory%subject, ' = ', memory%fact
+  end subroutine store_memory
+
+  function on_subagent_start(input) result(output)
+    type(subagent_start_input), intent(in) :: input
+    type(subagent_start_output) :: output
+    output%additional_context = 'You are helping ' // input%agent_name
+  end function on_subagent_start
+
+  function resolve_proxy(url) result(proxy)
+    character(len=*), intent(in) :: url
+    character(len=:), allocatable :: proxy
+    proxy = ''                                       ! '' connects directly
+    if (index(url, 'internal.example') > 0) proxy = 'http://proxy.example:8080'
+  end function resolve_proxy
+
+  function lookup(args, invocation) result(res)
+    use copilot_tools
+    character(len=*), intent(in) :: args
+    type(tool_invocation), intent(in) :: invocation
+    type(tool_result) :: res
+    res = tool_success('record for ' // args // ' in ' // invocation%session_id)
+  end function lookup
+end module my_callbacks
+```
+
+### Client options: client info, client mode, network callbacks
+
+```fortran
+opts%client_info%editor_name    = 'my-editor'       ! sent as clientInfo on connect
+opts%client_info%editor_version = '1.2.0'
+opts%mode = CLIENT_MODE_CODING_AGENT                ! default ('copilot-cli' is an alias)
+opts%network%scope = NETWORK_SCOPE_CONNECTION
+opts%network%resolve_proxy => resolve_proxy        ! registered with network.setProvider
+call copilot_client_create(client, opts)
+if (client%state%value == COPILOT_STATE_ERROR) print *, client%last_error
+```
+
+`CLIENT_MODE_EMPTY` starts sessions without the coding-agent defaults: every create and resume
+must set `config%available_tools`, and the SDK sends safe defaults (no telemetry, in-memory
+storage, memory and repository hooks off) under your own values:
+
+```fortran
+opts%mode = CLIENT_MODE_EMPTY
+config%available_tools = [character(len=4) :: 'view', 'grep']
+```
+
+### Session options
+
+```fortran
+config%model = 'gpt-5'
+config%auto_tier = AUTO_TIER_BALANCE                ! Auto routing tier (capi.autoTier)
+config%ask_user_variant = ASK_USER_VARIANT_ELICITATION
+config%github_token_provider => github_token        ! answers gitHubToken.getToken
+allocate(config%sandbox)
+config%sandbox%allow_bypass = .true.                ! permissions.sandbox.allowBypass
+config%feature_flags_json = '{"MY_FLAG":true}'      ! experiments.flags
+config%allowed_models = [character(len=6) :: 'gpt-5', 'claude']
+config%auth_client_id_metadata_url = 'https://example.com/oauth/client.json'
+config%model_limits%max_output_tokens = 4096        ! modelCapabilities.limits.max_output_tokens
+config%agent_directories = [character(len=8) :: './agents']
+config%hook_directories = [character(len=7) :: './hooks']
+config%trust_working_directory = WORKING_DIRECTORY_TRUST_SESSION   ! create only
+allocate(config%image_generation)
+config%image_generation%enabled = .true.
+config%image_generation%save_to_disk = .false.
+allocate(config%autopilot)
+config%autopilot%max_continues = 3
+config%on_subagent_start => on_subagent_start      ! hooks.invoke subagentStart
+config%on_shell_authentication_request => shell_auth
+config%on_store_memory => store_memory
+call client%create_session(config, session, ios)
+if (ios == COPILOT_IOSTAT_RPC_ERROR) then
+  print *, client%last_error
+  if (client%has_policy_helper_failure) print *, client%last_policy_helper_failure%message
+end if
+```
+
+`github_token` and `github_token_provider` are mutually exclusive. The provider is registered
+under a generated id and released when the session is detached or destroyed.
+
+### Named BYOK providers
+
+```fortran
+allocate(config%providers(1))
+config%providers(1)%name = 'azure'
+config%providers(1)%provider_type = 'azure'
+config%providers(1)%base_url = 'https://my-resource.openai.azure.com'
+config%providers(1)%api_key_command = 'az account get-access-token --query accessToken -o tsv'
+allocate(config%models(1))
+config%models(1)%provider = 'azure'
+config%models(1)%id = 'gpt-5'
+config%models(1)%max_output_tokens = 8192
+config%default_provider = 'azure'
+config%capi_enabled = .false.                       ! Copilot API models off
+config%model = 'azure/gpt-5'
+```
+
+The legacy single provider keeps working (it becomes the `"default"` provider):
+
+```fortran
+allocate(config%provider)
+config%provider%provider_type = 'openai'
+config%provider%base_url = 'https://api.openai.com/v1'
+config%provider%api_key_command = 'pass show openai'
+```
+
+### Tools and messages
+
+```fortran
+config%tools = [define_tool('lookup', 'Look up a record', '{"type":"object"}', lookup, &
+                            idempotent=.true.)]
+
+sopts%message = 'Summarize the build log'
+sopts%source = message_source_agent('reviewer')     ! or MESSAGE_SOURCE_USER / MESSAGE_SOURCE_SYSTEM
+sopts%client_turn_id = 'turn-42'
+sopts%response_schema_json = '{"type":"object","properties":{"summary":{"type":"string"}}}'
+call session%send_and_wait(sopts, result)
+```
+
+### Session and client methods
+
+```fortran
+call session%switch_auto_tier(AUTO_TIER_FAST, ios)            ! session.model.switchAutoTier
+call session%set_permission_mode(PERMISSION_MODE_ASSISTED, mode_result, ios)
+if (.not. mode_result%success .and. allocated(mode_result%reason)) then
+  if (mode_result%reason == PERMISSION_MODE_REFUSAL_MANAGED_POLICY) print *, 'blocked by policy'
+end if
+call session%recheck_policy_helper(snapshot, ios, failure, has_failure)
+call client%clear_managed_settings_cache(ios)                 ! managedSettings.clearCache
+call session%detach(ios)                                      ! session.detach
+
+resume_config%suppress_resume_event = .true.
+resume_config%allow_transcript_recovery = .true.
+resume_config%clear_default_provider = .true.
+call client%resume_session(saved_session_id, session, ios, resume_config)
+```
+
+`session%disconnect` now detaches (`session.detach`), so the session can be resumed later.
+`abort`, `delete_session`, and `set_foreground` report a JSON-RPC error through `iostat`.
+
+### Shell output events
+
+```fortran
+subroutine on_event(event, user_data)
+  type(session_event), intent(in) :: event
+  class(*), intent(inout), optional :: user_data
+  type(tool_shell_output_data) :: output
+  logical :: found
+  call parse_tool_shell_output(event%data_json, output, found)
+  if (found) write(*, '(A)', advance='no') output%text
+end subroutine on_event
+
+handler_id = session%on(EVENT_TOOL_SHELL_OUTPUT, on_event)
+```
+
+### Server-to-client requests
+
+While `send_and_wait` waits, the session answers `gitHubToken.getToken`, `hooks.invoke`
+(`subagentStart`, `subagentStop`), `shellAuthentication.request`, `shellAuthentication.cancel`,
+`memoryStore.store`, and `network.resolveProxy` / `network.authenticateNegotiate` /
+`network.authenticateBasic` with the callbacks above. Hosts that read messages themselves pass
+each request to the client, which routes it to the owning session:
+
+```fortran
+call copilot_handle_server_request(client, message, handled, ios)
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not
+  implemented: it is an experimental upstream surface that depends on the runtime's in-process
+  hosting library.
+- In-process native runtime hosting is not the default connection: the SDK keeps using the
+  Copilot CLI (`cli_path`, or an external server through `cli_url`).
+- Fortran transport: the client does not spawn the CLI process yet (it uses stdin/stdout units 5
+  and 6 as placeholders) and reads each response as the next message, without request id
+  correlation. Server-to-client requests are answered inside `send_and_wait`, or when the host
+  passes them to `copilot_handle_server_request`.
+- Callbacks run synchronously, so `shellAuthentication.cancel` can only decline a request that has
+  not been read yet.
+- Callbacks returning `character(len=:), allocatable` text (network callbacks) must always
+  assign a value; return `''` for "no answer".
+
 ## Architecture
 
 The SDK mirrors the architecture of all other SDKs in this repository:
@@ -110,25 +331,32 @@ Content-Length: <byte-count>\r\n
 
 | Method | Description |
 |---|---|
-| `ping` | Verify connectivity and protocol version |
+| `connect` | Handshake carrying `clientInfo` (falls back to `ping` on older servers) |
+| `ping` | Verify connectivity and protocol version (must be 4) |
 | `status.get` | Get CLI version info |
 | `auth.getStatus` | Get authentication status |
 | `models.list` | List available models |
-| `session.create` | Create a new session |
-| `session.resume` | Resume an existing session |
+| `session.create` | Create a new session (grouped v4 payload) |
+| `session.resume` | Resume an existing session (grouped v4 payload) |
 | `session.send` | Send a message to a session |
 | `session.getMessages` | Get session history |
+| `session.detach` | Detach a session (disconnect) |
 | `session.destroy` | Destroy a session |
 | `session.abort` | Abort current processing |
 | `session.delete` | Delete a session permanently |
 | `session.list` | List all sessions |
 | `session.setForeground` | Set foreground session (TUI mode) |
+| `session.model.switchAutoTier` | Request an Auto routing tier |
+| `session.permissions.setMode` | Set the permission mode |
+| `session.managedSettings.recheckPolicyHelper` | Re-run the managed-settings Policy Helper |
+| `managedSettings.clearCache` | Clear the managed settings cache |
+| `network.setProvider` | Register host network callbacks |
 
 **Server to Client (notifications):**
 
 | Method | Description |
 |---|---|
-| `session.event` | Session events (assistant.message, session.idle) |
+| `session.event` | Session events (assistant.message, session.idle, tool.shell_output) |
 | `session.lifecycle` | Session lifecycle events |
 
 **Server to Client (requests):**
@@ -137,6 +365,11 @@ Content-Length: <byte-count>\r\n
 |---|---|
 | `tool.call` | Execute a registered tool |
 | `permission.request` | Request permission for an operation |
+| `gitHubToken.getToken` | Ask the session's GitHub token provider for a token |
+| `hooks.invoke` | Run a hook handler (`subagentStart`, `subagentStop`) |
+| `shellAuthentication.request` / `.cancel` | Answer or cancel a shell authentication prompt |
+| `memoryStore.store` | Store a fact with the memory store callback |
+| `network.resolveProxy` / `.authenticateNegotiate` / `.authenticateBasic` | Network callbacks |
 
 ## API Reference
 
@@ -177,12 +410,14 @@ call copilot_stop(client)
 | `stop()` | Stop the CLI process |
 | `ping(iostat)` | Verify connectivity |
 | `create_session(config, session, iostat)` | Create a new session |
-| `resume_session(id, session, iostat)` | Resume an existing session |
+| `resume_session(id, session, iostat[, config])` | Resume an existing session |
 | `get_status(json, iostat)` | Get CLI status |
 | `get_auth_status(json, iostat)` | Get auth status |
 | `list_models(json, iostat)` | List available models |
 | `list_sessions(json, iostat)` | List sessions |
 | `set_foreground(id, iostat)` | Set foreground session |
+| `clear_managed_settings_cache(iostat)` | Clear the managed settings cache |
+| `handle_server_request(message, handled, iostat)` | Answer a server-to-client request |
 
 ### copilot_session_type
 
@@ -219,8 +454,12 @@ call session%destroy(ios)
 | `send(opts, iostat)` | Send a message (fire-and-forget) |
 | `send_and_wait(opts, result, timeout_ms)` | Send and block until idle |
 | `abort(iostat)` | Abort current processing |
-| `disconnect(iostat)` | Disconnect the session |
+| `disconnect(iostat)` | Disconnect (detach) the session |
+| `detach(iostat)` | Detach the session (`session.detach`) |
 | `destroy(iostat)` | Destroy the session on the server |
+| `switch_auto_tier(tier, iostat)` | Request an Auto routing tier |
+| `set_permission_mode(mode, outcome, iostat)` | Set the permission mode |
+| `recheck_policy_helper(snapshot_json, iostat[, failure, has_failure])` | Re-run the Policy Helper |
 | `on(event_type, callback)` | Subscribe to events (returns ID) |
 | `off(handler_id)` | Unsubscribe from events |
 
@@ -387,9 +626,11 @@ call client%create_session(config, session, ios)
 | `copilot_client_module` | `src/copilot_client.f90` | Main client, process management |
 | `copilot_jsonrpc` | `src/copilot_jsonrpc.f90` | JSON-RPC 2.0 transport |
 | `copilot_session_module` | `src/copilot_session.f90` | Session management |
+| `copilot_session_wire` | `src/copilot_session_wire.f90` | Flat to grouped v4 session payload translation |
+| `copilot_json` | `src/copilot_json.f90` | JSON escaping and object member helpers |
 | `copilot_types` | `src/copilot_types.f90` | All derived types |
 | `copilot_tools` | `src/copilot_tools.f90` | Tool definition helpers |
-| `copilot_version` | `src/copilot_version.f90` | Protocol version constant |
+| `copilot_version` | `src/copilot_version.f90` | Protocol version constant (4) |
 
 ## Error Handling
 

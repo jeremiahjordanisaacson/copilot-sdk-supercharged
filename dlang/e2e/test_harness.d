@@ -11,7 +11,6 @@ import std.stdio : File, stderr, writefln;
 import std.string : strip, indexOf;
 import std.regex : regex, matchFirst;
 import std.conv : to;
-import core.sys.posix.stdlib : setenv;
 import std.net.curl : HTTP, get, post;
 import std.exception : enforce;
 
@@ -60,27 +59,74 @@ struct ProxyHandle
     }
 }
 
+/// Locate the Copilot CLI for E2E runs, in order:
+/// 1. `COPILOT_CLI_PATH` when it points to an existing file
+/// 2. nodejs/node_modules/@github/copilot/npm-loader.js (run with node)
+/// 3. legacy nodejs/node_modules/@github/copilot-*/index.js, then
+///    nodejs/node_modules/@github/copilot/index.js
+/// Returns null when nothing is found. The SDK runs `.js` paths with node and
+/// executes any other path (for example the `.bin/copilot` shim) directly.
+string findCopilotCli()
+{
+    import std.file : exists, isFile, dirEntries, SpanMode;
+    import std.path : buildPath, buildNormalizedPath, baseName, dirName;
+    import std.process : environment;
+    import std.algorithm.searching : startsWith;
+
+    auto envPath = environment.get("COPILOT_CLI_PATH", "");
+    if (envPath.length > 0 && exists(envPath) && isFile(envPath))
+        return envPath;
+
+    // This file lives in dlang/e2e; the repository root is two levels up.
+    auto repoRoot = buildNormalizedPath(dirName(__FILE_FULL_PATH__), "..", "..");
+    auto githubDir = buildPath(repoRoot, "nodejs", "node_modules", "@github");
+    auto loader = buildPath(githubDir, "copilot", "npm-loader.js");
+    if (exists(loader))
+        return loader;
+    if (exists(githubDir))
+    {
+        foreach (entry; dirEntries(githubDir, SpanMode.shallow))
+        {
+            if (!entry.isDir || !baseName(entry.name).startsWith("copilot-"))
+                continue;
+            auto candidate = buildPath(entry.name, "index.js");
+            if (exists(candidate))
+                return candidate;
+        }
+    }
+    auto legacy = buildPath(githubDir, "copilot", "index.js");
+    if (exists(legacy))
+        return legacy;
+    return null;
+}
+
 /// Start the replay proxy and return a handle.
 ProxyHandle startProxy()
 {
-    import std.path : buildPath, dirName;
+    import std.path : buildPath, buildNormalizedPath, dirName;
+    import std.process : environment;
+    import std.stdio : stdin;
 
-    // Path from dlang/e2e/ to repo-root/test/harness/server.ts
-    auto serverPath = buildPath("..", "..", "test", "harness", "server.ts");
-    auto cwdPath = buildPath("..", "..", "test", "harness");
+    // Let the SDK find the CLI the same way the other SDK harnesses do.
+    auto cliPath = findCopilotCli();
+    if (cliPath !is null)
+        environment["COPILOT_CLI_PATH"] = cliPath;
+
+    // This file lives in dlang/e2e; the replay proxy is repo-root/test/harness/server.ts.
+    auto cwdPath = buildNormalizedPath(dirName(__FILE_FULL_PATH__), "..", "..", "test", "harness");
+    auto serverPath = buildPath(cwdPath, "server.ts");
 
     auto pipes = pipe();
     auto pid = spawnProcess(
         ["npx", "tsx", serverPath],
-        pipes.readEnd, pipes.writeEnd, stderr,
+        stdin, pipes.writeEnd, stderr,
         null, /* env inherit */
-        Config(cwdPath)
+        Config.none,
+        cwdPath
     );
 
     // Read the first line
-    char[1024] buf;
-    auto line = pipes.readEnd.readln(buf);
-    auto lineStr = strip(cast(string) line);
+    auto lineStr = strip(pipes.readEnd.readln());
 
     // Parse "Listening: http://..."
     auto re = regex(`Listening: (http://[^\s]+)`);

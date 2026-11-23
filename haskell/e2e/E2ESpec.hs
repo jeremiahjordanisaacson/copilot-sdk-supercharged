@@ -23,6 +23,7 @@ import           Test.Hspec
 import Copilot.Client
 import Copilot.DefineTool       (defineTool)
 import Copilot.Session          (CopilotSession, sessionId, sendAndWait, onSessionEvent)
+import Copilot.SessionParams    (groupSessionParams)
 import Copilot.Types
 
 import CopilotE2E.TestHarness
@@ -71,6 +72,60 @@ main = hspec spec
 
 spec :: Spec
 spec = do
+  -- SDK protocol 4 payload translation (pure; no CLI or proxy needed).
+  describe "groupSessionParams (SDK protocol 4)" $ do
+    it "moves flat resume options into their groups" $ do
+      let flat = object
+            [ "model"                 .= ("m" :: T.Text)
+            , "streaming"             .= True
+            , "requestPermission"     .= True
+            , "hooks"                 .= True
+            , "disableResume"         .= True
+            , "trustWorkingDirectory" .= ("session" :: T.Text)
+            , "futureRootOption"      .= True
+            ]
+      groupSessionParams True flat `shouldBe` object
+        [ "model"               .= ("m" :: T.Text)
+        , "events"              .= object [ "streaming" .= True ]
+        , "permissions"         .= object [ "request" .= True ]
+        , "hooks"               .= object [ "hasHandlers" .= True ]
+        , "suppressResumeEvent" .= True
+        , "futureRootOption"    .= True
+        ]
+
+    it "turns a legacy provider into the default named provider" $ do
+      let flat = object
+            [ "model"    .= ("gpt-4.1" :: T.Text)
+            , "provider" .= object
+                [ "type"            .= ("openai" :: T.Text)
+                , "baseUrl"         .= ("http://localhost:8080" :: T.Text)
+                , "maxOutputTokens" .= (512 :: Int)
+                ]
+            , "enableWebSocketResponses" .= True
+            ]
+      groupSessionParams False flat `shouldBe` object
+        [ "model"     .= ("gpt-4.1" :: T.Text)
+        , "inference" .= object
+            [ "providers" .=
+                [ object
+                    [ "name"    .= ("default" :: T.Text)
+                    , "type"    .= ("openai" :: T.Text)
+                    , "baseUrl" .= ("http://localhost:8080" :: T.Text)
+                    ]
+                ]
+            , "defaultProvider" .= ("default" :: T.Text)
+            , "models" .=
+                [ object
+                    [ "provider"        .= ("default" :: T.Text)
+                    , "id"              .= ("gpt-4.1" :: T.Text)
+                    , "maxOutputTokens" .= (512 :: Int)
+                    ]
+                ]
+            ]
+        , "github" .= object
+            [ "capi" .= object [ "enabled" .= False, "enableWebSocketResponses" .= True ] ]
+        ]
+
   -- Proxy lifecycle: started once before all tests, stopped after.
   -- We use 'around' with our bracket helper on the top-level describe.
   around withProxy $ do
@@ -121,6 +176,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing  -- default 60s timeout
@@ -184,6 +242,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         resp1 <- sendAndWait session msg1 Nothing
@@ -200,6 +261,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         resp2 <- sendAndWait session msg2 Nothing
@@ -415,6 +479,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         -- sendAndWait may timeout with replay proxy; use short timeout
@@ -448,6 +515,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         _ <- sendAndWait session msgOpts Nothing
@@ -493,6 +563,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing
@@ -541,6 +614,9 @@ spec = do
               , moRequestHeaders = Nothing
               , moAgentMode      = Nothing
               , moDisplayPrompt  = Nothing
+              , moSource         = Nothing
+              , moClientTurnId   = Nothing
+              , moResponseSchema = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing
@@ -640,6 +716,9 @@ spec = do
                     , moRequestHeaders = Nothing
                     , moAgentMode      = Nothing
                     , moDisplayPrompt  = Nothing
+                    , moSource         = Nothing
+                    , moClientTurnId   = Nothing
+                    , moResponseSchema = Nothing
                     }
               void $ sendAndWait session msgOpts Nothing
 

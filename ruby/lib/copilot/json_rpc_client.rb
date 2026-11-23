@@ -16,6 +16,15 @@ module Copilot
       @data = data
       super("JSON-RPC Error #{code}: #{message}")
     end
+
+    # Structured Policy Helper failure attached to a failed session.create or
+    # session.resume (+error.data.policyHelperFailure+).
+    #
+    # @return [PolicyHelperFailure, nil]
+    def policy_helper_failure
+      raw = @data.is_a?(Hash) ? @data["policyHelperFailure"] : nil
+      raw.is_a?(Hash) ? PolicyHelperFailure.from_hash(raw) : nil
+    end
   end
 
   # Minimal threaded JSON-RPC 2.0 client for stdio / TCP IO transport.
@@ -43,6 +52,7 @@ module Copilot
 
       @notification_handler = nil  # Proc(method, params)
       @request_handlers     = {}   # method => Proc(params) -> Hash
+      @async_request_methods = {}  # method => true when handled off the reader thread
 
       @running = false
       @reader_thread = nil
@@ -148,13 +158,21 @@ module Copilot
     # The handler receives +(params)+ and must return a Hash result.
     #
     # @param method [String] the RPC method to handle
+    # @param async  [Boolean] run the handler on its own thread so the reader keeps
+    #   processing messages (for example a cancellation) while it runs
     # @yield [params] the request parameters
     # @yieldreturn [Hash] the result to send back
-    def on_request(method, &handler)
+    def on_request(method, async: false, &handler)
       if handler.nil?
         @request_handlers.delete(method)
+        @async_request_methods.delete(method)
       else
         @request_handlers[method] = handler
+        if async
+          @async_request_methods[method] = true
+        else
+          @async_request_methods.delete(method)
+        end
       end
     end
 
@@ -293,6 +311,19 @@ module Copilot
         return
       end
 
+      if @async_request_methods[method]
+        Thread.new do
+          dispatch_request(method, request_id, params, handler)
+        rescue StandardError
+          # The connection closed before the response could be written.
+        end
+      else
+        dispatch_request(method, request_id, params, handler)
+      end
+    end
+
+    # Run a request handler and write its response (or error).
+    def dispatch_request(method, request_id, params, handler)
       # Execute handler (may be synchronous or may raise)
       begin
         result = handler.call(params)
@@ -300,13 +331,19 @@ module Copilot
         # as JSON null (the CLI decodes the result as `SessionFsError | undefined`).
         # Coercing nil to {} would be decoded as a malformed SessionFsError
         # ("missing field `code`"), so preserve nil for those methods only.
-        result = {} if result.nil? && !method.to_s.start_with?("sessionFs.")
+        # memoryStore.store also answers with JSON null.
+        result = {} if result.nil? && !null_result_method?(method)
         send_response(request_id, result)
       rescue JsonRpcError => e
         send_error_response(request_id, e.code, e.message, e.data)
       rescue StandardError => e
         send_error_response(request_id, -32603, e.message)
       end
+    end
+
+    # @return [Boolean] true for methods whose successful result is JSON null
+    def null_result_method?(method)
+      method.to_s.start_with?("sessionFs.") || method == "memoryStore.store"
     end
 
     # Send a successful response.

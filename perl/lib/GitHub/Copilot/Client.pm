@@ -19,6 +19,7 @@ use Errno ();
 use GitHub::Copilot::JsonRpcClient;
 use GitHub::Copilot::Session;
 use GitHub::Copilot::SdkProtocolVersion qw(get_sdk_protocol_version);
+use GitHub::Copilot::SessionParams qw(group_session_params apply_empty_mode_defaults);
 use GitHub::Copilot::Types;
 
 our $VERSION = '0.01';
@@ -86,6 +87,23 @@ sub new {
         $client_info = GitHub::Copilot::Types::ClientInfo->new(%$client_info);
     }
 
+    # Client mode: 'coding-agent' (default) or 'empty'; 'copilot-cli' is a legacy alias.
+    my $mode = $args{mode} // 'coding-agent';
+    $mode = 'coding-agent' if $mode eq 'copilot-cli';
+    croak "mode must be 'coding-agent' or 'empty'"
+        unless $mode eq 'coding-agent' || $mode eq 'empty';
+
+    # Host network callbacks (NetworkConfig object or hashref with scope /
+    # resolve_proxy / authenticate_negotiate / authenticate_basic)
+    my $network = $args{network};
+    if (ref($network) eq 'HASH') {
+        $network = GitHub::Copilot::Types::NetworkConfig->new(%$network);
+    }
+    if ($network && defined $network->scope) {
+        croak "network scope must be 'connection' or 'runtime'"
+            unless $network->scope eq 'connection' || $network->scope eq 'runtime';
+    }
+
     # Default use_logged_in_user: false when github_token provided, true otherwise
     if (!defined $use_logged_in_user) {
         $use_logged_in_user = defined $github_token ? 0 : 1;
@@ -96,13 +114,17 @@ sub new {
         # Try to find CLI if not specified
         if (!defined $cli_path) {
             $cli_path = $ENV{COPILOT_CLI_PATH};
+            $cli_path = undef if defined $cli_path && !length $cli_path;
             if (!defined $cli_path || !-e $cli_path) {
                 # Try repo-relative paths
                 my $script_dir = dirname(abs_path(__FILE__));
                 my $nodejs_github = File::Spec->catdir($script_dir, '..', '..', '..', '..', 'nodejs', 'node_modules', '@github');
-                # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-                # package (e.g. @github/copilot-linux-x64); prefer it when present.
+                # CLI >= 1.0.10x ships @github/copilot/npm-loader.js, which launches the
+                # native binary from the platform package (there is no index.js anymore);
+                # .js paths run with node. From CLI 1.0.64-1 until then, the runnable
+                # index.js shipped in a platform-specific package (e.g. @github/copilot-linux-x64).
                 my @candidates = (
+                    File::Spec->catfile($nodejs_github, 'copilot', 'npm-loader.js'),
                     (grep { $_ !~ /language-server/ } glob(File::Spec->catfile($nodejs_github, 'copilot-*', 'index.js'))),
                     File::Spec->catfile($nodejs_github, 'copilot', 'index.js'),
                     File::Spec->catfile($script_dir, '..', '..', '..', '..', 'test', 'harness', 'node_modules', '@github', 'copilot', 'npm-loader.js'),
@@ -138,6 +160,8 @@ sub new {
         request_handler       => $request_handler,
         bearer_token_provider => $bearer_token_provider,
         client_info        => $client_info,
+        mode               => $mode,
+        network            => $network,
         env                => $args{env},
         _process_pid       => undef,
         _client            => undef,
@@ -167,6 +191,7 @@ sub start {
         $self->_setup_handlers();
         $self->_send_client_info();
         $self->_verify_protocol_version();
+        $self->_register_network_provider();
 
         # Register session filesystem provider if configured
         if ($self->{session_fs}) {
@@ -255,6 +280,7 @@ sub create_session {
     $config //= GitHub::Copilot::Types::SessionConfig->new();
 
     $self->_ensure_connected();
+    $self->_validate_session_config_for_mode($config);
 
     my $payload = $config->to_wire();
 
@@ -266,6 +292,10 @@ sub create_session {
 
     my $registration_id = $self->_register_github_token_provider($config, $config->session_id);
     $payload->{gitHubTokenProviderRegistrationId} = $registration_id if defined $registration_id;
+
+    # SDK protocol 4: move the flat options into their option groups.
+    $payload = group_session_params($payload, resume => 0);
+    apply_empty_mode_defaults($payload) if $self->{mode} eq 'empty';
 
     my $response;
     my $ok = eval { $response = $self->{_client}->request('session.create', $payload); 1 };
@@ -308,6 +338,9 @@ sub create_session {
     if ($config->on_exit_plan_mode) {
         $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
     }
+
+    # Register shell authentication handler and memory store callback
+    $self->_register_session_v3_handlers($session, $config);
 
     # Register trace context provider
     if ($self->{on_get_trace_context}) {
@@ -355,12 +388,17 @@ sub resume_session {
     $config //= GitHub::Copilot::Types::SessionConfig->new();
 
     $self->_ensure_connected();
+    $self->_validate_session_config_for_mode($config);
 
     my $payload = $config->to_wire(resume => 1);
     $payload->{sessionId} = $session_id;
 
     my $registration_id = $self->_register_github_token_provider($config, $session_id);
     $payload->{gitHubTokenProviderRegistrationId} = $registration_id if defined $registration_id;
+
+    # SDK protocol 4: move the flat options into their option groups.
+    $payload = group_session_params($payload, resume => 1);
+    apply_empty_mode_defaults($payload) if $self->{mode} eq 'empty';
 
     my $response;
     my $ok = eval { $response = $self->{_client}->request('session.resume', $payload); 1 };
@@ -396,6 +434,9 @@ sub resume_session {
     if ($config->on_exit_plan_mode) {
         $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
     }
+
+    # Register shell authentication handler and memory store callback
+    $self->_register_session_v3_handlers($session, $config);
 
     # Register trace context provider
     if ($self->{on_get_trace_context}) {
@@ -652,6 +693,31 @@ sub _setup_handlers {
         my ($params) = @_;
         return $self->_handle_github_token_request($params);
     });
+
+    # Shell authentication prompts (sessions with on_shell_authentication_request)
+    $self->{_client}->set_request_handler('shellAuthentication.request', sub {
+        my ($params) = @_;
+        return $self->_handle_shell_authentication_request($params);
+    });
+    $self->{_client}->set_request_handler('shellAuthentication.cancel', sub {
+        my ($params) = @_;
+        my $session = $self->{_sessions}{ $params->{sessionId} // '' };
+        $session->_cancel_shell_authentication_request($params->{requestId})
+            if $session && defined $params->{requestId};
+        return {};
+    });
+
+    # Memory store (sessions with store_memory); answers JSON null
+    $self->{_client}->set_request_handler('memoryStore.store', sub {
+        my ($params) = @_;
+        my $session = $self->{_sessions}{ $params->{sessionId} // '' };
+        croak "Memory store owner is unavailable" unless $session;
+        $session->_handle_memory_store(GitHub::Copilot::Types::StoredMemory->from_hashref($params));
+        return $GitHub::Copilot::JsonRpcClient::NULL_RESULT;
+    });
+
+    # Host network callbacks (client network option)
+    $self->_setup_network_handlers();
 
     # Handle sessionFs.* provider callbacks from the server. When a sessionFs
     # provider is configured the CLI drives all of the session's filesystem
@@ -981,16 +1047,137 @@ sub _verify_protocol_version {
     my $server_version = $ping_result->protocolVersion;
 
     if (!defined $server_version) {
-        croak "SDK protocol version mismatch: SDK expects version $expected, "
+        croak "SDK protocol version mismatch: SDK supports version $expected, "
             . "but server does not report a protocol version. "
             . "Please update your server to ensure compatibility.";
     }
 
     if ($server_version != $expected) {
-        croak "SDK protocol version mismatch: SDK expects version $expected, "
+        croak "SDK protocol version mismatch: SDK supports version $expected, "
             . "but server reports version $server_version. "
             . "Please update your SDK or server to ensure compatibility.";
     }
+}
+
+# --------------------------------------------------------------------------
+# Internal: v3.0.0 client mode, session callbacks and network callbacks
+# --------------------------------------------------------------------------
+
+# Validates the session callbacks, and in 'empty' mode requires every session to
+# explicitly opt into its tools.
+sub _validate_session_config_for_mode {
+    my ($self, $config) = @_;
+    for my $callback (qw(on_shell_authentication_request store_memory)) {
+        my $value = $config->can($callback) ? $config->$callback : undef;
+        croak "$callback must be a code reference" if defined $value && ref($value) ne 'CODE';
+    }
+    return unless $self->{mode} eq 'empty';
+    croak "CopilotClient is in mode 'empty' but the session config did not specify "
+        . "available_tools. Empty mode requires every session to explicitly opt into "
+        . "the tools it wants."
+        unless defined $config->available_tools;
+}
+
+# Register the session's shell authentication handler and memory store callback.
+sub _register_session_v3_handlers {
+    my ($self, $session, $config) = @_;
+    $session->register_shell_authentication_handler($config->on_shell_authentication_request)
+        if defined $config->on_shell_authentication_request;
+    $session->register_memory_store($config->store_memory)
+        if defined $config->store_memory;
+    return;
+}
+
+# Answer shellAuthentication.request with { action => 'accept', value } or
+# { action => 'cancel' }. Malformed requests and unknown sessions cancel.
+sub _handle_shell_authentication_request {
+    my ($self, $params) = @_;
+
+    my %input_kinds = map { $_ => 1 } qw(secret text confirm);
+    for my $field (qw(sessionId requestId program prompt)) {
+        return { action => 'cancel' } unless defined $params->{$field} && !ref $params->{$field};
+    }
+    return { action => 'cancel' }
+        unless defined $params->{inputKind} && $input_kinds{ $params->{inputKind} };
+
+    my $session = $self->{_sessions}{ $params->{sessionId} };
+    return { action => 'cancel' } unless $session;
+
+    return $session->_handle_shell_authentication_request(
+        GitHub::Copilot::Types::ShellAuthenticationRequest->from_hashref($params),
+    );
+}
+
+# Register the host network callbacks with network.setProvider. An empty object
+# marks each callback the client answers; the scope is sent only when set.
+sub _register_network_provider {
+    my ($self) = @_;
+
+    my $network = $self->{network};
+    return unless $network && $network->has_any_callback;
+
+    my %params;
+    $params{scope}                 = $network->scope if defined $network->scope;
+    $params{resolveProxy}          = {} if defined $network->resolve_proxy;
+    $params{authenticateNegotiate} = {} if defined $network->authenticate_negotiate;
+    $params{authenticateBasic}     = {} if defined $network->authenticate_basic;
+    $self->{_client}->request('network.setProvider', \%params);
+    return;
+}
+
+# Register the server -> client handlers for the configured network callbacks.
+sub _setup_network_handlers {
+    my ($self) = @_;
+
+    my $network = $self->{network};
+    return unless $network;
+
+    if (defined $network->resolve_proxy) {
+        $self->{_client}->set_request_handler('network.resolveProxy', sub {
+            my ($params) = @_;
+            my $request = GitHub::Copilot::Types::NetworkResolveProxyRequest->new(url => $params->{url});
+            my $proxy = _invoke_network_callback('Proxy resolution', $network->resolve_proxy, $request);
+            return (defined $proxy && length $proxy) ? { proxy => "$proxy" } : {};
+        });
+    }
+    if (defined $network->authenticate_negotiate) {
+        $self->{_client}->set_request_handler('network.authenticateNegotiate', sub {
+            my ($params) = @_;
+            my $request = GitHub::Copilot::Types::NetworkAuthenticateNegotiateRequest->new(spn => $params->{spn});
+            my $token = _invoke_network_callback('Negotiate authentication', $network->authenticate_negotiate, $request);
+            return (defined $token && length $token) ? { token => "$token" } : {};
+        });
+    }
+    if (defined $network->authenticate_basic) {
+        $self->{_client}->set_request_handler('network.authenticateBasic', sub {
+            my ($params) = @_;
+            my $request = GitHub::Copilot::Types::NetworkAuthenticateBasicRequest->new(
+                proxy             => $params->{proxy},
+                realm             => $params->{realm},
+                previous_rejected => ($params->{previousRejected} ? 1 : 0),
+            );
+            my $credentials = _invoke_network_callback('Basic authentication', $network->authenticate_basic, $request);
+            return {} unless ref($credentials) eq 'HASH';
+            # Send only the credential fields, never other entries of the caller's hashref.
+            my %result;
+            $result{username} = "$credentials->{username}" if defined $credentials->{username};
+            $result{password} = "$credentials->{password}" if defined $credentials->{password};
+            return \%result;
+        });
+    }
+    return;
+}
+
+# Run a network callback. Failures are reported by type only so that secrets in an
+# error message are never logged or sent back over the wire.
+sub _invoke_network_callback {
+    my ($label, $callback, $request) = @_;
+    my $result;
+    eval { $result = $callback->($request); 1 } or do {
+        my $type = ref($@) || 'error';
+        die "$label callback failed ($type)\n";
+    };
+    return $result;
 }
 
 # --------------------------------------------------------------------------

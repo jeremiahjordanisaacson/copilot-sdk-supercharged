@@ -314,6 +314,117 @@ using CopilotSDK
         end
     end
 
+    # -- SDK protocol 4 -------------------------------------------------------------
+
+    @testset "SDK protocol 4" begin
+        @testset "protocol version" begin
+            @test CopilotSDK.SDK_PROTOCOL_VERSION == 4
+            @test CopilotSDK.MIN_PROTOCOL_VERSION == 4
+        end
+
+        @testset "group_session_params" begin
+            flat = Dict{String, Any}("model" => "m", "streaming" => true, "requestPermission" => true,
+                "tools" => Any[Dict{String, Any}("name" => "t")], "hooks" => true, "disableResume" => true)
+            @test group_session_params(flat, true) == Dict{String, Any}(
+                "model" => "m",
+                "events" => Dict{String, Any}("streaming" => true),
+                "permissions" => Dict{String, Any}("request" => true),
+                "tools" => Dict{String, Any}("definitions" => Any[Dict{String, Any}("name" => "t")]),
+                "hooks" => Dict{String, Any}("hasHandlers" => true),
+                "suppressResumeEvent" => true,
+            )
+
+            flat = Dict{String, Any}("trustWorkingDirectory" => "session", "openCanvases" => Any[],
+                "customKey" => 1, "agent" => nothing, "mcpServers" => Dict{String, Any}(),
+                "defaultProvider" => missing)
+            created = group_session_params(flat, false)
+            @test created["filesystem"] == Dict{String, Any}("trustWorkingDirectory" => "session")
+            @test !haskey(created, "canvases")
+            @test created["customKey"] == 1
+            @test !haskey(created, "agents")
+            @test created["mcp"]["envValueMode"] == "direct"
+            @test created["inference"]["defaultProvider"] === nothing
+            resumed = group_session_params(flat, true)
+            @test !haskey(resumed, "filesystem")
+            @test resumed["canvases"] == Dict{String, Any}("open" => Any[])
+        end
+
+        @testset "legacy provider" begin
+            flat = Dict{String, Any}("model" => "m1", "provider" => Dict{String, Any}(
+                "type" => "openai", "baseUrl" => "https://b", "maxOutputTokens" => 10))
+            p = group_session_params(flat)
+            @test p["inference"]["providers"] == Any[Dict{String, Any}(
+                "name" => "default", "type" => "openai", "baseUrl" => "https://b")]
+            @test p["inference"]["defaultProvider"] == "default"
+            @test p["inference"]["models"] == Any[Dict{String, Any}(
+                "provider" => "default", "id" => "m1", "maxOutputTokens" => 10)]
+            @test p["github"]["capi"] == Dict{String, Any}("enabled" => false)
+            @test !haskey(p, "provider")
+
+            flat["providers"] = Any[Dict{String, Any}("name" => "azure", "baseUrl" => "https://x")]
+            p = group_session_params(flat)
+            @test p["inference"]["providers"] == flat["providers"]
+            @test !haskey(p, "github")
+        end
+
+        @testset "client mode" begin
+            @test CopilotClient().options.mode == CLIENT_MODE_CODING_AGENT
+            @test CopilotClient(mode="copilot-cli").options.mode == CLIENT_MODE_CODING_AGENT
+            @test_throws ArgumentError CopilotClient(mode="bogus")
+
+            c = CopilotClient(mode=CLIENT_MODE_EMPTY)
+            @test_throws ArgumentError CopilotSDK._require_available_tools(c, SessionConfig())
+            cfg = SessionConfig(available_tools=["view"], memory=CopilotSDK.MemoryConfiguration(enabled=true))
+            p = CopilotSDK._session_wire_params(c,
+                CopilotSDK._session_flat_params(c, cfg; resume=false), false)
+            @test p["tools"]["availableTools"] == ["view"]
+            @test p["state"]["memory"] == Dict{String, Any}("enabled" => true)
+            @test p["state"]["enableCrossSessionStore"] == false
+            @test p["github"]["telemetryEnabled"] == false
+        end
+
+        @testset "server requests" begin
+            rpc = CopilotSDK.JsonRpcClient(nothing, IOBuffer(), IOBuffer())
+            c = CopilotClient(network=NetworkConfig(
+                authenticate_basic = req -> (username="u", password="p", other="x")))
+            cfg = SessionConfig(on_shell_authentication_request = req -> (action="accept", value="pw"))
+            c.sessions["s1"] = CopilotSession("s1", rpc, cfg)
+            request = Dict{String, Any}("sessionId" => "s1", "requestId" => "r1", "program" => "sudo",
+                "prompt" => "Password:", "inputKind" => "secret", "command" => "sudo ls", "cwd" => "/")
+            @test CopilotSDK._handle_shell_authentication(c, request) ==
+                Dict{String, Any}("action" => "accept", "value" => "pw")
+            request["inputKind"] = "bogus"
+            @test CopilotSDK._handle_shell_authentication(c, request) ==
+                Dict{String, Any}("action" => "cancel")
+            @test CopilotSDK._handle_network_request(c, :authenticate_basic,
+                Dict{String, Any}("proxy" => "p")) == Dict{String, Any}("username" => "u", "password" => "p")
+
+            err = JsonRpcError(-32603, "denied", Dict{String, Any}("policyHelperFailure" =>
+                Dict{String, Any}("category" => "c", "failureMode" => "f", "message" => "m",
+                    "previousPolicyRetained" => true, "reason" => "r")))
+            failure = policy_helper_failure(err)
+            @test failure.category == "c" && failure.previous_policy_retained
+            @test policy_helper_failure(JsonRpcError(-1, "x", nothing)) === nothing
+        end
+
+        @testset "permission requests" begin
+            req = CopilotSDK._permission_request_from_event(Dict{String, Any}("requestId" => "r1",
+                "permissionRequest" => Dict{String, Any}("kind" => "write", "toolCallId" => "tc1",
+                    "intention" => "Edit file")))
+            @test (req.permission_id, req.kind, req.tool_call_id) == ("r1", "write", "tc1")
+            @test req.tool_name == "write" && req.description == "Edit file"
+            @test CopilotSDK._permission_decision_wire(approve_all(req)) == Dict{String, Any}("kind" => "approve-once")
+            @test CopilotSDK._permission_decision_wire(false) == Dict{String, Any}("kind" => "reject")
+            @test CopilotSDK._permission_decision_wire(nothing) == Dict{String, Any}("kind" => "user-not-available")
+            @test CopilotSDK._permission_decision_wire("no-result") === nothing
+            @test CopilotSDK._permission_decision_wire((kind="reject", feedback="no")) ==
+                Dict{String, Any}("kind" => "reject", "feedback" => "no")
+            p = CopilotSDK._session_flat_params(CopilotClient(),
+                SessionConfig(on_permission_request=approve_all); resume=false)
+            @test group_session_params(p)["permissions"] == Dict{String, Any}("request" => true)
+        end
+    end
+
     # -- Module exports ----------------------------------------------------------
 
     @testset "Module exports" begin

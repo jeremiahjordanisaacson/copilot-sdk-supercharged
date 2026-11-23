@@ -7,13 +7,15 @@
 
 open Types
 
-(** [define_tool ~name ~description ?parameters handler] builds a
+(** [define_tool ~name ~description ?parameters ?idempotent handler] builds a
     {!Types.tool_definition} and pairs it with its handler function.
-    This is the primary way to declare tools in the OCaml SDK. *)
-let define_tool ~name ~description ?parameters
+    [~idempotent:true] declares that repeating a call with the same
+    arguments is safe (sent as [idempotent] in [tools.definitions]). This is
+    the primary way to declare tools in the OCaml SDK. *)
+let define_tool ~name ~description ?parameters ?idempotent
     (handler : tool_invocation -> tool_result Lwt.t)
     : tool_definition * Session.tool_handler =
-  let defn = make_tool_definition ?parameters name description in
+  let defn = make_tool_definition ?parameters ?idempotent name description in
   (defn, handler)
 
 (** [make_string_param ~name ~description ()] creates a JSON Schema

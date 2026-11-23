@@ -19,18 +19,21 @@ contains
   !! @param description   Human-readable description of what the tool does
   !! @param schema_json   JSON Schema string describing the tool parameters
   !! @param callback      Procedure pointer invoked when the assistant calls the tool
+  !! @param idempotent    Optional: repeating a call with the same arguments is safe
   !! @return              Populated copilot_tool instance
-  function define_tool(name, description, schema_json, callback) result(tool)
+  function define_tool(name, description, schema_json, callback, idempotent) result(tool)
     character(len=*), intent(in) :: name
     character(len=*), intent(in) :: description
     character(len=*), intent(in) :: schema_json
     procedure(tool_callback_interface) :: callback
+    logical, intent(in), optional :: idempotent
     type(copilot_tool) :: tool
 
     tool%name = name
     tool%description = description
     tool%input_schema_json = schema_json
     tool%callback => callback
+    if (present(idempotent)) tool%idempotent = idempotent
   end function define_tool
 
   !> Create a successful tool result.

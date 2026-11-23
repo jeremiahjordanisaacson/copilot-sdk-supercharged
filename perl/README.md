@@ -55,6 +55,160 @@ $session->destroy();
 $client->stop();
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected by `start()` with an `SDK protocol version mismatch` error.
+
+Existing options keep working: you keep passing the same `SessionConfig` attributes, and the SDK translates them into the grouped v4 wire payload (for example `streaming` becomes `events.streaming` and `on_permission_request` becomes `permissions.request`). A legacy single `provider` (BYOK) is translated into a named `default` provider with Copilot API models disabled, matching v1 behavior.
+
+### Named BYOK providers
+
+```perl
+my $gateway = GitHub::Copilot::Types::NamedProviderConfig->new(
+    name            => 'gateway',
+    type            => 'openai',
+    base_url        => 'https://models.example.com/v1',
+    api_key_command => 'print-model-key',
+);
+
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        model     => 'gateway/chat',
+        providers => [$gateway],
+        models    => [
+            GitHub::Copilot::Types::ProviderModelConfig->new(
+                provider => 'gateway', id => 'chat', model_id => 'gpt-4o', max_output_tokens => 4096,
+            ),
+        ],
+        capi => GitHub::Copilot::Types::CapiConfig->new(enabled => 0),  # BYOK-only catalog
+    ),
+);
+
+# Clear the default provider on resume by passing default_provider => undef explicitly
+$client->resume_session($session->session_id,
+    GitHub::Copilot::Types::SessionConfig->new(
+        model            => 'gpt-5.4',
+        capi             => { enabled => 1 },
+        default_provider => undef,
+    ),
+);
+```
+
+### Idempotent tools
+
+```perl
+my $tool = define_tool(
+    name        => 'lookup_order',
+    description => 'Look up an order',
+    idempotent  => 1,
+    handler     => sub { my ($args) = @_; return "Order $args->{id} shipped"; },
+);
+```
+
+### Client turn IDs
+
+```perl
+$session->send_and_wait({ prompt => 'Summarize the diff', client_turn_id => 'turn-42' });
+```
+
+### Client mode
+
+`mode => 'coding-agent'` (the default) keeps today's behavior. `mode => 'empty'` requires every session to set `available_tools` and applies conservative defaults (no telemetry, in-memory OAuth and embedding storage, no cross-session store or memory, no on-demand instruction discovery, repository hooks or host git operations). Values you pass win. `'copilot-cli'` is accepted as an alias of `'coding-agent'`.
+
+```perl
+my $client = GitHub::Copilot::Client->new(mode => GitHub::Copilot::Types::ClientMode::EMPTY);
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(model => 'gpt-5.4', available_tools => ['view']),
+);
+```
+
+### Shell output events
+
+```perl
+$session->on(sub {
+    my ($event) = @_;
+    return unless $event->type eq GitHub::Copilot::Types::ShellOutputData::EVENT_TYPE;
+    my $chunk = GitHub::Copilot::Types::ShellOutputData->from_hashref($event->data);
+    print $chunk->text;  # $chunk->stream is 'stdout', 'stderr' or undef (stdout)
+});
+```
+
+### Shell authentication
+
+Answer credential prompts from shell programs (for example `git` asking for a password). Failures and malformed answers cancel; the answer is never logged.
+
+```perl
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        on_shell_authentication_request => sub {
+            my ($request, $ctx) = @_;
+            # $request->program, ->prompt, ->input_kind ('secret', 'text' or 'confirm'), ->command, ->cwd
+            return GitHub::Copilot::Types::ShellAuthenticationResponse->accept(fetch_secret($request->program));
+        },
+    ),
+);
+```
+
+### Memory store
+
+```perl
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        store_memory => sub {
+            my ($memory, $ctx) = @_;   # GitHub::Copilot::Types::StoredMemory
+            save_memory($memory->subject, $memory->fact);
+        },
+    ),
+);
+```
+
+### Network callbacks
+
+Resolve proxies and answer proxy authentication challenges from your application. Tokens and passwords are never logged.
+
+```perl
+my $client = GitHub::Copilot::Client->new(
+    network => {
+        scope              => 'runtime',
+        resolve_proxy      => sub { my ($req) = @_; $req->url =~ m{^https://internal} ? 'DIRECT' : 'PROXY proxy.example:8080' },
+        authenticate_basic => sub {
+            my ($req) = @_;
+            return undef if $req->previous_rejected;
+            return { username => 'svc', password => $ENV{PROXY_PASSWORD} };
+        },
+    },
+);
+```
+
+### Policy helper failures
+
+```perl
+my $session = eval { $client->create_session() };
+if (my $err = $@) {
+    if (ref $err && $err->can('policy_helper_failure') && (my $failure = $err->policy_helper_failure)) {
+        warn sprintf "Policy helper failed (%s, %s): %s\n",
+            $failure->category, $failure->failure_mode, $failure->message;
+    }
+    die $err;
+}
+```
+
+### Permission mode refusal reason
+
+```perl
+my $result = $session->set_permission_mode(GitHub::Copilot::Types::PermissionMode::ALLOW_ALL);
+warn "Blocked by managed policy\n" if $result->refused_by_managed_policy;
+```
+
+The v2.6.0 features (client info, Auto routing tier, ask-user variant, GitHub token provider, sandbox bypass, feature flags, session detach, message source, managed settings cache clear, policy helper recheck, model allowlist, OAuth client metadata URL, max output tokens override, structured output, agent and hook directories, working directory trust, transcript recovery, image generation config, Autopilot options, subagent lifecycle hooks and BYOK `api_key_command`) are unchanged and are sent in their v4 groups.
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process runtime hosting is not the default connection: the Perl SDK keeps spawning the CLI.
+* The client is single-threaded, so server callbacks (tools, permissions, shell authentication, memory store and network callbacks) are answered only while the client processes messages: while it waits for a request's response or inside `send_and_wait`. A `shellAuthentication.cancel` that arrives while your handler runs is applied when the handler returns, and the prompt then answers `cancel`.
+* The fork-specific `skills` attribute (a list of skill names) has no SDK protocol 4 equivalent and is no longer sent; use `skill_directories` and `disabled_skills`.
+
 ## Architecture
 
 The SDK consists of the following modules:
@@ -66,6 +220,7 @@ The SDK consists of the following modules:
 | `GitHub::Copilot::JsonRpcClient` | JSON-RPC 2.0 client using Content-Length header framing over stdio. |
 | `GitHub::Copilot::Types` | Moo-based data classes for all SDK types. |
 | `GitHub::Copilot::DefineTool` | Helper function for defining custom tools. |
+| `GitHub::Copilot::SessionParams` | Translates session options into the grouped SDK protocol 4 payload. |
 | `GitHub::Copilot::SdkProtocolVersion` | Protocol version constant (must match the CLI server). |
 
 ## Client Options
@@ -366,8 +521,8 @@ copilot --headless --no-auto-update --log-level info --stdio
 ```
 
 Key JSON-RPC methods:
-- `ping` - Health check, returns protocol version
-- `session.create` / `session.resume` / `session.destroy` - Session lifecycle
+- `ping` - Health check, returns protocol version (4)
+- `session.create` / `session.resume` / `session.detach` - Session lifecycle (grouped protocol 4 options)
 - `session.send` - Send a message
 - `session.getMessages` - Retrieve history
 - `models.list` - List available models
@@ -377,6 +532,9 @@ Server-initiated requests handled by the SDK:
 - `permission.request` - Request permission for an operation
 - `userInput.request` - Request user input (ask_user)
 - `hooks.invoke` - Invoke a session hook
+- `shellAuthentication.request` / `shellAuthentication.cancel` - Shell credential prompts
+- `memoryStore.store` - Store a memory through `store_memory`
+- `network.resolveProxy` / `network.authenticateNegotiate` / `network.authenticateBasic` - Network callbacks
 
 Server-initiated notifications:
 - `session.event` - Session events (assistant.message, session.idle, etc.)

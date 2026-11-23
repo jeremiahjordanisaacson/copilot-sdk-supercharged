@@ -19,9 +19,168 @@ namespace eval ::copilot::jsonrpc {
 
 # ---- JSON helpers (pure Tcl, no Tcllib dependency) --------------------------
 
+# Raw JSON values: json_raw tags exactly-typed JSON text so json_encode (and the
+# message framing) emits it verbatim. Tcl values are untyped, so payloads whose
+# shape matters (session options, server-request replies) are built as raw JSON.
+proc ::copilot::jsonrpc::json_raw {text} {
+    return [list ::copilot::jsonrpc::RAW $text]
+}
+
+proc ::copilot::jsonrpc::is_raw {value} {
+    if {![string match {::copilot::jsonrpc::RAW *} $value]} { return 0 }
+    if {[catch {llength $value} n] || $n != 2} { return 0 }
+    return [expr {[lindex $value 0] eq "::copilot::jsonrpc::RAW"}]
+}
+
+# JSON text of a value: raw values verbatim, anything else via json_encode.
+proc ::copilot::jsonrpc::to_json {value} {
+    if {[is_raw $value]} {
+        return [lindex $value 1]
+    }
+    return [json_encode $value]
+}
+
+# Typed JSON text builders.
+proc ::copilot::jsonrpc::json_string {s} {
+    set s [string map {\\ \\\\ \" \\\" \n \\n \r \\r \t \\t \b \\b \f \\f} $s]
+    return "\"$s\""
+}
+
+proc ::copilot::jsonrpc::json_bool {value} {
+    if {[string is true -strict $value]} { return "true" }
+    return "false"
+}
+
+proc ::copilot::jsonrpc::json_number {value} {
+    if {![string is integer -strict $value] && ![string is double -strict $value]} {
+        error "Not a number: $value"
+    }
+    return $value
+}
+
+# JSON array of strings from a Tcl list.
+proc ::copilot::jsonrpc::json_string_list {items} {
+    set parts [list]
+    foreach item $items {
+        lappend parts [json_string $item]
+    }
+    return "\[[join $parts ,]\]"
+}
+
+# JSON array from a Tcl list of JSON texts.
+proc ::copilot::jsonrpc::json_array {texts} {
+    return "\[[join $texts ,]\]"
+}
+
+# JSON object from a dict of key -> JSON text (insertion order is kept).
+proc ::copilot::jsonrpc::json_object {members} {
+    set parts [list]
+    dict for {key text} $members {
+        lappend parts "[json_string $key]:$text"
+    }
+    set lbrace \{
+    set rbrace \}
+    return "${lbrace}[join $parts ,]${rbrace}"
+}
+
+# Split a JSON object text into a dict of key -> member JSON text, without
+# decoding the member values (so their JSON types are preserved).
+proc ::copilot::jsonrpc::json_object_members {text} {
+    set text [string trim $text]
+    if {[string index $text 0] ne "\{" || [string index $text end] ne "\}"} {
+        error "Not a JSON object: $text"
+    }
+    set members [dict create]
+    set pos 1
+    while {1} {
+        set pos [_jd_skip_ws $text $pos]
+        set ch [string index $text $pos]
+        if {$ch eq "\}" || $ch eq ""} {
+            break
+        }
+        if {$ch eq ","} {
+            incr pos
+            continue
+        }
+        lassign [_jd_parse_string $text $pos] key pos
+        set pos [_jd_skip_ws $text $pos]
+        incr pos ;# skip colon
+        set pos [_jd_skip_ws $text $pos]
+        set end [_json_value_end $text $pos]
+        dict set members $key [string trim [string range $text $pos [expr {$end - 1}]]]
+        set pos $end
+    }
+    return $members
+}
+
+# Index just past the JSON value that starts at pos.
+proc ::copilot::jsonrpc::_json_value_end {text pos} {
+    set len [string length $text]
+    set depth 0
+    set in_string 0
+    set i $pos
+    while {$i < $len} {
+        set ch [string index $text $i]
+        if {$in_string} {
+            if {$ch eq "\\"} {
+                incr i 2
+                continue
+            }
+            if {$ch eq "\""} {
+                set in_string 0
+                if {$depth == 0} {
+                    return [expr {$i + 1}]
+                }
+            }
+            incr i
+            continue
+        }
+        if {$ch eq "\""} {
+            set in_string 1
+        } elseif {$ch eq "\{" || $ch eq "\["} {
+            incr depth
+        } elseif {$ch eq "\}" || $ch eq "\]"} {
+            if {$depth == 0} {
+                return $i
+            }
+            incr depth -1
+            if {$depth == 0} {
+                return [expr {$i + 1}]
+            }
+        } elseif {$ch eq "," && $depth == 0} {
+            return $i
+        }
+        incr i
+    }
+    return $len
+}
+
+# JSON text of request params / results: raw values verbatim, an empty value as
+# {}, a Tcl dict as an object (each member via to_json), anything else via
+# json_encode.
+proc ::copilot::jsonrpc::params_json {params} {
+    if {[is_raw $params]} {
+        return [lindex $params 1]
+    }
+    if {$params eq ""} {
+        return "\{\}"
+    }
+    if {![catch {dict size $params} sz] && $sz > 0} {
+        set members [dict create]
+        dict for {key val} $params {
+            dict set members $key [to_json $val]
+        }
+        return [json_object $members]
+    }
+    return [json_encode $params]
+}
+
 # Minimal JSON encoder that handles dicts, lists, strings, numbers, and bools.
 # Uses a _tag metadata dict to distinguish JSON arrays from dicts when needed.
 proc ::copilot::jsonrpc::json_encode {value} {
+    if {[is_raw $value]} {
+        return [lindex $value 1]
+    }
     if {$value eq "null"} {
         return "null"
     }
@@ -266,13 +425,20 @@ proc ::copilot::jsonrpc::read_message {channel} {
         if {$line eq ""} { break }
     }
 
-    # Read exactly content_length bytes
+    # Read exactly content_length bytes (the body is UTF-8 encoded)
     set body [read $channel $content_length]
     if {$body eq ""} {
         return ""
     }
 
-    return [json_decode $body]
+    return [json_decode [encoding convertfrom utf-8 $body]]
+}
+
+# Write one Content-Length framed message whose body is the given JSON text.
+proc ::copilot::jsonrpc::write_frame {channel json} {
+    set bytes [encoding convertto utf-8 $json]
+    puts -nonewline $channel "Content-Length: [string length $bytes]\r\n\r\n$bytes"
+    flush $channel
 }
 
 # ---- Request / notification sending -----------------------------------------
@@ -285,50 +451,48 @@ proc ::copilot::jsonrpc::next_request_id {} {
 
 proc ::copilot::jsonrpc::send_request {channel method params} {
     set id [next_request_id]
-    set msg [dict create \
-        jsonrpc "2.0" \
+    write_frame $channel [json_object [dict create \
+        jsonrpc [json_string "2.0"] \
         id      $id \
-        method  $method \
-        params  $params \
-    ]
-    set encoded [encode_message $msg]
-    puts -nonewline $channel $encoded
-    flush $channel
+        method  [json_string $method] \
+        params  [params_json $params] \
+    ]]
     return $id
 }
 
 proc ::copilot::jsonrpc::send_notification {channel method params} {
-    set msg [dict create \
-        jsonrpc "2.0" \
-        method  $method \
-        params  $params \
-    ]
-    set encoded [encode_message $msg]
-    puts -nonewline $channel $encoded
-    flush $channel
+    write_frame $channel [json_object [dict create \
+        jsonrpc [json_string "2.0"] \
+        method  [json_string $method] \
+        params  [params_json $params] \
+    ]]
+}
+
+# The id is echoed exactly as received (a JSON number or string).
+proc ::copilot::jsonrpc::_id_json {id} {
+    if {[string is integer -strict $id]} {
+        return $id
+    }
+    return [json_string $id]
 }
 
 proc ::copilot::jsonrpc::send_response {channel id result} {
-    set msg [dict create \
-        jsonrpc "2.0" \
-        id      $id \
-        result  $result \
-    ]
-    set encoded [encode_message $msg]
-    puts -nonewline $channel $encoded
-    flush $channel
+    write_frame $channel [json_object [dict create \
+        jsonrpc [json_string "2.0"] \
+        id      [_id_json $id] \
+        result  [params_json $result] \
+    ]]
 }
 
 proc ::copilot::jsonrpc::send_error_response {channel id code message} {
-    set err_obj [dict create code $code message $message]
-    set msg [dict create \
-        jsonrpc "2.0" \
-        id      $id \
-        error   $err_obj \
-    ]
-    set encoded [encode_message $msg]
-    puts -nonewline $channel $encoded
-    flush $channel
+    write_frame $channel [json_object [dict create \
+        jsonrpc [json_string "2.0"] \
+        id      [_id_json $id] \
+        error   [json_object [dict create \
+            code    [json_number $code] \
+            message [json_string $message] \
+        ]] \
+    ]]
 }
 
 # ---- Notification handler registry ------------------------------------------

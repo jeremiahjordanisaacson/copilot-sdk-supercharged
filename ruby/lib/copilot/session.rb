@@ -60,6 +60,13 @@ module Copilot
 
       @trace_context_provider = nil
 
+      @shell_authentication_handler  = nil
+      @pending_shell_authentications = {} # request id => Queue
+      @shell_authentication_lock     = Mutex.new
+
+      @memory_store_handler = nil
+      @memory_store_lock    = Mutex.new
+
       @destroy_callbacks = []
     end
 
@@ -75,10 +82,13 @@ module Copilot
     # @param response_schema [Hash, nil]         JSON Schema requesting structured output; sent as
     #   +responseFormat: { type: "json_schema", jsonSchema: { name: "response", strict: true, schema: } }+
     #   and takes precedence over +response_format+
+    # @param client_turn_id  [String, nil]       opaque caller-chosen turn identifier, echoed on
+    #   the turn's events so you can correlate them with this send
     # @return [String] the message ID
-    def send(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil)
+    def send(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil, client_turn_id: nil)
       payload = { sessionId: @session_id, prompt: prompt }
       payload[:source] = source if source
+      payload[:clientTurnId] = client_turn_id if client_turn_id
       payload[:attachments] = attachments if attachments
       payload[:mode] = mode if mode
       payload[:agentMode] = agent_mode if agent_mode
@@ -125,11 +135,12 @@ module Copilot
     # @param image_options   [ImageOptions, nil] options for image generation
     # @param source          [String, nil]       message provenance (see {MessageSource})
     # @param response_schema [Hash, nil]         JSON Schema requesting structured output
+    # @param client_turn_id  [String, nil]       opaque caller-chosen turn identifier
     # @param timeout         [Numeric]           seconds to wait (default 60)
     # @return [SessionEvent, nil] the final assistant.message event, or nil
     # @raise [Timeout::Error] if the timeout expires before session.idle
     # @raise [RuntimeError] if the session emits a session.error event
-    def send_and_wait(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil, timeout: 60)
+    def send_and_wait(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil, client_turn_id: nil, timeout: 60)
       idle_mutex = Mutex.new
       idle_cv    = ConditionVariable.new
       idle_fired = false
@@ -163,7 +174,8 @@ module Copilot
                   agent_mode: agent_mode, display_prompt: display_prompt,
                   request_headers: request_headers,
                   response_format: response_format, image_options: image_options,
-                  source: source, response_schema: response_schema)
+                  source: source, response_schema: response_schema,
+                  client_turn_id: client_turn_id)
 
         idle_mutex.synchronize do
           unless idle_fired
@@ -293,6 +305,16 @@ module Copilot
       @rpc_client.request("session.managedSettings.recheckPolicyHelper", { sessionId: @session_id })
     end
 
+    # Change the session's permission mode.
+    #
+    # @param mode [String] "manual", "assisted" or "allow-all" (see {PermissionMode})
+    # @return [PermissionModeSetResult] whether the mode was applied, the authoritative
+    #   mode afterwards, and the refusal +reason+ when known ("managed_policy")
+    def set_permission_mode(mode)
+      result = @rpc_client.request("session.permissions.setMode", { sessionId: @session_id, mode: mode })
+      PermissionModeSetResult.from_hash(result.is_a?(Hash) ? result : {})
+    end
+
     # Destroy this session and release associated resources.
     #
     # Sends +session.detach+ (falling back to +session.destroy+ on older CLIs), so
@@ -315,6 +337,14 @@ module Copilot
       @hooks_lock.synchronize { @hooks = nil }
       @exit_plan_mode_handler_lock.synchronize { @exit_plan_mode_handler = nil }
       @trace_context_provider = nil
+      @memory_store_lock.synchronize { @memory_store_handler = nil }
+      pending = @shell_authentication_lock.synchronize do
+        @shell_authentication_handler = nil
+        queues = @pending_shell_authentications.values
+        @pending_shell_authentications.clear
+        queues
+      end
+      pending.each { |queue| queue << [:cancelled, nil] }
 
       callbacks = @destroy_callbacks.dup
       @destroy_callbacks.clear
@@ -431,6 +461,83 @@ module Copilot
     # @api private
     def _register_trace_context_provider(provider)
       @trace_context_provider = provider
+    end
+
+    # @api private
+    def _register_shell_authentication_handler(handler)
+      @shell_authentication_lock.synchronize { @shell_authentication_handler = handler }
+    end
+
+    # @api private
+    # Asks the registered handler for a shell program's credentials. A failure, a
+    # malformed answer, or a cancellation (see {#_cancel_shell_authentication_request})
+    # answers "cancel" so the program fails instead of receiving a wrong value. The
+    # answer is never logged. The handler runs on its own thread so a cancellation
+    # answers immediately even while the handler is still prompting.
+    #
+    # @param request [ShellAuthenticationRequest]
+    # @return [Hash] +{ action: "accept", value: }+ or +{ action: "cancel" }+
+    def _handle_shell_authentication_request(request)
+      handler = nil
+      outcome = Queue.new
+      @shell_authentication_lock.synchronize do
+        handler = @shell_authentication_handler
+        return { action: "cancel" } if handler.nil? || @pending_shell_authentications.key?(request.request_id)
+
+        @pending_shell_authentications[request.request_id] = outcome
+      end
+
+      Thread.new do
+        outcome << [:done, handler.call(request, { session_id: @session_id })]
+      rescue StandardError => e
+        # The error text could contain the answer, so only its type is logged.
+        $stderr.puts("[CopilotSDK] Shell authentication handler failed (#{e.class})")
+        outcome << [:done, nil]
+      end
+
+      status, result = outcome.pop
+      @shell_authentication_lock.synchronize do
+        @pending_shell_authentications.delete(request.request_id) if @pending_shell_authentications[request.request_id].equal?(outcome)
+      end
+      return { action: "cancel" } unless status == :done
+
+      answer = (result.is_a?(Hash) || result.is_a?(Struct)) ? result.to_h : {}
+      action = answer[:action] || answer["action"]
+      value = answer.key?(:value) ? answer[:value] : answer["value"]
+      return { action: "accept", value: value } if action.to_s == "accept" && value.is_a?(String)
+
+      { action: "cancel" }
+    end
+
+    # @api private
+    # Cancels a pending shell authentication prompt; it then answers "cancel".
+    def _cancel_shell_authentication_request(request_id)
+      outcome = @shell_authentication_lock.synchronize { @pending_shell_authentications.delete(request_id) }
+      outcome&.push([:cancelled, nil])
+    end
+
+    # @api private
+    def _register_memory_store(handler)
+      @memory_store_lock.synchronize { @memory_store_handler = handler }
+    end
+
+    # @api private
+    # Hands a memory the agent asked to store to the registered +store_memory+ callback.
+    #
+    # @param memory [StoredMemory]
+    # @return [nil]
+    def _handle_memory_store(memory)
+      handler = @memory_store_lock.synchronize { @memory_store_handler }
+      raise "No memory store is registered" unless handler
+
+      begin
+        handler.call(memory, { session_id: @session_id })
+      rescue StandardError => e
+        # The runtime reports a generic failure to the model; keep the cause visible here.
+        $stderr.puts("[CopilotSDK] Memory store callback failed: #{e.class}: #{e.message}")
+        raise "Memory store callback failed"
+      end
+      nil
     end
 
     # @api private

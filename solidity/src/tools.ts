@@ -104,6 +104,8 @@ export function createAuditTool(defaultVersion?: string): Tool<AuditToolParams> 
             },
             required: ["sourceCode"],
         },
+        // Pure prompt builder: repeating a call has no additional effect.
+        idempotent: true,
         handler: async (args) => {
             const params = args as unknown as AuditToolParams;
             const version = params.solidityVersion ?? defaultVersion;
@@ -139,6 +141,8 @@ export function createGasOptimizationTool(): Tool<GasToolParams> {
             },
             required: ["sourceCode"],
         },
+        // Pure prompt builder: repeating a call has no additional effect.
+        idempotent: true,
         handler: async (args) => {
             const params = args as unknown as GasToolParams;
             return {
@@ -179,6 +183,8 @@ export function createTestGenerationTool(
             },
             required: ["sourceCode"],
         },
+        // Pure prompt builder: repeating a call has no additional effect.
+        idempotent: true,
         handler: async (args) => {
             const params = args as unknown as TestGenToolParams;
             const fw = params.framework ?? defaultFramework;
@@ -227,6 +233,8 @@ export function createSecurityCheckTool(): Tool<SecurityCheckToolParams> {
             },
             required: ["sourceCode"],
         },
+        // Pure prompt builder: repeating a call has no additional effect.
+        idempotent: true,
         handler: async (args) => {
             const params = args as unknown as SecurityCheckToolParams;
             return {

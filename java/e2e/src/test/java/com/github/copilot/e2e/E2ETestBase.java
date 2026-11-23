@@ -78,8 +78,10 @@ public abstract class E2ETestBase {
     }
 
     /**
-     * Returns the CLI path for tests — uses COPILOT_CLI_PATH env var
-     * or falls back to the nodejs node_modules installation.
+     * Returns the CLI path for tests: the COPILOT_CLI_PATH env var when it points to an existing
+     * file, then the CLI 1.0.113+ {@code npm-loader.js} entry point (run with node; it starts the
+     * native binary), then the legacy {@code index.js} entry points from the nodejs installation.
+     * Paths without a {@code .js} suffix (such as {@code node_modules/.bin/copilot}) are run directly.
      */
     protected static String getCliPath() {
         String envPath = System.getenv("COPILOT_CLI_PATH");
@@ -95,8 +97,13 @@ public abstract class E2ETestBase {
                 .resolve("node_modules")
                 .resolve("@github");
 
-        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        Path npmLoader = githubModules.resolve("copilot").resolve("npm-loader.js");
+        if (Files.exists(npmLoader)) {
+            return npmLoader.toAbsolutePath().toString();
+        }
+
+        // Legacy layouts: CLI 1.0.64-1 through 1.0.112 shipped a runnable index.js in a
+        // platform-specific package (e.g. @github/copilot-linux-x64); prefer it when present.
         if (Files.isDirectory(githubModules)) {
             try (java.util.stream.Stream<Path> entries = Files.list(githubModules)) {
                 java.util.Optional<Path> platformCli = entries

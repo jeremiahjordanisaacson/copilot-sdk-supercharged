@@ -57,7 +57,11 @@ defmodule Copilot.Session do
             event_handlers: [{reference(), fun()}],
             typed_event_handlers: %{String.t() => [{reference(), fun()}]},
             waiters: [{reference(), pid(), any()}],
-            trace_context_provider: fun() | nil
+            trace_context_provider: fun() | nil,
+            shell_authentication_handler: fun() | nil,
+            memory_store: fun() | nil,
+            github_token_registration: String.t() | nil,
+            token_providers: :ets.tid() | nil
           }
     defstruct session_id: "",
               rpc: nil,
@@ -70,7 +74,11 @@ defmodule Copilot.Session do
               event_handlers: [],
               typed_event_handlers: %{},
               waiters: [],
-              trace_context_provider: nil
+              trace_context_provider: nil,
+              shell_authentication_handler: nil,
+              memory_store: nil,
+              github_token_registration: nil,
+              token_providers: nil
   end
 
   # ---------------------------------------------------------------------------
@@ -169,6 +177,65 @@ defmodule Copilot.Session do
     :exit, _ -> :ok
   end
 
+  @doc """
+  Detach from the session on the server (`session.detach`, falling back to
+  `session.destroy` on older CLIs) and stop this process. Session state on
+  disk is preserved, so the session can be resumed later.
+  """
+  @spec detach(GenServer.server()) :: :ok | {:error, any()}
+  def detach(session) do
+    GenServer.call(session, :detach, 10_000)
+  catch
+    :exit, _ -> :ok
+  end
+
+  @doc """
+  Change the Auto routing preference without changing the selected model
+  (`session.model.switchAutoTier`). Experimental. `tier` is `"efficiency"`,
+  `"balance"`, `"intelligence"`, or `"fast"`; pass `nil` to return to the
+  provider's default Auto routing.
+  """
+  @spec switch_auto_tier(GenServer.server(), String.t() | nil) :: {:ok, map()} | {:error, any()}
+  def switch_auto_tier(session, tier) do
+    GenServer.call(session, {:switch_auto_tier, tier}, 30_000)
+  end
+
+  @doc "Get the managed (enterprise) settings in effect (`session.managedSettings.get`)."
+  @spec get_managed_settings(GenServer.server()) :: {:ok, map()} | {:error, any()}
+  def get_managed_settings(session) do
+    GenServer.call(session, :get_managed_settings, 30_000)
+  end
+
+  @doc "Re-run the managed-settings policy helper (`session.managedSettings.recheckPolicyHelper`)."
+  @spec recheck_policy_helper(GenServer.server()) :: {:ok, map()} | {:error, any()}
+  def recheck_policy_helper(session) do
+    GenServer.call(session, :recheck_policy_helper, 30_000)
+  end
+
+  @doc """
+  Change the permission mode (`session.permissions.setMode`): `"manual"`,
+  `"assisted"`, or `"allow-all"`. Experimental. A refused change returns
+  `success: false` and, when known, `reason: "managed_policy"`
+  (`Copilot.Types.PermissionModeRefusal.managed_policy/0`).
+  """
+  @spec set_permission_mode(GenServer.server(), String.t()) ::
+          {:ok, Types.PermissionsSetModeResult.t()} | {:error, any()}
+  def set_permission_mode(session, mode) do
+    GenServer.call(session, {:set_permission_mode, mode}, 30_000)
+  end
+
+  @doc false
+  @spec shell_authentication_handler(GenServer.server()) :: fun() | nil
+  def shell_authentication_handler(session) do
+    GenServer.call(session, :shell_authentication_handler)
+  end
+
+  @doc false
+  @spec memory_store(GenServer.server()) :: fun() | nil
+  def memory_store(session) do
+    GenServer.call(session, :memory_store)
+  end
+
   # ---------------------------------------------------------------------------
   # Internal API (called by Client)
   # ---------------------------------------------------------------------------
@@ -252,28 +319,21 @@ defmodule Copilot.Session do
        permission_handler: on_permission_request,
        user_input_handler: on_user_input_request,
        hooks: hooks,
-       trace_context_provider: trace_context_provider
+       trace_context_provider: trace_context_provider,
+       shell_authentication_handler: Keyword.get(opts, :on_shell_authentication_request),
+       memory_store: Keyword.get(opts, :store_memory),
+       github_token_registration: Keyword.get(opts, :github_token_registration),
+       token_providers: Keyword.get(opts, :token_providers)
      }}
   end
 
   @impl true
   def handle_call({:send, options}, _from, state) do
-    params = %{
-      "sessionId" => state.session_id,
-      "prompt" => options.prompt
-    }
-
-    params = if options.attachments, do: Map.put(params, "attachments", options.attachments), else: params
-    params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
-    params = if options.agent_mode, do: Map.put(params, "agentMode", options.agent_mode), else: params
-    params = if options.display_prompt, do: Map.put(params, "displayPrompt", options.display_prompt), else: params
-    params = if options.request_headers, do: Map.put(params, "requestHeaders", options.request_headers), else: params
-    params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
-    params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
-    params = inject_trace_context(params, state)
+    params = send_params(options, state)
 
     case JsonRpcClient.request(state.rpc, "session.send", params, 30_000) do
       {:ok, %{"messageId" => mid}} -> {:reply, {:ok, mid}, state}
+      {:ok, _} -> {:reply, {:ok, nil}, state}
       {:error, _} = err -> {:reply, err, state}
     end
   end
@@ -296,19 +356,7 @@ defmodule Copilot.Session do
     state = %{state | waiters: [waiter | state.waiters]}
 
     # Now send the message
-    params = %{
-      "sessionId" => state.session_id,
-      "prompt" => options.prompt
-    }
-
-    params = if options.attachments, do: Map.put(params, "attachments", options.attachments), else: params
-    params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
-    params = if options.agent_mode, do: Map.put(params, "agentMode", options.agent_mode), else: params
-    params = if options.display_prompt, do: Map.put(params, "displayPrompt", options.display_prompt), else: params
-    params = if options.request_headers, do: Map.put(params, "requestHeaders", options.request_headers), else: params
-    params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
-    params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
-    params = inject_trace_context(params, state)
+    params = send_params(options, state)
 
     case JsonRpcClient.request(state.rpc, "session.send", params, 30_000) do
       {:ok, _} ->
@@ -368,13 +416,61 @@ defmodule Copilot.Session do
 
   def handle_call(:destroy, _from, state) do
     JsonRpcClient.request(state.rpc, "session.destroy", %{"sessionId" => state.session_id})
+    {:stop, :normal, :ok, release_resources(state)}
+  end
 
-    # Cancel all waiter timers
-    for waiter <- state.waiters do
-      if waiter.timer_ref, do: Process.cancel_timer(waiter.timer_ref)
+  def handle_call(:detach, _from, state) do
+    params = %{"sessionId" => state.session_id}
+
+    result =
+      case JsonRpcClient.request(state.rpc, "session.detach", params) do
+        # Older CLIs without session.detach
+        {:error, %{"code" => -32601}} -> JsonRpcClient.request(state.rpc, "session.destroy", params)
+        other -> other
+      end
+
+    case result do
+      {:error, _} = err -> {:reply, err, state}
+      {:ok, _} -> {:stop, :normal, :ok, release_resources(state)}
     end
+  end
 
-    {:stop, :normal, :ok, %{state | event_handlers: [], typed_event_handlers: %{}, tool_handlers: %{}, waiters: []}}
+  def handle_call({:switch_auto_tier, tier}, _from, state) do
+    params = %{"sessionId" => state.session_id, "autoTier" => tier}
+    {:reply, JsonRpcClient.request(state.rpc, "session.model.switchAutoTier", params, 30_000), state}
+  end
+
+  def handle_call(:get_managed_settings, _from, state) do
+    params = %{"sessionId" => state.session_id}
+    {:reply, JsonRpcClient.request(state.rpc, "session.managedSettings.get", params, 30_000), state}
+  end
+
+  def handle_call(:recheck_policy_helper, _from, state) do
+    params = %{"sessionId" => state.session_id}
+
+    {:reply,
+     JsonRpcClient.request(state.rpc, "session.managedSettings.recheckPolicyHelper", params, 30_000),
+     state}
+  end
+
+  def handle_call({:set_permission_mode, mode}, _from, state) do
+    params = %{"sessionId" => state.session_id, "mode" => mode}
+
+    case JsonRpcClient.request(state.rpc, "session.permissions.setMode", params, 30_000) do
+      {:ok, result} when is_map(result) ->
+        {:reply, {:ok, Types.PermissionsSetModeResult.from_map(result)}, state}
+
+      other ->
+        {:reply, other, state}
+    end
+  end
+
+  def handle_call(:shell_authentication_handler, _from, state) do
+    {:reply, state.shell_authentication_handler, state}
+  end
+
+  def handle_call(:memory_store, _from, state) do
+    {:reply, state.memory_store, state}
   end
 
   # ---------------------------------------------------------------------------
@@ -607,6 +703,62 @@ defmodule Copilot.Session do
   defp remove_waiter(state, ref) do
     waiters = Enum.reject(state.waiters, fn w -> w.ref == ref end)
     %{state | waiters: waiters}
+  end
+
+  # `session.send` params for both send/2 and send_and_wait/3.
+  defp send_params(%MessageOptions{} = options, state) do
+    params = %{"sessionId" => state.session_id, "prompt" => options.prompt}
+    params = if options.attachments, do: Map.put(params, "attachments", options.attachments), else: params
+    params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
+    params = if options.agent_mode, do: Map.put(params, "agentMode", options.agent_mode), else: params
+    params = if options.display_prompt, do: Map.put(params, "displayPrompt", options.display_prompt), else: params
+    params = if options.request_headers, do: Map.put(params, "requestHeaders", options.request_headers), else: params
+    params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
+    params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
+    # Message provenance: "user", "system", or "agent-<id>"
+    params = if options.source, do: Map.put(params, "source", options.source), else: params
+    # Opaque caller-chosen turn identifier
+    params = if options.client_turn_id, do: Map.put(params, "clientTurnId", options.client_turn_id), else: params
+
+    # Structured output: a JSON Schema replaces the legacy responseFormat value.
+    params =
+      if options.response_schema do
+        Map.put(params, "responseFormat", %{
+          "type" => "json_schema",
+          "jsonSchema" => %{"name" => "response", "strict" => true, "schema" => options.response_schema}
+        })
+      else
+        params
+      end
+
+    inject_trace_context(params, state)
+  end
+
+  # Cancels waiter timers, drops handlers, and removes this session's GitHub
+  # token provider registration.
+  defp release_resources(state) do
+    for waiter <- state.waiters do
+      if waiter.timer_ref, do: Process.cancel_timer(waiter.timer_ref)
+    end
+
+    if state.token_providers && state.github_token_registration do
+      try do
+        :ets.delete(state.token_providers, state.github_token_registration)
+      rescue
+        # The client (and its registry) may already be gone.
+        ArgumentError -> :ok
+      end
+    end
+
+    %{
+      state
+      | event_handlers: [],
+        typed_event_handlers: %{},
+        tool_handlers: %{},
+        waiters: [],
+        shell_authentication_handler: nil,
+        memory_store: nil
+    }
   end
 
   defp normalize_tool_result(%ToolResult{} = r) do

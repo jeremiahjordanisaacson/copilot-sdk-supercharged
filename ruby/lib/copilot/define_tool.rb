@@ -25,19 +25,22 @@ module Copilot
   # @param name        [String]    tool name
   # @param description [String]    human-readable description
   # @param parameters  [Hash, nil] JSON Schema for the tool parameters
+  # @param idempotent  [Boolean, nil] true when repeating a call with the same arguments
+  #   has no additional effect (sent as +idempotent+ in the tool definition)
   # @yield [args, invocation] called when the tool is invoked
   # @yieldparam args       [Hash]           parsed arguments from the LLM
   # @yieldparam invocation [ToolInvocation]  context about the invocation
   # @yieldreturn [String, Hash, ToolResult] the tool result
   # @return [Tool]
-  def self.define_tool(name:, description: nil, parameters: nil, &handler)
+  def self.define_tool(name:, description: nil, parameters: nil, idempotent: nil, &handler)
     raise ArgumentError, "Block required for tool handler" unless handler
 
     Tool.new(
       name: name,
       description: description,
       parameters: parameters,
-      handler: handler
+      handler: handler,
+      idempotent: idempotent
     )
   end
 

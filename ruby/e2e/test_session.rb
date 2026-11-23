@@ -445,9 +445,9 @@ class TestSession < E2E::TestCase
 
     session = client.create_session(
       model: "claude-sonnet-4.5",
-      mcp_servers: [
-        { name: "test-server", url: "http://localhost:9999" }
-      ]
+      mcp_servers: {
+        "test-server" => { type: "http", url: "http://localhost:9999", tools: ["*"] }
+      }
     )
     refute_nil session, "Session with MCP servers config should be created"
     refute_nil session.session_id

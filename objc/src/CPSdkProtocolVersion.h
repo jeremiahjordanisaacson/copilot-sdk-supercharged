@@ -6,8 +6,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// The protocol version this SDK expects from the Copilot CLI server.
-/// Must match the version reported by the server's ping response.
-static NSInteger const CPSdkProtocolVersion = 3;
+/// The SDK protocol version this SDK speaks; the startup check accepts exactly this version.
+/// Protocol 4 (grouped session payloads) requires Copilot CLI 1.0.113 or newer.
+static NSInteger const CPSdkProtocolVersion = 4;
 
 NS_ASSUME_NONNULL_END

@@ -7,7 +7,7 @@ A C11 SDK for interacting with the GitHub Copilot CLI server via JSON-RPC 2.0 ov
 - **C11 compiler** (GCC, Clang, or MSVC)
 - **CMake** 3.14 or later
 - **pthreads** (POSIX threads; included on Linux/macOS, via pthreads-win32 or native on Windows with MSVC)
-- **Copilot CLI** installed and on PATH (or specify `cli_path`)
+- **Copilot CLI** 1.0.113 or newer, installed and on PATH (or specify `cli_path`; `.js` entry points such as `npm-loader.js` run under `node`)
 - **GitHub authentication** (OAuth token, `gh` CLI auth, or `GITHUB_TOKEN` environment variable)
 
 ### Dependencies (automatically fetched)
@@ -65,6 +65,234 @@ int main(void)
 }
 ```
 
+## What's New in v3.0.0
+
+The SDK now speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected by `copilot_client_start()` with `COPILOT_ERROR_PROTOCOL_MISMATCH`.
+
+Existing code keeps working unchanged. You still fill the same flat `copilot_session_config_t` fields; the SDK translates them into the grouped protocol 4 `session.create` / `session.resume` payload internally (for example `streaming` is sent as `events.streaming` and `on_permission_request` as `permissions.request`). A legacy single `provider` is sent as a named provider called `default` with Copilot API models disabled, which preserves the v1 BYOK behavior.
+
+### Named BYOK providers
+
+Register provider connections and model definitions, then select a model as `<provider>/<id>`:
+
+```c
+copilot_named_provider_config_t providers[] = {
+    { .name = "gateway", .type = "openai", .base_url = "https://models.example.com/v1",
+      .api_key_command = "get-model-key" },
+};
+copilot_provider_model_config_t models[] = {
+    { .provider = "gateway", .id = "chat", .wire_model = "org/chat-large", .max_output_tokens = 8192 },
+};
+copilot_capi_config_t capi = { .enabled = false, .has_enabled = true };
+
+copilot_session_config_t config = copilot_session_config_default();
+config.model = "gateway/chat";
+config.providers = providers;
+config.providers_count = 1;
+config.models = models;
+config.models_count = 1;
+config.default_provider = "gateway";
+config.capi = &capi;
+```
+
+On resume, set `clear_default_provider = true` (with `default_provider` left NULL) to clear the default provider.
+
+### Idempotent tools and client turn IDs
+
+```c
+copilot_tool_t tools[] = {
+    { .name = "lookup_order", .description = "Looks up an order", .handler = lookup_order,
+      .idempotent = true },  /* safe to retry */
+};
+
+copilot_message_options_t msg = { .prompt = "Summarize the diff", .client_turn_id = "turn-42" };
+copilot_session_send(session, &msg, NULL);
+```
+
+### Client mode
+
+`COPILOT_CLIENT_MODE_CODING_AGENT` (the default, identical to earlier releases) or `COPILOT_CLIENT_MODE_EMPTY`. Empty mode requires `available_tools` on every create and resume, and applies minimal defaults (experimental mode, telemetry, cross-session store, memory, on-demand instructions, repository hooks, and host git operations off; in-memory OAuth and embedding storage) underneath your own values:
+
+```c
+copilot_client_options_t opts = copilot_client_options_default();
+opts.mode = COPILOT_CLIENT_MODE_EMPTY;
+copilot_client_t *client = copilot_client_create(&opts);
+
+const char *available[] = { "view", NULL };
+copilot_session_config_t config = copilot_session_config_default();
+config.available_tools = available;  /* required in empty mode */
+```
+
+### Live shell output
+
+`tool.shell_output` events carry parsed data in `event->shell_output`:
+
+```c
+static void on_shell_output(const copilot_session_event_t *event, void *user_data)
+{
+    (void)user_data;
+    const copilot_shell_output_data_t *out = event->shell_output;
+    fprintf(stderr, "[%s #%lld] %s", out->stream ? out->stream : COPILOT_SHELL_OUTPUT_STREAM_STDOUT,
+            (long long)out->sequence, out->text);
+}
+
+copilot_session_on_type(session, COPILOT_EVENT_TOOL_SHELL_OUTPUT, on_shell_output, NULL);
+```
+
+### Shell authentication
+
+Answer password and confirmation prompts from commands such as `sudo`, `ssh`, or `git`. The answer goes only to the program that asked:
+
+```c
+static copilot_error_t on_shell_auth(const copilot_shell_authentication_request_t *request,
+                                     void *user_data,
+                                     copilot_shell_authentication_response_t *out)
+{
+    (void)user_data;
+    if (strcmp(request->program, "sudo") != 0) {
+        out->action = COPILOT_SHELL_AUTH_CANCEL;
+        return COPILOT_OK;
+    }
+    out->action = COPILOT_SHELL_AUTH_ACCEPT;
+    out->value = read_secret(request->prompt);  /* heap string; the SDK wipes and frees it */
+    return COPILOT_OK;
+}
+
+config.on_shell_authentication_request = on_shell_auth;
+```
+
+### Memory store
+
+```c
+static copilot_error_t store_memory(const copilot_stored_memory_t *memory, void *user_data)
+{
+    FILE *log = (FILE *)user_data;
+    fprintf(log, "%s: %s (%s)\n", memory->subject, memory->fact, memory->citations);
+    return COPILOT_OK;
+}
+
+config.on_memory_store = store_memory;
+config.memory_store_user_data = memory_log;
+```
+
+### Network callbacks
+
+Callbacks are registered with `network.setProvider` when the client starts. The SDK never logs tokens or passwords:
+
+```c
+static char *resolve_proxy(const char *url, void *user_data)
+{
+    (void)url;
+    (void)user_data;
+    return strdup("PROXY proxy.corp.example:8080; DIRECT");  /* the SDK frees it */
+}
+
+copilot_network_options_t network = {
+    .scope = COPILOT_NETWORK_SCOPE_CONNECTION,
+    .resolve_proxy = resolve_proxy,
+};
+copilot_client_options_t opts = copilot_client_options_default();
+opts.network = &network;
+```
+
+`authenticate_negotiate` (Kerberos SPNEGO tokens) and `authenticate_basic` (proxy Basic credentials) work the same way.
+
+### Policy Helper failures and permission mode refusals
+
+```c
+if (copilot_client_create_session(client, &config, &session) != COPILOT_OK) {
+    copilot_policy_helper_failure_t failure;
+    if (copilot_client_get_last_policy_helper_failure(client, &failure)) {
+        fprintf(stderr, "Policy Helper (%s): %s\n", failure.category, failure.message);
+        copilot_policy_helper_failure_free(&failure);
+    }
+}
+
+copilot_permission_mode_result_t result;
+if (copilot_session_set_permission_mode(session, COPILOT_PERMISSION_MODE_ALLOW_ALL, &result) == COPILOT_OK &&
+    !result.success && result.reason &&
+    strcmp(result.reason, COPILOT_PERMISSION_MODE_REASON_MANAGED_POLICY) == 0) {
+    fprintf(stderr, "Managed policy keeps the permission mode at %s\n", result.mode);
+}
+copilot_permission_mode_result_free(&result);
+```
+
+`copilot_policy_helper_failure_parse()` reads the same structure from the JSON returned by `copilot_session_get_managed_settings()`. Set `config.permission_mode` to request a mode when the session is created.
+
+### Resume without side effects
+
+```c
+copilot_session_config_t resume = copilot_session_config_default();
+resume.suppress_resume_event = true;
+resume.has_suppress_resume_event = true;
+resume.allow_transcript_recovery = true;
+resume.has_allow_transcript_recovery = true;
+copilot_client_resume_session(client, session_id, &resume, &session);
+```
+
+### Also included (upstream v2.6.0 parity)
+
+```c
+/* Client identity on the connect handshake */
+copilot_client_info_t info = { .application_name = "my-editor", .application_version = "1.2.0" };
+opts.client_info = &info;
+
+/* GitHub token provider (gitHubToken.getToken); mutually exclusive with config.github_token */
+static copilot_error_t provide_github_token(const copilot_github_token_provider_args_t *args,
+                                            void *user_data, copilot_github_token_result_t *out)
+{
+    (void)user_data;
+    out->kind = COPILOT_GITHUB_TOKEN_RESULT_TOKEN;
+    out->access_token = fetch_token_for_host(args->host);  /* heap string; the SDK frees it */
+    out->expires_in = 3600;
+    return COPILOT_OK;
+}
+config.github_token_provider = provide_github_token;
+
+/* Session options */
+config.ask_user_variant = COPILOT_ASK_USER_VARIANT_ELICITATION;
+config.feature_flags_json = "{\"newPlanner\":true}";
+const char *allowed[] = { "claude-sonnet-4.5", NULL };
+config.allowed_models = allowed;
+config.auth_client_id_metadata_url = "https://example.com/oauth/client-metadata.json";
+const char *agent_dirs[] = { "./agents", NULL };
+const char *hook_dirs[] = { "./hooks", NULL };
+config.agent_directories = agent_dirs;
+config.hook_directories = hook_dirs;
+config.trust_working_directory = COPILOT_TRUST_WORKING_DIRECTORY_SESSION;  /* create only */
+config.max_output_tokens = 4096;
+config.has_max_output_tokens = true;
+copilot_sandbox_config_t sandbox = { .enabled = true, .allow_bypass = true, .has_allow_bypass = true };
+config.sandbox_config = &sandbox;
+copilot_image_generation_config_t images = { .save_to_disk = true, .has_save_to_disk = true };
+config.image_generation = &images;
+copilot_autopilot_options_t autopilot = { .continuation_enabled = true, .has_continuation_enabled = true,
+                                          .max_continues = 3, .has_max_continues = true };
+config.autopilot = &autopilot;
+copilot_provider_config_t provider = { .base_url = "https://models.example.com/v1",
+                                       .api_key_command = "get-model-key" };
+
+/* Sub-agent lifecycle hooks arrive through on_hook with COPILOT_HOOK_SUBAGENT_START / _STOP */
+
+/* Message source and structured output */
+copilot_message_options_t msg = { .prompt = "List three colors", .source = COPILOT_MESSAGE_SOURCE_SYSTEM };
+char *json = NULL;
+copilot_session_send_and_wait_structured(session, &msg,
+    "{\"type\":\"array\",\"items\":{\"type\":\"string\"}}", 60000, &json);
+
+/* Session and client RPCs */
+copilot_session_set_auto_tier(session, COPILOT_AUTO_TIER_FAST, NULL);  /* session.model.switchAutoTier */
+copilot_session_recheck_policy_helper(session, NULL);
+copilot_client_clear_managed_settings_cache(client);
+copilot_session_destroy(session);  /* session.detach: the session can be resumed later */
+```
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not implemented. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process native runtime hosting is not the default connection. The C SDK keeps spawning the CLI over stdio.
+* Server callbacks (tools, permissions, shell authentication, memory store, network) run synchronously on the SDK's reader thread. A `shellAuthentication.cancel` therefore always arrives after its request was answered, and the SDK acknowledges it without further action.
+
 ## Architecture
 
 ```
@@ -107,6 +335,9 @@ copilot_client_stop() + copilot_client_free()
 | `copilot_client_delete_session(client, id)` | Deletes a session |
 | `copilot_client_create_session(client, cfg, out)` | Creates a session |
 | `copilot_client_resume_session(client, id, cfg, out)` | Resumes a session |
+| `copilot_client_clear_managed_settings_cache(client)` | Clears the managed-settings cache |
+| `copilot_client_get_last_policy_helper_failure(client, out)` | Policy Helper failure of the last failed create/resume |
+| `copilot_policy_helper_failure_parse(json, out)` | Parses a Policy Helper failure from JSON |
 
 ### Session
 
@@ -119,9 +350,12 @@ copilot_client_stop() + copilot_client_free()
 | `copilot_session_on(session, handler, data)` | Registers event handler |
 | `copilot_session_on_type(session, type, handler, data)` | Registers typed event handler |
 | `copilot_session_off(session, handler_id)` | Unregisters event handler |
-| `copilot_session_destroy(session)` | Destroys session (server-side) |
+| `copilot_session_destroy(session)` | Releases the session server-side (`session.detach`) |
 | `copilot_session_free(session)` | Frees session memory |
 | `copilot_session_abort(session)` | Aborts current processing |
+| `copilot_session_set_auto_tier(session, tier, out)` | Switches the Auto routing tier |
+| `copilot_session_set_permission_mode(session, mode, out)` | Requests a permission mode |
+| `copilot_session_recheck_policy_helper(session, out)` | Re-runs the managed-settings Policy Helper |
 
 ### Tools
 
@@ -289,7 +523,7 @@ SDK                             CLI Server
  |<-- session.event (assistant.message)|
  |<-- session.event (session.idle)  |
  |                                   |
- |--- session.destroy -------------->|
+ |--- session.detach --------------->|
 ```
 
 ## Memory Management

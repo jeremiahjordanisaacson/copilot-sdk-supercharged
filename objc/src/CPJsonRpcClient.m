@@ -7,6 +7,14 @@
 static NSString *const kCPJsonRpcVersion = @"2.0";
 static NSString *const kCPJsonRpcErrorDomain = @"CPJsonRpcErrorDomain";
 
+NSString * const CPJsonRpcErrorDomain = @"CPJsonRpcErrorDomain";
+NSString * const CPJsonRpcErrorDataKey = @"CPJsonRpcErrorData";
+
+BOOL CPJsonRpcIsMethodNotFoundError(NSError * _Nullable error) {
+    if (![error.domain isEqualToString:CPJsonRpcErrorDomain]) return NO;
+    return error.code == -32601 || [error.localizedDescription rangeOfString:@"Unhandled method"].location != NSNotFound;
+}
+
 @interface CPJsonRpcClient ()
 
 @property (nonatomic, assign) NSInteger nextId;
@@ -230,6 +238,7 @@ static NSString *const kCPJsonRpcErrorDomain = @"CPJsonRpcErrorDomain";
 #pragma mark - Message Dispatch
 
 - (void)handleMessage:(NSDictionary *)msg {
+    if (![msg isKindOfClass:[NSDictionary class]]) return;
     NSString *msgId = msg[@"id"];
 
     // Response to our request
@@ -244,22 +253,32 @@ static NSString *const kCPJsonRpcErrorDomain = @"CPJsonRpcErrorDomain";
 
         if (handler) {
             if (msg[@"error"]) {
-                NSDictionary *rpcErr = msg[@"error"];
+                id rpcErr = msg[@"error"];
+                NSDictionary *errDict = [rpcErr isKindOfClass:[NSDictionary class]] ? rpcErr : @{};
+                id errMessage = errDict[@"message"];
+                NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+                userInfo[NSLocalizedDescriptionKey] = [errMessage isKindOfClass:[NSString class]] ? errMessage : @"Unknown error";
+                id errData = errDict[@"data"];
+                if (errData && errData != [NSNull null]) userInfo[CPJsonRpcErrorDataKey] = errData;
+                id errCode = errDict[@"code"];
                 NSError *error = [NSError errorWithDomain:kCPJsonRpcErrorDomain
-                                                     code:[rpcErr[@"code"] integerValue]
-                                                 userInfo:@{NSLocalizedDescriptionKey: rpcErr[@"message"] ?: @"Unknown error"}];
+                                                     code:[errCode isKindOfClass:[NSNumber class]] ? [errCode integerValue] : -1
+                                                 userInfo:userInfo];
                 handler(nil, error);
             } else {
-                handler(msg[@"result"], nil);
+                // `result: null` (and any non-object result) is reported as nil.
+                id result = msg[@"result"];
+                handler([result isKindOfClass:[NSDictionary class]] ? result : nil, nil);
             }
         }
         return;
     }
 
     NSString *method = msg[@"method"];
-    if (!method) return;
+    if (![method isKindOfClass:[NSString class]]) return;
 
-    NSDictionary *params = msg[@"params"] ?: @{};
+    id rawParams = msg[@"params"];
+    NSDictionary *params = [rawParams isKindOfClass:[NSDictionary class]] ? rawParams : @{};
 
     // Server request (has id and method)
     if (msgId) {

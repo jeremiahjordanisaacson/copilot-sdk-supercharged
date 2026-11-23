@@ -53,4 +53,13 @@ NSDictionary<NSString *, id> *CPDefineSimpleTool(
     CPToolHandler handler
 );
 
+/// Returns a copy of `tool` marked idempotent: repeated calls with the same arguments have
+/// no additional effect, so the runtime may safely retry it. Sent as `idempotent: true`
+/// in `tools.definitions[]`.
+///
+/// ```objc
+/// config.tools = @[CPIdempotentTool(CPDefineSimpleTool(@"get_time", @"Current time", handler))];
+/// ```
+NSDictionary<NSString *, id> *CPIdempotentTool(NSDictionary<NSString *, id> *tool);
+
 NS_ASSUME_NONNULL_END

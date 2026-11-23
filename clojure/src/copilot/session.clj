@@ -9,7 +9,8 @@
   "A CopilotSession maintains conversation state, handles events, and manages
   tool execution.  Sessions are created via `copilot.client/create-session!`
   or resumed via `copilot.client/resume-session!`."
-  (:require [copilot.json-rpc :as rpc]))
+  (:require [copilot.json-rpc :as rpc]
+            [copilot.types :as types]))
 
 ;; ============================================================================
 ;; Session construction
@@ -29,7 +30,10 @@
          :permission-handler nil      ;; (fn [request invocation])
          :user-input-handler nil      ;; (fn [request invocation])
          :hooks              nil      ;; session-hooks map
-         :session-fs-handler nil}))   ;; session filesystem provider map
+         :session-fs-handler nil      ;; session filesystem provider map
+         :shell-auth-handler nil      ;; (fn [request]) -> value string or nil
+         :memory-store       nil      ;; (fn [memory])
+         :cleanup-fns        []}))    ;; run once when the session is closed
 
 ;; ============================================================================
 ;; Event subscription
@@ -137,7 +141,8 @@
   `hooks` - map with optional keys:
     :on-pre-tool-use, :on-post-tool-use, :on-pre-mcp-tool-call,
     :on-user-prompt-submitted, :on-user-prompt-transformed,
-    :on-session-start, :on-session-end, :on-error-occurred"
+    :on-session-start, :on-session-end, :on-error-occurred,
+    :on-subagent-start, :on-subagent-stop"
   [session-atom hooks]
   (swap! session-atom assoc :hooks hooks))
 
@@ -149,6 +154,77 @@
     :mkdir, :readdir, :readdir-with-types, :rm, :rename"
   [session-atom handler]
   (swap! session-atom assoc :session-fs-handler handler))
+
+(defn register-trace-context-provider!
+  "Register a trace context provider.  `provider` is a zero-arg fn returning
+  {:traceparent s :tracestate s} (see `copilot.types/trace-context`); the
+  values are attached to every `send!`."
+  [session-atom provider]
+  (swap! session-atom assoc :trace-context-provider provider))
+
+(defn register-exit-plan-mode-handler!
+  "Register an exit plan mode handler.
+
+  `handler` - (fn [request invocation] -> {:approved bool ...})"
+  [session-atom handler]
+  (swap! session-atom assoc :exit-plan-mode-handler handler))
+
+(defn handle-exit-plan-mode!
+  "Handle an incoming exitPlanMode.request.  Internal.  Approves when no
+  handler is registered."
+  [session-atom request]
+  (if-let [handler (:exit-plan-mode-handler @session-atom)]
+    (handler request {:session-id (:session-id @session-atom)})
+    {:approved true}))
+
+(defn register-shell-authentication-handler!
+  "Register the shell authentication handler (session option
+  :on-shell-authentication-request).
+
+  `handler` - (fn [request] -> value string to accept, or nil to cancel);
+              `request` is a `copilot.types/shell-authentication-request` map."
+  [session-atom handler]
+  (swap! session-atom assoc :shell-auth-handler handler))
+
+(defn handle-shell-authentication-request!
+  "Invoke the shell authentication handler and return the reply map.
+  Internal.  Cancels when no handler is registered or the handler throws."
+  [session-atom request]
+  (if-let [handler (:shell-auth-handler @session-atom)]
+    (try
+      (types/shell-authentication-response (handler request))
+      (catch Exception _
+        {:action "cancel"}))
+    {:action "cancel"}))
+
+(defn register-memory-store!
+  "Register the memory store callback (session option :store-memory).
+
+  `store-fn` - (fn [memory]) where `memory` is a `copilot.types/stored-memory`
+               map; throw to report a failed store."
+  [session-atom store-fn]
+  (swap! session-atom assoc :memory-store store-fn))
+
+(defn handle-memory-store!
+  "Invoke the memory store callback.  Internal."
+  [session-atom memory]
+  (if-let [store-fn (:memory-store @session-atom)]
+    (do (store-fn memory) nil)
+    (throw (ex-info "Memory store owner is unavailable"
+                    {:session-id (:session-id @session-atom)}))))
+
+(defn register-cleanup!
+  "Register a zero-arg fn run once when the session is destroyed or
+  detached.  Internal."
+  [session-atom f]
+  (swap! session-atom update :cleanup-fns conj f))
+
+(defn- run-cleanup!
+  "Run and clear the registered cleanup fns (each runs at most once)."
+  [session-atom]
+  (let [[old _] (swap-vals! session-atom assoc :cleanup-fns [])]
+    (doseq [f (:cleanup-fns old)]
+      (try (f) (catch Exception _)))))
 
 (defn handle-hooks-invoke!
   "Handle an incoming hooks invoke request.  Internal."
@@ -162,7 +238,9 @@
                          "userPromptTransformed" :on-user-prompt-transformed
                          "sessionStart"          :on-session-start
                          "sessionEnd"            :on-session-end
-                         "errorOccurred"         :on-error-occurred}
+                         "errorOccurred"         :on-error-occurred
+                         "subagentStart"         :on-subagent-start
+                         "subagentStop"          :on-subagent-stop}
             hook-key    (get handler-map hook-type)
             handler     (when hook-key (get hooks hook-key))]
         (when handler
@@ -174,23 +252,37 @@
 ;; Messaging
 ;; ============================================================================
 
+(defn- response-schema-format
+  "Wrap a ResponseSchema (JSON Schema map) as the json_schema responseFormat
+  of session.send."
+  [schema]
+  {:type       "json_schema"
+   :jsonSchema {:name "response" :strict true :schema schema}})
+
 (defn send!
   "Send a message to this session.
 
   `options` - message options map with :prompt and optional :attachments, :mode,
               :response-format, :image-options, :agent-mode, :display-prompt,
-              :request-headers
+              :request-headers, :source (\"user\", \"system\", or \"agent-<id>\";
+              see `copilot.types/message-source`), :response-schema (JSON Schema
+              map for structured output; takes precedence over :response-format),
+              :client-turn-id (opaque caller-chosen turn identifier)
 
   Returns the message ID string."
   [session-atom options]
   (let [state      @session-atom
         rpc-client (:rpc-client state)
+        trace      (when-let [provider (:trace-context-provider state)]
+                     (try (provider) (catch Exception _ nil)))
         params     (cond-> {:sessionId   (:session-id state)
                             :prompt      (:prompt options)
                             :attachments (:attachments options)
                             :mode        (:mode options)}
                      (:response-format options)
                      (assoc :responseFormat (:response-format options))
+                     (:response-schema options)
+                     (assoc :responseFormat (response-schema-format (:response-schema options)))
                      (:image-options options)
                      (assoc :imageOptions (:image-options options))
                      (:agent-mode options)
@@ -198,7 +290,15 @@
                      (:display-prompt options)
                      (assoc :displayPrompt (:display-prompt options))
                      (:request-headers options)
-                     (assoc :requestHeaders (:request-headers options)))
+                     (assoc :requestHeaders (:request-headers options))
+                     (:source options)
+                     (assoc :source (:source options))
+                     (:client-turn-id options)
+                     (assoc :clientTurnId (:client-turn-id options))
+                     (:traceparent trace)
+                     (assoc :traceparent (:traceparent trace))
+                     (:tracestate trace)
+                     (assoc :tracestate (:tracestate trace)))
         response   (rpc/request! rpc-client "session.send" params)]
     (:messageId response)))
 
@@ -287,8 +387,32 @@
   [session-atom]
   (let [state @session-atom
         rpc-client (:rpc-client state)]
-    (rpc/request! rpc-client "session.destroy"
+    (try
+      (rpc/request! rpc-client "session.destroy"
+                    {:sessionId (:session-id state)})
+      (finally
+        (run-cleanup! session-atom)
+        (swap! session-atom assoc
+               :event-handlers #{}
+               :typed-handlers {}
+               :tool-handlers {}
+               :permission-handler nil
+               :user-input-handler nil
+               :hooks nil
+               :session-fs-handler nil
+               :shell-auth-handler nil
+               :memory-store nil)))
+    nil))
+
+(defn detach!
+  "Detach from this session (`session.detach`) without deleting it.  The
+  server keeps the session state, so it can be resumed later; this client
+  stops receiving its events and releases local resources."
+  [session-atom]
+  (let [state @session-atom]
+    (rpc/request! (:rpc-client state) "session.detach"
                   {:sessionId (:session-id state)})
+    (run-cleanup! session-atom)
     (swap! session-atom assoc
            :event-handlers #{}
            :typed-handlers {}
@@ -296,8 +420,51 @@
            :permission-handler nil
            :user-input-handler nil
            :hooks nil
-           :session-fs-handler nil)
+           :session-fs-handler nil
+           :shell-auth-handler nil
+           :memory-store nil)
     nil))
+
+(defn switch-auto-tier!
+  "Change the Auto routing preference without changing the selected model
+  (`session.model.switchAutoTier`).  `tier` is \"fast\", \"efficiency\",
+  \"balance\", or \"intelligence\" (see `copilot.types/auto-tiers`); nil
+  returns to the provider's default Auto routing.  Returns the raw result."
+  [session-atom tier]
+  (let [state @session-atom]
+    (rpc/request! (:rpc-client state) "session.model.switchAutoTier"
+                  {:sessionId (:session-id state)
+                   :autoTier  (some-> tier name)})))
+
+(defn get-managed-settings!
+  "Get the managed (enterprise) settings snapshot in effect
+  (`session.managedSettings.get`).  Use `copilot.types/policy-helper-failure`
+  on the result to read a reported policy helper failure."
+  [session-atom]
+  (let [state @session-atom]
+    (rpc/request! (:rpc-client state) "session.managedSettings.get"
+                  {:sessionId (:session-id state)})))
+
+(defn recheck-policy-helper!
+  "Re-run the managed-settings policy helper
+  (`session.managedSettings.recheckPolicyHelper`).  Returns the raw result."
+  [session-atom]
+  (let [state @session-atom]
+    (rpc/request! (:rpc-client state) "session.managedSettings.recheckPolicyHelper"
+                  {:sessionId (:session-id state)})))
+
+(defn set-permission-mode!
+  "Change the permission mode (`session.permissions.setMode`), for example
+  \"manual\", \"assisted\", or \"allow-all\".  Returns
+  {:success bool :mode str :reason str}; a refused change has :success false
+  and, when known, :reason \"managed_policy\"
+  (`copilot.types/permission-mode-refusals`)."
+  [session-atom mode]
+  (let [state @session-atom]
+    (types/permissions-set-mode-result
+     (rpc/request! (:rpc-client state) "session.permissions.setMode"
+                   {:sessionId (:session-id state)
+                    :mode      (name mode)}))))
 
 (defn abort!
   "Abort the currently processing message in this session."

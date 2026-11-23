@@ -39,6 +39,13 @@ classdef CapiProxy < handle
 
             obj.ProxyUrl = tokens{1}{1};
             setenv('COPILOT_API_URL', obj.ProxyUrl);
+
+            % Point the SDK at the CLI found by findCliPath (the client reads
+            % COPILOT_CLI_PATH and runs ".js" entry points through node).
+            cliPath = CapiProxy.findCliPath();
+            if ~isempty(cliPath)
+                setenv('COPILOT_CLI_PATH', cliPath);
+            end
             url = obj.ProxyUrl;
         end
 
@@ -64,6 +71,42 @@ classdef CapiProxy < handle
 
         function url = getUrl(obj)
             url = obj.ProxyUrl;
+        end
+    end
+
+    methods (Static)
+        function cliPath = findCliPath()
+            % findCliPath  Copilot CLI entry point for the E2E tests.
+            %
+            %   Lookup order:
+            %     1. COPILOT_CLI_PATH when set and the file exists (CI points
+            %        it at nodejs/node_modules/.bin/copilot, run directly);
+            %     2. nodejs/node_modules/@github/copilot/npm-loader.js
+            %        (CLI 1.0.113+, run with node);
+            %     3. legacy nodejs/node_modules/@github/copilot-*/index.js and
+            %        nodejs/node_modules/@github/copilot/index.js.
+            %   Returns '' when nothing is found.
+            cliPath = getenv('COPILOT_CLI_PATH');
+            if ~isempty(cliPath) && isfile(cliPath)
+                return;
+            end
+            repoRoot = fullfile(fileparts(mfilename('fullpath')), '..', '..');
+            modules = fullfile(repoRoot, 'nodejs', 'node_modules', '@github');
+            cliPath = fullfile(modules, 'copilot', 'npm-loader.js');
+            if isfile(cliPath)
+                return;
+            end
+            platforms = dir(fullfile(modules, 'copilot-*'));
+            for i = 1:numel(platforms)
+                cliPath = fullfile(modules, platforms(i).name, 'index.js');
+                if platforms(i).isdir && isfile(cliPath)
+                    return;
+                end
+            end
+            cliPath = fullfile(modules, 'copilot', 'index.js');
+            if ~isfile(cliPath)
+                cliPath = '';
+            end
         end
     end
 end

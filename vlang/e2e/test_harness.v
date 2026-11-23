@@ -8,7 +8,6 @@ module e2e
 
 import os
 import net.http
-import json
 import time
 
 pub struct ProxyHandle {
@@ -16,6 +15,39 @@ pub:
 	url string
 pub mut:
 	process os.Process
+}
+
+// find_copilot_cli locates the Copilot CLI for E2E runs, in order:
+// 1. COPILOT_CLI_PATH when it points to an existing file
+// 2. nodejs/node_modules/@github/copilot/npm-loader.js (run with node)
+// 3. legacy nodejs/node_modules/@github/copilot-*/index.js, then
+//    nodejs/node_modules/@github/copilot/index.js
+// Returns '' when nothing is found. The SDK runs `.js` paths with node and
+// executes any other path (for example the `.bin/copilot` shim) directly.
+pub fn find_copilot_cli() string {
+	env_path := os.getenv('COPILOT_CLI_PATH')
+	if env_path.len > 0 && os.is_file(env_path) {
+		return env_path
+	}
+	github_dir := os.join_path(os.dir(@FILE), '..', '..', 'nodejs', 'node_modules', '@github')
+	loader := os.join_path(github_dir, 'copilot', 'npm-loader.js')
+	if os.is_file(loader) {
+		return loader
+	}
+	entries := os.ls(github_dir) or { []string{} }
+	for entry in entries {
+		if entry.starts_with('copilot-') {
+			candidate := os.join_path(github_dir, entry, 'index.js')
+			if os.is_file(candidate) {
+				return candidate
+			}
+		}
+	}
+	legacy := os.join_path(github_dir, 'copilot', 'index.js')
+	if os.is_file(legacy) {
+		return legacy
+	}
+	return ''
 }
 
 // start_proxy starts the replay proxy and returns a handle with the URL.
@@ -54,6 +86,10 @@ pub fn start_proxy() !ProxyHandle {
 	}
 
 	os.setenv('COPILOT_API_URL', url, true)
+	cli_path := find_copilot_cli()
+	if cli_path.len > 0 {
+		os.setenv('COPILOT_CLI_PATH', cli_path, true)
+	}
 	println('[vlang-e2e] Proxy listening at ${url}')
 
 	return ProxyHandle{
@@ -86,8 +122,8 @@ pub fn http_post(handle ProxyHandle, path string, body string) !string {
 		url: '${handle.url}${path}'
 		method: .post
 		header: http.new_header_from_map({
-			'Content-Type':  'application/json'
-			'Authorization': 'Bearer fake-token-for-e2e-tests'
+			.content_type:  'application/json'
+			.authorization: 'Bearer fake-token-for-e2e-tests'
 		})
 		data: body
 	}

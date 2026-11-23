@@ -106,8 +106,8 @@ proc getError*(msg: JsonNode): Option[JsonRpcError] =
   if msg.hasKey("error") and msg["error"].kind != JNull:
     let errNode = msg["error"]
     some(JsonRpcError(
-      code: errNode["code"].getInt(),
-      message: errNode["message"].getStr(),
+      code: errNode{"code"}.getInt(),
+      message: errNode{"message"}.getStr(),
       data: if errNode.hasKey("data"): errNode["data"] else: newJNull(),
     ))
   else:
@@ -181,6 +181,36 @@ proc reject*(pr: PendingRequests; id: int; msg: string) =
       pr.table.del(id)
   if not fut.isNil:
     fut.fail(newException(IOError, msg))
+
+type
+  CopilotRpcError* = object of IOError
+    ## A JSON-RPC error response from the Copilot CLI. `code` and `data` carry
+    ## the server's error code and structured error data.
+    code*: int
+    data*: JsonNode
+
+proc newCopilotRpcError*(err: JsonRpcError): ref CopilotRpcError =
+  result = newException(CopilotRpcError, err.message)
+  result.code = err.code
+  result.data = err.data
+
+proc policyHelperFailure*(err: ref CopilotRpcError): Option[PolicyHelperFailure] =
+  ## The structured Policy Helper failure carried in the error data
+  ## (`error.data.policyHelperFailure`), for example when `session.create`
+  ## or `session.resume` is refused by managed policy.
+  if err.isNil or err.data.isNil or err.data.kind != JObject:
+    return none(PolicyHelperFailure)
+  parsePolicyHelperFailure(err.data{"policyHelperFailure"})
+
+proc rejectWithError*(pr: PendingRequests; id: int; err: JsonRpcError) =
+  ## Fail a pending request with a `CopilotRpcError` built from the server error.
+  var fut: Future[JsonNode]
+  withLock pr.lock:
+    if pr.table.hasKey(id):
+      fut = pr.table[id]
+      pr.table.del(id)
+  if not fut.isNil:
+    fut.fail(newCopilotRpcError(err))
 
 proc rejectAll*(pr: PendingRequests; msg: string) =
   withLock pr.lock:

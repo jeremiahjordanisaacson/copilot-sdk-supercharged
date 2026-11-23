@@ -20,6 +20,8 @@ import core.sync.mutex : Mutex;
 import copilot.types;
 import copilot.jsonrpc;
 import copilot.session;
+import copilot.session_params : groupSessionParams, applyEmptyModeDefaults;
+import copilot.sdk_protocol_version : SdkProtocolVersion;
 import copilot.tools : ToolBinding;
 
 /// A session's GitHub token provider in the client-level registry.
@@ -35,6 +37,62 @@ private string jsonString(JSONValue obj, string key) @safe
     if (obj.type != JSONType.object) return null;
     auto p = key in obj;
     return (p !is null && (*p).type == JSONType.string) ? (*p).str : null;
+}
+
+/// Throw unless a `connect` / `ping` result reports exactly `SdkProtocolVersion`.
+void verifyProtocolVersion(JSONValue handshake) @safe
+{
+    auto p = handshake.type == JSONType.object ? "protocolVersion" in handshake : null;
+    if (p is null || (*p).type == JSONType.null_)
+        throw new Exception(format!("SDK protocol version mismatch: SDK supports version %d, "
+            ~ "but server does not report a protocol version. "
+            ~ "Please update your SDK or server to ensure compatibility.")(SdkProtocolVersion));
+
+    long reported = -1;
+    string shown;
+    if ((*p).type == JSONType.integer)
+    {
+        reported = (*p).integer;
+        shown = to!string(reported);
+    }
+    else if ((*p).type == JSONType.uinteger)
+    {
+        reported = cast(long) (*p).uinteger;
+        shown = to!string(reported);
+    }
+    else if ((*p).type == JSONType.float_)
+    {
+        reported = cast(long) (*p).floating;
+        shown = to!string((*p).floating);
+    }
+    else
+    {
+        shown = (*p).toString();
+    }
+    if (reported != SdkProtocolVersion)
+        throw new Exception(format!("SDK protocol version mismatch: SDK supports version %d, "
+            ~ "but server reports version %s. "
+            ~ "Please update your SDK or server to ensure compatibility.")(SdkProtocolVersion, shown));
+}
+
+/// Resolve the CLI command line: an explicit `cliPath`, else `COPILOT_CLI_PATH`,
+/// else the default binary name. A `.js` entry point (for example
+/// `npm-loader.js`) runs under node; any other path runs directly.
+string[] resolveCliCommand(string cliPath) @safe
+{
+    import std.process : environment;
+    import std.algorithm.searching : endsWith;
+    import std.uni : toLower;
+
+    string path = cliPath;
+    if (path.length == 0 || path == CopilotClientOptions.init.cliPath)
+    {
+        auto fromEnv = environment.get("COPILOT_CLI_PATH", "");
+        path = fromEnv.length > 0 ? fromEnv : CopilotClientOptions.init.cliPath;
+    }
+    if (path.toLower.endsWith(".js"))
+        return ["node", path];
+    return [path];
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +160,17 @@ final class CopilotClient
         }
         _started = true;
 
-        // Declare the embedding application's identity before other requests.
-        _sendClientInfo();
+        // Handshake (connect with clientInfo, else ping) and protocol check.
+        try
+        {
+            _handshake();
+            _registerNetworkProvider();
+        }
+        catch (Exception e)
+        {
+            forceStop();
+            throw e;
+        }
 
         // Set up session filesystem if configured.
         if (!_opts.sessionFs.isNull)
@@ -183,18 +250,25 @@ final class CopilotClient
         enforce(_started, "client not started");
         enforce(config.gitHubToken.isNull || config.gitHubTokenProvider is null,
             "gitHubToken and gitHubTokenProvider are mutually exclusive");
+        enforce(_opts.mode != ClientMode.empty || !config.availableTools.isNull,
+            `client mode "empty" requires availableTools on every session`);
 
         auto params = config.toJson();
         auto registrationId = _registerGitHubTokenProvider(config.gitHubTokenProvider, params);
         scope (failure) _unregisterGitHubTokenProvider(registrationId);
 
-        auto result = _rpc.request("session.create", params);
+        auto payload = groupSessionParams(params, false);
+        if (_opts.mode == ClientMode.empty)
+            applyEmptyModeDefaults(payload);
+
+        auto result = _rpc.request("session.create", payload);
         auto info = SessionInfo.fromJson(result);
         enforce(info.sessionId.length > 0, "server returned empty sessionId");
         _assignGitHubTokenProvider(registrationId, info.sessionId);
 
         auto session = new CopilotSession(info.sessionId, _rpc);
         session.configureHooks(config.onSubagentStart, config.onSubagentStop);
+        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory);
         session.setReleaseHandler(&_releaseSession);
 
         // Register tool handlers if tools were provided.
@@ -224,18 +298,25 @@ final class CopilotClient
     CopilotSession resumeSession(ResumeSessionConfig config) @trusted
     {
         enforce(_started, "client not started");
+        enforce(_opts.mode != ClientMode.empty || !config.availableTools.isNull,
+            `client mode "empty" requires availableTools on every session`);
 
         auto params = config.toJson();
         auto registrationId = _registerGitHubTokenProvider(config.gitHubTokenProvider, params);
         scope (failure) _unregisterGitHubTokenProvider(registrationId);
 
-        auto result = _rpc.request("session.resume", params);
+        auto payload = groupSessionParams(params, true);
+        if (_opts.mode == ClientMode.empty)
+            applyEmptyModeDefaults(payload);
+
+        auto result = _rpc.request("session.resume", payload);
         auto info = SessionInfo.fromJson(result);
         string sid = info.sessionId.length > 0 ? info.sessionId : config.sessionId;
         _assignGitHubTokenProvider(registrationId, sid);
 
         auto session = new CopilotSession(sid, _rpc);
         session.configureHooks(config.onSubagentStart, config.onSubagentStop);
+        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory);
         session.setReleaseHandler(&_releaseSession);
 
         _sessionsMutex.lock();
@@ -373,7 +454,8 @@ final class CopilotClient
     /// Spawn the CLI as a child process using stdio transport.
     private void _startSubprocess() @trusted
     {
-        string[] args = [_opts.cliPath, "--headless", "--no-auto-update"];
+        string[] args = resolveCliCommand(_opts.cliPath);
+        args ~= ["--headless", "--no-auto-update"];
         args ~= "--log-level";
         args ~= _opts.logLevel;
         args ~= "--stdio";
@@ -421,18 +503,42 @@ final class CopilotClient
     /// Route incoming notifications to the appropriate session.
     private void _onNotification(string method, JSONValue params) @safe
     {
-        // Session events arrive as "session/event".
-        if (method != "session/event") return;
+        // Session events arrive as "session.event" with the event nested
+        // under `event` (legacy servers sent "session/event" with the event
+        // fields at the top level). Unknown event types pass through.
+        if (method != "session.event" && method != "session/event") return;
+        if (params.type != JSONType.object) return;
 
         auto pSid = "sessionId" in params;
         if (pSid is null || (*pSid).type != JSONType.string) return;
         string sid = (*pSid).str;
 
-        auto pType = "type" in params;
+        JSONValue eventJson = params;
+        auto pEvent = "event" in params;
+        if (method == "session.event" && pEvent !is null && (*pEvent).type == JSONType.object)
+            eventJson = *pEvent;
+
+        auto pType = "type" in eventJson;
         string evType = (pType !is null && (*pType).type == JSONType.string)
             ? (*pType).str : "";
 
-        auto event = SessionEvent(parseEventType(evType), params);
+        auto event = SessionEvent(parseEventType(evType), eventJson);
+        auto pId = "id" in eventJson;
+        if (pId !is null && (*pId).type == JSONType.string)
+            event.id = (*pId).str;
+        auto pTimestamp = "timestamp" in eventJson;
+        if (pTimestamp !is null && (*pTimestamp).type == JSONType.string)
+            event.timestamp = (*pTimestamp).str;
+        auto pParent = "parentId" in eventJson;
+        if (pParent !is null && (*pParent).type == JSONType.string)
+            event.parentId = (*pParent).str;
+        auto pAgent = "agentId" in eventJson;
+        if (pAgent !is null && (*pAgent).type == JSONType.string)
+            event.agentId = (*pAgent).str;
+        auto pEphemeral = "ephemeral" in eventJson;
+        if (pEphemeral !is null && ((*pEphemeral).type == JSONType.true_
+            || (*pEphemeral).type == JSONType.false_))
+            event.ephemeral = (*pEphemeral).type == JSONType.true_;
 
         CopilotSession session;
         () @trusted {
@@ -447,28 +553,53 @@ final class CopilotClient
     }
 
     // ------------------------------------------------------------------
-    // v2.6.0: client info, GitHub token providers, hooks
+    // Handshake, network callbacks, GitHub token providers, hooks
     // ------------------------------------------------------------------
 
-    /// Declare the embedding application's identity via `connect`. Older
-    /// runtimes without `connect` are tolerated.
-    private void _sendClientInfo() @trusted
+    /// Handshake with the runtime and verify SDK protocol 4. `connect` is
+    /// only sent to declare `clientInfo`; runtimes without `connect` fall back
+    /// to `ping`, which is also used when no client info is configured.
+    private void _handshake() @trusted
     {
+        JSONValue handshake;
+        bool connected = false;
         auto info = _opts.clientInfo.toWire();
-        if (info.type != JSONType.object) return;
+        if (info.type == JSONType.object)
+        {
+            auto params = JSONValue(string[string].init);
+            params["clientInfo"] = info;
+            try
+            {
+                handshake = _rpc.request("connect", params);
+                connected = true;
+            }
+            catch (JsonRpcError e)
+            {
+                import std.algorithm.searching : canFind;
+                if (e.code != methodNotFoundCode && !e.msg.canFind("Unhandled method connect"))
+                    throw e;
+            }
+        }
+        if (!connected)
+            handshake = _rpc.request("ping", JSONValue(string[string].init));
+        verifyProtocolVersion(handshake);
+    }
 
+    /// Register the configured network callbacks (`network.setProvider`).
+    /// An empty object marks each registered callback.
+    private void _registerNetworkProvider() @trusted
+    {
+        if (!_opts.network.hasCallbacks()) return;
         auto params = JSONValue(string[string].init);
-        params["clientInfo"] = info;
-        try
-        {
-            _rpc.request("connect", params);
-        }
-        catch (JsonRpcError e)
-        {
-            import std.algorithm.searching : canFind;
-            if (e.code != methodNotFoundCode && !e.msg.canFind("Unhandled method connect"))
-                throw e;
-        }
+        if (!_opts.network.scope_.isNull)
+            params["scope"] = _opts.network.scope_.get;
+        if (_opts.network.resolveProxy !is null)
+            params["resolveProxy"] = JSONValue(string[string].init);
+        if (_opts.network.authenticateNegotiate !is null)
+            params["authenticateNegotiate"] = JSONValue(string[string].init);
+        if (_opts.network.authenticateBasic !is null)
+            params["authenticateBasic"] = JSONValue(string[string].init);
+        _rpc.request("network.setProvider", params);
     }
 
     /// Register handlers for server-to-client requests.
@@ -476,6 +607,94 @@ final class CopilotClient
     {
         _rpc.onRequest("gitHubToken.getToken", &_onGitHubTokenRequest);
         _rpc.onRequest("hooks.invoke", &_onHooksInvoke);
+        _rpc.onRequest("shellAuthentication.request", &_onShellAuthenticationRequest);
+        _rpc.onRequest("shellAuthentication.cancel", &_onShellAuthenticationCancel);
+        _rpc.onRequest("memoryStore.store", &_onMemoryStore);
+        if (_opts.network.resolveProxy !is null)
+            _rpc.onRequest("network.resolveProxy", &_onResolveProxy);
+        if (_opts.network.authenticateNegotiate !is null)
+            _rpc.onRequest("network.authenticateNegotiate", &_onAuthenticateNegotiate);
+        if (_opts.network.authenticateBasic !is null)
+            _rpc.onRequest("network.authenticateBasic", &_onAuthenticateBasic);
+    }
+
+    /// Find a tracked session by ID (null when unknown).
+    private CopilotSession _findSession(string sid) @trusted
+    {
+        _sessionsMutex.lock();
+        scope(exit) _sessionsMutex.unlock();
+        auto ps = sid in _sessions;
+        return ps !is null ? *ps : null;
+    }
+
+    /// Answer `shellAuthentication.request` through the session's handler.
+    private JSONValue _onShellAuthenticationRequest(JSONValue params) @trusted
+    {
+        auto session = _findSession(jsonString(params, "sessionId"));
+        if (session is null)
+            return ShellAuthenticationResponse.cancel().toJson();
+        return session.handleShellAuthentication(params);
+    }
+
+    /// Acknowledge `shellAuthentication.cancel`. Requests are answered
+    /// synchronously on the reader thread, so the request was already answered.
+    private JSONValue _onShellAuthenticationCancel(JSONValue params) @trusted
+    {
+        return JSONValue(string[string].init);
+    }
+
+    /// Deliver `memoryStore.store` to the session's memory-store callback.
+    private JSONValue _onMemoryStore(JSONValue params) @trusted
+    {
+        auto session = _findSession(jsonString(params, "sessionId"));
+        enforce(session !is null, "Memory store owner is unavailable");
+        session.handleMemoryStore(params);
+        return JSONValue(null);
+    }
+
+    /// Answer `network.resolveProxy`.
+    private JSONValue _onResolveProxy(JSONValue params) @trusted
+    {
+        auto reply = JSONValue(string[string].init);
+        auto proxy = _opts.network.resolveProxy(jsonString(params, "url"));
+        if (!proxy.isNull && proxy.get.length > 0)
+            reply["proxy"] = proxy.get;
+        return reply;
+    }
+
+    /// Answer `network.authenticateNegotiate`. Tokens are never logged.
+    private JSONValue _onAuthenticateNegotiate(JSONValue params) @trusted
+    {
+        auto reply = JSONValue(string[string].init);
+        auto token = _opts.network.authenticateNegotiate(jsonString(params, "spn"));
+        if (!token.isNull && token.get.length > 0)
+            reply["token"] = token.get;
+        return reply;
+    }
+
+    /// Answer `network.authenticateBasic`. Credentials are never logged.
+    private JSONValue _onAuthenticateBasic(JSONValue params) @trusted
+    {
+        NetworkBasicAuthRequest request;
+        request.proxy = jsonString(params, "proxy");
+        auto realm = jsonString(params, "realm");
+        if (realm !is null)
+            request.realm = realm;
+        if (params.type == JSONType.object)
+        {
+            auto pRejected = "previousRejected" in params;
+            request.previousRejected = pRejected !is null && (*pRejected).type == JSONType.true_;
+        }
+        auto reply = JSONValue(string[string].init);
+        auto credentials = _opts.network.authenticateBasic(request);
+        if (!credentials.isNull)
+        {
+            if (credentials.get.username.length > 0)
+                reply["username"] = credentials.get.username;
+            if (credentials.get.password.length > 0)
+                reply["password"] = credentials.get.password;
+        }
+        return reply;
     }
 
     /// Store a session's GitHub token provider and add its registration ID

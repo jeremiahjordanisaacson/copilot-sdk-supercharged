@@ -64,7 +64,17 @@ class CopilotSession(
   @volatile private var userInputHandler: Option[UserInputHandler] = None
   @volatile private var hooks: Option[SessionHooks] = None
   @volatile private var exitPlanModeHandler: Option[ExitPlanModeHandler] = None
+  @volatile private var shellAuthenticationHandler: Option[ShellAuthenticationHandler] = None
+  @volatile private var memoryStoreHandler: Option[MemoryStoreHandler] = None
   @volatile private var onDestroyed: Option[() => Unit] = None
+
+  /** In-flight shell authentication answers keyed by request ID, completed early by `shellAuthentication.cancel`. */
+  private val pendingShellAuthentications = new ConcurrentHashMap[String, Promise[Json]]()
+  private val shellAuthInputKinds = Set("secret", "text", "confirm")
+  private def shellAuthenticationCancel: Json = Json.obj("action" -> "cancel".asJson)
+
+  /** In-flight external tool calls keyed by request ID; `external_tool.completed` completes the token so no answer is sent. */
+  private val pendingExternalTools = new ConcurrentHashMap[String, Promise[Unit]]()
 
   // -------------------------------------------------------------------------
   // Sending Messages
@@ -231,7 +241,13 @@ class CopilotSession(
     connection.sendRequest("session.detach", params).recoverWith {
       case ex: JsonRpcException if isMethodNotFound(ex, "session.detach") =>
         connection.sendRequest("session.destroy", params)
-    }.map { _ =>
+    }.map { result =>
+      if result.hcursor.get[Boolean]("success").toOption.contains(false) then
+        val error = result.hcursor.get[String]("error").getOrElse("Unknown error")
+        throw new RuntimeException(s"Failed to disconnect session $sessionId: $error")
+      cancelPendingShellAuthentications()
+      pendingExternalTools.forEach((_, token) => { token.trySuccess(()); () })
+      pendingExternalTools.clear()
       eventHandlers.clear()
       typedEventHandlers.clear()
       toolHandlers.clear()
@@ -239,6 +255,8 @@ class CopilotSession(
       userInputHandler = None
       hooks = None
       exitPlanModeHandler = None
+      shellAuthenticationHandler = None
+      memoryStoreHandler = None
       val callback = onDestroyed
       onDestroyed = None
       callback.foreach(f => f())
@@ -274,6 +292,25 @@ class CopilotSession(
   def recheckPolicyHelper(): Future[Json] =
     connection.sendRequest("session.managedSettings.recheckPolicyHelper", Json.obj("sessionId" -> sessionId.asJson))
 
+  /**
+   * Changes the session's permission mode. A refused change reports `success == false` with the
+   * authoritative mode and, when known, a `reason` such as [[PermissionModeRefusalReason.ManagedPolicy]].
+   *
+   * @param mode The permission mode (see [[PermissionMode]])
+   */
+  def setPermissionMode(mode: String): Future[PermissionModeResult] =
+    connection.sendRequest("session.permissions.setMode", Json.obj(
+      "sessionId" -> sessionId.asJson,
+      "mode" -> mode.asJson
+    )).map { result =>
+      val c = result.hcursor
+      PermissionModeResult(
+        success = c.get[Boolean]("success").getOrElse(false),
+        mode = c.get[String]("mode").toOption,
+        reason = c.get[String]("reason").toOption
+      )
+    }
+
   // -------------------------------------------------------------------------
   // Tool Registration (internal)
   // -------------------------------------------------------------------------
@@ -307,12 +344,83 @@ class CopilotSession(
   private[copilot] def registerOnDestroyed(callback: () => Unit): Unit =
     onDestroyed = Some(callback)
 
+  /** Registers a shell authentication handler. */
+  private[copilot] def registerShellAuthenticationHandler(handler: ShellAuthenticationHandler): Unit =
+    shellAuthenticationHandler = Some(handler)
+
+  /** Registers the memory store callback. */
+  private[copilot] def registerMemoryStore(handler: MemoryStoreHandler): Unit =
+    memoryStoreHandler = Some(handler)
+
+  /**
+   * Answers a `shellAuthentication.request`. A `shellAuthentication.cancel` completes the answer
+   * with `cancel` without waiting for the handler; invalid requests, missing handlers, and failures
+   * also answer `cancel`. Never logs the answer.
+   */
+  private[copilot] def handleShellAuthenticationRequest(params: Json): Future[Json] =
+    val c = params.hcursor
+    val prepared = for
+      handler   <- shellAuthenticationHandler
+      requestId <- c.get[String]("requestId").toOption
+      program   <- c.get[String]("program").toOption
+      prompt    <- c.get[String]("prompt").toOption
+      inputKind <- c.get[String]("inputKind").toOption
+      if shellAuthInputKinds.contains(inputKind)
+    yield (handler, ShellAuthenticationRequest(
+      requestId = requestId,
+      program = program,
+      prompt = prompt,
+      inputKind = inputKind,
+      command = c.get[String]("command").getOrElse(""),
+      cwd = c.get[String]("cwd").getOrElse("")
+    ))
+    prepared match
+      case None => Future.successful(shellAuthenticationCancel)
+      case Some((handler, request)) =>
+        val answer = Promise[Json]()
+        if pendingShellAuthentications.putIfAbsent(request.requestId, answer) != null then
+          Future.successful(shellAuthenticationCancel)
+        else
+          val handled = Future.delegate(handler(request, sessionId)).map {
+            case ShellAuthenticationResult.Accept(value) =>
+              Json.obj("action" -> "accept".asJson, "value" -> value.asJson)
+            case _ => shellAuthenticationCancel
+          }.recover { case _ => shellAuthenticationCancel } // the error could contain the answer
+          answer.completeWith(handled)
+          answer.future.andThen { case _ => pendingShellAuthentications.remove(request.requestId, answer) }
+
+  /** Cancels a pending shell authentication prompt (`shellAuthentication.cancel`). */
+  private[copilot] def cancelShellAuthentication(requestId: String): Unit =
+    val pending = pendingShellAuthentications.remove(requestId)
+    if pending != null then pending.trySuccess(shellAuthenticationCancel)
+
+  private def cancelPendingShellAuthentications(): Unit =
+    pendingShellAuthentications.keySet().asScala.toList.foreach(cancelShellAuthentication)
+
+  /** Invokes the memory store callback for a `memoryStore.store` request; answers with a JSON null. */
+  private[copilot] def handleMemoryStore(params: Json): Future[Json] =
+    memoryStoreHandler match
+      case None => Future.failed(new IllegalStateException("No memory store is registered"))
+      case Some(handler) =>
+        val c = params.hcursor
+        val memory = StoredMemory(
+          sessionId = c.get[String]("sessionId").getOrElse(sessionId),
+          subject = c.get[String]("subject").getOrElse(""),
+          fact = c.get[String]("fact").getOrElse(""),
+          citations = c.get[String]("citations").getOrElse(""),
+          reason = c.get[String]("reason").getOrElse("")
+        )
+        Future.delegate(handler(memory)).map(_ => Json.Null).recoverWith { case _ =>
+          Future.failed(new RuntimeException("Memory store callback failed"))
+        }
+
   // -------------------------------------------------------------------------
   // Event Dispatch (internal)
   // -------------------------------------------------------------------------
 
   /** Dispatches an event to all registered handlers. Called by CopilotClient. */
   private[copilot] def dispatchEvent(event: SessionEvent): Unit =
+    handleBroadcastEvent(event)
     // Typed handlers
     val typedSet = typedEventHandlers.get(event.`type`)
     if typedSet != null then
@@ -323,6 +431,75 @@ class CopilotSession(
     eventHandlers.forEach { handler =>
       Try(handler(event)).failed.foreach(_ => ()) // ignore handler errors
     }
+
+  /**
+   * Services the protocol 4 broadcast requests: `external_tool.requested` runs the registered tool
+   * handler and answers via `session.tools.handlePendingToolCall` (`external_tool.completed`
+   * cancels the answer), and `permission.requested` runs the permission handler and answers via
+   * `session.permissions.handlePendingPermissionRequest`.
+   */
+  private def handleBroadcastEvent(event: SessionEvent): Unit =
+    val c = event.data.hcursor
+    event.`type` match
+      case "external_tool.requested" =>
+        for
+          requestId <- c.get[String]("requestId").toOption
+          toolName <- c.get[String]("toolName").toOption
+          if !c.get[Boolean]("hasHandler").toOption.contains(false)
+          handler <- Option(toolHandlers.get(toolName))
+        do
+          val token = Promise[Unit]()
+          if pendingExternalTools.putIfAbsent(requestId, token) == null then
+            val toolCallId = c.get[String]("toolCallId").getOrElse("")
+            val arguments = c.get[Json]("arguments").getOrElse(Json.obj())
+            runExternalTool(requestId, toolCallId, toolName, arguments, handler, token)
+      case "external_tool.completed" =>
+        c.get[String]("requestId").toOption.foreach { requestId =>
+          Option(pendingExternalTools.remove(requestId)).foreach(_.trySuccess(()))
+        }
+      case "permission.requested" =>
+        for
+          requestId <- c.get[String]("requestId").toOption
+          if !c.get[Boolean]("resolvedByHook").toOption.contains(true)
+          if permissionHandler.isDefined
+        do respondToPermissionRequest(requestId, c.get[Json]("permissionRequest").getOrElse(Json.obj()))
+      case _ => ()
+
+  private def runExternalTool(
+    requestId: String,
+    toolCallId: String,
+    toolName: String,
+    arguments: Json,
+    handler: ToolHandler,
+    token: Promise[Unit]
+  ): Unit =
+    val invocation = ToolInvocation(sessionId, toolCallId, toolName, arguments)
+    Future.delegate(handler(arguments, invocation)).transformWith { outcome =>
+      // Claim the request; it fails once the call was cancelled or completed elsewhere.
+      if token.isCompleted || !pendingExternalTools.remove(requestId, token) then Future.unit
+      else
+        val answer = outcome match
+          case Success(result) => Json.obj("result" -> result.asJson.dropNullValues)
+          case Failure(ex)     => Json.obj("error" -> Option(ex.getMessage).getOrElse(ex.toString).asJson)
+        val body = Json.obj("sessionId" -> sessionId.asJson, "requestId" -> requestId.asJson).deepMerge(answer)
+        connection.sendRequest("session.tools.handlePendingToolCall", body).map(_ => ())
+    }.recover { case _ => () } // Connection lost or RPC error: nothing more to report.
+    ()
+
+  private def respondToPermissionRequest(requestId: String, permissionRequest: Json): Unit =
+    handlePermissionRequest(permissionRequest)
+      .recover { case _ => PermissionRequestResult(kind = "user-not-available") }
+      .flatMap { result =>
+        if result.kind == "no-result" then Future.unit
+        else
+          val decision = Json.obj("kind" -> result.kind.asJson)
+            .deepMerge(result.rules.fold(Json.obj())(rules => Json.obj("rules" -> rules.asJson)))
+          val body = Json.obj("sessionId" -> sessionId.asJson, "requestId" -> requestId.asJson, "result" -> decision)
+            .deepMerge(result.decisionContext.fold(Json.obj())(ctx => Json.obj("decisionContext" -> ctx.asJson)))
+          connection.sendRequest("session.permissions.handlePendingPermissionRequest", body).map(_ => ())
+      }
+      .recover { case _ => () } // Connection lost or RPC error: nothing more to report.
+    ()
 
   // -------------------------------------------------------------------------
   // Request Handlers (internal, called by CopilotClient)

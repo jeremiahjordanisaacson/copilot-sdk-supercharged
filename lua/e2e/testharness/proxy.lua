@@ -199,6 +199,40 @@ function CapiProxy:url()
     return self._proxy_url
 end
 
+--- Register the replay user answered by the proxy's /copilot_internal/user endpoint.
+-- @param token string  The GitHub token the CLI authenticates with
+-- @return boolean success
+-- @return string|nil error
+function CapiProxy:set_copilot_user_by_token(token)
+    if not self._proxy_url then
+        return false, "Proxy not started"
+    end
+
+    local json_body = string.format(
+        '{"token":"%s","response":{"login":"e2e-test-user","id":12345,"copilot_plan":"individual_pro",'
+            .. '"endpoints":{"api":"%s","telemetry":"https://sdk-hydro-collector.example.com"},'
+            .. '"analytics_tracking_id":"e2e-test-tracking-id"}}',
+        tostring(token):gsub('["\\]', "\\%0"), self._proxy_url)
+
+    local is_windows = (package.config:sub(1, 1) == "\\")
+    local curl_cmd
+    if is_windows then
+        curl_cmd = string.format(
+            'curl -s -X POST -H "Content-Type: application/json" -d "%s" "%s/copilot-user-config"',
+            json_body:gsub('"', '\\"'), self._proxy_url)
+    else
+        curl_cmd = string.format(
+            "curl -s -X POST -H 'Content-Type: application/json' -d '%s' '%s/copilot-user-config'",
+            json_body, self._proxy_url)
+    end
+
+    local ok = os.execute(curl_cmd)
+    if not ok then
+        return false, "Failed to register the replay Copilot user"
+    end
+    return true, nil
+end
+
 --- Get environment variables for routing HTTPS traffic through the CONNECT proxy.
 -- @return table|nil  Map of env var names to values, or nil if proxy not started
 function CapiProxy:get_proxy_env()

@@ -39,6 +39,10 @@ function CopilotSession.new(session_id, rpc_client, workspace_path)
     self._hooks            = nil          -- SessionHooks table or nil
     self._exit_plan_mode_handler = nil    -- function or nil
     self._trace_context_provider = nil    -- function or nil
+    self._shell_authentication_handler = nil  -- function or nil
+    self._pending_shell_authentications = {}  -- requestId -> true once cancelled
+    self._memory_store_handler = nil      -- function or nil
+    self._destroy_callbacks = {}          -- functions run once after destroy()
 
     return self
 end
@@ -48,7 +52,9 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Send a message to this session.
--- @param options table  MessageOptions with fields: prompt, attachments, mode, responseFormat, imageOptions
+-- @param options table  MessageOptions with fields: prompt, attachments, mode, responseFormat,
+--   imageOptions, source ("user", "system" or "agent-<id>"), responseSchema (JSON Schema
+--   requesting structured output) and clientTurnId (opaque turn id echoed on events)
 -- @return string|nil messageId
 -- @return string|nil error
 function CopilotSession:send(options)
@@ -63,7 +69,16 @@ function CopilotSession:send(options)
         requestHeaders = options.requestHeaders,
         responseFormat = options.responseFormat,
         imageOptions   = options.imageOptions,
+        source         = options.source,
+        clientTurnId   = options.clientTurnId,
     }
+    -- Structured output takes precedence over the plain response format.
+    if options.responseSchema then
+        req.responseFormat = {
+            type       = "json_schema",
+            jsonSchema = { name = "response", strict = true, schema = options.responseSchema },
+        }
+    end
 
     -- Inject trace context if provider is available
     if self._trace_context_provider then
@@ -211,12 +226,19 @@ function CopilotSession:get_metadata()
 end
 
 --- Destroy this session and release resources.
+-- Sends session.detach (falling back to session.destroy on CLIs that do not
+-- implement it), so on-disk state is preserved and the session can be resumed.
 -- @return boolean success
 -- @return string|nil error
 function CopilotSession:destroy()
-    local _, err = self._rpc_client:request("session.destroy", {
+    local _, err = self._rpc_client:request("session.detach", {
         sessionId = self.session_id,
     })
+    if err and tostring(err):find("-32601", 1, true) then
+        _, err = self._rpc_client:request("session.destroy", {
+            sessionId = self.session_id,
+        })
+    end
     if err then
         return false, "failed to destroy session: " .. tostring(err)
     end
@@ -229,8 +251,75 @@ function CopilotSession:destroy()
     self._hooks              = nil
     self._exit_plan_mode_handler = nil
     self._trace_context_provider = nil
+    self._shell_authentication_handler = nil
+    self._memory_store_handler = nil
+    for request_id in pairs(self._pending_shell_authentications) do
+        self._pending_shell_authentications[request_id] = true
+    end
+
+    local callbacks = self._destroy_callbacks
+    self._destroy_callbacks = {}
+    for _, callback in ipairs(callbacks) do
+        pcall(callback)
+    end
 
     return true, nil
+end
+
+--- Detach from this session (same as destroy()): sends session.detach so the
+-- session state is kept and the session can be resumed later.
+-- @return boolean success
+-- @return string|nil error
+function CopilotSession:detach()
+    return self:destroy()
+end
+
+--- Change the Auto routing preference without changing the selected model
+-- (experimental). The runtime commits it on a later turn that uses the "auto" model.
+-- @param auto_tier string|nil  "efficiency", "balance", "intelligence" or "fast"
+--   (see types.AutoTier); nil returns to the provider's default Auto routing
+-- @return table|nil result (status, effectiveAutoTier, pendingAutoTier, ...)
+-- @return string|nil error
+function CopilotSession:set_auto_tier(auto_tier)
+    local params = { sessionId = self.session_id, autoTier = auto_tier }
+    if auto_tier == nil then
+        params.autoTier = cjson.null
+    end
+    return self._rpc_client:request("session.model.switchAutoTier", params)
+end
+
+--- Retrieve the managed (enterprise policy) settings in effect for this session.
+-- @return table|nil settings
+-- @return string|nil error
+function CopilotSession:get_managed_settings()
+    return self._rpc_client:request("session.managedSettings.get", {
+        sessionId = self.session_id,
+    })
+end
+
+--- Ask the runtime to re-run the managed-settings policy helper for this session.
+-- @return table|nil result
+-- @return string|nil error
+function CopilotSession:recheck_policy_helper()
+    return self._rpc_client:request("session.managedSettings.recheckPolicyHelper", {
+        sessionId = self.session_id,
+    })
+end
+
+--- Change the session's permission mode.
+-- @param mode string  "manual", "assisted" or "allow-all" (see types.PermissionMode)
+-- @return table|nil PermissionModeSetResult { success, mode, reason }; reason is
+--   "managed_policy" when enterprise policy refused the mode
+-- @return string|nil error
+function CopilotSession:set_permission_mode(mode)
+    local result, err = self._rpc_client:request("session.permissions.setMode", {
+        sessionId = self.session_id,
+        mode      = mode,
+    })
+    if err then
+        return nil, err
+    end
+    return types.PermissionModeSetResult(type(result) == "table" and result or {}), nil
 end
 
 --- Abort the currently processing message in this session.
@@ -369,6 +458,87 @@ function CopilotSession:_register_trace_context_provider(provider)
     self._trace_context_provider = provider
 end
 
+--- Register a callback run once after destroy() releases the session.
+-- @param callback function
+function CopilotSession:_on_destroy(callback)
+    if type(callback) == "function" then
+        table.insert(self._destroy_callbacks, callback)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Internal: shell authentication and memory store
+-- ---------------------------------------------------------------------------
+
+--- Register the shell authentication handler.
+-- @param handler function(ShellAuthenticationRequest, ctx) -> ShellAuthenticationResponse
+function CopilotSession:_register_shell_authentication_handler(handler)
+    self._shell_authentication_handler = handler
+end
+
+--- Ask the registered handler for a shell program's credentials. A failure, a
+-- malformed answer, or a cancellation answers "cancel" so the program fails
+-- instead of receiving a wrong value. The answer is never logged.
+-- @param request table { sessionId, requestId, program, prompt, inputKind, command, cwd }
+-- @return table { action = "accept", value = ... } or { action = "cancel" }
+function CopilotSession:_handle_shell_authentication_request(request)
+    local handler = self._shell_authentication_handler
+    local request_id = request.requestId
+    if not handler or self._pending_shell_authentications[request_id] ~= nil then
+        return { action = "cancel" }
+    end
+
+    self._pending_shell_authentications[request_id] = false
+    local ok, result = pcall(handler, request, { sessionId = self.session_id })
+    local cancelled = self._pending_shell_authentications[request_id]
+    self._pending_shell_authentications[request_id] = nil
+
+    if not ok then
+        -- The error text could contain the answer, so it is not logged.
+        io.stderr:write("[CopilotSDK] Shell authentication handler failed\n")
+        return { action = "cancel" }
+    end
+    if cancelled ~= false then
+        return { action = "cancel" }
+    end
+    if type(result) == "table" and result.action == "accept" and type(result.value) == "string" then
+        return { action = "accept", value = result.value }
+    end
+    return { action = "cancel" }
+end
+
+--- Cancel a pending shell authentication prompt; it then answers "cancel".
+-- @param request_id string
+function CopilotSession:_cancel_shell_authentication_request(request_id)
+    if self._pending_shell_authentications[request_id] ~= nil then
+        self._pending_shell_authentications[request_id] = true
+    end
+end
+
+--- Register the memory store callback.
+-- @param handler function(StoredMemory, ctx)
+function CopilotSession:_register_memory_store(handler)
+    self._memory_store_handler = handler
+end
+
+--- Hand a memory the agent asked to store to the registered callback.
+-- @param memory table { sessionId, subject, fact, citations, reason }
+-- @return boolean success
+-- @return string|nil error
+function CopilotSession:_handle_memory_store(memory)
+    local handler = self._memory_store_handler
+    if not handler then
+        return false, "No memory store is registered"
+    end
+    local ok, err = pcall(handler, memory, { sessionId = self.session_id })
+    if not ok then
+        -- The runtime reports a generic failure to the model; keep the cause visible here.
+        io.stderr:write("[CopilotSDK] Memory store callback failed: " .. tostring(err) .. "\n")
+        return false, "Memory store callback failed"
+    end
+    return true, nil
+end
+
 --- Handle a hooks invocation from the server.
 -- @param hook_type string    The hook type (e.g. "preToolUse", "postToolUse")
 -- @param input table         The hook input data
@@ -421,6 +591,18 @@ function CopilotSession:_handle_hooks_invoke(hook_type, input)
     elseif hook_type == "errorOccurred" then
         if not hooks.onErrorOccurred then return nil, nil end
         local ok, result = pcall(hooks.onErrorOccurred, input, invocation)
+        if not ok then return nil, tostring(result) end
+        return result, nil
+
+    elseif hook_type == "subagentStart" then
+        if not hooks.onSubagentStart then return nil, nil end
+        local ok, result = pcall(hooks.onSubagentStart, input, invocation)
+        if not ok then return nil, tostring(result) end
+        return result, nil
+
+    elseif hook_type == "subagentStop" then
+        if not hooks.onSubagentStop then return nil, nil end
+        local ok, result = pcall(hooks.onSubagentStop, input, invocation)
         if not ok then return nil, tostring(result) end
         return result, nil
 

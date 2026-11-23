@@ -34,11 +34,13 @@ Tool defineTool(
   String? description,
   Map<String, dynamic>? parameters,
   required ToolHandler handler,
+  bool? idempotent,
 }) {
   return Tool(
     name: name,
     description: description,
     parameters: parameters,
     handler: handler,
+    idempotent: idempotent,
   );
 }

@@ -40,6 +40,8 @@ final class CopilotSession
         ExitPlanModeHandler _exitPlanModeHandler;
         SubagentStartHandler _onSubagentStart;
         SubagentStopHandler _onSubagentStop;
+        ShellAuthenticationHandler _onShellAuthentication;
+        StoreMemoryHandler _onStoreMemory;
         void delegate(string sessionId) _onRelease;
     }
 
@@ -116,12 +118,12 @@ final class CopilotSession
 
         auto params = JSONValue(string[string].init);
         params["sessionId"] = _sessionId;
-        params["message"] = message;
+        params["prompt"] = message;
 
         if (opts.attachments.length > 0)
             params["attachments"] = JSONValue(opts.attachments);
-        if (!opts.responseFormat.isNull)
-            params["responseFormat"] = opts.responseFormat.get;
+        // The legacy string `responseFormat` is no longer sent: protocol 4
+        // only accepts the structured `responseFormat` built from `responseSchema`.
         if (!opts.agentMode.isNull)
             params["agentMode"] = opts.agentMode.get;
         if (!opts.displayPrompt.isNull)
@@ -135,9 +137,11 @@ final class CopilotSession
         }
         if (!opts.source.isNull)
             params["source"] = opts.source.get;
+        if (!opts.clientTurnId.isNull)
+            params["clientTurnId"] = opts.clientTurnId.get;
         if (opts.responseSchema.type != JSONType.null_)
         {
-            // Structured output replaces any legacy string responseFormat.
+            // Structured output: the protocol 4 `responseFormat` object.
             auto jsonSchema = JSONValue(string[string].init);
             jsonSchema["name"] = "response";
             jsonSchema["strict"] = true;
@@ -148,7 +152,18 @@ final class CopilotSession
             params["responseFormat"] = structured;
         }
 
-        _rpc.notify("session/send", params);
+        try
+        {
+            _rpc.request("session.send", params);
+        }
+        catch (Exception e)
+        {
+            _idleMutex.lock();
+            _idle = true;
+            _idleCond.notifyAll();
+            _idleMutex.unlock();
+            throw e;
+        }
     }
 
     /// Send a user message and block until the session becomes idle.
@@ -172,12 +187,13 @@ final class CopilotSession
         return collected;
     }
 
-    /// Abort the current in-flight request.
+    /// Abort the current in-flight request (`session.abort`). A refusal from
+    /// the runtime surfaces as a `JsonRpcError`.
     void abort() @safe
     {
         auto params = JSONValue(string[string].init);
         params["sessionId"] = _sessionId;
-        _rpc.notify("session/abort", params);
+        _rpc.request("session.abort", params);
     }
 
     /// Send a message requesting structured output that matches `schema`,
@@ -255,6 +271,24 @@ final class CopilotSession
         auto params = JSONValue(string[string].init);
         params["sessionId"] = _sessionId;
         return _rpc.request("session.managedSettings.recheckPolicyHelper", params);
+    }
+
+    /// Detach from the session (`session.detach`) without deleting it; the
+    /// same as `disconnect`. The session can be resumed later.
+    void detach() @trusted
+    {
+        disconnect();
+    }
+
+    /// Set the session permission mode (`session.permissions.setMode`). When
+    /// the runtime refuses the mode, `reason` explains why (for example
+    /// `permissionModeRefusalManagedPolicy`).
+    PermissionModeResult setPermissionMode(string mode) @safe
+    {
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = _sessionId;
+        params["mode"] = mode;
+        return PermissionModeResult.fromJson(_rpc.request("session.permissions.setMode", params));
     }
 
     // ------------------------------------------------------------------
@@ -338,6 +372,37 @@ final class CopilotSession
     {
         _onSubagentStart = onStart;
         _onSubagentStop = onStop;
+    }
+
+    /// Install the shell-authentication and memory-store callbacks (called by CopilotClient).
+    package void configureCallbacks(ShellAuthenticationHandler onShellAuthentication,
+        StoreMemoryHandler onStoreMemory) @safe
+    {
+        _onShellAuthentication = onShellAuthentication;
+        _onStoreMemory = onStoreMemory;
+    }
+
+    /// Answer a `shellAuthentication.request`; cancels when no handler is set
+    /// or the handler throws.
+    package JSONValue handleShellAuthentication(JSONValue params) @trusted
+    {
+        if (_onShellAuthentication is null)
+            return ShellAuthenticationResponse.cancel().toJson();
+        try
+        {
+            return _onShellAuthentication(ShellAuthenticationRequest.fromJson(params)).toJson();
+        }
+        catch (Exception)
+        {
+            return ShellAuthenticationResponse.cancel().toJson();
+        }
+    }
+
+    /// Deliver a `memoryStore.store` request to the memory-store callback.
+    package void handleMemoryStore(JSONValue params) @trusted
+    {
+        enforce(_onStoreMemory !is null, "Memory store owner is unavailable");
+        _onStoreMemory(StoredMemory.fromJson(params));
     }
 
     /// Install the callback run when the session is released (called by CopilotClient).

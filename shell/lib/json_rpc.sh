@@ -55,14 +55,22 @@ copilot_jsonrpc_start() {
         return 1
     fi
 
-    # Verify the CLI binary exists (if not a bare command name)
-    if [[ "$cli_path" == */* ]] && [[ ! -x "$cli_path" ]]; then
+    # Verify the CLI exists (if not a bare command name). A .js entry point (for example
+    # npm-loader.js) is run with node; any other path is executed directly.
+    local launcher=()
+    if [[ "$cli_path" == *.js ]]; then
+        if [[ ! -f "$cli_path" ]]; then
+            echo "ERROR: Copilot CLI entry point not found at: $cli_path" >&2
+            return 1
+        fi
+        launcher=("node")
+    elif [[ "$cli_path" == */* ]] && [[ ! -x "$cli_path" ]]; then
         echo "ERROR: Copilot CLI not found or not executable at: $cli_path" >&2
         return 1
     fi
 
     # Start the coproc
-    coproc COPILOT_COPROC { "$cli_path" "${cli_args[@]}" 2>/dev/null; }
+    coproc COPILOT_COPROC { ${launcher[@]+"${launcher[@]}"} "$cli_path" "${cli_args[@]}" 2>/dev/null; }
 
     if [[ -z "${COPILOT_COPROC_PID:-}" ]]; then
         echo "ERROR: Failed to start copilot CLI process" >&2
@@ -114,9 +122,10 @@ copilot_jsonrpc_send_message() {
         return 1
     fi
 
-    local content_length=${#message}
-    local frame
-    frame="Content-Length: ${content_length}\r\n\r\n${message}"
+    # Content-Length counts bytes: measure the message in the C locale (in a UTF-8 locale
+    # ${#message} counts characters, which breaks framing for non-ASCII text)
+    local content_length
+    content_length=$(LC_ALL=C; echo "${#message}")
 
     # Write the framed message to the coproc stdin
     printf "Content-Length: %d\r\n\r\n%s" "$content_length" "$message" >&"${COPILOT_JSONRPC_FD_IN}"
@@ -164,7 +173,10 @@ copilot_jsonrpc_read_message() {
     local body=""
     body=$(dd bs=1 count="$content_length" <&"${COPILOT_JSONRPC_FD_OUT}" 2>/dev/null)
 
-    if [[ ${#body} -lt $content_length ]]; then
+    # Compare byte lengths (see copilot_jsonrpc_send_message)
+    local body_bytes
+    body_bytes=$(LC_ALL=C; echo "${#body}")
+    if [[ $body_bytes -lt $content_length ]]; then
         echo "ERROR: Short read: expected $content_length bytes, got ${#body}" >&2
         return 1
     fi

@@ -33,6 +33,7 @@
     set_auto_tier/2,
     get_managed_settings/1,
     recheck_policy_helper/1,
+    set_permission_mode/2,
     handle_event/3,
     set_ready/1,
     session_id/1,
@@ -161,6 +162,15 @@ get_managed_settings(Pid) ->
 recheck_policy_helper(Pid) ->
     gen_server:call(Pid, recheck_policy_helper).
 
+%% @doc Change the session permission mode (`session.permissions.setMode`):
+%% <<"manual">>, <<"assisted">> or <<"allow-all">>. Experimental. Returns
+%% #{success, mode, reason}; a refused change has `success => false` and, when
+%% known, `reason => <<"managed_policy">>`
+%% (`copilot_types:permission_mode_refusal(managed_policy)`).
+-spec set_permission_mode(pid(), binary()) -> {ok, map()} | {error, term()}.
+set_permission_mode(Pid, Mode) ->
+    gen_server:call(Pid, {set_permission_mode, Mode}).
+
 -spec handle_event(pid(), binary(), map()) -> ok.
 handle_event(Pid, EventType, EventData) ->
     gen_server:cast(Pid, {event, EventType, EventData}).
@@ -275,6 +285,20 @@ handle_call(recheck_policy_helper, _From, #state{rpc = Rpc, session_id = Session
                                      #{<<"sessionId">> => SessionId}),
     {reply, Result, State};
 
+handle_call({set_permission_mode, Mode}, _From,
+            #state{rpc = Rpc, session_id = SessionId} = State) ->
+    Reply = case copilot_jsonrpc:request(Rpc, <<"session.permissions.setMode">>,
+                                         #{<<"sessionId">> => SessionId,
+                                           <<"mode">>      => Mode}) of
+        {ok, Result} when is_map(Result) ->
+            {ok, copilot_types:permissions_set_mode_result(Result)};
+        {ok, Other} ->
+            {ok, Other};
+        {error, _} = Err ->
+            Err
+    end,
+    {reply, Reply, State};
+
 handle_call(session_id, _From, #state{session_id = Id} = State) ->
     {reply, Id, State};
 
@@ -310,8 +334,7 @@ handle_cast({event, EventType, EventData}, State) ->
         _ ->
             State#state.waiting
     end,
-    %% Invoke hooks
-    maybe_invoke_hook(EventType, EventData, State),
+    %% Hooks run through `hooks.invoke` requests (see copilot_client), not events.
     %% Handle command.execute events
     maybe_handle_command(EventType, EventData, State),
     %% Handle elicitation.requested events
@@ -378,10 +401,12 @@ build_send_params(Options, SessionId) ->
         undefined -> Req7;
         Source    -> Req7#{<<"source">> => copilot_types:message_source(Source)}
     end,
+    %% Opaque caller-chosen turn identifier (clientTurnId)
+    Req9 = maybe_add(<<"clientTurnId">>, client_turn_id, Options, Req8),
     %% Structured output: a JSON Schema replaces the legacy responseFormat value.
     case maps:get(response_schema, Options, undefined) of
-        undefined -> Req8;
-        Schema    -> Req8#{<<"responseFormat">> => copilot_types:response_format_json_schema(Schema)}
+        undefined -> Req9;
+        Schema    -> Req9#{<<"responseFormat">> => copilot_types:response_format_json_schema(Schema)}
     end.
 
 detach_reply({ok, #{<<"success">> := false} = Resp}) ->
@@ -390,56 +415,6 @@ detach_reply({ok, _}) ->
     ok;
 detach_reply({error, _} = Err) ->
     Err.
-
-maybe_invoke_hook(<<"tool.execution_start">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_pre_tool_use, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end,
-    case maps:get(on_pre_mcp_tool_call, Hooks, undefined) of
-        undefined -> ok;
-        McpHook   -> catch McpHook(Data)
-    end;
-maybe_invoke_hook(<<"tool.execution_complete">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_post_tool_use, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-maybe_invoke_hook(<<"session.start">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_session_start, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-maybe_invoke_hook(<<"session.shutdown">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_session_end, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-maybe_invoke_hook(<<"session.error">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_error_occurred, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-%% Sub-agent lifecycle hooks (hook types subagentStart / subagentStop).
-maybe_invoke_hook(<<"subagent.started">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_subagent_start, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-maybe_invoke_hook(<<"subagent.completed">>, Data, #state{hooks = Hooks})
-  when Hooks =/= undefined ->
-    case maps:get(on_subagent_stop, Hooks, undefined) of
-        undefined -> ok;
-        Hook      -> catch Hook(Data)
-    end;
-maybe_invoke_hook(_EventType, _Data, _State) ->
-    ok.
 
 maybe_handle_command(<<"command.execute">>, Data,
                      #state{rpc = Rpc, session_id = SessionId,

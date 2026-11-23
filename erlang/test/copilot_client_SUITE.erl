@@ -47,7 +47,10 @@
     test_client_info_wire/1,
     test_message_source/1,
     test_v2_6_wire_helpers/1,
-    test_subagent_hook_types/1
+    test_subagent_hook_types/1,
+    test_group_session_params/1,
+    test_legacy_provider_and_empty_mode/1,
+    test_v3_wire_helpers/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -70,7 +73,10 @@ groups() ->
             test_client_info_wire,
             test_message_source,
             test_v2_6_wire_helpers,
-            test_subagent_hook_types
+            test_subagent_hook_types,
+            test_group_session_params,
+            test_legacy_provider_and_empty_mode,
+            test_v3_wire_helpers
         ]},
         {tools, [parallel], [
             test_define_tool_basic,
@@ -209,6 +215,116 @@ test_v2_6_wire_helpers(_Config) ->
 test_subagent_hook_types(_Config) ->
     <<"subagentStart">> = copilot_types:hook_type(subagent_start),
     <<"subagentStop">>  = copilot_types:hook_type(subagent_stop),
+    ok.
+
+test_group_session_params(_Config) ->
+    Tool = #{<<"name">> => <<"t">>, <<"idempotent">> => true},
+    Resume = copilot_client:group_session_params(#{
+        <<"sessionId">>             => <<"s1">>,
+        <<"model">>                 => <<"m">>,
+        <<"name">>                  => <<"create only">>,
+        <<"streaming">>             => true,
+        <<"requestPermission">>     => true,
+        <<"tools">>                 => [Tool],
+        <<"hooks">>                 => true,
+        <<"disableResume">>         => true,
+        <<"trustWorkingDirectory">> => <<"session">>,
+        <<"reasoningEffort">>       => null,
+        <<"futureOption">>          => 1
+    }, resume),
+    #{
+        <<"sessionId">>           := <<"s1">>,
+        <<"model">>               := <<"m">>,
+        <<"suppressResumeEvent">> := true,
+        <<"futureOption">>        := 1,
+        <<"events">>              := #{<<"streaming">> := true},
+        <<"permissions">>         := #{<<"request">> := true},
+        <<"tools">>               := #{<<"definitions">> := [Tool]},
+        <<"hooks">>               := #{<<"hasHandlers">> := true}
+    } = Resume,
+    false = maps:is_key(<<"name">>, Resume),
+    false = maps:is_key(<<"filesystem">>, Resume),
+    false = maps:is_key(<<"inference">>, Resume),
+    Create = copilot_client:group_session_params(#{
+        <<"configDir">>             => <<"/cfg">>,
+        <<"mcpServers">>            => #{<<"s">> => #{<<"command">> => <<"x">>}},
+        <<"allowTranscriptRecovery">> => true,
+        <<"capi">>                  => #{<<"autoTier">> => <<"fast">>}
+    }, create),
+    <<"/cfg">> = maps:get(<<"configDirectory">>, Create),
+    false = maps:is_key(<<"allowTranscriptRecovery">>, Create),
+    #{<<"envValueMode">> := <<"direct">>} = maps:get(<<"mcp">>, Create),
+    #{<<"capi">> := #{<<"autoTier">> := <<"fast">>}} = maps:get(<<"github">>, Create),
+    ok.
+
+test_legacy_provider_and_empty_mode(_Config) ->
+    Legacy = copilot_client:group_session_params(#{
+        <<"model">>    => <<"gpt-4o">>,
+        <<"provider">> => copilot_types:provider_config(#{
+            type              => <<"openai">>,
+            base_url          => <<"https://models.example.com/v1">>,
+            api_key_command   => <<"print-key">>,
+            max_output_tokens => 2048
+        })
+    }, create),
+    #{<<"inference">> := Inference, <<"github">> := Github} = Legacy,
+    [#{<<"name">> := <<"default">>, <<"baseUrl">> := <<"https://models.example.com/v1">>,
+       <<"apiKeyCommand">> := <<"print-key">>} = Connection] = maps:get(<<"providers">>, Inference),
+    false = maps:is_key(<<"maxOutputTokens">>, Connection),
+    <<"default">> = maps:get(<<"defaultProvider">>, Inference),
+    [#{<<"provider">> := <<"default">>, <<"id">> := <<"gpt-4o">>,
+       <<"maxOutputTokens">> := 2048}] = maps:get(<<"models">>, Inference),
+    #{<<"capi">> := #{<<"enabled">> := false}} = Github,
+    %% Explicit named providers win; an explicit null clears the default on resume.
+    Explicit = copilot_client:group_session_params(#{
+        <<"sessionId">>       => <<"s1">>,
+        <<"provider">>        => #{<<"baseUrl">> => <<"https://legacy.example.com">>},
+        <<"defaultProvider">> => null
+    }, resume),
+    #{<<"inference">> := #{<<"defaultProvider">> := null}} = Explicit,
+    false = maps:is_key(<<"github">>, Explicit),
+    Empty = copilot_client:apply_mode_defaults(
+        copilot_client:group_session_params(#{
+            <<"availableTools">> => [<<"view">>],
+            <<"memory">>         => #{<<"enabled">> => true}
+        }, create), empty),
+    #{<<"availableTools">> := [<<"view">>]} = maps:get(<<"tools">>, Empty),
+    #{<<"memory">> := #{<<"enabled">> := true}, <<"skipEmbeddingRetrieval">> := true} =
+        maps:get(<<"state">>, Empty),
+    #{<<"oauthTokenStorage">> := <<"in-memory">>} = maps:get(<<"mcp">>, Empty),
+    #{<<"enableHostGitOperations">> := false} = maps:get(<<"git">>, Empty),
+    Same = #{<<"model">> => <<"m">>},
+    Same = copilot_client:apply_mode_defaults(Same, coding_agent),
+    {ok, coding_agent} = copilot_types:parse_client_mode(<<"copilot-cli">>),
+    {ok, empty} = copilot_types:parse_client_mode(<<"empty">>),
+    <<"coding-agent">> = copilot_types:client_mode(coding_agent),
+    ok.
+
+test_v3_wire_helpers(_Config) ->
+    #{text := <<"hi">>, sequence := 3, tool_call_id := <<"tc">>} =
+        copilot_types:shell_output(#{<<"toolCallId">> => <<"tc">>, <<"text">> => <<"hi">>,
+                                     <<"sequence">> => 3}),
+    <<"tool.shell_output">> = copilot_types:session_event_type(tool_shell_output),
+    #{<<"action">> := <<"accept">>, <<"value">> := <<"pw">>} =
+        copilot_types:shell_authentication_response({accept, <<"pw">>}),
+    #{<<"action">> := <<"cancel">>} = copilot_types:shell_authentication_response(cancel),
+    #{<<"name">> := <<"t">>, <<"idempotent">> := true} = Definition =
+        copilot_types:tool_definition(copilot_tools:define_tool(
+            <<"t">>, <<"d">>, undefined, fun(_Args, _Inv) -> ok end, #{idempotent => true})),
+    false = maps:is_key(<<"handler">>, Definition),
+    #{<<"scope">> := <<"runtime">>, <<"resolveProxy">> := #{}} =
+        copilot_types:network_set_provider_params(#{scope => runtime,
+                                                    resolve_proxy => fun(_) -> undefined end}),
+    #{category := <<"timeout">>, previous_policy_retained := true} =
+        copilot_types:policy_helper_failure({error, #{<<"data">> => #{
+            <<"policyHelperFailure">> => #{<<"category">> => <<"timeout">>,
+                                           <<"previousPolicyRetained">> => true}}}}),
+    undefined = copilot_types:policy_helper_failure({error, #{<<"code">> => -32603}}),
+    #{success := false, reason := <<"managed_policy">>} =
+        copilot_types:permissions_set_mode_result(#{<<"success">> => false,
+                                                    <<"mode">> => <<"manual">>,
+                                                    <<"reason">> => <<"managed_policy">>}),
+    <<"managed_policy">> = copilot_types:permission_mode_refusal(managed_policy),
     ok.
 
 %% ---------------------------------------------------------------------------

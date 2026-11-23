@@ -8,6 +8,7 @@
 #import "../src/CPDefineTool.h"
 #import "../src/CPJsonRpcClient.h"
 #import "../src/CPSdkProtocolVersion.h"
+#import "../src/CPSessionParams.h"
 #import "../src/CPTypes.h"
 
 #pragma mark - Type Tests
@@ -28,7 +29,7 @@
 }
 
 - (void)testProtocolVersion {
-    XCTAssertEqual(CPSdkProtocolVersion, 3);
+    XCTAssertEqual(CPSdkProtocolVersion, 4);
 }
 
 - (void)testToolResultSuccess {
@@ -128,6 +129,150 @@
     NSDictionary *dict = [fs toDictionary];
     XCTAssertEqualObjects(dict[@"initialCwd"], @"/home/user");
     XCTAssertEqualObjects(dict[@"conventions"], @"posix");
+}
+
+- (void)testMessageOptionsV3Fields {
+    CPMessageOptions *opts = [[CPMessageOptions alloc] init];
+    opts.prompt = @"Summarize";
+    opts.source = CPMessageSourceAgent(@"reviewer");
+    opts.clientTurnId = @"turn-1";
+    opts.responseSchema = @{@"type": @"object"};
+
+    NSDictionary *dict = [opts toDictionary];
+    XCTAssertEqualObjects(dict[@"source"], @"agent-reviewer");
+    XCTAssertEqualObjects(dict[@"clientTurnId"], @"turn-1");
+    NSDictionary *expectedFormat = @{
+        @"type": @"json_schema",
+        @"jsonSchema": @{@"name": @"response", @"strict": @YES, @"schema": @{@"type": @"object"}},
+    };
+    XCTAssertEqualObjects(dict[@"responseFormat"], expectedFormat);
+}
+
+- (void)testShellOutputEventEnvelope {
+    CPSessionEvent *event = [[CPSessionEvent alloc] initWithEnvelope:@{
+        @"id": @"e1",
+        @"type": CPEventTypeToolShellOutput,
+        @"ephemeral": @YES,
+        @"data": @{@"toolCallId": @"c1", @"text": @"hi\n", @"sequence": @3, @"stream": @"stderr"},
+    }];
+    XCTAssertEqualObjects(event.eventId, @"e1");
+    XCTAssertTrue(event.ephemeral);
+    XCTAssertEqualObjects(event.shellOutput.toolCallId, @"c1");
+    XCTAssertEqualObjects(event.shellOutput.text, @"hi\n");
+    XCTAssertEqual(event.shellOutput.sequence, 3);
+    XCTAssertEqualObjects(event.shellOutput.stream, @"stderr");
+}
+
+- (void)testPolicyHelperFailureFromErrorData {
+    NSDictionary *data = @{@"policyHelperFailure": @{
+        @"category": @"helper_failed",
+        @"failureMode": @"fail_closed",
+        @"message": @"Policy helper exited",
+        @"previousPolicyRetained": @YES,
+        @"reason": @"exit_code",
+        @"helpLink": @{@"url": @"https://example.com/help"},
+    }};
+    NSError *error = [NSError errorWithDomain:CPJsonRpcErrorDomain
+                                         code:-32603
+                                     userInfo:@{CPJsonRpcErrorDataKey: data}];
+    CPPolicyHelperFailure *failure = [CPPolicyHelperFailure failureFromError:error];
+    XCTAssertEqualObjects(failure.category, @"helper_failed");
+    XCTAssertEqualObjects(failure.failureMode, @"fail_closed");
+    XCTAssertTrue(failure.previousPolicyRetained);
+    XCTAssertEqualObjects(failure.helpLinkUrl, @"https://example.com/help");
+    XCTAssertNil([CPPolicyHelperFailure failureFromDictionary:@{@"category": @"x"}]);
+}
+
+@end
+
+#pragma mark - Session Params (SDK protocol 4) Tests
+
+@interface CPSessionParamsTests : XCTestCase
+@end
+
+@implementation CPSessionParamsTests
+
+- (void)testGroupsFlatOptionsOnResume {
+    NSDictionary *flat = @{
+        @"model": @"m",
+        @"streaming": @YES,
+        @"requestPermission": @YES,
+        @"tools": @[@{@"name": @"t"}],
+        @"hooks": @YES,
+        @"disableResume": @YES,
+        @"trustWorkingDirectory": @"session",
+        @"otlpProtocol": @"grpc",
+    };
+    NSDictionary *expected = @{
+        @"model": @"m",
+        @"events": @{@"streaming": @YES},
+        @"permissions": @{@"request": @YES},
+        @"tools": @{@"definitions": @[@{@"name": @"t"}]},
+        @"hooks": @{@"hasHandlers": @YES},
+        @"suppressResumeEvent": @YES,
+        @"otlpProtocol": @"grpc",
+    };
+    XCTAssertEqualObjects(CPGroupSessionParams(flat, YES), expected);
+}
+
+- (void)testLegacyProviderBecomesDefaultNamedProvider {
+    NSDictionary *flat = @{
+        @"model": @"gpt",
+        @"capi": @{@"autoTier": @"fast"},
+        @"provider": @{@"type": @"openai", @"baseUrl": @"http://x", @"apiKeyCommand": @"get-key", @"maxOutputTokens": @100},
+    };
+    NSDictionary *expected = @{
+        @"model": @"gpt",
+        @"github": @{@"capi": @{@"autoTier": @"fast", @"enabled": @NO}},
+        @"inference": @{
+            @"providers": @[@{@"name": @"default", @"type": @"openai", @"baseUrl": @"http://x", @"apiKeyCommand": @"get-key"}],
+            @"defaultProvider": @"default",
+            @"models": @[@{@"provider": @"default", @"id": @"gpt", @"maxOutputTokens": @100}],
+        },
+    };
+    XCTAssertEqualObjects(CPGroupSessionParams(flat, NO), expected);
+}
+
+- (void)testSessionConfigBuildsGroupedPayload {
+    CPSessionConfig *config = [[CPSessionConfig alloc] init];
+    config.streaming = YES;
+    config.maxOutputTokens = @1000;
+    config.autoTier = CPAutoTierFast;
+    config.trustWorkingDirectory = CPTrustWorkingDirectorySession;
+    config.clearDefaultProvider = YES;
+    config.onMemoryStore = ^(CPStoredMemory *memory, void (^completion)(NSError *error)) {
+        completion(nil);
+    };
+    config.tools = @[CPIdempotentTool(CPDefineSimpleTool(@"lookup", nil,
+        ^(CPToolInvocation *invocation, void (^done)(CPToolResult *)) {
+            done([CPToolResult successWithText:@"ok"]);
+        }))];
+
+    NSDictionary *created = CPGroupSessionParams([config toDictionary], NO);
+    XCTAssertNil(created[@"streaming"]);
+    XCTAssertEqualObjects(created[@"events"][@"streaming"], @YES);
+    XCTAssertEqualObjects(created[@"inference"][@"capabilities"][@"limits"][@"max_output_tokens"], @1000);
+    XCTAssertEqualObjects(created[@"github"][@"capi"][@"autoTier"], @"fast");
+    XCTAssertEqualObjects(created[@"filesystem"][@"trustWorkingDirectory"], @"session");
+    XCTAssertEqualObjects(created[@"state"][@"hasMemoryStore"], @YES);
+    XCTAssertNil(created[@"inference"][@"defaultProvider"]);
+    NSDictionary *tool = created[@"tools"][@"definitions"][0];
+    XCTAssertEqualObjects(tool[@"idempotent"], @YES);
+    XCTAssertNil(tool[@"_handler"]);
+
+    NSDictionary *resumed = CPGroupSessionParams([config toDictionary], YES);
+    XCTAssertNil(resumed[@"filesystem"]);
+    XCTAssertEqualObjects(resumed[@"inference"][@"defaultProvider"], [NSNull null]);
+}
+
+- (void)testEmptyModeDefaultsKeepCallerValues {
+    NSDictionary *grouped = CPGroupSessionParams(@{@"availableTools": @[], @"enableExperimentalMode": @YES}, NO);
+    NSDictionary *params = CPApplyEmptyModeDefaults(grouped);
+    XCTAssertEqualObjects(params[@"tools"][@"availableTools"], @[]);
+    XCTAssertEqualObjects(params[@"experiments"][@"enableExperimentalMode"], @YES);
+    XCTAssertEqualObjects(params[@"state"][@"memory"], @{@"enabled": @NO});
+    XCTAssertEqualObjects(params[@"mcp"][@"oauthTokenStorage"], @"in-memory");
+    XCTAssertEqualObjects(params[@"git"][@"enableHostGitOperations"], @NO);
 }
 
 @end

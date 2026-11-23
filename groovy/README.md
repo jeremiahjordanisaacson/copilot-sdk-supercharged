@@ -59,6 +59,144 @@ try {
 }
 ```
 
+## What's New in v3.0.0
+
+This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
+
+* **Requires Copilot CLI 1.0.113 or newer.** Older CLIs are rejected at `start()` with
+  `SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+* **Existing options keep working.** You still pass the same flat named arguments to
+  `createSession`/`resumeSession`; the SDK translates the payload into the grouped protocol 4
+  shape (`inference`, `tools`, `permissions`, `interaction`, `events`, `agents`, `mcp`, `github`,
+  `state`, ...) right before `session.create` and `session.resume`.
+* **Legacy BYOK keeps working.** `provider: new ProviderConfig(...)` becomes a named `'default'`
+  connection that is also the default provider, and Copilot API models are disabled for that
+  session, exactly as in v1. Explicit `providers`/`defaultProvider`/`capi` win.
+* **Protocol 4 tool and permission flow.** Custom tools and `onPermissionRequest` are served
+  through the runtime's `external_tool.requested` and `permission.requested` events, answered
+  with `session.tools.handlePendingToolCall` and `session.permissions.handlePendingPermissionRequest`.
+
+### New in v3.0.0
+
+```groovy
+import com.github.copilot.*
+import com.github.copilot.Types.*
+
+// Named BYOK providers and model definitions (select a model as "provider/id")
+def session = client.createSession(
+    model: 'gateway/chat',
+    providers: [new NamedProviderConfig(name: 'gateway', baseUrl: 'https://models.example.com/v1',
+                                        apiKeyCommand: 'print-model-key', wireApi: 'responses')],
+    models: [new ProviderModelConfig(provider: 'gateway', id: 'chat', wireModel: 'my-deployment', maxOutputTokens: 8192)],
+    capi: new CapiConfig(enabled: false)            // BYOK-only catalog
+)
+
+// Use a connection for unqualified model names; defaultProvider: null clears it on resume
+def resumed = client.resumeSession(session.sessionId, defaultProvider: null, capi: [enabled: false])
+```
+
+```groovy
+// Idempotent tools: the runtime may safely retry them
+def lookup = DefineTool.create('lookup_order')
+    .description('Look up an order by ID')
+    .parameters([type: 'object', properties: [id: [type: 'string']], required: ['id']])
+    .idempotent(true)
+    .handler { args, invocation -> "order ${args.id} shipped" }
+    .build()
+
+// Client turn IDs are echoed on the turn's events
+session.send(prompt: 'Summarize the diff', clientTurnId: 'turn-42')
+
+// Resume without emitting session.resume
+client.resumeSession(sessionId, suppressResumeEvent: true, continuePendingWork: false)
+```
+
+```groovy
+// Client mode: 'coding-agent' (default) or 'empty' (every session must pick its tools, and
+// telemetry, repository hooks, cross-session memory, and similar features default off)
+def client = new CopilotClient(mode: ClientMode.EMPTY)
+def session = client.createSession(availableTools: ['view', 'grep'])
+```
+
+```groovy
+// Live shell output events
+session.on(ToolShellOutputData.EVENT_TYPE) { SessionEvent event ->
+    def out = ToolShellOutputData.fromEvent(event)
+    print out.text                                  // out.stream is 'stdout', 'stderr', or null
+}
+
+// Shell authentication: answer sudo/ssh prompts from programs that shell tools run
+client.createSession(onShellAuthenticationRequest: { ShellAuthenticationRequest request, String sessionId ->
+    request.inputKind == 'confirm' ? ShellAuthenticationResult.accept('yes') : ShellAuthenticationResult.cancel()
+})
+
+// Memory store: receive the memories the agent saves (requires memory enabled)
+client.createSession(memory: new MemoryConfiguration(enabled: true,
+    storeMemory: { StoredMemory memory -> myStore.save(memory.subject, memory.fact) }))
+```
+
+```groovy
+// Network callbacks: proxy resolution and proxy authentication (never log credentials)
+def client = new CopilotClient(network: [
+    scope            : NetworkScope.CONNECTION,
+    resolveProxy     : { NetworkResolveProxyRequest request -> 'PROXY proxy.corp.example:8080; DIRECT' },
+    authenticateBasic: { NetworkAuthenticateBasicRequest request -> new NetworkBasicCredentials(proxyUser, proxyPassword) }
+])
+```
+
+```groovy
+// Policy Helper failures on create/resume, and permission-mode refusal reasons
+try {
+    client.createSession(permissionMode: PermissionMode.MANUAL)
+} catch (Exception e) {
+    def failure = PolicyHelperFailure.fromError(e)
+    if (failure) System.err.println("${failure.category}: ${failure.message}")
+}
+
+PermissionModeResult result = session.setPermissionMode(PermissionMode.ALLOW_ALL)
+if (!result.success && result.reason == PermissionModeRefusalReason.MANAGED_POLICY) {
+    println "Blocked by managed policy; mode stays ${result.mode}"
+}
+```
+
+### Also available (shipped in v2.6.0)
+
+* **Client info handshake**: `new CopilotClient(clientInfo: new ClientInfo(applicationName: 'acme-portal', applicationVersion: '2.4.0', integrationName: 'acme-plugin'))`.
+* **Auto routing tier**: `session.setAutoTier(AutoTier.BALANCE)` (sends `session.model.switchAutoTier`) or `createSession(autoTier: AutoTier.BALANCE)`.
+* **Ask-user variant**: `createSession(askUserVariant: AskUserVariant.ELICITATION)`.
+* **GitHub token provider**: `createSession(gitHubTokenProvider: { GitHubTokenProviderArgs args -> GitHubTokenProviderResult.token(fetchToken(args.host), 28800L) })` (served via `gitHubToken.getToken`; mutually exclusive with `gitHubToken`).
+* **Sandbox bypass**: `createSession(sandboxConfig: new SandboxConfig(enabled: true, allowBypass: true))`.
+* **Feature flag overrides**: `createSession(featureFlags: [my_flag: true])`.
+* **Session detach**: `session.destroy()` sends `session.detach`, so the session can be resumed later.
+* **Message source**: `session.send(prompt: 'Run the checks', source: MessageSource.agent('planner'))`.
+* **Managed settings cache clear**: `client.clearManagedSettingsCache()`.
+* **Policy helper recheck**: `def snapshot = session.recheckPolicyHelper()` (parse `snapshot.policyHelperFailure` with `PolicyHelperFailure.fromMap`).
+* **Model allowlist**: `createSession(allowedModels: ['gpt-5', 'claude-sonnet-4.5'])`.
+* **OAuth client metadata URL**: `createSession(authClientIdMetadataUrl: 'https://example.com/oauth/client.json')`.
+* **Max output tokens override**: `createSession(modelCapabilities: [limits: [max_output_tokens: 8192]])` or `new ModelCapabilities(limits: new ModelCapabilities.ModelLimits(maxOutputTokens: 8192))`.
+* **Structured output**: `session.sendAndWait(prompt: 'List three colors', responseSchema: [type: 'object', properties: [colors: [type: 'array', items: [type: 'string']]]])`.
+* **Agent/hook directories**: `createSession(agentDirectories: ['./agents'], hookDirectories: ['./hooks'])`.
+* **Working directory trust** (create only): `createSession(trustWorkingDirectory: WorkingDirectoryTrust.SESSION)`.
+* **Transcript recovery** (resume only): `client.resumeSession(sessionId, allowTranscriptRecovery: true)`.
+* **Image generation config**: `createSession(imageGeneration: new ImageGenerationConfig(enabled: true, watermark: true, saveToDisk: false))`.
+* **Autopilot options**: `createSession(autopilot: new AutopilotOptions(continuationEnabled: true, maxContinues: 3))`.
+* **Subagent lifecycle hooks**: `createSession(hooks: [onSubagentStart: { input, sessionId -> [additionalContext: 'Follow the style guide'] }, onSubagentStop: { input, sessionId -> null }])` (served via `hooks.invoke`).
+* **BYOK API key command**: `new ProviderConfig(type: 'openai', baseUrl: url, apiKeyCommand: 'print-model-key')`, or `NamedProviderConfig.apiKeyCommand`.
+
+### Known limitations
+
+* **AHP host**: the runtime-supervised AHP host (`startAhpHost` and the `ahp.*`/`host.*` RPC
+  families) is not implemented. It is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+* **In-process hosting**: this SDK keeps spawning the CLI (or connecting over TCP) instead of
+  hosting the runtime in-process by default; the `inProcess` option is unchanged.
+* **Legacy response format**: the string `responseFormat` send option (`'text'`, `'image'`,
+  `'json_object'`) is no longer sent, because protocol 4 rejects the string form. Use
+  `responseSchema` for structured output and the `imageGeneration` session option for images.
+* **Callback cancellation**: Groovy closures receive no cancellation token. When the runtime
+  cancels a shell authentication prompt (the SDK answers `cancel`) or completes an external tool
+  call elsewhere (no answer is sent), the SDK interrupts the closure's thread.
+
 ## Custom Tools
 
 Define tools using the builder pattern with Groovy closures:
@@ -154,10 +292,14 @@ println "Workspace: ${session.workspacePath}"
 
 ## Image Generation
 
+Opt in to image generation for the session with the `imageGeneration` option. Per-message
+`imageOptions` are still forwarded; the legacy `responseFormat` string is no longer sent because
+protocol 4 rejects it (use `responseSchema` for structured output).
+
 ```groovy
+def session = client.createSession(imageGeneration: new ImageGenerationConfig(enabled: true, saveToDisk: false))
 def result = session.sendAndWait(
     prompt: 'Generate a sunset over mountains',
-    responseFormat: 'image',
     imageOptions: new ImageOptions('1024x1024', 'hd', 'natural')
 )
 ```
@@ -246,7 +388,7 @@ def client = new CopilotClient(
 | `stop()` | Graceful shutdown |
 | `forceStop()` | Force shutdown |
 | `createSession(config)` | Create a new session |
-| `resumeSession(id, config)` | Resume an existing session |
+| `resumeSession(id, config)` | Resume an existing session (also `resumeSession(id, name: value)`) |
 | `listSessions()` | List all sessions |
 | `deleteSession(id)` | Delete a session |
 | `ping(message)` | Ping the server |
@@ -254,6 +396,7 @@ def client = new CopilotClient(
 | `getState()` | Get connection state |
 | `getStatus()` | Get CLI status |
 | `getAuthStatus()` | Get auth status |
+| `clearManagedSettingsCache()` | Clear cached enterprise managed settings |
 | `on(handler)` | Subscribe to lifecycle events |
 | `on(type, handler)` | Subscribe to specific lifecycle event |
 
@@ -270,7 +413,11 @@ def client = new CopilotClient(
 | `getMessages()` | Get conversation history |
 | `getMetadata()` | Get session metadata |
 | `abort()` | Abort current processing |
-| `destroy()` | Destroy the session |
+| `setAutoTier(tier)` | Change the Auto routing preference |
+| `setPermissionMode(mode)` | Change the permission mode (`PermissionModeResult`) |
+| `getManagedSettings()` | Get the managed settings snapshot |
+| `recheckPolicyHelper()` | Re-run the Policy Helper and get the snapshot |
+| `destroy()` | Detach from the session (state is kept for resume) |
 
 ### DefineTool
 
@@ -279,6 +426,7 @@ def client = new CopilotClient(
 | `create(name)` | Start building a tool |
 | `description(desc)` | Set tool description |
 | `parameters(schema)` | Set JSON Schema parameters |
+| `idempotent(flag)` | Declare that the runtime may safely retry the tool |
 | `handler(closure)` | Set handler closure |
 | `build()` | Build the Tool instance |
 

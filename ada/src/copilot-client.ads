@@ -27,6 +27,7 @@ with Copilot.Types;    use Copilot.Types;
 with Copilot.Session;  use Copilot.Session;
 with Copilot.JSON_RPC; use Copilot.JSON_RPC;
 with GNAT.OS_Lib;
+with GNAT.Expect;
 
 package Copilot.Client is
 
@@ -36,8 +37,12 @@ package Copilot.Client is
    function Create
      (Options : Client_Options := Default_Options) return Copilot_Client;
 
-   --  Start the CLI server and establish the JSON-RPC connection.
-   --  Raises Connection_Error if the process cannot be spawned.
+   --  Start the CLI server and establish the JSON-RPC connection.  The
+   --  handshake sends connect (with Options.Client_Info as clientInfo) and
+   --  falls back to ping on runtimes without connect.  The server must
+   --  speak SDK protocol 4 (Copilot CLI 1.0.113 or newer).
+   --  Raises Connection_Error if the process cannot be spawned and
+   --  Protocol_Error on a protocol version mismatch.
    procedure Start (Self : in out Copilot_Client);
 
    --  Gracefully stop the server and close all sessions.
@@ -46,13 +51,14 @@ package Copilot.Client is
    --  Force-stop the server without graceful cleanup.
    procedure Force_Stop (Self : in out Copilot_Client);
 
-   --  Create a new conversational session.
+   --  Create a new conversational session.  The flat options are converted
+   --  to the SDK protocol 4 grouped payload before session.create is sent.
    function Create_Session
      (Self   : in out Copilot_Client;
       Config : Session_Config := Default_Session_Config)
       return Copilot_Session;
 
-   --  Resume a previously persisted session.
+   --  Resume a previously persisted session (session.resume).
    function Resume_Session
      (Self   : in out Copilot_Client;
       Config : Resume_Session_Config) return Copilot_Session;
@@ -64,7 +70,7 @@ package Copilot.Client is
 
    --  Retrieve metadata for a given session.
    function Get_Session_Metadata
-     (Self       : Copilot_Client;
+     (Self       : in out Copilot_Client;
       Session_Id : String) return Session_Metadata;
 
    --  Ping the server; returns the echoed message.
@@ -109,13 +115,25 @@ package Copilot.Client is
      (Self       : in out Copilot_Client;
       Session_Id : String);
 
+   --  Clear the runtime's cached enterprise managed settings
+   --  (managedSettings.clearCache).
+   procedure Clear_Managed_Settings_Cache (Self : in out Copilot_Client);
+
+   --  Policy Helper failure attached to the last failed Create_Session or
+   --  Resume_Session (error.data.policyHelperFailure).  Present is False
+   --  when the last failure carried none.
+   function Last_Policy_Helper_Failure
+     (Self : Copilot_Client) return Policy_Helper_Failure;
+
 private
 
    type Copilot_Client is tagged record
-      Options    : Client_Options;
-      Conn       : aliased RPC_Connection;
-      State      : Connection_State := Disconnected;
-      Process_Id : GNAT.OS_Lib.Process_Id := GNAT.OS_Lib.Invalid_Pid;
+      Options      : Client_Options;
+      Conn         : aliased RPC_Connection;
+      State        : Connection_State := Disconnected;
+      Process_Id   : GNAT.OS_Lib.Process_Id := GNAT.OS_Lib.Invalid_Pid;
+      Process      : GNAT.Expect.Process_Descriptor;
+      Last_Failure : Policy_Helper_Failure;
    end record;
 
 end Copilot.Client;

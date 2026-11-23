@@ -16,7 +16,7 @@ open CopilotSDK.Supercharged.FSharp
 
 [<Fact>]
 let ``SdkProtocolVersion returns expected version`` () =
-    SdkProtocolVersion.getVersion () |> should equal 3
+    SdkProtocolVersion.getVersion () |> should equal 4
 
 [<Fact>]
 let ``SdkProtocolVersion literal matches getVersion`` () =
@@ -279,7 +279,7 @@ let ``CopilotClient NegotiatedProtocolVersion is None before start`` () =
 
 [<Fact>]
 let ``MessageOptions record creates correctly`` () =
-    let opts = { Prompt = "hello"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None }
+    let opts = { Prompt = "hello"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None; ClientTurnId = None }
     opts.Prompt |> should equal "hello"
     opts.Attachments |> should equal None
     opts.Mode |> should equal None
@@ -287,7 +287,7 @@ let ``MessageOptions record creates correctly`` () =
 [<Fact>]
 let ``MessageOptions with attachments`` () =
     let attachment = { Type = "file"; Path = Some "./test.fs"; Url = None; Content = None }
-    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None }
+    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None; ClientTurnId = None }
     opts.Attachments |> Option.get |> List.length |> should equal 1
 
 // ---------------------------------------------------------------------------
@@ -320,10 +320,10 @@ let ``SessionMetadata deserializes from JSON`` () =
 
 [<Fact>]
 let ``GetStatusResponse deserializes from JSON`` () =
-    let json = """{"version":"1.0","protocolVersion":3}"""
+    let json = """{"version":"1.0","protocolVersion":4}"""
     let opts = JsonSerializerOptions(PropertyNameCaseInsensitive = true)
     let status = JsonSerializer.Deserialize<GetStatusResponse>(json, opts)
-    status.ProtocolVersion |> should equal (Some 3)
+    status.ProtocolVersion |> should equal (Some 4)
 
 [<Fact>]
 let ``GetAuthStatusResponse deserializes from JSON`` () =
@@ -406,3 +406,86 @@ let ``ResumeSessionConfig create leaves new options unset`` () =
     config.SessionId |> should equal "s1"
     config.AutoTier |> should equal None
     config.AllowTranscriptRecovery |> should equal None
+
+// ---------------------------------------------------------------------------
+// v3.0.0 (SDK protocol 4) tests
+// ---------------------------------------------------------------------------
+
+let private parseObject (json: string) =
+    System.Text.Json.Nodes.JsonNode.Parse(json).AsObject()
+
+[<Fact>]
+let ``SessionWire groups a flat resume payload into the v4 shape`` () =
+    let flat =
+        parseObject
+            """{"sessionId":"s1","model":"m","streaming":true,"requestPermission":true,"tools":[{"name":"t","idempotent":true}],"hooks":true,"disableResume":true,"trustWorkingDirectory":true,"mcpServers":{"a":{"command":"x"}},"capi":{"autoTier":"fast"},"agent":null,"customKey":1,"events":{"bogusMember":1}}"""
+    let grouped = SessionWire.groupSessionParams flat true
+    let json = grouped.ToJsonString()
+    grouped.["model"].GetValue<string>() |> should equal "m"
+    grouped.["events"].["streaming"].GetValue<bool>() |> should equal true
+    // Unknown group members are rejected by the runtime, so they are never sent.
+    grouped.["events"].AsObject().ContainsKey("bogusMember") |> should equal false
+    grouped.["permissions"].["request"].GetValue<bool>() |> should equal true
+    grouped.["tools"].["definitions"].[0].["idempotent"].GetValue<bool>() |> should equal true
+    grouped.["hooks"].["hasHandlers"].GetValue<bool>() |> should equal true
+    grouped.["suppressResumeEvent"].GetValue<bool>() |> should equal true
+    grouped.["mcp"].["envValueMode"].GetValue<string>() |> should equal "direct"
+    grouped.["github"].["capi"].["autoTier"].GetValue<string>() |> should equal "fast"
+    grouped.["customKey"].GetValue<int>() |> should equal 1
+    // Create-only and null values are dropped; flat keys do not leak to the root.
+    json |> should not' (haveSubstring "trustWorkingDirectory")
+    json |> should not' (haveSubstring "disableResume")
+    json |> should not' (haveSubstring "\"agents\"")
+    grouped.ContainsKey("streaming") |> should equal false
+
+[<Fact>]
+let ``SessionWire translates the legacy provider into a default named provider`` () =
+    let flat =
+        parseObject
+            """{"model":"llama","provider":{"type":"openai","baseUrl":"http://localhost:11434/v1","apiKeyCommand":"op read key","maxOutputTokens":2048}}"""
+    let grouped = SessionWire.groupSessionParams flat false
+    let provider = grouped.["inference"].["providers"].[0]
+    provider.["name"].GetValue<string>() |> should equal "default"
+    provider.["apiKeyCommand"].GetValue<string>() |> should equal "op read key"
+    provider.AsObject().ContainsKey("maxOutputTokens") |> should equal false
+    grouped.["inference"].["defaultProvider"].GetValue<string>() |> should equal "default"
+    grouped.["inference"].["models"].[0].["id"].GetValue<string>() |> should equal "llama"
+    grouped.["inference"].["models"].[0].["maxOutputTokens"].GetValue<int>() |> should equal 2048
+    grouped.["github"].["capi"].["enabled"].GetValue<bool>() |> should equal false
+    grouped.ContainsKey("provider") |> should equal false
+
+[<Fact>]
+let ``SessionWire empty-mode defaults keep caller values`` () =
+    let grouped =
+        SessionWire.groupSessionParams (parseObject """{"enableSessionStore":true,"availableTools":["view"]}""") false
+        |> SessionWire.applyEmptyModeDefaults
+    grouped.["state"].["enableCrossSessionStore"].GetValue<bool>() |> should equal true
+    grouped.["state"].["skipEmbeddingRetrieval"].GetValue<bool>() |> should equal true
+    grouped.["mcp"].["oauthTokenStorage"].GetValue<string>() |> should equal "in-memory"
+    grouped.["experiments"].["enableExperimentalMode"].GetValue<bool>() |> should equal false
+    ClientMode.normalize (Some ClientMode.CopilotCli) |> should equal ClientMode.CodingAgent
+    (fun () -> ClientMode.normalize (Some "bogus") |> ignore) |> should throw typeof<ArgumentException>
+
+[<Fact>]
+let ``SessionEvent.parse handles tool.shell_output`` () =
+    let data = """{"toolCallId":"tc1","text":"hello\n","sequence":3,"stream":"stderr"}"""
+    let elem = JsonDocument.Parse(data).RootElement.Clone() |> Some
+    match SessionEvent.parse "tool.shell_output" elem with
+    | ToolShellOutput d ->
+        d.ToolCallId |> should equal "tc1"
+        d.Sequence |> should equal 3L
+        d.Stream |> should equal (Some "stderr")
+    | other -> failwithf "Expected ToolShellOutput but got %A" other
+
+[<Fact>]
+let ``JsonRpcException exposes policyHelperFailure from error data`` () =
+    let data =
+        JsonDocument.Parse(
+            """{"policyHelperFailure":{"category":"timeout","failureMode":"failClosed","message":"helper timed out","previousPolicyRetained":true,"reason":"sessionStart"}}""")
+            .RootElement.Clone()
+    let ex = JsonRpcException(-32603, "blocked", Some data)
+    let failure = ex.PolicyHelperFailure |> Option.get
+    failure.Category |> should equal "timeout"
+    failure.FailureMode |> should equal "failClosed"
+    failure.PreviousPolicyRetained |> should equal true
+    JsonRpcException(-32603, "other", None).PolicyHelperFailure |> should equal None

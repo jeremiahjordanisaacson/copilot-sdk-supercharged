@@ -52,6 +52,137 @@ session.destroy
 client.stop
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected at `start` with an `SDK protocol version mismatch` error.
+
+Existing options keep working: you keep passing the same flat keywords to `create_session` / `resume_session`, and the SDK translates them into the grouped v4 wire payload (for example `streaming:` becomes `events.streaming`, `on_permission_request:` becomes `permissions.request`). A legacy single `provider:` (BYOK) is translated into a named `"default"` provider with Copilot API models disabled, matching v1 behavior.
+
+### Named BYOK providers
+
+Register several provider connections and model definitions, then select a model with `"provider/id"`:
+
+```ruby
+gateway = Copilot::NamedProviderConfig.new(
+  name: "gateway", type: "openai",
+  base_url: "https://models.example.com/v1",
+  api_key_command: "print-model-key"
+)
+
+session = client.create_session(
+  model: "gateway/chat",
+  providers: [gateway],
+  models: [
+    Copilot::ProviderModelConfig.new(provider: "gateway", id: "chat", model_id: "gpt-4o", max_output_tokens: 4096)
+  ],
+  capi: Copilot::CapiConfig.new(enabled: false) # BYOK-only catalog
+)
+
+# Route unqualified model names through a connection, and clear it again on resume
+session = client.create_session(model: "deployment", providers: [gateway], default_provider: "gateway",
+                                capi: { enabled: false })
+client.resume_session(session.session_id, model: "gpt-5.4", capi: { enabled: true }, default_provider: nil)
+```
+
+### Idempotent tools
+
+```ruby
+lookup = Copilot.define_tool(name: "lookup_order", description: "Look up an order", idempotent: true) do |args, _inv|
+  "Order #{args['id']} shipped"
+end
+```
+
+### Client turn IDs
+
+```ruby
+session.send_and_wait(prompt: "Summarize the diff", client_turn_id: "turn-42")
+```
+
+### Client mode
+
+`mode: "coding-agent"` (the default) keeps today's behavior. `mode: "empty"` requires every session to set `available_tools:` and applies conservative defaults (no telemetry, in-memory OAuth and embedding storage, no cross-session store or memory, no on-demand instruction discovery, repository hooks or host git operations). Values you pass win. `"copilot-cli"` is accepted as an alias of `"coding-agent"`.
+
+```ruby
+client = Copilot::CopilotClient.new(mode: Copilot::ClientMode::EMPTY)
+session = client.create_session(model: "gpt-5.4", available_tools: ["view"])
+```
+
+### Shell output events
+
+```ruby
+session.on(Copilot::SessionEventType::TOOL_SHELL_OUTPUT) do |event|
+  chunk = Copilot::ShellOutputData.from_hash(event.data)
+  print chunk.text # chunk.stream is "stdout", "stderr" or nil (stdout)
+end
+```
+
+### Shell authentication
+
+Answer credential prompts from shell programs (for example `git` asking for a password). Return `ShellAuthenticationResponse.accept(value)` or `.cancel`; failures and malformed answers cancel. The answer is never logged.
+
+```ruby
+session = client.create_session(
+  on_shell_authentication_request: ->(request, _ctx) {
+    # request.program, request.prompt, request.input_kind ("secret", "text" or "confirm"), request.command, request.cwd
+    Copilot::ShellAuthenticationResponse.accept(fetch_secret(request.program))
+  }
+)
+```
+
+### Memory store
+
+```ruby
+session = client.create_session(
+  store_memory: ->(memory, _ctx) {
+    # memory is a Copilot::StoredMemory (subject, fact, citations, reason)
+    MyMemoryDb.save(memory.subject, memory.fact)
+  }
+)
+```
+
+### Network callbacks
+
+Resolve proxies and answer proxy authentication challenges from your application. Tokens and passwords are never logged.
+
+```ruby
+client = Copilot::CopilotClient.new(
+  network: Copilot::NetworkConfig.new(
+    scope: Copilot::NetworkScope::RUNTIME,
+    resolve_proxy: ->(request) { request.url.start_with?("https://internal") ? "DIRECT" : "PROXY proxy.example:8080" },
+    authenticate_basic: ->(request) { request.previous_rejected ? nil : { username: "svc", password: ENV["PROXY_PASSWORD"] } },
+    authenticate_negotiate: ->(request) { kerberos_token_for(request.spn) }
+  )
+)
+```
+
+### Policy helper failures
+
+```ruby
+begin
+  client.create_session(model: "gpt-5.4")
+rescue Copilot::JsonRpcError => e
+  if (failure = e.policy_helper_failure)
+    warn "Policy helper failed (#{failure.category}, #{failure.failure_mode}): #{failure.message}"
+  end
+  raise
+end
+```
+
+### Permission mode refusal reason
+
+```ruby
+result = session.set_permission_mode(Copilot::PermissionMode::ALLOW_ALL)
+warn "Blocked by managed policy" if result.reason == Copilot::PermissionModeRefusalReason::MANAGED_POLICY
+```
+
+The v2.6.0 features (client info, Auto routing tier, ask-user variant, GitHub token provider, sandbox bypass, feature flags, session detach, message source, managed settings cache clear, policy helper recheck, model allowlist, OAuth client metadata URL, max output tokens override, structured output, agent and hook directories, working directory trust, transcript recovery, image generation config, Autopilot options, subagent lifecycle hooks and BYOK `api_key_command`) are unchanged and are sent in their v4 groups.
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*` RPC families) is not available: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process runtime hosting is not the default connection: the Ruby SDK keeps spawning the CLI (or connecting over TCP with `cli_url`).
+* A shell authentication handler runs on its own thread. When the runtime cancels the prompt, the SDK answers `cancel` immediately, but the handler thread keeps running until it returns (its answer is discarded).
+
 ## Connecting to an External Server
 
 Instead of spawning a CLI process, connect to an already-running server:
@@ -391,17 +522,21 @@ session.send_and_wait(
 | `delete_session(id)` | Permanently delete a session |
 | `get_foreground_session_id` | Get TUI foreground session |
 | `set_foreground_session_id(id)` | Set TUI foreground session |
+| `clear_managed_settings_cache` | Clear cached managed (enterprise policy) settings |
 | `on(event_type = nil, &block)` | Subscribe to lifecycle events |
 
 ### `Copilot::CopilotSession`
 
 | Method | Description |
 |--------|-------------|
-| `send(prompt:, attachments:, mode:)` | Send a message |
+| `send(prompt:, attachments:, mode:, client_turn_id:)` | Send a message |
 | `send_and_wait(prompt:, timeout:)` | Send and wait for idle |
 | `on(event_type = nil, &block)` | Subscribe to session events |
 | `get_messages` | Get conversation history |
-| `destroy` | Destroy the session |
+| `set_auto_tier(tier)` | Change the Auto routing preference |
+| `set_permission_mode(mode)` | Change the permission mode (returns `PermissionModeSetResult`) |
+| `recheck_policy_helper` | Re-run the managed-settings policy helper |
+| `destroy` | Detach from the session (state is kept for resume) |
 | `abort` | Abort current processing |
 
 ### Key Types

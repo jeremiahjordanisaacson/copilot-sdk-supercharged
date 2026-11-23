@@ -57,6 +57,135 @@ copilot_session:stop(Session),
 copilot_client:stop(Client).
 ```
 
+## What's New in v3.0.0
+
+This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime, and requires **Copilot CLI 1.0.113 or newer**: older CLIs fail startup with `{error, {protocol_mismatch, Message}}`. Existing options keep working. You pass the same atom-keyed config maps as before, and `copilot_client` converts the flat payload into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, a hooks map becomes `hooks.hasHandlers`, and `allow_transcript_recovery` stays at the root). The legacy single `provider` map becomes a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) now runs under `node`.
+
+Protocol 4 also brings these behavior fixes: tools are declared in `tools.definitions` and answered through `tool.call`; hooks run through `hooks.invoke`; session events are read from the `event` field of `session.event` notifications; and a `success: false` reply from `session.delete` or `session.setForeground` is returned as `{error, ...}`.
+
+New in this release:
+
+* **Named BYOK providers**: `providers`, `models`, `default_provider`, and `capi` session keys (sent as `inference.providers`, `inference.models`, `inference.defaultProvider`, and `github.capi`). Select a registered model as `<<"Provider/Id">>`; `default_provider => null` clears the default on resume. Wire helpers: `copilot_types:named_provider_config/1` and `copilot_types:provider_model_config/1`.
+* **Idempotent tools**: `copilot_tools:define_tool/5` with `#{idempotent => true}` (or `<<"idempotent">> => true` in the tool map) marks a tool as safe to retry.
+* **Client turn ID**: the `client_turn_id` message option is sent as `clientTurnId`.
+* **Client mode**: client option `mode => coding_agent` (the default, unchanged behavior) or `mode => empty`; the binaries `<<"coding-agent">>` and `<<"empty">>` work too, and the legacy `<<"copilot-cli">>` is an alias of `coding-agent`. In empty mode every create and resume must set `available_tools` (otherwise `{error, {invalid_config, _}}`), and safe defaults are applied under your values: experimental mode, telemetry, cross-session store, memory, on-demand instructions, repository hooks, and host Git operations off; in-memory MCP OAuth token and embedding cache storage; embedding retrieval skipped.
+* **Shell output events**: `copilot_types:session_event_type(tool_shell_output)` (`<<"tool.shell_output">>`) and `copilot_types:shell_output/1`, which decodes `#{tool_call_id, text, sequence, stream}`.
+* **Shell authentication**: `on_shell_authentication_request => fun(Request) -> {accept, Value} | cancel end` answers `sudo`, `ssh`, and `git` prompts (`shellAuthentication.request`). When the runtime sends `shellAuthentication.cancel`, the pending prompt is answered with `cancel`.
+* **Memory store**: `store_memory => fun(Memory) -> ok | {error, Reason} end` receives each approved memory (`#{session_id, subject, fact, citations, reason}`) through `memoryStore.store`.
+* **Network callbacks**: client option `network => #{scope, resolve_proxy, authenticate_negotiate, authenticate_basic}`, registered with `network.setProvider` after connecting. Tokens and passwords are never logged.
+* **Policy helper failure**: `copilot_types:policy_helper_failure/1` reads `policyHelperFailure` from a failed `create_session` / `resume_session` result or a managed settings snapshot.
+* **Permission mode refusal reason**: `copilot_session:set_permission_mode/2` returns `#{success, mode, reason}`; `copilot_types:permission_mode_refusal(managed_policy)` is `<<"managed_policy">>`.
+
+Run a shared service in empty mode with proxy callbacks:
+
+```erlang
+{ok, Client} = copilot_client:start_link(#{
+    mode    => empty,
+    network => #{
+        scope         => connection,
+        resolve_proxy => fun(#{url := Url}) ->
+            case binary:match(Url, <<".internal.example">>) of
+                nomatch -> <<"PROXY proxy.example:8080">>;
+                _       -> <<"DIRECT">>
+            end
+        end,
+        authenticate_basic => fun
+            (#{previous_rejected := true}) -> undefined;
+            (#{proxy := _Proxy}) ->
+                #{username => <<"svc-proxy">>,
+                  password => list_to_binary(os:getenv("PROXY_PASSWORD", ""))}
+        end
+    }
+}).
+```
+
+Use named providers, an idempotent tool, shell authentication, and an application memory store:
+
+```erlang
+LookupOrder = copilot_tools:define_tool(
+    <<"lookup_order">>,
+    <<"Look up an order by ID">>,
+    #{<<"type">> => <<"object">>,
+      <<"properties">> => #{<<"id">> => #{<<"type">> => <<"string">>}}},
+    fun(#{<<"id">> := Id}, _Invocation) -> <<"Order ", Id/binary, " shipped">> end,
+    #{idempotent => true}
+),
+{ok, Session} = copilot_client:create_session(Client, #{
+    model           => <<"gateway/chat">>,
+    available_tools => [<<"view">>, <<"lookup_order">>],
+    tools           => [LookupOrder],
+    providers       => [#{name            => <<"gateway">>,
+                          type            => <<"openai">>,
+                          base_url        => <<"https://models.example.com/v1">>,
+                          api_key_command => <<"print-gateway-key">>}],
+    models          => [#{provider          => <<"gateway">>,
+                          id                => <<"chat">>,
+                          wire_model        => <<"deployment-1">>,
+                          max_output_tokens => 8192}],
+    capi            => #{enabled => false},
+    on_shell_authentication_request => fun
+        (#{input_kind := <<"confirm">>}) -> cancel;
+        (#{program := <<"sudo">>}) -> {accept, list_to_binary(os:getenv("SUDO_PASSWORD", ""))};
+        (_Other) -> cancel
+    end,
+    store_memory => fun(#{subject := Subject, fact := Fact}) ->
+        io:format("remember [~s]: ~s~n", [Subject, Fact]),
+        ok
+    end
+}).
+```
+
+Stream shell output, tag a turn, and change the permission mode:
+
+```erlang
+Ref = copilot_session:subscribe(Session, self()),
+{ok, _MessageId} = copilot_session:send(Session, #{
+    prompt         => <<"Run the test suite">>,
+    client_turn_id => <<"turn-42">>
+}),
+receive
+    {copilot_session_event, _SessionId, #{type := <<"tool.shell_output">>, data := Data}} ->
+        #{text := Text} = copilot_types:shell_output(Data),
+        io:format("~s", [Text])
+after 5000 ->
+    ok
+end,
+ManagedPolicy = copilot_types:permission_mode_refusal(managed_policy),
+case copilot_session:set_permission_mode(Session, <<"allow-all">>) of
+    {ok, #{success := false, reason := ManagedPolicy, mode := Mode}} ->
+        io:format("Managed policy keeps the session in ~s mode~n", [Mode]);
+    {ok, _Applied} ->
+        ok
+end.
+```
+
+Inspect a policy helper failure, and clear the default provider on resume:
+
+```erlang
+case copilot_client:create_session(Client, #{available_tools => [<<"view">>]}) of
+    {ok, _NewSession} ->
+        ok;
+    {error, _} = Error ->
+        case copilot_types:policy_helper_failure(Error) of
+            #{category := Category, message := Message} ->
+                io:format("Policy helper failed (~s): ~s~n", [Category, Message]);
+            undefined ->
+                Error
+        end
+end,
+{ok, Resumed} = copilot_client:resume_session(Client, SessionId, #{
+    available_tools  => [<<"view">>],
+    default_provider => null   %% sends inference.defaultProvider: null
+}).
+```
+
+### Known limitations
+
+* The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not available. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
+* In-process native runtime hosting is not the default connection: this SDK keeps spawning the CLI over stdio. The existing `in_process` helper option is unchanged.
+* Callbacks that the runtime raises while `create_session/2` is still in flight (for example a `sessionStart` hook) are answered with no output, because the session ID is not known until `session.create` returns. `resume_session/3` registers its callbacks before sending the request.
+* Option keys this SDK sent before v3.0.0 that have no protocol 4 equivalent (`rewindEnabled`, `otlpProtocol`, `contentExclusion`, `mcpAuthHandler`) are kept unchanged at the top level of the payload for forward compatibility.
+
 ## Architecture
 
 The SDK follows OTP principles with gen_server behaviours:
@@ -160,7 +289,11 @@ Register a handler to respond to user input requests:
 
 ## Hooks
 
-Register lifecycle hooks for observability:
+Register lifecycle hooks. The runtime calls them through `hooks.invoke` requests
+with the hook input (a map with binary keys). Return a map to supply the hook
+output (for example `#{<<"permissionDecision">> => <<"deny">>}` from
+`on_pre_tool_use`); any other return value (such as `ok`) leaves the runtime's
+behavior unchanged:
 
 ```erlang
 Hooks = #{
@@ -370,8 +503,9 @@ Hooks = #{
 - External-tool cancellation is N/A: this SDK runs tools on the `tool.call` request path.
 - Experimental host-integration callbacks (skill provider, installation confirmation,
   extension launch provider, Entra/Kerberos auth callbacks) are not yet available in this SDK.
-- Like the other Erlang hooks, the sub-agent hooks are observers dispatched from the
-  `subagent.started` / `subagent.completed` events; their return values are ignored.
+- Since v3.0.0, hooks (including the sub-agent hooks) run through `hooks.invoke`
+  requests: a hook that returns a map supplies the hook output, and any other
+  return value leaves the runtime's behavior unchanged.
 
 ## Recent Features (v2.4–v2.5)
 
@@ -492,9 +626,9 @@ copilot_types:session_event_type(session_compaction_start). %% <<"session.compac
 
 ## Protocol Version
 
-The SDK protocol version must match the server. The current version is **3**.
+The SDK speaks SDK protocol **4**, which requires Copilot CLI 1.0.113 or newer.
 
-The client automatically verifies protocol compatibility on startup via the `ping` response.
+The client verifies protocol compatibility on startup via the `ping` response. A server that reports another version (or none) fails startup with `{error, {protocol_mismatch, Message}}`, where `Message` reads `SDK protocol version mismatch: SDK supports version 4, but server reports version N. Please update your SDK or server to ensure compatibility.`
 
 ## Running Tests
 
@@ -540,6 +674,7 @@ rebar3 ct
 | `set_auto_tier(Pid, Tier)` | Switch the Auto routing tier (`null` resets) |
 | `get_managed_settings(Pid)` | Get effective managed settings |
 | `recheck_policy_helper(Pid)` | Re-run the managed policy helper |
+| `set_permission_mode(Pid, Mode)` | Change the permission mode; returns `#{success, mode, reason}` |
 | `disconnect(Pid)` | Detach from the server session and stop the process |
 | `session_id(Pid)` | Get session ID |
 
@@ -549,6 +684,7 @@ rebar3 ct
 |----------|-------------|
 | `define_tool(Name, Desc, Handler)` | Define a tool without params |
 | `define_tool(Name, Desc, Params, Handler)` | Define a tool with JSON Schema |
+| `define_tool(Name, Desc, Params, Handler, Options)` | Define a tool with declaration options such as `#{idempotent => true}` |
 | `normalize_result(Value)` | Normalize a return value |
 
 ## License

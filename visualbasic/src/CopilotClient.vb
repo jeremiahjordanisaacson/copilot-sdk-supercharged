@@ -40,9 +40,12 @@ Namespace GitHub.Copilot.SDK
         Implements IDisposable
 
         Private ReadOnly _sessions As New ConcurrentDictionary(Of String, CopilotSession)
+        Private ReadOnly _gitHubTokenProviders As New ConcurrentDictionary(Of String, GitHubTokenRegistration)
         Private ReadOnly _options As CopilotClientOptions
+        Private ReadOnly _mode As String
         Private _process As Process
         Private _rpcClient As JsonRpcClient
+        Private _negotiatedProtocolVersion As Integer? = Nothing
         Private _started As Boolean = False
         Private _disposed As Boolean = False
 
@@ -56,11 +59,30 @@ Namespace GitHub.Copilot.SDK
         End Property
 
         ''' <summary>
+        ''' Gets the client mode in effect: <see cref="ClientMode.CodingAgent"/> or <see cref="ClientMode.Empty"/>.
+        ''' </summary>
+        Public ReadOnly Property Mode As String
+            Get
+                Return _mode
+            End Get
+        End Property
+
+        ''' <summary>
+        ''' Gets the SDK protocol version negotiated with the server (Nothing before start).
+        ''' </summary>
+        Public ReadOnly Property NegotiatedProtocolVersion As Integer?
+            Get
+                Return _negotiatedProtocolVersion
+            End Get
+        End Property
+
+        ''' <summary>
         ''' Creates a new instance of <see cref="CopilotClient"/>.
         ''' </summary>
         ''' <param name="options">Options for creating the client. If Nothing, defaults are used.</param>
         Public Sub New(Optional options As CopilotClientOptions = Nothing)
             _options = If(options, New CopilotClientOptions())
+            _mode = ClientMode.Normalize(_options.Mode)
 
             ' Validate mutually exclusive options
             If Not String.IsNullOrEmpty(_options.CliUrl) AndAlso Not String.IsNullOrEmpty(_options.CliPath) Then
@@ -136,10 +158,17 @@ Namespace GitHub.Copilot.SDK
             End If
 
             _rpcClient = New JsonRpcClient(_process.StandardOutput.BaseStream, _process.StandardInput.BaseStream)
+            RegisterServerHandlers()
             _rpcClient.StartListening()
 
-            ' Verify protocol compatibility
+            ' Verify protocol compatibility (connect, falling back to ping on older CLIs)
             Await VerifyProtocolVersionAsync(cancellationToken)
+
+            ' Register host network callbacks
+            If _options.Network IsNot Nothing AndAlso _options.Network.HasCallbacks Then
+                Await _rpcClient.InvokeAsync(Of JsonElement)(
+                    "network.setProvider", _options.Network.ToSetProviderParams(), cancellationToken)
+            End If
 
             ' Set up session filesystem provider if configured
             If _options.SessionFs IsNot Nothing AndAlso
@@ -170,6 +199,7 @@ Namespace GitHub.Copilot.SDK
                 End Try
             Next
             _sessions.Clear()
+            _gitHubTokenProviders.Clear()
 
             ' Shut down RPC
             If _rpcClient IsNot Nothing Then
@@ -220,9 +250,22 @@ Namespace GitHub.Copilot.SDK
             Await EnsureStartedAsync(cancellationToken)
 
             Dim cfg = If(config, New SessionConfig())
-            Dim request = BuildSessionCreateRequest(cfg)
+            If Not String.IsNullOrEmpty(cfg.GitHubToken) AndAlso cfg.GitHubTokenProvider IsNot Nothing Then
+                Throw New ArgumentException("GitHubToken and GitHubTokenProvider are mutually exclusive")
+            End If
+            RequireAvailableToolsForMode(cfg.AvailableTools)
 
-            Dim response = Await _rpcClient.InvokeAsync(Of SessionCreateResponse)("session.create", request, cancellationToken)
+            Dim registrationId = RegisterGitHubTokenProvider(cfg.GitHubTokenProvider, Nothing)
+            Dim request = BuildSessionCreateRequest(cfg, registrationId)
+            Dim wireRequest = FinalizeSessionParams(request, isResume:=False)
+
+            Dim response As SessionCreateResponse
+            Try
+                response = Await _rpcClient.InvokeAsync(Of SessionCreateResponse)("session.create", wireRequest, cancellationToken)
+            Catch
+                RemoveGitHubTokenProvider(registrationId)
+                Throw
+            End Try
 
             Dim session As New CopilotSession(response.SessionId, _rpcClient, response.WorkspacePath)
             If response.Capabilities IsNot Nothing Then
@@ -251,7 +294,8 @@ Namespace GitHub.Copilot.SDK
                 Next
             End If
 
-            _sessions.TryAdd(response.SessionId, session)
+            TrackSession(session, registrationId, cfg.OnSubagentStart, cfg.OnSubagentStop,
+                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory)
             Return session
         End Function
 
@@ -271,15 +315,58 @@ Namespace GitHub.Copilot.SDK
             Await EnsureStartedAsync(cancellationToken)
 
             Dim cfg = If(config, New ResumeSessionConfig())
+            RequireAvailableToolsForMode(cfg.AvailableTools)
+
             Dim request As New Dictionary(Of String, Object) From {
                 {"sessionId", sessionId}
             }
 
-            If cfg.Skills IsNot Nothing Then
-                request("skills") = cfg.Skills
+            If Not String.IsNullOrEmpty(cfg.Model) Then
+                request("model") = cfg.Model
             End If
 
-            Dim response = Await _rpcClient.InvokeAsync(Of SessionCreateResponse)("session.resume", request, cancellationToken)
+            If cfg.Skills IsNot Nothing AndAlso cfg.Skills.Count > 0 Then
+                request("includedBuiltinSkills") = cfg.Skills
+            End If
+
+            If cfg.IncludeSubAgentStreamingEvents Then
+                request("includeSubAgentStreamingEvents") = True
+            End If
+
+            Dim registrationId = RegisterGitHubTokenProvider(cfg.GitHubTokenProvider, sessionId)
+            AddSharedSessionOptions(
+                request,
+                cfg.AutoTier, cfg.EnableWebSocketResponses, cfg.CapiEnabled, cfg.AskUserVariant,
+                cfg.SandboxConfig, cfg.FeatureFlags, cfg.AllowedModels, cfg.AuthClientIdMetadataUrl,
+                cfg.AgentDirectories, cfg.HookDirectories, cfg.InteractiveUser,
+                cfg.ExcludedManagedSettings, cfg.EnforceManagedModelDefaults,
+                cfg.ImageGeneration, cfg.Autopilot, cfg.Provider,
+                cfg.OnSubagentStart IsNot Nothing OrElse cfg.OnSubagentStop IsNot Nothing,
+                registrationId, cfg.AvailableTools, cfg.ExcludedTools, cfg.Tools,
+                cfg.Providers, cfg.Models, cfg.DefaultProvider,
+                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing)
+
+            ' Resume-only options.
+            If cfg.AllowTranscriptRecovery.HasValue Then
+                request("allowTranscriptRecovery") = cfg.AllowTranscriptRecovery.Value
+            End If
+            If cfg.SuppressResumeEvent.HasValue Then
+                request("suppressResumeEvent") = cfg.SuppressResumeEvent.Value
+            End If
+            If cfg.ClearDefaultProvider Then
+                ' An explicit null clears the provider stored with the session.
+                request("inference") = New Dictionary(Of String, Object) From {{"defaultProvider", Nothing}}
+            End If
+
+            Dim wireRequest = FinalizeSessionParams(request, isResume:=True)
+
+            Dim response As SessionCreateResponse
+            Try
+                response = Await _rpcClient.InvokeAsync(Of SessionCreateResponse)("session.resume", wireRequest, cancellationToken)
+            Catch
+                RemoveGitHubTokenProvider(registrationId)
+                Throw
+            End Try
 
             Dim session As New CopilotSession(response.SessionId, _rpcClient, response.WorkspacePath)
             If response.Capabilities IsNot Nothing Then
@@ -301,8 +388,18 @@ Namespace GitHub.Copilot.SDK
                 Next
             End If
 
-            _sessions.TryAdd(response.SessionId, session)
+            TrackSession(session, registrationId, cfg.OnSubagentStart, cfg.OnSubagentStop,
+                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory)
             Return session
+        End Function
+
+        ''' <summary>
+        ''' Clears the server's managed-settings (enterprise policy) cache.
+        ''' </summary>
+        Public Async Function ClearManagedSettingsCacheAsync(Optional cancellationToken As CancellationToken = Nothing) As Task
+            Await EnsureStartedAsync(cancellationToken)
+            Await _rpcClient.InvokeAsync(Of Object)(
+                "managedSettings.clearCache", New Dictionary(Of String, Object)(), cancellationToken)
         End Function
 
         ''' <summary>
@@ -327,8 +424,11 @@ Namespace GitHub.Copilot.SDK
         ) As Task
 
             Await EnsureStartedAsync(cancellationToken)
-            Await _rpcClient.InvokeAsync(Of Object)(
+            Dim result = Await _rpcClient.InvokeAsync(Of JsonElement)(
                 "session.setForeground", New With {.sessionId = sessionId}, cancellationToken)
+            If ReadBool(result, "success") = False Then
+                Throw New InvalidOperationException(If(ReadString(result, "error"), "Failed to set foreground session"))
+            End If
         End Function
 
         ''' <summary>
@@ -367,8 +467,12 @@ Namespace GitHub.Copilot.SDK
         ) As Task
 
             Await EnsureStartedAsync(cancellationToken)
-            Await _rpcClient.InvokeAsync(Of Object)(
+            Dim result = Await _rpcClient.InvokeAsync(Of JsonElement)(
                 "session.delete", New With {.sessionId = sessionId}, cancellationToken)
+            If ReadBool(result, "success") = False Then
+                Throw New InvalidOperationException(
+                    $"Failed to delete session {sessionId}: {If(ReadString(result, "error"), "Unknown error")}")
+            End If
 
             Dim removed As CopilotSession = Nothing
             If _sessions.TryRemove(sessionId, removed) Then
@@ -487,7 +591,7 @@ Namespace GitHub.Copilot.SDK
             Return String.Join(" ", parts)
         End Function
 
-        Private Function BuildSessionCreateRequest(cfg As SessionConfig) As Dictionary(Of String, Object)
+        Private Function BuildSessionCreateRequest(cfg As SessionConfig, tokenProviderRegistrationId As String) As Dictionary(Of String, Object)
             Dim request As New Dictionary(Of String, Object) From {
                 {"protocolVersion", SdkProtocolVersion.Version}
             }
@@ -501,7 +605,7 @@ Namespace GitHub.Copilot.SDK
             End If
 
             If cfg.Skills IsNot Nothing AndAlso cfg.Skills.Count > 0 Then
-                request("skills") = cfg.Skills
+                request("includedBuiltinSkills") = cfg.Skills
             End If
 
             If cfg.CustomizeMode Then
@@ -535,10 +639,6 @@ Namespace GitHub.Copilot.SDK
 
             If Not String.IsNullOrEmpty(cfg.OtlpProtocol) Then
                 request("otlpProtocol") = cfg.OtlpProtocol
-            End If
-
-            If cfg.EnableWebSocketResponses.HasValue Then
-                request("enableWebSocketResponses") = cfg.EnableWebSocketResponses.Value
             End If
 
             If cfg.ExpAssignments IsNot Nothing AndAlso cfg.ExpAssignments.Count > 0 Then
@@ -599,7 +699,7 @@ Namespace GitHub.Copilot.SDK
             End If
 
             If cfg.ExperimentalMode.HasValue Then
-                request("experimentalMode") = cfg.ExperimentalMode.Value
+                request("enableExperimentalMode") = cfg.ExperimentalMode.Value
             End If
 
             If cfg.ContentExclusion.HasValue Then
@@ -611,18 +711,6 @@ Namespace GitHub.Copilot.SDK
                 request("mcpAuthHandler") = True
             End If
 
-            If cfg.Tools IsNot Nothing AndAlso cfg.Tools.Count > 0 Then
-                Dim toolDefs As New List(Of Dictionary(Of String, Object))
-                For Each tool In cfg.Tools
-                    toolDefs.Add(New Dictionary(Of String, Object) From {
-                        {"name", tool.Name},
-                        {"description", tool.Description},
-                        {"parameters", tool.ParametersSchema}
-                    })
-                Next
-                request("tools") = toolDefs
-            End If
-
             If cfg.OnExitPlanMode IsNot Nothing Then
                 request("requestExitPlanMode") = True
             End If
@@ -631,8 +719,370 @@ Namespace GitHub.Copilot.SDK
                 request("enableSessionTelemetry") = cfg.EnableSessionTelemetry.Value
             End If
 
+            If Not String.IsNullOrEmpty(cfg.GitHubToken) Then
+                request("gitHubToken") = cfg.GitHubToken
+            End If
+
+            If cfg.ModelCapabilities IsNot Nothing Then
+                request("modelCapabilities") = cfg.ModelCapabilities
+            End If
+
+            If cfg.McpServers IsNot Nothing AndAlso cfg.McpServers.Count > 0 Then
+                request("mcpServers") = cfg.McpServers
+            End If
+
+            If cfg.IncludeSubAgentStreamingEvents Then
+                request("includeSubAgentStreamingEvents") = True
+            End If
+
+            AddSharedSessionOptions(
+                request,
+                cfg.AutoTier, cfg.EnableWebSocketResponses, cfg.CapiEnabled, cfg.AskUserVariant,
+                cfg.SandboxConfig, cfg.FeatureFlags, cfg.AllowedModels, cfg.AuthClientIdMetadataUrl,
+                cfg.AgentDirectories, cfg.HookDirectories, cfg.InteractiveUser,
+                cfg.ExcludedManagedSettings, cfg.EnforceManagedModelDefaults,
+                cfg.ImageGeneration, cfg.Autopilot, cfg.Provider,
+                cfg.OnSubagentStart IsNot Nothing OrElse cfg.OnSubagentStop IsNot Nothing,
+                tokenProviderRegistrationId, cfg.AvailableTools, cfg.ExcludedTools, cfg.Tools,
+                cfg.Providers, cfg.Models, cfg.DefaultProvider,
+                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing)
+
+            ' Create-only options.
+            If Not String.IsNullOrEmpty(cfg.Name) Then
+                request("name") = cfg.Name
+            End If
+            If Not String.IsNullOrEmpty(cfg.TrustWorkingDirectory) Then
+                request("trustWorkingDirectory") = cfg.TrustWorkingDirectory
+            End If
+            If cfg.RefreshCustomInstructions.HasValue Then
+                request("refreshCustomInstructions") = cfg.RefreshCustomInstructions.Value
+            End If
+
             Return request
         End Function
+
+        ''' <summary>
+        ''' Adds the options shared by <c>session.create</c> and <c>session.resume</c> to the flat payload.
+        ''' </summary>
+        Private Shared Sub AddSharedSessionOptions(
+            request As Dictionary(Of String, Object),
+            autoTier As String,
+            enableWebSocketResponses As Boolean?,
+            capiEnabled As Boolean?,
+            askUserVariant As String,
+            sandboxConfig As SandboxConfig,
+            featureFlags As Dictionary(Of String, Boolean),
+            allowedModels As List(Of String),
+            authClientIdMetadataUrl As String,
+            agentDirectories As List(Of String),
+            hookDirectories As List(Of String),
+            interactiveUser As Boolean?,
+            excludedManagedSettings As List(Of String),
+            enforceManagedModelDefaults As Boolean?,
+            imageGeneration As ImageGenerationConfig,
+            autopilot As AutopilotOptions,
+            provider As ProviderConfig,
+            hasSubagentHooks As Boolean,
+            tokenProviderRegistrationId As String,
+            availableTools As List(Of String),
+            excludedTools As List(Of String),
+            tools As List(Of DefineTool),
+            providers As List(Of NamedProviderConfig),
+            models As List(Of ProviderModelConfig),
+            defaultProvider As String,
+            hasShellAuthentication As Boolean,
+            hasMemoryStore As Boolean)
+
+            ' autoTier, enableWebSocketResponses and enabled share "capi" (github.capi on the wire).
+            Dim capi As New Dictionary(Of String, Object)
+            If Not String.IsNullOrEmpty(autoTier) Then capi("autoTier") = autoTier
+            If enableWebSocketResponses.HasValue Then capi("enableWebSocketResponses") = enableWebSocketResponses.Value
+            If capiEnabled.HasValue Then capi("enabled") = capiEnabled.Value
+            If capi.Count > 0 Then request("capi") = capi
+
+            If Not String.IsNullOrEmpty(askUserVariant) Then request("askUserVariant") = askUserVariant
+            If sandboxConfig IsNot Nothing Then request("sandboxConfig") = sandboxConfig.ToWire()
+            If featureFlags IsNot Nothing Then request("featureFlags") = featureFlags
+            If allowedModels IsNot Nothing Then request("allowedModels") = allowedModels
+            If Not String.IsNullOrEmpty(authClientIdMetadataUrl) Then request("authClientIdMetadataUrl") = authClientIdMetadataUrl
+            If agentDirectories IsNot Nothing Then request("agentDirectories") = agentDirectories
+            If hookDirectories IsNot Nothing Then request("hookDirectories") = hookDirectories
+            If interactiveUser.HasValue Then request("interactiveUser") = interactiveUser.Value
+            If excludedManagedSettings IsNot Nothing Then request("excludedManagedSettings") = excludedManagedSettings
+            If enforceManagedModelDefaults.HasValue Then request("enforceManagedModelDefaults") = enforceManagedModelDefaults.Value
+            If imageGeneration IsNot Nothing Then request("imageGeneration") = imageGeneration.ToWire()
+            If autopilot IsNot Nothing Then request("autopilot") = autopilot.ToWire()
+            If provider IsNot Nothing Then request("provider") = provider.ToWire()
+            If hasSubagentHooks Then request("hooks") = True
+            If tokenProviderRegistrationId IsNot Nothing Then request("gitHubTokenProviderRegistrationId") = tokenProviderRegistrationId
+            If availableTools IsNot Nothing Then request("availableTools") = availableTools
+            If excludedTools IsNot Nothing AndAlso excludedTools.Count > 0 Then request("excludedTools") = excludedTools
+            If tools IsNot Nothing AndAlso tools.Count > 0 Then
+                request("tools") = tools.Select(Function(t) t.ToWire()).ToList()
+            End If
+            If providers IsNot Nothing Then request("providers") = providers.Select(Function(p) p.ToWire()).ToList()
+            If models IsNot Nothing Then request("models") = models.Select(Function(m) m.ToWire()).ToList()
+            If Not String.IsNullOrEmpty(defaultProvider) Then request("defaultProvider") = defaultProvider
+            If hasShellAuthentication Then request("requestShellAuthentication") = True
+            If hasMemoryStore Then request("hasMemoryStore") = True
+        End Sub
+
+        ''' <summary>
+        ''' Translates the flat payload into the SDK protocol 4 grouped payload and applies the
+        ''' client-mode defaults (called right before sending create and resume).
+        ''' </summary>
+        Private Function FinalizeSessionParams(request As Dictionary(Of String, Object), isResume As Boolean) As Dictionary(Of String, Object)
+            Dim grouped = SessionWire.GroupSessionParams(request, isResume)
+            If _mode = ClientMode.Empty Then
+                Return SessionWire.ApplyEmptyModeDefaults(grouped)
+            End If
+            Return grouped
+        End Function
+
+        Private Sub RequireAvailableToolsForMode(availableTools As List(Of String))
+            If _mode = ClientMode.Empty AndAlso availableTools Is Nothing Then
+                Throw New InvalidOperationException(
+                    "CopilotClient is in mode 'empty' but the session config did not specify AvailableTools. " &
+                    "Empty mode requires every session to opt into the tools it wants.")
+            End If
+        End Sub
+
+        Private Function RegisterGitHubTokenProvider(
+            provider As Func(Of GitHubTokenProviderArgs, Task(Of GitHubTokenProviderResult)),
+            sessionId As String) As String
+
+            If provider Is Nothing Then Return Nothing
+            Dim registrationId = Guid.NewGuid().ToString()
+            _gitHubTokenProviders(registrationId) = New GitHubTokenRegistration With {
+                .Provider = provider,
+                .SessionId = sessionId
+            }
+            Return registrationId
+        End Function
+
+        Private Sub RemoveGitHubTokenProvider(registrationId As String)
+            If registrationId Is Nothing Then Return
+            Dim removed As GitHubTokenRegistration = Nothing
+            _gitHubTokenProviders.TryRemove(registrationId, removed)
+        End Sub
+
+        ''' <summary>
+        ''' Wires the host callbacks into a created/resumed session and tracks it for server requests.
+        ''' </summary>
+        Private Sub TrackSession(
+            session As CopilotSession,
+            registrationId As String,
+            onSubagentStart As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput)),
+            onSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput)),
+            onShellAuthentication As ShellAuthenticationHandler,
+            onStoreMemory As Func(Of StoredMemory, Task))
+
+            Dim registration As GitHubTokenRegistration = Nothing
+            If registrationId IsNot Nothing AndAlso _gitHubTokenProviders.TryGetValue(registrationId, registration) Then
+                registration.SessionId = session.SessionId
+            End If
+            session.SetSubagentHooks(onSubagentStart, onSubagentStop)
+            session.SetShellAuthenticationHandler(onShellAuthentication)
+            session.SetMemoryStoreHandler(onStoreMemory)
+            session.SetDetachedCallback(Sub()
+                                            RemoveGitHubTokenProvider(registrationId)
+                                            ' Only forget the session if a later create/resume did not replace it.
+                                            DirectCast(_sessions, ICollection(Of KeyValuePair(Of String, CopilotSession))).Remove(
+                                                New KeyValuePair(Of String, CopilotSession)(session.SessionId, session))
+                                        End Sub)
+            _sessions(session.SessionId) = session
+        End Sub
+
+        ' -----------------------------------------------------------------------
+        '  Server-to-client requests
+        ' -----------------------------------------------------------------------
+
+        Private Sub RegisterServerHandlers()
+            _rpcClient.OnRequest("gitHubToken.getToken", AddressOf HandleGitHubTokenRequestAsync)
+            _rpcClient.OnRequest("hooks.invoke", AddressOf HandleHooksInvokeAsync)
+            _rpcClient.OnRequest("exitPlanMode.request", AddressOf HandleExitPlanModeRequestAsync)
+            _rpcClient.OnRequest("shellAuthentication.request", AddressOf HandleShellAuthenticationRequestAsync)
+            _rpcClient.OnRequest("shellAuthentication.cancel", AddressOf HandleShellAuthenticationCancelAsync)
+            _rpcClient.OnRequest("memoryStore.store", AddressOf HandleMemoryStoreAsync)
+            If _options.Network IsNot Nothing Then
+                If _options.Network.ResolveProxy IsNot Nothing Then
+                    _rpcClient.OnRequest("network.resolveProxy", AddressOf HandleResolveProxyAsync)
+                End If
+                If _options.Network.AuthenticateNegotiate IsNot Nothing Then
+                    _rpcClient.OnRequest("network.authenticateNegotiate", AddressOf HandleAuthenticateNegotiateAsync)
+                End If
+                If _options.Network.AuthenticateBasic IsNot Nothing Then
+                    _rpcClient.OnRequest("network.authenticateBasic", AddressOf HandleAuthenticateBasicAsync)
+                End If
+            End If
+        End Sub
+
+        ''' <summary>Answers <c>gitHubToken.getToken</c> with the registered provider's token.</summary>
+        Private Async Function HandleGitHubTokenRequestAsync(params As JsonElement) As Task(Of Object)
+            Dim registrationId = ReadString(params, "registrationId")
+            Dim registration As GitHubTokenRegistration = Nothing
+            If registrationId Is Nothing OrElse Not _gitHubTokenProviders.TryGetValue(registrationId, registration) Then
+                Throw New InvalidOperationException($"No GitHub token provider registered for registration ID ""{registrationId}""")
+            End If
+            Dim args As New GitHubTokenProviderArgs With {
+                .Host = If(ReadString(params, "host"), ""),
+                .SessionId = If(ReadString(params, "sessionId"), registration.SessionId),
+                .Reason = If(ReadString(params, "reason"), "initial")
+            }
+            Dim result = Await registration.Provider(args)
+            Return If(result, GitHubTokenProviderResult.Cancelled()).ToWire()
+        End Function
+
+        ''' <summary>Dispatches <c>hooks.invoke</c> to the target session ({output?}).</summary>
+        Private Async Function HandleHooksInvokeAsync(params As JsonElement) As Task(Of Object)
+            Dim sessionId = ReadString(params, "sessionId")
+            Dim session As CopilotSession = Nothing
+            If sessionId Is Nothing OrElse Not _sessions.TryGetValue(sessionId, session) Then
+                Throw New InvalidOperationException($"Session not found: {sessionId}")
+            End If
+            Dim input As JsonElement = Nothing
+            If params.ValueKind = JsonValueKind.Object Then params.TryGetProperty("input", input)
+            Dim output = Await session.HandleHooksInvokeAsync(ReadString(params, "hookType"), input)
+            Dim response As New Dictionary(Of String, Object)
+            If output IsNot Nothing Then response("output") = output
+            Return response
+        End Function
+
+        ''' <summary>Answers <c>exitPlanMode.request</c> with the session's exit-plan-mode handler.</summary>
+        Private Async Function HandleExitPlanModeRequestAsync(params As JsonElement) As Task(Of Object)
+            Dim sessionId = ReadString(params, "sessionId")
+            Dim session As CopilotSession = Nothing
+            If sessionId Is Nothing OrElse Not _sessions.TryGetValue(sessionId, session) Then
+                Throw New InvalidOperationException($"Session not found: {sessionId}")
+            End If
+            Dim request = JsonSerializer.Deserialize(Of ExitPlanModeRequest)(params.GetRawText())
+            Return Await session.HandleExitPlanModeRequest(request)
+        End Function
+
+        ''' <summary>Answers <c>shellAuthentication.request</c>; malformed requests are cancelled.</summary>
+        Private Async Function HandleShellAuthenticationRequestAsync(params As JsonElement) As Task(Of Object)
+            Dim inputKind = ReadString(params, "inputKind")
+            Dim request As New ShellAuthenticationRequest With {
+                .SessionId = ReadString(params, "sessionId"),
+                .RequestId = ReadString(params, "requestId"),
+                .Program = ReadString(params, "program"),
+                .Prompt = ReadString(params, "prompt"),
+                .InputKind = inputKind,
+                .Command = If(ReadString(params, "command"), ""),
+                .Cwd = If(ReadString(params, "cwd"), "")
+            }
+            Dim validKind = inputKind = ShellAuthenticationInputKind.Secret OrElse
+                            inputKind = ShellAuthenticationInputKind.Text OrElse
+                            inputKind = ShellAuthenticationInputKind.Confirm
+            Dim session As CopilotSession = Nothing
+            If Not validKind OrElse request.SessionId Is Nothing OrElse request.RequestId Is Nothing OrElse
+               request.Program Is Nothing OrElse request.Prompt Is Nothing OrElse
+               Not _sessions.TryGetValue(request.SessionId, session) Then
+                Return ShellAuthenticationResponse.Cancel().ToWire()
+            End If
+            Dim answer = Await session.HandleShellAuthenticationAsync(request)
+            Return answer.ToWire()
+        End Function
+
+        ''' <summary>Handles <c>shellAuthentication.cancel</c> by cancelling the pending prompt.</summary>
+        Private Function HandleShellAuthenticationCancelAsync(params As JsonElement) As Task(Of Object)
+            Dim sessionId = ReadString(params, "sessionId")
+            Dim session As CopilotSession = Nothing
+            If sessionId IsNot Nothing AndAlso _sessions.TryGetValue(sessionId, session) Then
+                session.CancelShellAuthentication(ReadString(params, "requestId"))
+            End If
+            Return Task.FromResult(Of Object)(New Dictionary(Of String, Object)())
+        End Function
+
+        ''' <summary>Delivers <c>memoryStore.store</c> to the session's store-memory callback (replies null).</summary>
+        Private Async Function HandleMemoryStoreAsync(params As JsonElement) As Task(Of Object)
+            Dim sessionId = ReadString(params, "sessionId")
+            Dim session As CopilotSession = Nothing
+            If sessionId Is Nothing OrElse Not _sessions.TryGetValue(sessionId, session) Then
+                Throw New InvalidOperationException("Memory store owner is unavailable")
+            End If
+            Await session.HandleMemoryStoreAsync(New StoredMemory With {
+                .SessionId = sessionId,
+                .Subject = If(ReadString(params, "subject"), ""),
+                .Fact = If(ReadString(params, "fact"), ""),
+                .Citations = If(ReadString(params, "citations"), ""),
+                .Reason = If(ReadString(params, "reason"), "")
+            })
+            Return Nothing
+        End Function
+
+        ''' <summary>Answers <c>network.resolveProxy</c> {url} with {proxy?}.</summary>
+        Private Async Function HandleResolveProxyAsync(params As JsonElement) As Task(Of Object)
+            Dim result As New Dictionary(Of String, Object)
+            Dim proxy = Await _options.Network.ResolveProxy(If(ReadString(params, "url"), ""))
+            If Not String.IsNullOrEmpty(proxy) Then result("proxy") = proxy
+            Return result
+        End Function
+
+        ''' <summary>Answers <c>network.authenticateNegotiate</c> {spn} with {token?}. Tokens are never logged.</summary>
+        Private Async Function HandleAuthenticateNegotiateAsync(params As JsonElement) As Task(Of Object)
+            Dim result As New Dictionary(Of String, Object)
+            Dim token = Await _options.Network.AuthenticateNegotiate(If(ReadString(params, "spn"), ""))
+            If Not String.IsNullOrEmpty(token) Then result("token") = token
+            Return result
+        End Function
+
+        ''' <summary>
+        ''' Answers <c>network.authenticateBasic</c> {proxy, realm?, previousRejected} with
+        ''' {username?, password?}. Credentials are never logged.
+        ''' </summary>
+        Private Async Function HandleAuthenticateBasicAsync(params As JsonElement) As Task(Of Object)
+            Dim result As New Dictionary(Of String, Object)
+            Dim request As New NetworkBasicAuthRequest With {
+                .Proxy = If(ReadString(params, "proxy"), ""),
+                .Realm = ReadString(params, "realm"),
+                .PreviousRejected = ReadBool(params, "previousRejected").GetValueOrDefault(False)
+            }
+            Dim credentials = Await _options.Network.AuthenticateBasic(request)
+            If credentials IsNot Nothing Then
+                If credentials.Username IsNot Nothing Then result("username") = credentials.Username
+                If credentials.Password IsNot Nothing Then result("password") = credentials.Password
+            End If
+            Return result
+        End Function
+
+        ' -----------------------------------------------------------------------
+        '  JSON helpers
+        ' -----------------------------------------------------------------------
+
+        Private Shared Function ReadString(element As JsonElement, name As String) As String
+            Dim value As JsonElement = Nothing
+            If element.ValueKind = JsonValueKind.Object AndAlso element.TryGetProperty(name, value) AndAlso
+               value.ValueKind = JsonValueKind.String Then
+                Return value.GetString()
+            End If
+            Return Nothing
+        End Function
+
+        Private Shared Function ReadInt(element As JsonElement, name As String) As Integer?
+            Dim value As JsonElement = Nothing
+            Dim number As Integer
+            If element.ValueKind = JsonValueKind.Object AndAlso element.TryGetProperty(name, value) AndAlso
+               value.ValueKind = JsonValueKind.Number AndAlso value.TryGetInt32(number) Then
+                Return number
+            End If
+            Return Nothing
+        End Function
+
+        Private Shared Function ReadBool(element As JsonElement, name As String) As Boolean?
+            Dim value As JsonElement = Nothing
+            If element.ValueKind = JsonValueKind.Object AndAlso element.TryGetProperty(name, value) Then
+                If value.ValueKind = JsonValueKind.True Then Return True
+                If value.ValueKind = JsonValueKind.False Then Return False
+            End If
+            Return Nothing
+        End Function
+
+        ''' <summary>A GitHub token provider registered for one session.</summary>
+        Private Class GitHubTokenRegistration
+            Public Property Provider As Func(Of GitHubTokenProviderArgs, Task(Of GitHubTokenProviderResult))
+            Public Property SessionId As String
+        End Class
 
         Private Sub ApplyTelemetryEnv(psi As ProcessStartInfo, telemetry As TelemetryConfig)
             If Not String.IsNullOrEmpty(telemetry.OtlpEndpoint) Then
@@ -654,22 +1104,39 @@ Namespace GitHub.Copilot.SDK
         End Sub
 
         Private Async Function VerifyProtocolVersionAsync(ct As CancellationToken) As Task
+            Dim serverVersion As Integer? = Nothing
+            Dim connectUnsupported = False
             Try
-                Dim info = Await _rpcClient.InvokeAsync(Of Dictionary(Of String, Object))(
-                    "getServerInfo", Nothing, ct)
-
-                ' Check that server protocol version is compatible
-                If info IsNot Nothing AndAlso info.ContainsKey("protocolVersion") Then
-                    Dim serverVersion = Convert.ToInt32(info("protocolVersion"))
-                    Dim clientVersion = SdkProtocolVersion.GetVersion()
-                    If serverVersion < clientVersion Then
-                        Throw New InvalidOperationException(
-                            $"Server protocol version {serverVersion} is older than SDK version {clientVersion}")
-                    End If
+                Dim connectParams As New Dictionary(Of String, Object)
+                Dim clientInfo = _options.ClientInfo?.ToWire()
+                If clientInfo IsNot Nothing AndAlso clientInfo.Count > 0 Then
+                    connectParams("clientInfo") = clientInfo
                 End If
-            Catch ex As JsonRpcException
-                ' Server may not support getServerInfo yet; continue anyway
+                Dim result = Await _rpcClient.InvokeAsync(Of JsonElement)("connect", connectParams, ct)
+                serverVersion = ReadInt(result, "protocolVersion")
+            Catch ex As JsonRpcException When ex.Code = -32601 OrElse ex.Message.Contains("Unhandled method connect")
+                ' Legacy server without connect: fall back to ping.
+                connectUnsupported = True
             End Try
+
+            If connectUnsupported Then
+                Dim pong = Await _rpcClient.InvokeAsync(Of JsonElement)(
+                    "ping", New Dictionary(Of String, Object) From {{"message", "ping"}}, ct)
+                serverVersion = ReadInt(pong, "protocolVersion")
+            End If
+
+            Dim expected = SdkProtocolVersion.Version
+            If Not serverVersion.HasValue Then
+                Throw New InvalidOperationException(
+                    $"SDK protocol version mismatch: SDK supports version {expected}, but server does not report a protocol version. " &
+                    "Please update your SDK or server to ensure compatibility.")
+            End If
+            If serverVersion.Value <> expected Then
+                Throw New InvalidOperationException(
+                    $"SDK protocol version mismatch: SDK supports version {expected}, but server reports version {serverVersion.Value}. " &
+                    "Please update your SDK or server to ensure compatibility.")
+            End If
+            _negotiatedProtocolVersion = serverVersion
         End Function
 
         Private Async Function EnsureStartedAsync(ct As CancellationToken) As Task

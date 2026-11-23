@@ -96,7 +96,7 @@ package body Test_Harness is
       Self.Running := True;
 
       --  Stash the PID so we can clean up if needed.
-      Self.Pid := Get_Pid (Fd);
+      Self.Pid := Integer (Get_Pid (Fd));
 
       --  Set COPILOT_API_URL so the CLI process uses our proxy.
       Ada.Environment_Variables.Set
@@ -207,5 +207,66 @@ package body Test_Harness is
    begin
       return To_String (Self.Url);
    end Proxy_Url;
+
+   --------------
+   -- Cli_Path --
+   --------------
+
+   function Cli_Path return String is
+      Sep     : constant String := (1 => GNAT.OS_Lib.Directory_Separator);
+      Root    : constant String :=
+        Ada.Directories.Full_Name (".." & Sep & ".." & Sep & "..");
+      Modules : constant String :=
+        Root & Sep & "nodejs" & Sep & "node_modules" & Sep & "@github";
+      Loader  : constant String :=
+        Modules & Sep & "copilot" & Sep & "npm-loader.js";
+      Legacy  : constant String :=
+        Modules & Sep & "copilot" & Sep & "index.js";
+   begin
+      if Ada.Environment_Variables.Exists ("COPILOT_CLI_PATH") then
+         declare
+            Path : constant String :=
+              Ada.Environment_Variables.Value ("COPILOT_CLI_PATH");
+         begin
+            if Path'Length > 0 and then Ada.Directories.Exists (Path) then
+               return Path;
+            end if;
+         end;
+      end if;
+
+      if Ada.Directories.Exists (Loader) then
+         return Loader;
+      end if;
+
+      --  Legacy layout: @github/copilot-<platform>/index.js.
+      if Ada.Directories.Exists (Modules) then
+         declare
+            Search : Ada.Directories.Search_Type;
+            Item   : Ada.Directories.Directory_Entry_Type;
+         begin
+            Ada.Directories.Start_Search
+              (Search, Modules, "copilot-*",
+               (Ada.Directories.Directory => True, others => False));
+            while Ada.Directories.More_Entries (Search) loop
+               Ada.Directories.Get_Next_Entry (Search, Item);
+               declare
+                  Candidate : constant String :=
+                    Ada.Directories.Full_Name (Item) & Sep & "index.js";
+               begin
+                  if Ada.Directories.Exists (Candidate) then
+                     Ada.Directories.End_Search (Search);
+                     return Candidate;
+                  end if;
+               end;
+            end loop;
+            Ada.Directories.End_Search (Search);
+         end;
+      end if;
+
+      if Ada.Directories.Exists (Legacy) then
+         return Legacy;
+      end if;
+      return "";
+   end Cli_Path;
 
 end Test_Harness;

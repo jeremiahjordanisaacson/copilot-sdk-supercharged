@@ -35,6 +35,16 @@ package Test_Harness is
    --  Returns the base URL of the running proxy (e.g. "http://127.0.0.1:PORT").
    --  Returns "" if the proxy has not been started.
 
+   function Cli_Path return String;
+   --  Copilot CLI entry point for the E2E tests, in lookup order:
+   --    1. COPILOT_CLI_PATH when set and the file exists (CI points it at
+   --       nodejs/node_modules/.bin/copilot, which runs directly);
+   --    2. nodejs/node_modules/@github/copilot/npm-loader.js (CLI 1.0.113+,
+   --       run with node by the SDK because of the .js suffix);
+   --    3. legacy nodejs/node_modules/@github/copilot-*/index.js and
+   --       nodejs/node_modules/@github/copilot/index.js.
+   --  Returns "" when nothing is found.
+
 private
 
    type Capi_Proxy is tagged record

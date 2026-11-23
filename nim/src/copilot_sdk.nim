@@ -19,10 +19,14 @@ import copilot_sdk/types
 import copilot_sdk/jsonrpc
 import copilot_sdk/tools
 import copilot_sdk/session
+import copilot_sdk/session_params
+import copilot_sdk/sdk_protocol_version
 import copilot_sdk/client
 
 export types
 export jsonrpc
 export tools
 export session
+export session_params
+export sdk_protocol_version
 export client

@@ -18,6 +18,7 @@ module Main where
 import           Control.Monad    (forM_)
 import           Data.Aeson       (FromJSON, Value (..), (.=), object)
 import qualified Data.Aeson       as Aeson
+import qualified Data.Aeson.Types as Aeson (parseMaybe)
 import           Data.Text        (Text)
 import qualified Data.Text        as T
 import qualified Data.Text.IO     as TIO
@@ -110,11 +111,7 @@ main = do
   TIO.putStrLn ""
   TIO.putStrLn "Sending message: \"What is the weather in San Francisco?\""
   mResponse <- sendAndWait session
-    (MessageOptions
-      { moPrompt      = "What is the weather in San Francisco?"
-      , moAttachments = Nothing
-      , moMode        = Nothing
-      })
+    (defaultMessageOptions "What is the weather in San Francisco?")
     Nothing  -- Use default 60s timeout
 
   case mResponse of

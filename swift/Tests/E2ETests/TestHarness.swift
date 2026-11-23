@@ -27,6 +27,9 @@ final class TestHarness {
     /// startup metadata. Required so the CLI accepts the replay proxy's TLS cert.
     private(set) var caFilePath: String?
 
+    /// Whether the default replay users were registered with the running proxy.
+    private var copilotUsersRegistered = false
+
     /// Start the replay proxy server.
     ///
     /// - Returns: The proxy URL (e.g. `http://127.0.0.1:PORT`).
@@ -141,6 +144,61 @@ final class TestHarness {
         else {
             throw TestHarnessError.configFailed
         }
+
+        if !copilotUsersRegistered {
+            try await registerDefaultCopilotUsers()
+            copilotUsersRegistered = true
+        }
+    }
+
+    /// Register the replay user the proxy's `/copilot_internal/user` endpoint returns
+    /// for `token`. Current CLIs resolve the Copilot API endpoint from this user (through
+    /// `COPILOT_DEBUG_GITHUB_API_URL`), so every token the tests use must be known.
+    func setCopilotUserByToken(_ token: String) async throws {
+        guard let proxyUrl = proxyUrl else {
+            throw TestHarnessError.notStarted
+        }
+
+        let url = URL(string: "\(proxyUrl)/copilot-user-config")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "token": token,
+            "response": [
+                "login": "e2e-test-user",
+                "id": 12345,
+                "copilot_plan": "individual_pro",
+                "endpoints": [
+                    "api": proxyUrl,
+                    "telemetry": "https://sdk-hydro-collector.example.com",
+                ],
+                "analytics_tracking_id": "e2e-test-tracking-id",
+            ] as [String: Any],
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200
+        else {
+            throw TestHarnessError.configFailed
+        }
+    }
+
+    /// Register the tokens the E2E clients authenticate with.
+    private func registerDefaultCopilotUsers() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        var tokens: [String] = []
+        for token in [environment["GH_TOKEN"], environment["GITHUB_TOKEN"], "fake-test-token"] {
+            if let token = token, !token.isEmpty, !tokens.contains(token) {
+                tokens.append(token)
+            }
+        }
+        for token in tokens {
+            try await setCopilotUserByToken(token)
+        }
     }
 
     /// Stop the replay proxy server.
@@ -169,6 +227,7 @@ final class TestHarness {
         process = nil
         stdoutPipe = nil
         proxyUrl = nil
+        copilotUsersRegistered = false
     }
 
     /// Read a single line (up to newline) from a file handle.

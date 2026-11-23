@@ -15,6 +15,13 @@ classdef JsonRpcClient < handle
         Pending          % containers.Map: id -> struct (response holder)
         Running (1,1) logical = false
         ReadTimer        % timer object for background reading
+        RequestHandlers  % containers.Map: method -> function handle
+    end
+
+    properties (SetAccess = private)
+        % The "error" object (code, message, data) of the last JSON-RPC
+        % error response, or [] when the last request succeeded.
+        LastError = []
     end
 
     events
@@ -26,6 +33,17 @@ classdef JsonRpcClient < handle
             %JsonRpcClient  Wrap a java.lang.Process for JSON-RPC I/O.
             obj.Process = javaProcess;
             obj.Pending = containers.Map('KeyType', 'char', 'ValueType', 'any');
+            obj.RequestHandlers = containers.Map('KeyType', 'char', 'ValueType', 'any');
+        end
+
+        function onRequest(obj, method, handler)
+            %onRequest  Answer server-to-client requests for METHOD.
+            %
+            %   rpc.onRequest('hooks.invoke', @(params) struct());
+            %
+            %   The handler receives the decoded params struct and returns the
+            %   result ([] replies null).  Errors become JSON-RPC errors.
+            obj.RequestHandlers(method) = handler;
         end
 
         function start(obj)
@@ -83,6 +101,7 @@ classdef JsonRpcClient < handle
                 'params',  params);
 
             obj.Pending(id) = struct('done', false, 'result', [], 'error', []);
+            obj.LastError = [];
             obj.sendRaw(msg);
 
             % Block until response arrives or timeout.
@@ -93,6 +112,7 @@ classdef JsonRpcClient < handle
                     if entry.done
                         obj.Pending.remove(id);
                         if ~isempty(entry.error)
+                            obj.LastError = entry.error;
                             error('copilot:rpcError', ...
                                 'JSON-RPC error %d: %s', ...
                                 entry.error.code, entry.error.message);
@@ -128,11 +148,46 @@ classdef JsonRpcClient < handle
     methods (Access = private)
         function sendRaw(obj, msgStruct)
             %sendRaw  Serialize a struct to JSON and write to stdin.
-            jsonBytes = jsonencode(msgStruct);
-            header = sprintf('Content-Length: %d\r\n\r\n', strlength(jsonBytes));
+            obj.writeJson(jsonencode(msgStruct));
+        end
+
+        function writeJson(obj, jsonText)
+            %writeJson  Write one Content-Length framed JSON message.
+            byteCount = numel(unicode2native(jsonText, 'UTF-8'));
+            header = sprintf('Content-Length: %d\r\n\r\n', byteCount);
             obj.Writer.write(header);
-            obj.Writer.write(jsonBytes);
+            obj.Writer.write(jsonText);
             obj.Writer.flush();
+        end
+
+        function answerRequest(obj, msg)
+            %answerRequest  Reply to a server-to-client request.
+            params = struct();
+            if isfield(msg, 'params')
+                params = msg.params;
+            end
+            idJson = jsonencode(msg.id);
+            if ~obj.RequestHandlers.isKey(msg.method)
+                obj.writeJson(sprintf( ...
+                    '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":%s}}', ...
+                    idJson, jsonencode(['Method not found: ' msg.method])));
+                return;
+            end
+            handler = obj.RequestHandlers(msg.method);
+            try
+                result = handler(params);
+                if isnumeric(result) && isempty(result)
+                    resultJson = 'null';
+                else
+                    resultJson = jsonencode(result);
+                end
+                obj.writeJson(sprintf('{"jsonrpc":"2.0","id":%s,"result":%s}', ...
+                    idJson, resultJson));
+            catch me
+                obj.writeJson(sprintf( ...
+                    '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":%s}}', ...
+                    idJson, jsonencode(me.message)));
+            end
         end
 
         function readLoop(obj)
@@ -175,6 +230,12 @@ classdef JsonRpcClient < handle
         function handleMessage(obj, jsonStr)
             %handleMessage  Route an incoming JSON-RPC message.
             msg = jsondecode(jsonStr);
+
+            % Server-to-client request (callbacks, hooks, providers).
+            if isfield(msg, 'method') && isfield(msg, 'id') && ~isempty(msg.id)
+                obj.answerRequest(msg);
+                return;
+            end
 
             % Response to a pending request.
             if isfield(msg, 'id') && ~isempty(msg.id)

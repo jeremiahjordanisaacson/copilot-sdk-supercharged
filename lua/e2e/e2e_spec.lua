@@ -8,9 +8,12 @@
 local CopilotClient = require("copilot.client")
 local CapiProxy     = require("e2e.testharness.proxy")
 
---- Resolve the path to the CLI binary (node + index.js).
--- Checks COPILOT_CLI_PATH, then falls back to the repo's nodejs installation.
--- @return string  The CLI path suitable for passing to CopilotClient
+--- Resolve the CLI command for tests.
+-- Lookup order: COPILOT_CLI_PATH (CI points it at the npm bin shim, which runs
+-- directly), then @github/copilot/npm-loader.js (CLI >= 1.0.10x ships a native
+-- binary that this loader launches; run with node), then the legacy index.js
+-- entry points of older CLIs.
+-- @return string  The CLI command suitable for passing to CopilotClient
 local function resolve_cli_path()
     local env_path = os.getenv("COPILOT_CLI_PATH")
     if env_path and env_path ~= "" then
@@ -28,8 +31,15 @@ local function resolve_cli_path()
     local github_modules = repo_root .. sep .. "nodejs" .. sep .. "node_modules"
         .. sep .. "@github"
 
-    -- As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-    -- package (e.g. @github/copilot-linux-x64); prefer it when present.
+    local loader = github_modules .. sep .. "copilot" .. sep .. "npm-loader.js"
+    local lf = io.open(loader, "r")
+    if lf then
+        lf:close()
+        return 'node "' .. loader .. '"'
+    end
+
+    -- From CLI 1.0.64-1 until the native-binary releases, the runnable index.js
+    -- shipped in a platform-specific package (e.g. @github/copilot-linux-x64).
     local ls = io.popen('ls -1 "' .. github_modules .. '"/copilot-*/index.js 2>/dev/null')
     if ls then
         for line in ls:lines() do
@@ -67,6 +77,8 @@ describe("Lua SDK E2E", function()
     local function make_client(extra_opts)
         local env = {
             COPILOT_API_URL = proxy and proxy:url() or "",
+            -- Route GitHub API calls (including /copilot_internal/user) to the replay proxy.
+            COPILOT_DEBUG_GITHUB_API_URL = proxy and proxy:url() or "",
             GH_TOKEN = os.getenv("GH_TOKEN") or "fake-test-token",
             GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or "fake-test-token",
         }
@@ -104,6 +116,15 @@ describe("Lua SDK E2E", function()
         local url, err = proxy:start()
         assert.is_not_nil(url, "Failed to start replay proxy: " .. tostring(err))
         assert.is_nil(err)
+        -- Current CLIs resolve the Copilot API endpoint from /copilot_internal/user,
+        -- so register the replay user for every token the tests authenticate with.
+        local seen = {}
+        for _, token in ipairs({ os.getenv("GH_TOKEN"), os.getenv("GITHUB_TOKEN"), "fake-test-token" }) do
+            if token and token ~= "" and not seen[token] then
+                seen[token] = true
+                proxy:set_copilot_user_by_token(token)
+            end
+        end
     end)
 
     -- Shut down the replay proxy after all tests
@@ -719,10 +740,10 @@ describe("Lua SDK E2E", function()
 
             local session, sess_err = client:create_session({
                 mcpServers = {
-                    {
-                        name    = "test-mcp",
-                        url     = "http://localhost:0/mcp",
-                        enabled = true,
+                    ["test-mcp"] = {
+                        type  = "http",
+                        url   = "http://localhost:0/mcp",
+                        tools = { "*" },
                     },
                 },
             })

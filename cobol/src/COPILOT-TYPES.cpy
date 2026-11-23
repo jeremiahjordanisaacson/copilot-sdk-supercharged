@@ -105,6 +105,13 @@
            05 WS-TOOL-NAME          PIC X(64)  VALUE SPACES.
            05 WS-TOOL-DESCRIPTION   PIC X(256) VALUE SPACES.
            05 WS-TOOL-SCHEMA        PIC X(1024) VALUE SPACES.
+      *    Idempotent tool (idempotent): "Y", "N" or SPACE (not sent)
+           05 WS-TOOL-IDEMPOTENT    PIC X      VALUE SPACE.
+               88 TOOL-IDEMPOTENT-YES          VALUE "Y".
+               88 TOOL-IDEMPOTENT-NO           VALUE "N".
+      *    CALLable program that runs the tool. The definition is sent
+      *    (tools.definitions) only when a handler program is named.
+           05 WS-TOOL-HANDLER-PGM   PIC X(30)  VALUE SPACES.
 
       *----------------------------------------------------------------*
       * Tool invocation (received from assistant)                      *
@@ -519,3 +526,200 @@
            05 WS-MCO-ENABLED         PIC 9      VALUE 0.
                88 MCO-ENABLED                   VALUE 1.
                88 MCO-DISABLED                  VALUE 0.
+
+      *================================================================*
+      * SDK protocol 4 / v3.0.0 types (Microsoft Copilot SDK 2.0)      *
+      * Callback programs named in these records are CALLed            *
+      * dynamically by COPILOT-SESSION when the runtime sends the      *
+      * matching server-to-client request.                             *
+      *================================================================*
+
+      *----------------------------------------------------------------*
+      * Client info handshake (ClientInfo): sent as clientInfo in the  *
+      * connect params. Blank fields are dropped and nothing is sent   *
+      * when every field is blank.                                     *
+      *----------------------------------------------------------------*
+       01  WS-CLIENT-INFO.
+           05 WS-CI-EDITOR-NAME      PIC X(64)  VALUE SPACES.
+           05 WS-CI-EDITOR-VERSION   PIC X(32)  VALUE SPACES.
+           05 WS-CI-EXTENSION-NAME   PIC X(64)  VALUE SPACES.
+           05 WS-CI-EXTENSION-VER    PIC X(32)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Client mode: "coding-agent" (default, the existing behavior)   *
+      * or "empty". Empty mode requires WS-AVAILABLE-TOOLS on every    *
+      * session and turns ambient features off. "copilot-cli" is an   *
+      * alias of "coding-agent".                                       *
+      *----------------------------------------------------------------*
+       01  WS-CLIENT-MODE            PIC X(16)  VALUE "coding-agent".
+           88 CLIENT-MODE-CODING-AGENT          VALUE "coding-agent"
+                                                      "copilot-cli"
+                                                      " ".
+           88 CLIENT-MODE-EMPTY                 VALUE "empty".
+
+      *----------------------------------------------------------------*
+      * Network callbacks (network.setProvider). Name the CALLable     *
+      * program that answers each request (blank = not registered).    *
+      * Each program receives WS-NETWORK-REQUEST and fills             *
+      * WS-NETWORK-RESPONSE; blank response fields decline.            *
+      *----------------------------------------------------------------*
+       01  WS-NETWORK-OPTIONS.
+           05 WS-NET-SCOPE           PIC X(16)  VALUE SPACES.
+               88 NET-SCOPE-CONNECTION          VALUE "connection".
+               88 NET-SCOPE-RUNTIME             VALUE "runtime".
+           05 WS-NET-PROXY-PGM       PIC X(30)  VALUE SPACES.
+           05 WS-NET-NEGOTIATE-PGM   PIC X(30)  VALUE SPACES.
+           05 WS-NET-BASIC-PGM       PIC X(30)  VALUE SPACES.
+
+       01  WS-NETWORK-REQUEST.
+           05 WS-NREQ-METHOD         PIC X(32)  VALUE SPACES.
+           05 WS-NREQ-URL            PIC X(1024) VALUE SPACES.
+           05 WS-NREQ-SPN            PIC X(256) VALUE SPACES.
+           05 WS-NREQ-PROXY          PIC X(256) VALUE SPACES.
+           05 WS-NREQ-REALM          PIC X(256) VALUE SPACES.
+           05 WS-NREQ-PREV-REJECTED  PIC 9      VALUE 0.
+               88 NREQ-PREVIOUS-REJECTED        VALUE 1.
+
+       01  WS-NETWORK-RESPONSE.
+           05 WS-NRESP-PROXY         PIC X(256) VALUE SPACES.
+           05 WS-NRESP-TOKEN         PIC X(4096) VALUE SPACES.
+           05 WS-NRESP-USERNAME      PIC X(128) VALUE SPACES.
+           05 WS-NRESP-PASSWORD      PIC X(128) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * GitHub token provider (gitHubToken.getToken). The provider     *
+      * program receives WS-GITHUB-TOKEN-REQ and fills                 *
+      * WS-GITHUB-TOKEN-RESP; SET GTP-CANCELLED to decline.            *
+      *----------------------------------------------------------------*
+       01  WS-GITHUB-TOKEN-REQ.
+           05 WS-GTR-REGISTRATION-ID PIC X(36)  VALUE SPACES.
+           05 WS-GTR-HOST            PIC X(256) VALUE SPACES.
+           05 WS-GTR-SESSION-ID      PIC X(64)  VALUE SPACES.
+           05 WS-GTR-REASON          PIC X(64)  VALUE SPACES.
+
+       01  WS-GITHUB-TOKEN-RESP.
+           05 WS-GTP-CANCEL-FLAG     PIC 9      VALUE 0.
+               88 GTP-CANCELLED                 VALUE 1.
+               88 GTP-TOKEN                     VALUE 0.
+           05 WS-GTP-ACCESS-TOKEN    PIC X(1024) VALUE SPACES.
+           05 WS-GTP-TOKEN-TYPE      PIC X(32)  VALUE SPACES.
+           05 WS-GTP-EXPIRES-IN      PIC 9(10)  VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Shell authentication prompts (shellAuthentication.request).    *
+      * The handler fills WS-SHELL-AUTH-RESP: SAP-ACCEPT with          *
+      * WS-SAP-VALUE replies {"action":"accept"}, SAP-CANCEL replies   *
+      * {"action":"cancel"}.                                           *
+      *----------------------------------------------------------------*
+       01  WS-SHELL-AUTH-REQ.
+           05 WS-SAR-SESSION-ID      PIC X(64)  VALUE SPACES.
+           05 WS-SAR-REQUEST-ID      PIC X(64)  VALUE SPACES.
+           05 WS-SAR-PROGRAM         PIC X(128) VALUE SPACES.
+           05 WS-SAR-PROMPT          PIC X(512) VALUE SPACES.
+           05 WS-SAR-INPUT-KIND      PIC X(8)   VALUE SPACES.
+               88 SAR-INPUT-SECRET              VALUE "secret".
+               88 SAR-INPUT-TEXT                VALUE "text".
+               88 SAR-INPUT-CONFIRM             VALUE "confirm".
+           05 WS-SAR-COMMAND         PIC X(1024) VALUE SPACES.
+           05 WS-SAR-CWD             PIC X(256) VALUE SPACES.
+
+       01  WS-SHELL-AUTH-RESP.
+           05 WS-SAP-ACTION          PIC 9      VALUE 0.
+               88 SAP-ACCEPT                    VALUE 1.
+               88 SAP-CANCEL                    VALUE 0.
+           05 WS-SAP-VALUE           PIC X(512) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Memory store callback (memoryStore.store). The store program   *
+      * receives WS-STORED-MEMORY (citations as raw JSON); the SDK     *
+      * replies null.                                                  *
+      *----------------------------------------------------------------*
+       01  WS-STORED-MEMORY.
+           05 WS-SM-SESSION-ID       PIC X(64)  VALUE SPACES.
+           05 WS-SM-SUBJECT          PIC X(256) VALUE SPACES.
+           05 WS-SM-FACT             PIC X(2048) VALUE SPACES.
+           05 WS-SM-CITATIONS        PIC X(1024) VALUE SPACES.
+           05 WS-SM-REASON           PIC X(512) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Sub-agent lifecycle hooks (hooks.invoke with hookType          *
+      * "subagentStart" or "subagentStop").                            *
+      *----------------------------------------------------------------*
+       01  WS-SUBAGENT-HOOK-INPUT.
+           05 WS-SAH-HOOK-TYPE       PIC X(16)  VALUE SPACES.
+               88 SAH-SUBAGENT-START            VALUE "subagentStart".
+               88 SAH-SUBAGENT-STOP             VALUE "subagentStop".
+           05 WS-SAH-SESSION-ID      PIC X(64)  VALUE SPACES.
+           05 WS-SAH-AGENT-NAME      PIC X(128) VALUE SPACES.
+           05 WS-SAH-AGENT-DISPLAY   PIC X(128) VALUE SPACES.
+           05 WS-SAH-AGENT-DESC      PIC X(512) VALUE SPACES.
+           05 WS-SAH-AGENT-ID        PIC X(64)  VALUE SPACES.
+           05 WS-SAH-AGENT-TYPE      PIC X(64)  VALUE SPACES.
+           05 WS-SAH-STOP-REASON     PIC X(64)  VALUE SPACES.
+           05 WS-SAH-RESPONSE        PIC X(2048) VALUE SPACES.
+
+      *    subagentStart: WS-SAO-ADDITIONAL-CTX is added to the child
+      *    prompt. subagentStop: SAO-BLOCK-YES with WS-SAO-REASON
+      *    blocks the stop; WS-SAO-MODIFIED-RESP replaces the response.
+       01  WS-SUBAGENT-HOOK-OUTPUT.
+           05 WS-SAO-ADDITIONAL-CTX  PIC X(2048) VALUE SPACES.
+           05 WS-SAO-BLOCK           PIC 9      VALUE 0.
+               88 SAO-BLOCK-YES                 VALUE 1.
+               88 SAO-BLOCK-NO                  VALUE 0.
+           05 WS-SAO-REASON          PIC X(512) VALUE SPACES.
+           05 WS-SAO-MODIFIED-RESP   PIC X(2048) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * tool.shell_output event (streamed shell command output).       *
+      *----------------------------------------------------------------*
+       01  WS-EVT-TOOL-SHELL-OUTPUT  PIC X(32)
+           VALUE "tool.shell_output".
+       01  WS-SHELL-OUTPUT-EVENT.
+           05 WS-SOE-TOOL-CALL-ID    PIC X(64)  VALUE SPACES.
+           05 WS-SOE-TEXT            PIC X(4096) VALUE SPACES.
+           05 WS-SOE-SEQUENCE        PIC 9(10)  VALUE 0.
+           05 WS-SOE-STREAM          PIC X(8)   VALUE SPACES.
+               88 SOE-STREAM-STDOUT             VALUE "stdout".
+               88 SOE-STREAM-STDERR             VALUE "stderr".
+
+      *----------------------------------------------------------------*
+      * Policy Helper failure (PolicyHelperFailure), read from         *
+      * error.data.policyHelperFailure when session.create or          *
+      * session.resume fails. PHF-PRESENT tells whether one was sent.  *
+      *----------------------------------------------------------------*
+       01  WS-POLICY-HELPER-FAILURE.
+           05 WS-PHF-FOUND           PIC 9      VALUE 0.
+               88 PHF-PRESENT                   VALUE 1.
+               88 PHF-ABSENT                    VALUE 0.
+           05 WS-PHF-CATEGORY        PIC X(64)  VALUE SPACES.
+           05 WS-PHF-FAILURE-MODE    PIC X(64)  VALUE SPACES.
+           05 WS-PHF-MESSAGE         PIC X(512) VALUE SPACES.
+           05 WS-PHF-PREV-RETAINED   PIC 9      VALUE 0.
+               88 PHF-PREVIOUS-RETAINED         VALUE 1.
+           05 WS-PHF-REASON          PIC X(256) VALUE SPACES.
+           05 WS-PHF-AUTHORITY       PIC X(64)  VALUE SPACES.
+           05 WS-PHF-CODE            PIC X(64)  VALUE SPACES.
+           05 WS-PHF-DIAGNOSTIC      PIC X(512) VALUE SPACES.
+           05 WS-PHF-HELP-LINK       PIC X(512) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Permission mode (session.permissions.setMode) and its result.  *
+      * WS-PMR-REASON is "managed_policy" when enterprise policy       *
+      * refused the change.                                            *
+      *----------------------------------------------------------------*
+       01  WS-PERMISSION-MODE        PIC X(32)  VALUE SPACES.
+       01  WS-PERMISSION-MODE-RESULT.
+           05 WS-PMR-SUCCESS         PIC 9      VALUE 0.
+               88 PMR-SUCCEEDED                 VALUE 1.
+           05 WS-PMR-MODE            PIC X(32)  VALUE SPACES.
+           05 WS-PMR-REASON          PIC X(32)  VALUE SPACES.
+               88 PMR-MANAGED-POLICY            VALUE "managed_policy".
+
+      *----------------------------------------------------------------*
+      * Auto routing tier (session.model.switchAutoTier)               *
+      *----------------------------------------------------------------*
+       01  WS-AUTO-TIER              PIC X(16)  VALUE SPACES.
+           88 AUTO-TIER-FAST                    VALUE "fast".
+           88 AUTO-TIER-EFFICIENCY              VALUE "efficiency".
+           88 AUTO-TIER-BALANCE                 VALUE "balance".
+           88 AUTO-TIER-INTELLIGENCE            VALUE "intelligence".

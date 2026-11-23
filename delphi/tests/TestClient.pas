@@ -10,7 +10,8 @@ uses
   DUnitX.TestFramework,
   System.SysUtils, System.JSON,
   Copilot.Types, Copilot.JsonRpc, Copilot.Session,
-  Copilot.Client, Copilot.DefineTool, Copilot.SdkProtocolVersion;
+  Copilot.Client, Copilot.DefineTool, Copilot.SdkProtocolVersion,
+  Copilot.SessionParams;
 
 type
   [TestFixture]
@@ -74,6 +75,13 @@ type
     procedure TestPendingRequestTimeout;
   end;
 
+  [TestFixture]
+  TSessionParamsTests = class
+  public
+    [Test]
+    procedure TestGroupSessionParamsMovesFlatKeys;
+  end;
+
 implementation
 
 { TClientTests }
@@ -128,7 +136,9 @@ end;
 
 procedure TClientTests.TestProtocolVersionConstant;
 begin
-  Assert.AreEqual('2', SDK_PROTOCOL_VERSION);
+  Assert.AreEqual('4', SDK_PROTOCOL_VERSION);
+  Assert.AreEqual(4, SDK_PROTOCOL_VERSION_MIN);
+  Assert.AreEqual(4, SDK_PROTOCOL_VERSION_MAX);
 end;
 
 { TTypesTests }
@@ -291,10 +301,53 @@ begin
   end;
 end;
 
+{ TSessionParamsTests }
+
+procedure TSessionParamsTests.TestGroupSessionParamsMovesFlatKeys;
+var
+  Flat, Grouped, Legacy, LegacyGrouped: TJSONObject;
+begin
+  Flat := TJSONObject.ParseJSONValue(
+    '{"model":"m","streaming":true,"requestPermission":true,' +
+    '"tools":[{"name":"t"}],"hooks":true,"disableResume":true,' +
+    '"trustWorkingDirectory":"session","instructions":["x"],"custom":1}') as TJSONObject;
+  Legacy := TJSONObject.ParseJSONValue(
+    '{"model":"m","provider":{"type":"openai","baseUrl":"http://x",' +
+    '"maxOutputTokens":100}}') as TJSONObject;
+  Grouped := GroupSessionParams(Flat, True);
+  LegacyGrouped := GroupSessionParams(Legacy, False);
+  try
+    Assert.AreEqual('m', Grouped.GetValue<string>('model', ''));
+    Assert.IsTrue(Grouped.GetValue<Boolean>('suppressResumeEvent', False));
+    Assert.IsTrue(Grouped.GetValue<Boolean>('events.streaming', False));
+    Assert.IsTrue(Grouped.GetValue<Boolean>('permissions.request', False));
+    Assert.IsTrue(Grouped.GetValue<Boolean>('hooks.hasHandlers', False));
+    Assert.AreEqual('t', Grouped.GetValue<string>('tools.definitions[0].name', ''));
+    Assert.AreEqual(1, Grouped.GetValue<Integer>('custom', 0));
+    Assert.IsNull(Grouped.GetValue('streaming'));
+    Assert.IsNull(Grouped.GetValue('instructions'));
+    Assert.IsNull(Grouped.GetValue('filesystem'));
+
+    Assert.AreEqual('default',
+      LegacyGrouped.GetValue<string>('inference.defaultProvider', ''));
+    Assert.AreEqual('default',
+      LegacyGrouped.GetValue<string>('inference.providers[0].name', ''));
+    Assert.AreEqual(100,
+      LegacyGrouped.GetValue<Integer>('inference.models[0].maxOutputTokens', 0));
+    Assert.IsFalse(LegacyGrouped.GetValue<Boolean>('github.capi.enabled', True));
+  finally
+    LegacyGrouped.Free;
+    Grouped.Free;
+    Legacy.Free;
+    Flat.Free;
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TClientTests);
   TDUnitX.RegisterTestFixture(TTypesTests);
   TDUnitX.RegisterTestFixture(TDefineToolTests);
   TDUnitX.RegisterTestFixture(TJsonRpcTests);
+  TDUnitX.RegisterTestFixture(TSessionParamsTests);
 
 end.

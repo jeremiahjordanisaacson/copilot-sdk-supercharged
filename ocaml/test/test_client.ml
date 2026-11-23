@@ -200,13 +200,13 @@ let test_session_event_unknown_type () =
 let test_get_status_response_of_yojson () =
   let json =
     `Assoc
-      [ ("protocolVersion", `Int 3)
+      [ ("protocolVersion", `Int 4)
       ; ("serverVersion", `String "1.2.3")
       ]
   in
   match Types.get_status_response_of_yojson json with
   | Ok resp ->
-    Alcotest.(check int) "protocol_version" 3 resp.protocol_version;
+    Alcotest.(check int) "protocol_version" 4 resp.protocol_version;
     Alcotest.(check (option string)) "server_version"
       (Some "1.2.3") resp.server_version
   | Error msg -> Alcotest.fail msg
@@ -216,10 +216,139 @@ let test_get_status_response_of_yojson () =
 (* ========================================================================== *)
 
 let test_version_constants () =
-  Alcotest.(check int) "sdk_protocol_version" 3 Version.sdk_protocol_version;
-  Alcotest.(check int) "min_protocol_version" 3 Version.min_protocol_version;
+  Alcotest.(check int) "sdk_protocol_version" 4 Version.sdk_protocol_version;
+  Alcotest.(check int) "min_protocol_version" 4 Version.min_protocol_version;
+  Alcotest.(check int) "max_protocol_version" 4 Version.max_protocol_version;
   Alcotest.(check string) "sdk_name"
     "copilot-sdk-supercharged-ocaml" Version.sdk_name
+
+(* ========================================================================== *)
+(* SDK protocol 4 tests                                                       *)
+(* ========================================================================== *)
+
+let test_group_session_params_resume () =
+  let flat =
+    `Assoc
+      [ ("sessionId", `String "s1")
+      ; ("model", `String "m")
+      ; ("streaming", `Bool true)
+      ; ("requestPermission", `Bool true)
+      ; ("tools", `List [ `Assoc [ ("name", `String "t"); ("idempotent", `Bool true) ] ])
+      ; ("hooks", `Bool true)
+      ; ("disableResume", `Bool true)
+      ; ("trustWorkingDirectory", `String "session")
+      ; ("mcpServers", `Assoc [ ("a", `Assoc []) ])
+      ; ("events", `Assoc [ ("bogusMember", `Int 1) ])
+      ; ("customKey", `Int 1)
+      ]
+  in
+  let grouped = Session_wire.group_session_params ~resume:true flat in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "model" "m" (grouped |> member "model" |> to_string);
+  Alcotest.(check bool) "events.streaming" true
+    (grouped |> member "events" |> member "streaming" |> to_bool);
+  Alcotest.(check bool) "unknown group member dropped" true
+    ((grouped |> member "events" |> member "bogusMember") = `Null);
+  Alcotest.(check bool) "permissions.request" true
+    (grouped |> member "permissions" |> member "request" |> to_bool);
+  Alcotest.(check bool) "tools.definitions idempotent" true
+    (grouped |> member "tools" |> member "definitions" |> index 0 |> member "idempotent"
+     |> to_bool);
+  Alcotest.(check bool) "hooks.hasHandlers" true
+    (grouped |> member "hooks" |> member "hasHandlers" |> to_bool);
+  Alcotest.(check bool) "suppressResumeEvent" true
+    (grouped |> member "suppressResumeEvent" |> to_bool);
+  Alcotest.(check string) "mcp.envValueMode" "direct"
+    (grouped |> member "mcp" |> member "envValueMode" |> to_string);
+  Alcotest.(check bool) "create-only member dropped on resume" true
+    ((grouped |> member "filesystem") = `Null);
+  Alcotest.(check bool) "flat key not left at root" true
+    ((grouped |> member "streaming") = `Null);
+  Alcotest.(check int) "unknown root key kept" 1 (grouped |> member "customKey" |> to_int)
+
+let test_group_session_params_legacy_provider () =
+  let provider =
+    Types.make_provider_config ~provider_type:"openai" ~api_key_command:"op read key"
+      "http://localhost:11434/v1"
+  in
+  let flat =
+    `Assoc
+      [ ("model", `String "llama")
+      ; ("provider", Types.provider_config_to_yojson provider)
+      ]
+  in
+  let grouped = Session_wire.group_session_params ~resume:false flat in
+  let open Yojson.Safe.Util in
+  let connection = grouped |> member "inference" |> member "providers" |> index 0 in
+  Alcotest.(check string) "provider name" "default" (connection |> member "name" |> to_string);
+  Alcotest.(check string) "apiKeyCommand" "op read key"
+    (connection |> member "apiKeyCommand" |> to_string);
+  Alcotest.(check string) "defaultProvider" "default"
+    (grouped |> member "inference" |> member "defaultProvider" |> to_string);
+  Alcotest.(check bool) "capi disabled" false
+    (grouped |> member "github" |> member "capi" |> member "enabled" |> to_bool);
+  Alcotest.(check bool) "no flat provider" true ((grouped |> member "provider") = `Null)
+
+let test_empty_mode_defaults () =
+  let flat =
+    `Assoc
+      [ ("enableSessionStore", `Bool true)
+      ; ("availableTools", `List [ `String "view" ])
+      ]
+  in
+  let grouped =
+    Session_wire.apply_empty_mode_defaults
+      (Session_wire.group_session_params ~resume:false flat)
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "caller value kept" true
+    (grouped |> member "state" |> member "enableCrossSessionStore" |> to_bool);
+  Alcotest.(check bool) "default applied" true
+    (grouped |> member "state" |> member "skipEmbeddingRetrieval" |> to_bool);
+  Alcotest.(check string) "legacy mode alias" "coding-agent"
+    (Types.normalize_client_mode (Some "copilot-cli"));
+  let rejected =
+    try
+      ignore (Types.normalize_client_mode (Some "bogus"));
+      false
+    with Invalid_argument _ -> true
+  in
+  Alcotest.(check bool) "unknown mode rejected" true rejected
+
+let test_shell_output_and_policy_failure () =
+  let data =
+    `Assoc
+      [ ("toolCallId", `String "tc1")
+      ; ("text", `String "hi")
+      ; ("sequence", `Int 3)
+      ; ("stream", `String "stderr")
+      ]
+  in
+  (match Types.tool_shell_output_of_yojson data with
+   | Some output ->
+     Alcotest.(check int) "sequence" 3 output.so_sequence;
+     Alcotest.(check (option string)) "stream" (Some "stderr") output.so_stream
+   | None -> Alcotest.fail "expected shell output");
+  Alcotest.(check bool) "tool.shell_output event type" true
+    (Types.session_event_type_of_string "tool.shell_output" = Types.ToolShellOutput);
+  let error_data =
+    Some
+      (`Assoc
+         [ ( "policyHelperFailure"
+           , `Assoc
+               [ ("category", `String "timeout")
+               ; ("failureMode", `String "failClosed")
+               ; ("message", `String "helper timed out")
+               ; ("previousPolicyRetained", `Bool true)
+               ; ("reason", `String "sessionStart")
+               ] )
+         ])
+  in
+  match Types.policy_helper_failure_of_error_data error_data with
+  | Some failure ->
+    Alcotest.(check string) "category" "timeout" failure.phf_category;
+    Alcotest.(check bool) "retained" true failure.phf_previous_policy_retained
+  | None -> Alcotest.fail "expected policy helper failure"
 
 (* ========================================================================== *)
 (* Tools helper tests                                                         *)
@@ -322,6 +451,15 @@ let () =
         ] )
     ; ( "version"
       , [ Alcotest.test_case "version_constants" `Quick test_version_constants
+        ] )
+    ; ( "protocol_v4"
+      , [ Alcotest.test_case "group_session_params_resume" `Quick
+            test_group_session_params_resume
+        ; Alcotest.test_case "group_session_params_legacy_provider" `Quick
+            test_group_session_params_legacy_provider
+        ; Alcotest.test_case "empty_mode_defaults" `Quick test_empty_mode_defaults
+        ; Alcotest.test_case "shell_output_and_policy_failure" `Quick
+            test_shell_output_and_policy_failure
         ] )
     ; ( "tools"
       , [ Alcotest.test_case "make_string_param" `Quick test_make_string_param

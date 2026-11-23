@@ -54,6 +54,141 @@ fun main() = runBlocking {
 }
 ```
 
+## What's New in v3.0.0
+
+This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
+
+- **Requires Copilot CLI 1.0.113 or newer.** Older CLIs are rejected at `start()` with
+  `SDK protocol version mismatch: SDK supports version 4, but server reports version N.`
+- **Existing options keep working.** `SessionConfig` and `ResumeSessionConfig` keep their flat
+  properties; the SDK translates the payload into the grouped protocol 4 shape (`inference`,
+  `tools`, `permissions`, `interaction`, `events`, `agents`, `mcp`, `github`, `state`, ...)
+  right before `session.create` and `session.resume`.
+- **Legacy BYOK keeps working.** `provider = ProviderConfig(...)` becomes a named `"default"`
+  connection that is also the default provider, and Copilot API models are disabled for that
+  session, exactly as in v1. Explicit `providers`/`defaultProvider`/`capi` win.
+- **Protocol 4 tool and permission flow.** Custom tools and `onPermissionRequest` are served
+  through the runtime's `external_tool.requested` and `permission.requested` events, answered
+  with `session.tools.handlePendingToolCall` and `session.permissions.handlePendingPermissionRequest`.
+
+### New in v3.0.0
+
+```kotlin
+// Named BYOK providers and model definitions (select a model as "provider/id")
+val session = client.createSession(SessionConfig(
+    model = "gateway/chat",
+    providers = listOf(NamedProviderConfig(
+        name = "gateway",
+        baseUrl = "https://models.example.com/v1",
+        apiKeyCommand = "print-model-key",
+        wireApi = "responses"
+    )),
+    models = listOf(ProviderModelConfig(provider = "gateway", id = "chat", wireModel = "my-deployment", maxOutputTokens = 8192)),
+    capi = CapiConfig(enabled = false)            // BYOK-only catalog
+))
+
+// Clear a default provider on resume
+client.resumeSession(sessionId, ResumeSessionConfig(clearDefaultProvider = true, capi = CapiConfig(enabled = true)))
+```
+
+```kotlin
+// Idempotent tools: the runtime may safely retry them
+val lookup = defineTool("lookup_order") {
+    description = "Look up an order by ID"
+    idempotent = true
+    handler = { _, _ -> "shipped" }
+}
+
+// Client turn IDs are echoed on the turn's events
+session.send(MessageOptions(prompt = "Summarize the diff", clientTurnId = "turn-42"))
+
+// Resume without emitting session.resume
+client.resumeSession(sessionId, ResumeSessionConfig(suppressResumeEvent = true))
+```
+
+```kotlin
+// Client mode: "coding-agent" (default) or "empty" (every session must pick its tools,
+// and telemetry, repository hooks, cross-session memory, and similar features default off)
+val client = CopilotClient(CopilotClientOptions(mode = ClientMode.EMPTY))
+val session = client.createSession(SessionConfig(availableTools = listOf("view", "grep")))
+```
+
+```kotlin
+// Live shell output events
+session.on(ToolShellOutputData.EVENT_TYPE) { event ->
+    ToolShellOutputData.fromEvent(event)?.let { print(it.text) }   // it.stream: "stdout", "stderr", or null
+}
+
+// Shell authentication: answer sudo/ssh prompts from programs that shell tools run
+SessionConfig(onShellAuthenticationRequest = { request, _ ->
+    if (request.inputKind == "confirm") ShellAuthenticationResult.Accept("yes") else ShellAuthenticationResult.Cancel
+})
+
+// Memory store: receive the memories the agent saves (requires memory enabled)
+SessionConfig(memory = MemoryConfiguration(enabled = true, storeMemory = { memory ->
+    myStore.save(memory.subject, memory.fact)
+}))
+```
+
+```kotlin
+// Network callbacks: proxy resolution and proxy authentication (never log credentials)
+val client = CopilotClient(CopilotClientOptions(
+    network = NetworkConfig(
+        scope = NetworkScope.CONNECTION,
+        resolveProxy = { request -> "PROXY proxy.corp.example:8080; DIRECT" },
+        authenticateBasic = { request -> NetworkBasicCredentials(proxyUser, proxyPassword) }
+    )
+))
+```
+
+```kotlin
+// Policy Helper failures on create/resume, and permission-mode refusal reasons
+try {
+    client.createSession(SessionConfig(permissionMode = PermissionMode.MANUAL))
+} catch (e: Exception) {
+    PolicyHelperFailure.fromError(e)?.let { println("${it.category}: ${it.message}") }
+}
+
+val result = session.setPermissionMode(PermissionMode.ALLOW_ALL)
+if (!result.success && result.reason == PermissionModeRefusalReason.MANAGED_POLICY) {
+    println("Blocked by managed policy; mode stays ${result.mode}")
+}
+```
+
+### Also available (shipped in v2.6.0)
+
+- **Client info handshake**: `CopilotClientOptions(clientInfo = ClientInfo(applicationName = "acme-portal", applicationVersion = "2.4.0"))`.
+- **Auto routing tier**: `session.setAutoTier(AutoTier.BALANCE)` (sends `session.model.switchAutoTier`) or `SessionConfig(autoTier = ...)`.
+- **Ask-user variant**: `SessionConfig(askUserVariant = AskUserVariant.ELICITATION)`.
+- **GitHub token provider**: `SessionConfig(gitHubTokenProvider = { args -> GitHubTokenProviderResult.Token(fetchToken(args.host), expiresIn = 3600) })`.
+- **Sandbox bypass**: `SessionConfig(sandboxConfig = SandboxConfig(enabled = true, allowBypass = true))`.
+- **Feature flag overrides**: `SessionConfig(featureFlags = mapOf("my_flag" to true))`.
+- **Session detach**: `session.destroy()` sends `session.detach`, so the session can be resumed later.
+- **Message source**: `MessageOptions(prompt = "Run the checks", source = MessageSource.agent("planner"))`.
+- **Managed settings cache clear**: `client.clearManagedSettingsCache()`.
+- **Policy helper recheck**: `val snapshot = session.recheckPolicyHelper()` (parse `snapshot["policyHelperFailure"]` with `PolicyHelperFailure.fromJson`).
+- **Model allowlist**: `SessionConfig(allowedModels = listOf("gpt-5", "claude-sonnet-4.5"))`.
+- **OAuth client metadata URL**: `SessionConfig(authClientIdMetadataUrl = "https://example.com/oauth/client.json")`.
+- **Max output tokens override**: `SessionConfig(modelCapabilities = mapOf("limits" to mapOf("max_output_tokens" to 8192)))`.
+- **Structured output**: `val json = session.sendAndWaitStructured("List three colors", schema)` or `MessageOptions(prompt = ..., responseSchema = schema)`.
+- **Agent/hook directories**: `SessionConfig(agentDirectories = listOf("./agents"), hookDirectories = listOf("./hooks"))`.
+- **Working directory trust** (create only): `SessionConfig(trustWorkingDirectory = WorkingDirectoryTrust.SESSION)`.
+- **Transcript recovery** (resume only): `ResumeSessionConfig(allowTranscriptRecovery = true)`.
+- **Image generation config**: `SessionConfig(imageGeneration = ImageGenerationConfig(enabled = true, watermark = true, saveToDisk = false))`.
+- **Autopilot options**: `SessionConfig(autopilot = AutopilotOptions(continuationEnabled = true, maxContinues = 3))`.
+- **Subagent lifecycle hooks**: `SessionHooks(onSubagentStart = { input, _ -> mapOf("additionalContext" to "Follow the style guide") }, onSubagentStop = { _, _ -> null })`.
+- **BYOK API key command**: `ProviderConfig(baseUrl = "https://models.example.com/v1", apiKeyCommand = "print-model-key")` or `NamedProviderConfig(..., apiKeyCommand = ...)`.
+
+### Known limitations
+
+- **AHP host**: the runtime-supervised AHP host (`startAhpHost` and the `ahp.*`/`host.*` RPC
+  families) is not implemented. It is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+- **In-process hosting**: this SDK keeps spawning the CLI (or connecting over TCP) instead of
+  hosting the runtime in-process by default; `CopilotClientOptions.inProcess` is unchanged.
+- **Legacy response format**: `MessageOptions.responseFormat` is no longer sent, because protocol 4
+  rejects it. Use `responseSchema` for structured output and `SessionConfig.imageGeneration` for images.
+
 ## Architecture
 
 The SDK communicates with the Copilot CLI server using the JSON-RPC 2.0 protocol over stdio (default) or TCP. The CLI server is spawned as a subprocess with the flags `--headless --no-auto-update --log-level info --stdio`.
@@ -405,7 +540,7 @@ val session = client.createSession(SessionConfig(
 - **Transport**: stdio (default) or TCP
 - **Framing**: Content-Length header (LSP base protocol)
 - **Protocol**: JSON-RPC 2.0
-- **Protocol Version**: 2 (verified via ping on connection)
+- **Protocol Version**: 4 (verified via ping on connection; requires Copilot CLI 1.0.113 or newer)
 
 ### Message Flow
 
@@ -422,12 +557,16 @@ val session = client.createSession(SessionConfig(
 
 ## Image Generation
 
-Request image responses using `responseFormat` and `imageOptions`:
+Opt in to image generation for the session with `SessionConfig.imageGeneration`. Per-message
+`imageOptions` are still forwarded; the legacy `responseFormat` enum is no longer sent because
+protocol 4 rejects it (use `responseSchema` for structured output).
 
 ```kotlin
+val session = client.createSession(SessionConfig(
+    imageGeneration = ImageGenerationConfig(enabled = true, saveToDisk = false)
+))
 val response = session.sendAndWait(MessageOptions(
     prompt = "Generate a sunset over mountains",
-    responseFormat = ResponseFormat.IMAGE,
     imageOptions = ImageOptions(size = "1024x1024", quality = "hd", style = "natural")
 ))
 ```

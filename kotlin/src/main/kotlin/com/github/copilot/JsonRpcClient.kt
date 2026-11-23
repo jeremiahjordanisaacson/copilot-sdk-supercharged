@@ -263,25 +263,28 @@ class JsonRpcClient(
         if (method != null && id != null) {
             val params = message["params"]?.jsonObject ?: JsonObject(emptyMap())
             val handler = requestHandlers[method]
+            // Echo the id exactly as received: the runtime uses numeric ids and ignores responses
+            // whose id type differs.
+            val requestId: JsonElement = message["id"] ?: JsonNull
 
             scope.launch {
                 if (handler == null) {
-                    sendErrorResponse(id, -32601, "Method not found: $method")
+                    sendErrorResponse(requestId, -32601, "Method not found: $method")
                     return@launch
                 }
                 try {
                     val result = handler(params)
-                    sendResponse(id, result)
+                    sendResponse(requestId, result)
                 } catch (e: JsonRpcException) {
-                    sendErrorResponse(id, e.code, e.message ?: "Unknown error")
+                    sendErrorResponse(requestId, e.code, e.message ?: "Unknown error")
                 } catch (e: Exception) {
-                    sendErrorResponse(id, -32603, e.message ?: "Internal error")
+                    sendErrorResponse(requestId, -32603, e.message ?: "Internal error")
                 }
             }
         }
     }
 
-    private suspend fun sendResponse(requestId: String, result: JsonElement) {
+    private suspend fun sendResponse(requestId: JsonElement, result: JsonElement) {
         val response = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", requestId)
@@ -290,7 +293,7 @@ class JsonRpcClient(
         sendMessage(response)
     }
 
-    private suspend fun sendErrorResponse(requestId: String, code: Int, message: String) {
+    private suspend fun sendErrorResponse(requestId: JsonElement, code: Int, message: String) {
         val response = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", requestId)

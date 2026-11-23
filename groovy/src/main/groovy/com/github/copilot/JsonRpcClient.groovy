@@ -23,6 +23,12 @@ import java.util.concurrent.TimeUnit
  */
 @CompileStatic
 class JsonRpcClient {
+    /**
+     * Sentinel a request handler returns to answer with a JSON {@code null} result
+     * (for example {@code memoryStore.store}). Any other null or empty result is sent as {@code {}}.
+     */
+    static final Map<String, Object> NULL_RESULT = Collections.unmodifiableMap(new LinkedHashMap<String, Object>())
+
     private final InputStream inputStream
     private final OutputStream outputStream
     private final JsonSlurper slurper = new JsonSlurper()
@@ -179,7 +185,8 @@ class JsonRpcClient {
                     Map<String, Object> error = (Map<String, Object>) message.error
                     String errorMsg = error?.message?.toString() ?: 'Unknown error'
                     int code = (error?.code as Number)?.intValue() ?: -1
-                    future.completeExceptionally(new JsonRpcException(code, errorMsg))
+                    Object data = error != null ? error.get('data') : null
+                    future.completeExceptionally(new JsonRpcException(code, errorMsg, data))
                 } else {
                     future.complete(message.result)
                 }
@@ -199,7 +206,9 @@ class JsonRpcClient {
         // Incoming request (has both method and id)
         if (message.containsKey('method') && message.containsKey('id')) {
             String method = (String) message.method
-            String id = message.id?.toString()
+            // Echo the id exactly as received: the runtime uses numeric ids and ignores responses
+            // whose id type differs.
+            Object id = message.id
             Map<String, Object> params = (Map<String, Object>) (message.params ?: [:])
 
             Closure handler = requestHandlers.get(method)
@@ -213,8 +222,13 @@ class JsonRpcClient {
 
             handlerExecutor.submit {
                 try {
-                    Map<String, Object> result = (Map<String, Object>) handler.call(params)
-                    sendResponse(id, result ?: [:] as Map<String, Object>)
+                    Object raw = handler.call(params)
+                    if (raw.is(NULL_RESULT)) {
+                        sendMessage([jsonrpc: '2.0', id: id, result: null] as Map<String, Object>)
+                    } else {
+                        Map<String, Object> result = (Map<String, Object>) raw
+                        sendResponse(id, result ?: [:] as Map<String, Object>)
+                    }
                 } catch (Exception e) {
                     try { sendErrorResponse(id, -32603, e.message) }
                     catch (Exception ignored) {}
@@ -223,11 +237,11 @@ class JsonRpcClient {
         }
     }
 
-    private void sendResponse(String requestId, Map<String, Object> result) {
+    private void sendResponse(Object requestId, Map<String, Object> result) {
         sendMessage([jsonrpc: '2.0', id: requestId, result: result] as Map<String, Object>)
     }
 
-    private void sendErrorResponse(String requestId, int code, String message) {
+    private void sendErrorResponse(Object requestId, int code, String message) {
         sendMessage([
             jsonrpc: '2.0',
             id     : requestId,
@@ -235,14 +249,43 @@ class JsonRpcClient {
         ] as Map<String, Object>)
     }
 
-    /** JSON-RPC error with code and message. */
+    /**
+     * Returns whether a request failed because the server does not implement the method
+     * (JSON-RPC {@code -32601} or an "Unhandled method" error), walking the cause chain.
+     *
+     * @param error the failure thrown by {@link #request}
+     * @param method the method that was called
+     * @return true when the method is unknown to the server
+     */
+    static boolean isMethodNotFound(Throwable error, String method) {
+        Throwable current = error
+        while (current != null) {
+            if (current instanceof JsonRpcException) {
+                JsonRpcException rpcError = (JsonRpcException) current
+                if (rpcError.code == -32601) return true
+                String text = rpcError.message
+                return text != null && text.contains("Unhandled method ${method}".toString())
+            }
+            current = current.cause
+        }
+        false
+    }
+
+    /** JSON-RPC error with code, message, and optional structured {@code data}. */
     @CompileStatic
     static class JsonRpcException extends Exception {
         final int code
+        /** The error's {@code data} member (for example {@code policyHelperFailure}), or null. */
+        final Object data
 
         JsonRpcException(int code, String message) {
-            super("JSON-RPC Error ${code}: ${message}")
+            this(code, message, null)
+        }
+
+        JsonRpcException(int code, String message, Object data) {
+            super("JSON-RPC Error ${code}: ${message}".toString())
             this.code = code
+            this.data = data
         }
     }
 }

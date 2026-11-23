@@ -120,6 +120,24 @@ public class SessionConfig {
     private ImageGenerationConfig imageGeneration;
     /** Autopilot continuation policy. */
     private AutopilotOptions autopilot;
+    /** Named BYOK provider connections ({@code inference.providers}). */
+    private List<NamedProviderConfig> providers;
+    /** BYOK model definitions served by the named providers ({@code inference.models}). */
+    private List<ProviderModelConfig> models;
+    /** Connection that serves unqualified model names ({@code inference.defaultProvider}). */
+    private String defaultProvider;
+    /** Whether {@link #defaultProvider(String)} was called, so an explicit null clears the default on resume. */
+    private boolean defaultProviderSet;
+    /** Copilot API (CAPI) options ({@code github.capi}); members win over autoTier/enableWebSocketResponses. */
+    private CapiConfig capi;
+    /** Answers secret, text, or confirmation prompts from programs run by shell tools. */
+    private ShellAuthenticationHandler onShellAuthenticationRequest;
+    /** Skip emitting the {@code session.resume} event (resume only). */
+    private Boolean suppressResumeEvent;
+    /** Continue tool calls and permission prompts pending when the session was suspended (resume only). */
+    private Boolean continuePendingWork;
+    /** Initial permission mode ({@code "manual"}, {@code "assisted"}, {@code "allow-all"}). */
+    private String permissionMode;
 
     public SessionConfig() {}
 
@@ -188,6 +206,15 @@ public class SessionConfig {
     public SessionConfig allowTranscriptRecovery(boolean allow) { this.allowTranscriptRecovery = allow; return this; }
     public SessionConfig imageGeneration(ImageGenerationConfig config) { this.imageGeneration = config; return this; }
     public SessionConfig autopilot(AutopilotOptions options) { this.autopilot = options; return this; }
+    public SessionConfig providers(List<NamedProviderConfig> providers) { this.providers = providers; return this; }
+    public SessionConfig models(List<ProviderModelConfig> models) { this.models = models; return this; }
+    /** Sets the default provider connection; passing null clears a previously set default on resume. */
+    public SessionConfig defaultProvider(String name) { this.defaultProvider = name; this.defaultProviderSet = true; return this; }
+    public SessionConfig capi(CapiConfig capi) { this.capi = capi; return this; }
+    public SessionConfig onShellAuthenticationRequest(ShellAuthenticationHandler handler) { this.onShellAuthenticationRequest = handler; return this; }
+    public SessionConfig suppressResumeEvent(boolean suppress) { this.suppressResumeEvent = suppress; return this; }
+    public SessionConfig continuePendingWork(boolean continuePending) { this.continuePendingWork = continuePending; return this; }
+    public SessionConfig permissionMode(String mode) { this.permissionMode = mode; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -254,4 +281,13 @@ public class SessionConfig {
     public Boolean getAllowTranscriptRecovery() { return allowTranscriptRecovery; }
     public ImageGenerationConfig getImageGeneration() { return imageGeneration; }
     public AutopilotOptions getAutopilot() { return autopilot; }
+    public List<NamedProviderConfig> getProviders() { return providers; }
+    public List<ProviderModelConfig> getModels() { return models; }
+    public String getDefaultProvider() { return defaultProvider; }
+    public boolean isDefaultProviderSet() { return defaultProviderSet; }
+    public CapiConfig getCapi() { return capi; }
+    public ShellAuthenticationHandler getOnShellAuthenticationRequest() { return onShellAuthenticationRequest; }
+    public Boolean getSuppressResumeEvent() { return suppressResumeEvent; }
+    public Boolean getContinuePendingWork() { return continuePendingWork; }
+    public String getPermissionMode() { return permissionMode; }
 }

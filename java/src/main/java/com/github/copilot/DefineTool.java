@@ -32,6 +32,7 @@ public class DefineTool {
     private String description;
     private Map<String, Object> parameters;
     private ToolHandler handler;
+    private Boolean idempotent;
 
     private DefineTool(String name) {
         this.name = name;
@@ -75,10 +76,23 @@ public class DefineTool {
         return this;
     }
 
+    /**
+     * Declares that repeating a call with the same arguments has no additional effect.
+     *
+     * @param idempotent whether the tool is idempotent
+     * @return this builder
+     */
+    public DefineTool idempotent(boolean idempotent) {
+        this.idempotent = idempotent;
+        return this;
+    }
+
     /** Builds the Tool instance. */
     public Tool build() {
         if (name == null) throw new IllegalStateException("Tool name is required");
         if (handler == null) throw new IllegalStateException("Tool handler is required");
-        return new Tool(name, description, parameters, handler);
+        Tool tool = new Tool(name, description, parameters, handler);
+        tool.idempotent = idempotent;
+        return tool;
     }
 }

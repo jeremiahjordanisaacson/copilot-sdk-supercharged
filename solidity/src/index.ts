@@ -71,7 +71,37 @@ export type {
     SubagentStopHookInput,
     SubagentStopHookOutput,
     WorkingDirectoryTrust,
+    // v3.0.0 (SDK protocol 4) types
+    CapiSessionOptions,
+    ManagedSettingsResolvedData,
+    MemoryStoreCallOptions,
+    NamedProviderConfig,
+    NetworkConfig,
+    PermissionModeSetResult,
+    PolicyHelperFailure,
+    ProviderModelConfig,
+    SessionStartError,
+    ShellAuthenticationHandler,
+    ShellAuthenticationRequest,
+    ShellAuthenticationResponse,
+    SolidityClientMode,
+    SolidityProviderConfig,
+    StoredMemory,
+    ToolShellOutputData,
+    ToolShellOutputEvent,
+    ToolShellOutputStream,
 } from "./types.js";
 
 // Upstream-sync feature constants
-export { ToolDefer, SystemMessageSection, GitHubAttachment, MessageSource } from "./types.js";
+export {
+    ToolDefer,
+    SystemMessageSection,
+    GitHubAttachment,
+    MessageSource,
+    PermissionModeRefusalReason,
+    TOOL_SHELL_OUTPUT_EVENT,
+} from "./types.js";
+
+// SDK protocol 4
+export { SDK_PROTOCOL_VERSION } from "./sdkProtocolVersion.js";
+export { getPolicyHelperFailure } from "./client.js";

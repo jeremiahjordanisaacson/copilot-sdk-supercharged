@@ -5,13 +5,52 @@
 #import "CPCopilotClient.h"
 #import "CPJsonRpcClient.h"
 #import "CPSdkProtocolVersion.h"
+#import "CPSessionParams.h"
 #import "CPTypes.h"
 
 static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
+/// Answers a server-to-client JSON-RPC request with a result or an error dictionary.
+typedef void (^CPRpcResponder)(NSDictionary * _Nullable result, NSDictionary * _Nullable error);
+
+static NSString *CPStringOrNil(id value) {
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+
+static NSDictionary *CPRpcError(NSString *message) {
+    return @{@"code": @(-32603), @"message": message};
+}
+
+static NSError *CPClientError(NSInteger code, NSString *message) {
+    return [NSError errorWithDomain:kCPClientErrorDomain
+                               code:code
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+/// Lifecycle RPCs that answer `{success: false, error}` instead of a JSON-RPC error.
+static NSError *CPLifecycleFailure(NSDictionary *result, NSString *what) {
+    id success = result[@"success"];
+    if (![success isKindOfClass:[NSNumber class]] || [success boolValue]) return nil;
+    NSString *message = CPStringOrNil(result[@"error"]) ?: @"Unknown error";
+    return CPClientError(-7, [NSString stringWithFormat:@"%@: %@", what, message]);
+}
+
+/// Attaches the Policy Helper failure carried in the JSON-RPC error data, if any.
+static NSError *CPErrorWithPolicyHelperFailure(NSError *error) {
+    if (error.userInfo[CPPolicyHelperFailureErrorKey]) return error;
+    CPPolicyHelperFailure *failure = [CPPolicyHelperFailure failureFromError:error];
+    if (!failure) return error;
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:error.userInfo ?: @{}];
+    userInfo[CPPolicyHelperFailureErrorKey] = failure;
+    return [NSError errorWithDomain:error.domain code:error.code userInfo:userInfo];
+}
+
 @interface CPCopilotSession ()
 
+@property (nonatomic, copy, readwrite) NSString *sessionId;
+@property (nonatomic, copy, readwrite, nullable) NSString *workspacePath;
 @property (nonatomic, copy, nullable) CPSessionConfig *config;
+@property (nonatomic, copy, nullable) void (^onRelease)(void);
 
 - (instancetype)initWithSessionId:(NSString *)sessionId
                     workspacePath:(nullable NSString *)workspacePath
@@ -19,6 +58,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
                            config:(nullable CPSessionConfig *)config;
 
 - (void)dispatchEvent:(CPSessionEvent *)event;
+- (void)handleBroadcastEvent:(CPSessionEvent *)event;
 
 @end
 
@@ -26,8 +66,13 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
 @property (nonatomic, strong) CPCopilotClientOptions *options;
 @property (nonatomic, strong, nullable) NSTask *cliProcess;
+@property (nonatomic, strong, nullable) NSFileHandle *stderrHandle;
 @property (nonatomic, strong, nullable) CPJsonRpcClient *rpcClient;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, CPCopilotSession *> *sessions;
+/// GitHub token providers keyed by registration ID.
+@property (nonatomic, strong) NSMutableDictionary<NSString *, CPGitHubTokenProvider> *tokenProviders;
+/// Unanswered shell authentication requests keyed by "sessionId/requestId".
+@property (nonatomic, strong) NSMutableDictionary<NSString *, CPRpcResponder> *pendingShellAuthentications;
 @property (nonatomic, assign, readwrite) CPConnectionState connectionState;
 @property (nonatomic, strong) dispatch_queue_t clientQueue;
 
@@ -40,10 +85,16 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     if (self) {
         _options = options ?: [CPCopilotClientOptions defaultOptions];
         _sessions = [NSMutableDictionary dictionary];
+        _tokenProviders = [NSMutableDictionary dictionary];
+        _pendingShellAuthentications = [NSMutableDictionary dictionary];
         _connectionState = CPConnectionStateDisconnected;
         _clientQueue = dispatch_queue_create("com.github.copilot.client", DISPATCH_QUEUE_SERIAL);
     }
     return self;
+}
+
+- (BOOL)isEmptyMode {
+    return [self.options.mode isEqualToString:CPClientModeEmpty];
 }
 
 #pragma mark - Start / Stop
@@ -52,6 +103,14 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     dispatch_async(self.clientQueue, ^{
         if (self.connectionState == CPConnectionStateConnected) {
             completion(nil);
+            return;
+        }
+
+        NSString *mode = self.options.mode;
+        if (mode && ![mode isEqualToString:CPClientModeCodingAgent] &&
+            ![mode isEqualToString:CPClientModeCopilotCli] && ![mode isEqualToString:CPClientModeEmpty]) {
+            completion(CPClientError(-8, [NSString stringWithFormat:
+                @"Invalid client mode \"%@\": use \"coding-agent\" or \"empty\"", mode]));
             return;
         }
 
@@ -71,60 +130,134 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
             return;
         }
 
-        // Verify protocol version via ping
-        [self pingWithMessage:@"init" completion:^(NSDictionary *response, NSError *error) {
-            if (error) {
-                self.connectionState = CPConnectionStateError;
-                completion(error);
+        // connect (clientInfo) -> ping (protocol check) -> network callbacks
+        [self sendConnectHandshakeWithCompletion:^(NSError *connectError) {
+            if (connectError) {
+                [self failStartWithError:connectError completion:completion];
                 return;
             }
+            [self verifyProtocolVersionWithCompletion:^(NSError *versionError) {
+                if (versionError) {
+                    [self failStartWithError:versionError completion:completion];
+                    return;
+                }
+                [self registerNetworkProviderWithCompletion:^(NSError *networkError) {
+                    if (networkError) {
+                        [self failStartWithError:networkError completion:completion];
+                        return;
+                    }
 
-            NSInteger serverVersion = [response[@"protocolVersion"] integerValue];
-            if (serverVersion != 0 && serverVersion != CPSdkProtocolVersion) {
-                self.connectionState = CPConnectionStateError;
-                NSError *versionError = [NSError errorWithDomain:kCPClientErrorDomain
-                    code:-4
-                    userInfo:@{NSLocalizedDescriptionKey:
-                        [NSString stringWithFormat:@"Protocol version mismatch: expected %ld, got %ld",
-                         (long)CPSdkProtocolVersion, (long)serverVersion]}];
-                completion(versionError);
-                return;
-            }
+                    self.connectionState = CPConnectionStateConnected;
 
-            self.connectionState = CPConnectionStateConnected;
+                    // Set up session filesystem provider if configured
+                    if (self.options.sessionFs && self.options.sessionFs.initialCwd) {
+                        NSDictionary *fsParams = [self.options.sessionFs toDictionary];
+                        [self.rpcClient sendRequest:@"sessionFs.setProvider"
+                                             params:fsParams
+                                         completion:^(NSDictionary *fsResp, NSError *fsErr) {
+                            // Provider set; ignore errors silently
+                        }];
+                    }
 
-            // Set up session filesystem provider if configured
-            if (self.options.sessionFs && self.options.sessionFs.initialCwd) {
-                NSDictionary *fsParams = [self.options.sessionFs toDictionary];
-                [self.rpcClient sendRequest:@"sessionFs.setProvider"
-                                     params:fsParams
-                                 completion:^(NSDictionary *fsResp, NSError *fsErr) {
-                    // Provider set; ignore errors silently
+                    completion(nil);
                 }];
-            }
-
-            completion(nil);
+            }];
         }];
     });
+}
+
+- (void)failStartWithError:(NSError *)error completion:(void (^)(NSError * _Nullable))completion {
+    self.connectionState = CPConnectionStateError;
+    completion(error);
+}
+
+/// Declares the integrating application (`clientInfo`) with `connect` before the ping
+/// handshake. Skipped when no clientInfo field is set; CLIs without `connect` are accepted.
+- (void)sendConnectHandshakeWithCompletion:(void (^)(NSError * _Nullable))completion {
+    NSDictionary *clientInfo = [self.options.clientInfo toDictionary];
+    if (clientInfo.count == 0) {
+        completion(nil);
+        return;
+    }
+    [self.rpcClient sendRequest:@"connect"
+                         params:@{@"clientInfo": clientInfo}
+                     completion:^(NSDictionary *result, NSError *error) {
+        completion(CPJsonRpcIsMethodNotFoundError(error) ? nil : error);
+    }];
+}
+
+/// Accepts exactly SDK protocol 4 (Copilot CLI 1.0.113 or newer).
+- (void)verifyProtocolVersionWithCompletion:(void (^)(NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"ping"
+                         params:@{@"message": @"sdk-init"}
+                     completion:^(NSDictionary *response, NSError *error) {
+        if (error) {
+            completion(error);
+            return;
+        }
+        id reported = response[@"protocolVersion"];
+        if (![reported isKindOfClass:[NSNumber class]]) {
+            completion(CPClientError(-4, [NSString stringWithFormat:
+                @"SDK protocol version mismatch: SDK supports version %ld, but server does not report a protocol version. Please update your SDK or server to ensure compatibility.",
+                (long)CPSdkProtocolVersion]));
+            return;
+        }
+        NSInteger serverVersion = [reported integerValue];
+        if (serverVersion != CPSdkProtocolVersion) {
+            completion(CPClientError(-4, [NSString stringWithFormat:
+                @"SDK protocol version mismatch: SDK supports version %ld, but server reports version %ld. Please update your SDK or server to ensure compatibility.",
+                (long)CPSdkProtocolVersion, (long)serverVersion]));
+            return;
+        }
+        completion(nil);
+    }];
+}
+
+/// Registers the configured network callbacks with `network.setProvider`; each present
+/// member (an empty object) marks one registered callback.
+- (void)registerNetworkProviderWithCompletion:(void (^)(NSError * _Nullable))completion {
+    CPNetworkOptions *network = self.options.network;
+    if (!network.resolveProxy && !network.authenticateNegotiate && !network.authenticateBasic) {
+        completion(nil);
+        return;
+    }
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    if (network.scope) params[@"scope"] = network.scope;
+    if (network.resolveProxy) params[@"resolveProxy"] = @{};
+    if (network.authenticateNegotiate) params[@"authenticateNegotiate"] = @{};
+    if (network.authenticateBasic) params[@"authenticateBasic"] = @{};
+    [self.rpcClient sendRequest:@"network.setProvider"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        completion(error);
+    }];
 }
 
 - (BOOL)spawnCLIProcess:(NSError **)error {
     NSString *cliPath = self.options.cliPath ?: @"copilot";
 
-    NSMutableArray<NSString *> *args = [NSMutableArray arrayWithObjects:@"--server-mode", nil];
-
-    if (self.options.logLevel) {
-        [args addObject:@"--log-level"];
-        [args addObject:self.options.logLevel];
-    }
+    NSMutableArray<NSString *> *cliArgs = [NSMutableArray arrayWithObjects:@"--headless", @"--no-auto-update", nil];
+    [cliArgs addObject:@"--log-level"];
+    [cliArgs addObject:self.options.logLevel ?: @"info"];
+    [cliArgs addObject:@"--stdio"];
 
     if (self.options.extraArgs) {
-        [args addObjectsFromArray:self.options.extraArgs];
+        [cliArgs addObjectsFromArray:self.options.extraArgs];
     }
 
     NSTask *task = [[NSTask alloc] init];
-    task.executableURL = [NSURL fileURLWithPath:cliPath];
-    task.arguments = args;
+    if ([cliPath.pathExtension isEqualToString:@"js"]) {
+        // JavaScript entry points (for example @github/copilot/npm-loader.js) run under node.
+        task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/env"];
+        task.arguments = [@[@"node", cliPath] arrayByAddingObjectsFromArray:cliArgs];
+    } else if (cliPath.isAbsolutePath) {
+        task.executableURL = [NSURL fileURLWithPath:cliPath];
+        task.arguments = cliArgs;
+    } else {
+        // Bare command names (and relative paths) are resolved by /usr/bin/env.
+        task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/env"];
+        task.arguments = [@[cliPath] arrayByAddingObjectsFromArray:cliArgs];
+    }
 
     if (self.options.cwd) {
         task.currentDirectoryURL = [NSURL fileURLWithPath:self.options.cwd isDirectory:YES];
@@ -162,17 +295,19 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
                             writeHandle:[stdinPipe fileHandleForWriting]];
 
     // Handle stderr (logging)
-    [[stderrPipe fileHandleForReading] readabilityHandler = ^(NSFileHandle *handle) {
+    self.stderrHandle = [stderrPipe fileHandleForReading];
+    self.stderrHandle.readabilityHandler = ^(NSFileHandle *handle) {
         NSData *data = [handle availableData];
         if (data.length > 0) {
             NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             if (str) NSLog(@"[CopilotCLI] %@", str);
         }
-    }];
+    };
 
     NSError *launchError = nil;
-    [task launchAndReturnError:&launchError];
-    if (launchError) {
+    if (![task launchAndReturnError:&launchError]) {
+        self.stderrHandle.readabilityHandler = nil;
+        [self.rpcClient stop];
         if (error) *error = launchError;
         return NO;
     }
@@ -181,7 +316,9 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
     // Handle termination
     task.terminationHandler = ^(NSTask *t) {
-        dispatch_async(self.clientQueue, ^{
+        CPCopilotClient *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        dispatch_async(strongSelf.clientQueue, ^{
             if (weakSelf.connectionState == CPConnectionStateConnected) {
                 weakSelf.connectionState = CPConnectionStateDisconnected;
                 if (weakSelf.options.autoRestart) {
@@ -208,6 +345,8 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 - (void)stopWithCompletion:(void (^)(NSError * _Nullable))completion {
     dispatch_async(self.clientQueue, ^{
         [self.rpcClient stop];
+        self.stderrHandle.readabilityHandler = nil;
+        self.stderrHandle = nil;
 
         if (self.cliProcess && self.cliProcess.isRunning) {
             [self.cliProcess terminate];
@@ -218,6 +357,12 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
         @synchronized (self.sessions) {
             [self.sessions removeAllObjects];
+        }
+        @synchronized (self.tokenProviders) {
+            [self.tokenProviders removeAllObjects];
+        }
+        @synchronized (self.pendingShellAuthentications) {
+            [self.pendingShellAuthentications removeAllObjects];
         }
 
         completion(nil);
@@ -249,6 +394,247 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
                                              void (^respond)(NSDictionary *, NSDictionary *)) {
         [weakSelf handleExitPlanModeRequest:params respond:respond];
     }];
+
+    // GitHub token providers (CPSessionConfig.gitHubTokenProvider)
+    [self.rpcClient registerRequestHandler:@"gitHubToken.getToken"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleGitHubTokenRequest:params respond:respond];
+    }];
+
+    // Shell authentication (CPSessionConfig.onShellAuthentication)
+    [self.rpcClient registerRequestHandler:@"shellAuthentication.request"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleShellAuthenticationRequest:params respond:respond];
+    }];
+    [self.rpcClient registerRequestHandler:@"shellAuthentication.cancel"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf cancelShellAuthenticationRequest:params];
+        respond(@{}, nil);
+    }];
+
+    // Memory store (CPSessionConfig.onMemoryStore)
+    [self.rpcClient registerRequestHandler:@"memoryStore.store"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleMemoryStoreRequest:params respond:respond];
+    }];
+
+    // Session hooks, including subagentStart / subagentStop (CPSessionConfig.hooks)
+    [self.rpcClient registerRequestHandler:@"hooks.invoke"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleHooksInvoke:params respond:respond];
+    }];
+
+    // Network callbacks (CPCopilotClientOptions.network)
+    [self.rpcClient registerRequestHandler:@"network.resolveProxy"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleResolveProxy:params respond:respond];
+    }];
+    [self.rpcClient registerRequestHandler:@"network.authenticateNegotiate"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleAuthenticateNegotiate:params respond:respond];
+    }];
+    [self.rpcClient registerRequestHandler:@"network.authenticateBasic"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleAuthenticateBasic:params respond:respond];
+    }];
+}
+
+- (nullable CPCopilotSession *)sessionWithId:(nullable NSString *)sessionId {
+    if (!sessionId) return nil;
+    CPCopilotSession *session = nil;
+    @synchronized (self.sessions) {
+        session = self.sessions[sessionId];
+    }
+    return session;
+}
+
+#pragma mark - GitHub Token Providers
+
+- (void)registerTokenProvider:(CPGitHubTokenProvider)provider registrationId:(NSString *)registrationId {
+    @synchronized (self.tokenProviders) {
+        self.tokenProviders[registrationId] = [provider copy];
+    }
+}
+
+- (void)unregisterTokenProvider:(NSString *)registrationId {
+    @synchronized (self.tokenProviders) {
+        [self.tokenProviders removeObjectForKey:registrationId];
+    }
+}
+
+/// `gitHubToken.getToken` {registrationId, host, sessionId?, reason} ->
+/// {kind: "token", accessToken, tokenType?, expiresIn} or {kind: "cancelled"}.
+- (void)handleGitHubTokenRequest:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    NSString *registrationId = CPStringOrNil(params[@"registrationId"]);
+    CPGitHubTokenProvider provider = nil;
+    if (registrationId) {
+        @synchronized (self.tokenProviders) {
+            provider = self.tokenProviders[registrationId];
+        }
+    }
+    if (!provider) {
+        respond(nil, CPRpcError(@"GitHub token provider is unavailable"));
+        return;
+    }
+
+    CPGitHubTokenProviderArgs *args = [[CPGitHubTokenProviderArgs alloc] init];
+    args.host = CPStringOrNil(params[@"host"]) ?: @"";
+    args.sessionId = CPStringOrNil(params[@"sessionId"]);
+    args.reason = CPStringOrNil(params[@"reason"]) ?: @"initial";
+    provider(args, ^(CPGitHubToken * _Nullable token) {
+        if (!token) {
+            respond(@{@"kind": @"cancelled"}, nil);
+            return;
+        }
+        NSMutableDictionary *reply = [NSMutableDictionary dictionary];
+        reply[@"kind"] = @"token";
+        reply[@"accessToken"] = token.accessToken ?: @"";
+        if (token.tokenType) reply[@"tokenType"] = token.tokenType;
+        reply[@"expiresIn"] = @(token.expiresIn);
+        respond(reply, nil);
+    });
+}
+
+#pragma mark - Shell Authentication / Memory Store / Hooks
+
+/// `shellAuthentication.request` -> {action: "accept", value} or {action: "cancel"}.
+/// Requests without a handler (or with an unknown input kind) are cancelled. Answers are never logged.
+- (void)handleShellAuthenticationRequest:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    NSDictionary *cancel = [[CPShellAuthenticationResponse cancel] toDictionary];
+    CPShellAuthenticationRequest *request = [[CPShellAuthenticationRequest alloc] initWithDictionary:params];
+    NSArray<NSString *> *inputKinds = @[CPShellAuthenticationInputKindSecret,
+                                        CPShellAuthenticationInputKindText,
+                                        CPShellAuthenticationInputKindConfirm];
+    CPShellAuthenticationHandler handler = [self sessionWithId:request.sessionId].config.onShellAuthentication;
+    if (!handler || request.requestId.length == 0 || ![inputKinds containsObject:request.inputKind]) {
+        respond(cancel, nil);
+        return;
+    }
+
+    NSString *key = [NSString stringWithFormat:@"%@/%@", request.sessionId, request.requestId];
+    @synchronized (self.pendingShellAuthentications) {
+        if (self.pendingShellAuthentications[key]) {
+            respond(cancel, nil);
+            return;
+        }
+        self.pendingShellAuthentications[key] = [respond copy];
+    }
+
+    handler(request, ^(CPShellAuthenticationResponse *response) {
+        CPRpcResponder pending = nil;
+        @synchronized (self.pendingShellAuthentications) {
+            pending = self.pendingShellAuthentications[key];
+            [self.pendingShellAuthentications removeObjectForKey:key];
+        }
+        // nil when shellAuthentication.cancel already answered the request
+        if (pending) pending(response ? [response toDictionary] : cancel, nil);
+    });
+}
+
+/// `shellAuthentication.cancel` {sessionId, requestId}: answers the pending request with "cancel".
+- (void)cancelShellAuthenticationRequest:(NSDictionary *)params {
+    NSString *key = [NSString stringWithFormat:@"%@/%@",
+                     CPStringOrNil(params[@"sessionId"]) ?: @"", CPStringOrNil(params[@"requestId"]) ?: @""];
+    CPRpcResponder pending = nil;
+    @synchronized (self.pendingShellAuthentications) {
+        pending = self.pendingShellAuthentications[key];
+        [self.pendingShellAuthentications removeObjectForKey:key];
+    }
+    if (pending) pending([[CPShellAuthenticationResponse cancel] toDictionary], nil);
+}
+
+/// `memoryStore.store` {sessionId, subject, fact, citations, reason} -> null.
+- (void)handleMemoryStoreRequest:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    CPStoredMemory *memory = [[CPStoredMemory alloc] initWithDictionary:params];
+    CPMemoryStoreHandler handler = [self sessionWithId:memory.sessionId].config.onMemoryStore;
+    if (!handler) {
+        respond(nil, CPRpcError(@"Memory store owner is unavailable"));
+        return;
+    }
+    handler(memory, ^(NSError * _Nullable error) {
+        if (error) {
+            respond(nil, CPRpcError(error.localizedDescription ?: @"Memory store failed"));
+        } else {
+            respond((NSDictionary *)[NSNull null], nil);
+        }
+    });
+}
+
+/// `hooks.invoke` {sessionId, hookType, input} -> {output?}.
+- (void)handleHooksInvoke:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    NSString *sessionId = CPStringOrNil(params[@"sessionId"]);
+    NSString *hookType = CPStringOrNil(params[@"hookType"]);
+    if (!sessionId || !hookType) {
+        respond(nil, CPRpcError(@"Invalid hooks invoke payload"));
+        return;
+    }
+    CPCopilotSession *session = [self sessionWithId:sessionId];
+    if (!session) {
+        respond(nil, CPRpcError([NSString stringWithFormat:@"Session not found: %@", sessionId]));
+        return;
+    }
+    CPHookHandler handler = [session.config.hooks handlerForHookType:hookType];
+    if (!handler) {
+        respond(@{}, nil);
+        return;
+    }
+    id input = params[@"input"];
+    handler([input isKindOfClass:[NSDictionary class]] ? input : @{}, sessionId,
+            ^(NSDictionary<NSString *, id> * _Nullable output) {
+        respond(output ? @{@"output": output} : @{}, nil);
+    });
+}
+
+#pragma mark - Network Callbacks
+
+/// `network.resolveProxy` {url} -> {proxy?}.
+- (void)handleResolveProxy:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    CPNetworkResolveProxyHandler handler = self.options.network.resolveProxy;
+    if (!handler) {
+        respond(@{}, nil);
+        return;
+    }
+    handler(CPStringOrNil(params[@"url"]) ?: @"", ^(NSString * _Nullable proxy) {
+        respond(proxy ? @{@"proxy": proxy} : @{}, nil);
+    });
+}
+
+/// `network.authenticateNegotiate` {spn} -> {token?}.
+- (void)handleAuthenticateNegotiate:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    CPNetworkAuthenticateNegotiateHandler handler = self.options.network.authenticateNegotiate;
+    if (!handler) {
+        respond(@{}, nil);
+        return;
+    }
+    handler(CPStringOrNil(params[@"spn"]) ?: @"", ^(NSString * _Nullable token) {
+        respond(token ? @{@"token": token} : @{}, nil);
+    });
+}
+
+/// `network.authenticateBasic` {proxy, realm?, previousRejected} -> {username?, password?}.
+- (void)handleAuthenticateBasic:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    CPNetworkAuthenticateBasicHandler handler = self.options.network.authenticateBasic;
+    if (!handler) {
+        respond(@{}, nil);
+        return;
+    }
+    CPNetworkBasicAuthRequest *request = [[CPNetworkBasicAuthRequest alloc] initWithDictionary:params];
+    handler(request, ^(CPNetworkBasicCredentials * _Nullable credentials) {
+        NSMutableDictionary *reply = [NSMutableDictionary dictionary];
+        if (credentials.username) {
+            reply[@"username"] = credentials.username;
+            if (credentials.password) reply[@"password"] = credentials.password;
+        }
+        respond(reply, nil);
+    });
 }
 
 - (void)handleToolInvocation:(NSDictionary *)params
@@ -312,6 +698,18 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 }
 
 - (void)handleNotification:(NSString *)method params:(NSDictionary *)params {
+    // Session events: {sessionId, event: {id, timestamp, parentId, agentId, ephemeral, type, data}}
+    if ([method isEqualToString:@"session.event"]) {
+        CPCopilotSession *session = [self sessionWithId:CPStringOrNil(params[@"sessionId"])];
+        id envelope = params[@"event"];
+        if (!session || ![envelope isKindOfClass:[NSDictionary class]]) return;
+        CPSessionEvent *event = [[CPSessionEvent alloc] initWithEnvelope:envelope];
+        [session dispatchEvent:event];
+        // Tool calls and permission prompts arrive as broadcast events in SDK protocol 4.
+        [session handleBroadcastEvent:event];
+        return;
+    }
+
     // Route session events
     if ([method hasPrefix:@"session/"]) {
         NSString *sessionId = params[@"sessionId"] ?: @"";
@@ -379,46 +777,99 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
 - (void)doCreateSession:(nullable CPSessionConfig *)config
              completion:(void (^)(CPCopilotSession * _Nullable, NSError * _Nullable))completion {
-    NSDictionary *params = config ? [config toDictionary] : @{};
+    [self openSessionWithId:nil config:config completion:completion];
+}
+
+/// Describes why `config` cannot be used with this client, or nil when it is valid.
+- (nullable NSString *)sessionConfigProblem:(nullable CPSessionConfig *)config {
+    if (config.githubToken && config.gitHubTokenProvider) {
+        return @"githubToken and gitHubTokenProvider are mutually exclusive";
+    }
+    if ([self isEmptyMode] && !config.availableTools) {
+        return @"availableTools is required for every session when the client mode is \"empty\"";
+    }
+    return nil;
+}
+
+/// Shared session.create / session.resume flow: builds the flat options, adds the GitHub
+/// token provider registration, converts them to the grouped SDK protocol 4 payload with
+/// `CPGroupSessionParams`, and registers the session before sending so server requests
+/// that arrive while it is being created are routed to it.
+- (void)openSessionWithId:(nullable NSString *)resumeSessionId
+                   config:(nullable CPSessionConfig *)config
+               completion:(void (^)(CPCopilotSession * _Nullable, NSError * _Nullable))completion {
+    BOOL isResume = resumeSessionId != nil;
+    NSString *problem = [self sessionConfigProblem:config];
+    if (problem) {
+        completion(nil, CPClientError(-8, problem));
+        return;
+    }
+
+    NSMutableDictionary *flat = [NSMutableDictionary dictionaryWithDictionary:config ? [config toDictionary] : @{}];
+    NSString *requestedId = resumeSessionId ?: (config.sessionId ?: [[NSUUID UUID] UUIDString]);
+    flat[@"sessionId"] = requestedId;
 
     // Inject trace context
     if (self.options.onGetTraceContext) {
         CPTraceContext *ctx = self.options.onGetTraceContext();
-        if (ctx) {
-            NSMutableDictionary *mutableParams = [params mutableCopy];
-            if (ctx.traceparent) mutableParams[@"traceparent"] = ctx.traceparent;
-            if (ctx.tracestate) mutableParams[@"tracestate"] = ctx.tracestate;
-            params = [mutableParams copy];
-        }
+        if (ctx.traceparent) flat[@"traceparent"] = ctx.traceparent;
+        if (ctx.tracestate) flat[@"tracestate"] = ctx.tracestate;
     }
 
-    [self.rpcClient sendRequest:@"session.create"
+    NSString *registrationId = nil;
+    if (config.gitHubTokenProvider) {
+        registrationId = [[NSUUID UUID] UUIDString];
+        [self registerTokenProvider:config.gitHubTokenProvider registrationId:registrationId];
+        flat[@"gitHubTokenProviderRegistrationId"] = registrationId;
+    }
+
+    NSDictionary *params = CPGroupSessionParams(flat, isResume);
+    if ([self isEmptyMode]) params = CPApplyEmptyModeDefaults(params);
+
+    CPCopilotSession *session = [[CPCopilotSession alloc] initWithSessionId:requestedId
+                                                              workspacePath:nil
+                                                                  rpcClient:self.rpcClient
+                                                                     config:config];
+    if (registrationId) {
+        __weak typeof(self) weakSelf = self;
+        session.onRelease = ^{
+            [weakSelf unregisterTokenProvider:registrationId];
+        };
+    }
+    CPCopilotSession *previous = nil;
+    @synchronized (self.sessions) {
+        previous = self.sessions[requestedId];
+        self.sessions[requestedId] = session;
+    }
+
+    NSString *method = isResume ? @"session.resume" : @"session.create";
+    [self.rpcClient sendRequest:method
                          params:params
                      completion:^(NSDictionary *result, NSError *error) {
         if (error) {
-            completion(nil, error);
+            @synchronized (self.sessions) {
+                if (self.sessions[requestedId] == session) {
+                    if (previous) {
+                        self.sessions[requestedId] = previous;
+                    } else {
+                        [self.sessions removeObjectForKey:requestedId];
+                    }
+                }
+            }
+            if (registrationId) [self unregisterTokenProvider:registrationId];
+            completion(nil, CPErrorWithPolicyHelperFailure(error));
             return;
         }
 
-        NSString *sessionId = result[@"sessionId"];
-        if (!sessionId) {
-            NSError *parseError = [NSError errorWithDomain:kCPClientErrorDomain
-                                                      code:-6
-                                                  userInfo:@{NSLocalizedDescriptionKey: @"No sessionId in response"}];
-            completion(nil, parseError);
-            return;
+        NSString *sessionId = CPStringOrNil(result[@"sessionId"]) ?: requestedId;
+        if (![sessionId isEqualToString:requestedId]) {
+            @synchronized (self.sessions) {
+                if (self.sessions[requestedId] == session) [self.sessions removeObjectForKey:requestedId];
+                self.sessions[sessionId] = session;
+            }
+            session.sessionId = sessionId;
         }
-
-        NSString *workspacePath = result[@"workspacePath"];
-        CPCopilotSession *session = [[CPCopilotSession alloc] initWithSessionId:sessionId
-                                                                  workspacePath:workspacePath
-                                                                      rpcClient:self.rpcClient
-                                                                         config:config];
-
-        @synchronized (self.sessions) {
-            self.sessions[sessionId] = session;
-        }
-
+        session.workspacePath = CPStringOrNil(result[@"workspacePath"]);
         completion(session, nil);
     }];
 }
@@ -444,42 +895,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 - (void)doResumeSession:(NSString *)sessionId
                  config:(nullable CPSessionConfig *)config
              completion:(void (^)(CPCopilotSession * _Nullable, NSError * _Nullable))completion {
-    NSMutableDictionary *params = [NSMutableDictionary dictionary];
-    params[@"sessionId"] = sessionId;
-    if (config) {
-        [params addEntriesFromDictionary:[config toDictionary]];
-    }
-
-    // Inject trace context
-    if (self.options.onGetTraceContext) {
-        CPTraceContext *ctx = self.options.onGetTraceContext();
-        if (ctx) {
-            if (ctx.traceparent) params[@"traceparent"] = ctx.traceparent;
-            if (ctx.tracestate) params[@"tracestate"] = ctx.tracestate;
-        }
-    }
-
-    [self.rpcClient sendRequest:@"session.resume"
-                         params:params
-                     completion:^(NSDictionary *result, NSError *error) {
-        if (error) {
-            completion(nil, error);
-            return;
-        }
-
-        NSString *sid = result[@"sessionId"] ?: sessionId;
-        NSString *workspacePath = result[@"workspacePath"];
-        CPCopilotSession *session = [[CPCopilotSession alloc] initWithSessionId:sid
-                                                                  workspacePath:workspacePath
-                                                                      rpcClient:self.rpcClient
-                                                                         config:config];
-
-        @synchronized (self.sessions) {
-            self.sessions[sid] = session;
-        }
-
-        completion(session, nil);
-    }];
+    [self openSessionWithId:sessionId config:config completion:completion];
 }
 
 #pragma mark - Administrative Operations
@@ -505,21 +921,8 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     [self.rpcClient sendRequest:@"session.setForeground"
                          params:@{@"sessionId": sessionId}
                      completion:^(NSDictionary *result, NSError *error) {
-        if (error) {
-            completion(error);
-            return;
-        }
-        NSNumber *success = result[@"success"];
-        if (![success boolValue]) {
-            NSString *errMsg = result[@"error"] ?: @"Unknown error";
-            NSError *failError = [NSError errorWithDomain:kCPClientErrorDomain
-                                                     code:-7
-                                                 userInfo:@{NSLocalizedDescriptionKey:
-                                                     [NSString stringWithFormat:@"Failed to set foreground session: %@", errMsg]}];
-            completion(failError);
-            return;
-        }
-        completion(nil);
+        // SDK protocol 4 reports failures as JSON-RPC errors; older CLIs answer success: false.
+        completion(error ?: CPLifecycleFailure(result, @"Failed to set foreground session"));
     }];
 }
 
@@ -559,11 +962,20 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     [self.rpcClient sendRequest:@"session.delete"
                          params:@{@"sessionId": sessionId}
                      completion:^(NSDictionary *result, NSError *error) {
-        if (!error) {
+        NSError *failure = error ?: CPLifecycleFailure(result, @"Failed to delete session");
+        if (!failure) {
             @synchronized (self.sessions) {
                 [self.sessions removeObjectForKey:sessionId];
             }
         }
+        completion(failure);
+    }];
+}
+
+- (void)clearManagedSettingsCacheWithCompletion:(void (^)(NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"managedSettings.clearCache"
+                         params:@{}
+                     completion:^(NSDictionary *result, NSError *error) {
         completion(error);
     }];
 }

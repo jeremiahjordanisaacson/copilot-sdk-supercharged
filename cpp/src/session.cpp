@@ -62,6 +62,9 @@ std::string CopilotSession::send(const MessageOptions& options) {
     if (options.source) {
         params["source"] = *options.source;
     }
+    if (options.clientTurnId) {
+        params["clientTurnId"] = *options.clientTurnId;
+    }
     if (options.imageOptions) {
         params["imageOptions"] = *options.imageOptions;
     }
@@ -285,6 +288,48 @@ ExitPlanModeResponse CopilotSession::handleExitPlanModeRequest(const ExitPlanMod
 }
 
 // ============================================================================
+// Shell Authentication / Memory Store
+// ============================================================================
+
+void CopilotSession::registerShellAuthenticationHandler(ShellAuthenticationHandler handler) {
+    std::lock_guard<std::mutex> lock(shellAuthenticationMutex_);
+    shellAuthenticationHandler_ = std::move(handler);
+}
+
+ShellAuthenticationResponse CopilotSession::handleShellAuthenticationRequest(
+    const ShellAuthenticationRequest& request, std::function<bool()> isCancelled) {
+    ShellAuthenticationHandler handler;
+    {
+        std::lock_guard<std::mutex> lock(shellAuthenticationMutex_);
+        handler = shellAuthenticationHandler_;
+    }
+
+    if (!handler) {
+        return ShellAuthenticationResponse::cancel();
+    }
+
+    ShellAuthenticationInvocation invocation{sessionId, std::move(isCancelled)};
+    return handler(request, invocation);
+}
+
+void CopilotSession::registerMemoryStoreHandler(MemoryStoreHandler handler) {
+    std::lock_guard<std::mutex> lock(memoryStoreMutex_);
+    memoryStoreHandler_ = std::move(handler);
+}
+
+bool CopilotSession::handleMemoryStore(const StoredMemory& memory) {
+    MemoryStoreHandler handler;
+    {
+        std::lock_guard<std::mutex> lock(memoryStoreMutex_);
+        handler = memoryStoreHandler_;
+    }
+
+    if (!handler) return false;
+    handler(memory);
+    return true;
+}
+
+// ============================================================================
 // Hooks Handling
 // ============================================================================
 
@@ -382,6 +427,12 @@ nlohmann::json CopilotSession::recheckPolicyHelper() {
     return client_->request("session.managedSettings.recheckPolicyHelper", {{"sessionId", sessionId}});
 }
 
+PermissionModeResult CopilotSession::setPermissionMode(const std::string& mode) {
+    auto result = client_->request("session.permissions.setMode",
+                                   {{"sessionId", sessionId}, {"mode", mode}});
+    return result.is_object() ? result.get<PermissionModeResult>() : PermissionModeResult{};
+}
+
 void CopilotSession::destroy() {
     try {
         client_->request("session.detach", {{"sessionId", sessionId}});
@@ -413,6 +464,14 @@ void CopilotSession::destroy() {
     {
         std::lock_guard<std::mutex> lock(exitPlanModeMutex_);
         exitPlanModeHandler_ = nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(shellAuthenticationMutex_);
+        shellAuthenticationHandler_ = nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(memoryStoreMutex_);
+        memoryStoreHandler_ = nullptr;
     }
 
     if (onDisconnected) {

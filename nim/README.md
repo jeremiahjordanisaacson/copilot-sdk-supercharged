@@ -5,7 +5,7 @@ The Nim SDK for the GitHub Copilot CLI. Build AI-powered applications using idio
 ## Requirements
 
 - Nim >= 2.0.0
-- GitHub Copilot CLI installed (or set `COPILOT_CLI_PATH`)
+- GitHub Copilot CLI 1.0.113 or newer installed (or set `COPILOT_CLI_PATH`)
 
 ## Installation
 
@@ -44,6 +44,175 @@ proc main() {.async.} =
 waitFor main()
 ```
 
+## What's New in v3.0.0
+
+**SDK protocol 4.** The SDK now speaks SDK protocol 4 (`SdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. Older CLIs are rejected at `start` with an `SDK protocol version mismatch` error. Existing options keep working: you pass the same `newSessionConfig` options as before, and the SDK translates the flat payload into the grouped protocol 4 shape (`groupSessionParams`) right before `session.create` and `session.resume`. A legacy single `provider` is translated into a named `"default"` provider automatically.
+
+New client options:
+
+```nim
+var config = newClientConfig(
+  mode = cmCodingAgent,  # default; cmEmpty requires availableTools on every session
+  clientInfo = ClientInfo(editorName: "my-editor", editorVersion: "1.2.0"),
+)
+# Network callbacks, registered with network.setProvider after connecting.
+config.network = NetworkOptions(
+  scope: "connection",
+  resolveProxy: proc(url: string): Option[string] = some("PROXY proxy.example:8080; DIRECT"),
+  authenticateBasic: proc(req: NetworkBasicAuthRequest): Option[NetworkBasicCredentials] =
+    some(NetworkBasicCredentials(username: "user", password: getEnv("PROXY_PASSWORD"))),
+)
+let client = newCopilotClient(config)
+await client.start()
+await client.clearManagedSettingsCache()  # managedSettings.clearCache
+```
+
+In `cmEmpty` mode every `createSession` / `resumeSession` must pass `availableTools`, and conservative defaults (no telemetry, in-memory OAuth and embedding storage, no repository hooks, no host git operations) are applied beneath your own values:
+
+```nim
+let client = newCopilotClient(newClientConfig(mode = cmEmpty))
+let session = await client.createSession(newSessionConfig(
+  availableTools = some(@["view", "grep"]),
+))
+```
+
+New session options (all optional named arguments of `newSessionConfig`):
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  model = "gateway/chat",
+  askUserVariant = AskUserVariantElicitation,
+  featureFlags = {"my_flag": true}.toTable,
+  allowedModels = @["gpt-5", "claude-sonnet-4.5"],
+  authClientIdMetadataUrl = "https://example.com/oauth/client.json",
+  agentDirectories = @["./agents"],
+  hookDirectories = @["./hooks"],
+  trustWorkingDirectory = TrustWorkingDirectorySession,
+  sandbox = some(SandboxConfig(enabled: true, allowBypass: true)),
+  modelCapabilities = some(ModelCapabilitiesOverride(maxOutputTokens: 4096)),
+  imageGeneration = some(ImageGenerationConfig(enabled: some(true), saveToDisk: some(false))),
+  autopilot = some(AutopilotConfig(continuationEnabled: some(true), maxContinues: some(3))),
+))
+```
+
+Named BYOK providers (select a registered model with `"provider/id"`), with `apiKeyCommand` for fresh keys:
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  model = "gateway/chat",
+  providers = @[NamedProviderConfig(name: "gateway", `type`: "openai",
+                                    baseUrl: "https://models.example.com/v1",
+                                    apiKeyCommand: "get-model-key")],
+  models = @[ProviderModelConfig(provider: "gateway", id: "chat", wireModel: "gpt-5")],
+  defaultProvider = "gateway",
+  capi = some(CapiConfig(enabled: some(false))),
+))
+
+# The legacy single provider still works and gains apiKeyCommand:
+let legacy = await client.createSession(newSessionConfig(
+  model = "my-deployment",
+  provider = some(ProviderConfig(`type`: "openai", baseUrl: "https://models.example.com/v1",
+                                 apiKeyCommand: "get-model-key")),
+))
+```
+
+GitHub token provider (mutually exclusive with `githubToken`; unregistered when the session closes):
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  gitHubTokenProvider = proc(req: GitHubTokenRequest): GitHubTokenResult =
+    GitHubTokenResult(accessToken: fetchToken(req.host), expiresIn: 7200),
+))
+```
+
+Hooks, including the subagent lifecycle hooks (`HookSubagentStart`, `HookSubagentStop`):
+
+```nim
+var hooks = initTable[string, HookHandler]()
+hooks[HookSubagentStart] = proc(input: JsonNode): JsonNode =
+  echo "subagent started: ", input
+  nil
+hooks[HookSubagentStop] = proc(input: JsonNode): JsonNode = nil
+let session = await client.createSession(newSessionConfig(hooks = hooks))
+```
+
+Shell authentication and memory store callbacks:
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  onShellAuthenticationRequest = proc(req: ShellAuthenticationRequest): ShellAuthenticationResponse =
+    if req.program == "sudo": ShellAuthenticationResponse(accept: true, value: getEnv("SUDO_PASSWORD"))
+    else: ShellAuthenticationResponse(accept: false),
+  onStoreMemory = proc(memory: StoredMemory) =
+    echo "remember: ", memory.subject, " = ", memory.fact
+))
+```
+
+Idempotent tools, declared per session:
+
+```nim
+let lookup = newTool("lookup", "Look up a record", @[newToolParameter("id", "string", "Record id")],
+  proc(params: JsonNode): string = $(%*{"id": params{"id"}.getStr()}),
+  idempotent = true)
+let session = await client.createSession(newSessionConfig(tools = @[lookup]))
+```
+
+Message options: source, client turn id, and structured output:
+
+```nim
+let reply = await session.send(newMessageOptions(
+  "List three colors",
+  source = MessageSourceSystem,          # or agentMessageSource("reviewer")
+  clientTurnId = "turn-42",
+  responseSchemaJson = """{"type": "object", "properties": {"colors": {"type": "array"}}}""",
+))
+```
+
+Session methods:
+
+```nim
+discard await session.switchAutoTier(atBalance)        # session.model.switchAutoTier
+discard await session.recheckPolicyHelper()            # session.managedSettings.recheckPolicyHelper
+let modeResult = await session.setPermissionMode("yolo")
+if not modeResult.success and modeResult.reason == PermissionModeRefusalManagedPolicy:
+  echo "Blocked by managed policy"
+await session.detach()                                 # session.detach
+```
+
+Resume options: transcript recovery and resume event suppression:
+
+```nim
+let resumed = await client.resumeSession(newResumeSessionConfig(
+  "existing-session-id",
+  options = newSessionConfig(tools = @[lookup]),
+  allowTranscriptRecovery = true,
+  disableResume = true,  # sent as suppressResumeEvent
+))
+```
+
+Shell output events and Policy Helper failures:
+
+```nim
+session.on("tool.shell_output", proc(event: SessionEvent) =
+  let chunk = parseShellOutputData(event.data)
+  stdout.write(chunk.text)
+)
+
+try:
+  discard await client.createSession(newSessionConfig())
+except CopilotRpcError as e:
+  let failure = e.policyHelperFailure()
+  if failure.isSome:
+    echo "Policy Helper: ", failure.get().message
+```
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection. The SDK keeps spawning the Copilot CLI over stdio (`cliUrl` remains unsupported).
+- Server requests are answered synchronously on the reader thread, so `shellAuthentication.cancel` cannot interrupt a handler that is already running; the cancellation is acknowledged.
+- The `connect` handshake is only sent when `clientInfo` is set; otherwise the SDK uses `ping` as before.
+
 ## Architecture
 
 ```
@@ -66,6 +235,8 @@ The SDK spawns the Copilot CLI as a child process and communicates over JSON-RPC
 | `copilot_sdk/jsonrpc` | JSON-RPC 2.0 framing and message builders |
 | `copilot_sdk/types` | All type definitions (objects, enums) |
 | `copilot_sdk/tools` | Tool definition helpers and schema generation |
+| `copilot_sdk/session_params` | Protocol 4 session payload translation (`groupSessionParams`) |
+| `copilot_sdk/sdk_protocol_version` | `SdkProtocolVersion` (4) |
 
 ## Creating a Client
 
@@ -387,21 +558,37 @@ See the [cookbook/](cookbook/) directory for practical recipes:
 | `PermissionRequest` | Permission request from server |
 | `PermissionDecision` | Allow or deny permission |
 | `ConnectionState` | Client connection state enum |
+| `ClientMode` | `cmCodingAgent` (default) or `cmEmpty` |
+| `ClientInfo` | Integrating application identity for `connect` |
+| `NetworkOptions` | Proxy resolution and proxy authentication callbacks |
+| `NamedProviderConfig` / `ProviderModelConfig` | Named BYOK providers and their models |
+| `ProviderConfig` | Legacy single BYOK provider (translated automatically) |
+| `SandboxConfig` | Sandbox settings, including `allowBypass` |
+| `CopilotRpcError` | JSON-RPC error with `code`, `data`, and `policyHelperFailure` |
+| `PolicyHelperFailure` | Structured Policy Helper failure |
+| `PermissionModeResult` | Result of `setPermissionMode`, with refusal `reason` |
+| `ShellOutputData` | Data of a `tool.shell_output` event |
 
 ### Key Procedures
 
 | Procedure | Description |
 |-----------|-------------|
 | `newCopilotClient` | Create a new client |
-| `client.start` | Start CLI and connect |
+| `client.start` | Start CLI and connect (checks SDK protocol 4) |
 | `client.stop` | Stop CLI and clean up |
 | `client.createSession` | Create a new conversation |
 | `client.resumeSession` | Resume an existing conversation |
 | `client.registerTools` | Register tools for the model |
 | `client.defineTool` | Define and register a tool |
+| `client.clearManagedSettingsCache` | Clear cached managed settings |
 | `session.send` | Send a message (non-blocking) |
 | `session.sendAndWait` | Send and wait for idle |
 | `session.on` | Subscribe to events |
 | `session.disconnect` | Disconnect session |
+| `session.detach` | Detach from a session without ending it |
+| `session.switchAutoTier` | Switch the Auto routing tier |
+| `session.recheckPolicyHelper` | Re-run the Policy Helper |
+| `session.setPermissionMode` | Set the permission mode |
 | `session.getState` | Serialize session state |
+| `groupSessionParams` | Translate a flat session payload to protocol 4 groups |
 | `defineTool` (template) | Inline tool definition |

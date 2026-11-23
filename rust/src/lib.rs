@@ -108,7 +108,7 @@ pub enum CopilotError {
     Connection(String),
 
     /// Protocol version mismatch.
-    #[error("SDK protocol version mismatch: expected {expected}, server reports {actual:?}")]
+    #[error("{}", protocol_mismatch_message(.expected, .actual))]
     ProtocolMismatch {
         expected: u32,
         actual: Option<u32>,
@@ -121,4 +121,31 @@ pub enum CopilotError {
     /// No handler registered for a request.
     #[error("No handler: {0}")]
     NoHandler(String),
+}
+
+impl CopilotError {
+    /// Returns the structured policy helper failure carried in the JSON-RPC error data
+    /// (`error.data.policyHelperFailure`), for example when `session.create` or
+    /// `session.resume` is refused by a fail-closed managed-settings policy helper.
+    pub fn policy_helper_failure(&self) -> Option<PolicyHelperFailure> {
+        match self {
+            CopilotError::JsonRpc {
+                data: Some(data), ..
+            } => PolicyHelperFailure::from_data(data),
+            _ => None,
+        }
+    }
+}
+
+fn protocol_mismatch_message(expected: &u32, actual: &Option<u32>) -> String {
+    match actual {
+        Some(actual) => format!(
+            "SDK protocol version mismatch: SDK supports version {}, but server reports version {}. Please update your SDK or server to ensure compatibility.",
+            expected, actual
+        ),
+        None => format!(
+            "SDK protocol version mismatch: SDK supports version {}, but server does not report a protocol version. Please update your server to ensure compatibility.",
+            expected
+        ),
+    }
 }

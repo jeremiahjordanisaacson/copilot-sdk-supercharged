@@ -1546,85 +1546,238 @@ session, err := client.CreateSession(context.Background(), &copilot.CreateSessio
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `Type: "azure"`, not `Type: "openai"`.
 > - The `BaseURL` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
 
+## What's New in v3.0.0
+
+v3.0.0 is a major release. The core SDK now tracks Microsoft Copilot SDK 2.0, which negotiates **SDK protocol 4** and requires **Copilot CLI runtime 1.0.113 or newer** (v2.5.3 used protocol 3). Upgrade the SDK and the runtime together: an older runtime fails connection negotiation.
+
+### Breaking changes
+
+Code written for v2.5.x needs a migration pass. The [v2 breaking changes guide](../docs/v2-breaking-changes.md) lists every rename; these are the main ones:
+
+- **Explicit client mode:** `ClientOptions.Mode` is required, and `NewClient` panics on nil options or an unknown mode. Use `copilot.ModeCodingAgent` (formerly `ModeCopilotCli`) for CLI-like tools and defaults, or `copilot.ModeEmpty` for multi-user services that enable each capability explicitly.
+- **Runtime connections, in-process by default:** `ClientOptions.Connection` is now `Runtime`. Use `copilot.SpawnedStdioConnection{}`, `copilot.SpawnedTCPConnection{}`, `copilot.TCPConnection{Host: ..., Port: ...}`, `copilot.InProcessConnection{}`, or `copilot.ForDefault(...)`. `StdioConnection` became `SpawnedStdioConnection`, the old spawning `TCPConnection` became `SpawnedTCPConnection`, and `URIConnection` became the attached `TCPConnection`. With `Runtime` nil, the SDK hosts the runtime in your process; use `SpawnedStdioConnection{}` or `COPILOT_SDK_DEFAULT_CONNECTION=stdio` to keep a child process, and build with `-tags copilot_no_inprocess` for native-free binaries (see [In-process transport](#in-process-transport)). The client-level `Env` and `WorkingDirectory` move onto spawned connections, next to `Path` and `Args`.
+- **Grouped client options:** `LogLevel` and `Telemetry` move into `Observability`; `GitHubToken`, `UseLoggedInUser`, and `OnGitHubTelemetry` become `GitHub.Token`, `GitHub.UseLoggedInUser`, and `GitHub.OnTelemetry`; `OnListModels` and `RequestHandler` move into `Models`; `BuiltinPluginDirectories` becomes `Plugins.BuiltinDirectories`; `BaseDirectory` and `SessionIdleTimeoutSeconds` move onto the owned connection structs; `EnableRemoteSessions` is removed. New `Extensions` and `Installations` groups hold the extension launch provider and the installation confirmation handler.
+- **Grouped session options:** `SessionConfig` and `ResumeSessionConfig` become `CreateSessionOptions` and `ResumeSessionOptions`, with nested `Inference`, `Tools`, `Permissions`, `Interaction`, `Events`, `Agents`, `Skills`, `MCP`, `GitHub`, `Filesystem`, `Execution`, `Instructions`, `Hooks`, `Git`, `State`, `Plugins`, `Canvases`, `Extensions`, `Experiments`, and `Policy` structs. `Model`, `WorkingDirectory`, `SystemMessage`, `ConfigDirectory`, and `EnableConfigDiscovery` stay at the top level. `ResumeSessionWithOptions` and the other method variants are removed: use one `CreateSession(ctx, options)` and one `ResumeSession(ctx, sessionID, options)`.
+- **Named BYOK providers:** `Provider` is removed. Declare connections in `Inference.Providers`, optional model definitions in `Inference.Models` (selected as `provider/id`), and an optional pass-through connection in `Inference.DefaultProvider`. Set `GitHub.Capi.Enabled` to `copilot.Bool(false)` for a BYOK-only catalog; adding a provider no longer turns off Copilot API models.
+- **Go-specific:** generated RPC methods that take request parameters accept one explicit argument (pass `nil` for an all-optional request), generated types need keyed struct literals, and `Models.OnListModels` returns `[]copilot.Model` instead of `[]ModelInfo`.
+
+A v3.0.0 client and session with the restructured options:
+
+```go
+ctx := context.Background()
+client := copilot.NewClient(&copilot.ClientOptions{
+	Mode:          copilot.ModeCodingAgent,
+	Runtime:       copilot.SpawnedStdioConnection{}, // omit to host the runtime in-process
+	Observability: copilot.ClientObservabilityOptions{LogLevel: "debug"},
+	GitHub:        copilot.ClientGitHubOptions{Token: os.Getenv("COPILOT_GITHUB_TOKEN")},
+})
+defer client.Stop()
+
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Model:       "gateway/chat",
+	Permissions: copilot.SessionPermissionOptions{OnRequest: copilot.PermissionHandler.ApproveAll},
+	Inference: copilot.SessionInferenceOptions{
+		ReasoningEffort: "medium",
+		Providers: []copilot.NamedProviderConfig{{
+			Name:    "gateway",
+			Type:    "openai",
+			BaseURL: "https://models.example.com/v1",
+			APIKey:  os.Getenv("MODEL_API_KEY"),
+		}},
+		Models: []copilot.ProviderModelConfig{{Provider: "gateway", ID: "chat", WireModel: "my-deployment"}},
+	},
+	GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}},
+	Events: copilot.SessionEventOptions{Streaming: copilot.Bool(true)},
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer session.Disconnect()
+```
+
+### Module identity
+
+- The Go module path changes from `github.com/github/copilot-sdk/go` to `github.com/microsoft/copilot-sdk/go/v2`, adopted from upstream. Update imports to `copilot "github.com/microsoft/copilot-sdk/go/v2"` (and `github.com/microsoft/copilot-sdk/go/v2/rpc`), then run `go get github.com/microsoft/copilot-sdk/go/v2`.
+- Re-register the bundler tool under the new path with `go get -tool github.com/microsoft/copilot-sdk/go/v2/cmd/bundler`. `embeddedcli.Config.Dir` is now `embeddedcli.Config.Directory`.
+
+### New Microsoft Copilot SDK 2.0 features
+
+**Idempotent tool definitions:** declare that repeating a call with the same arguments has no further effect, so the runtime can safely repeat a call whose outcome was lost. Permission checks are unchanged.
+
+```go
+type LookupIssueParams struct {
+	ID string `json:"id" jsonschema:"Issue identifier"`
+}
+
+lookupIssue := copilot.DefineTool("lookup_issue", "Fetch issue details",
+	func(params LookupIssueParams, inv copilot.ToolInvocation) (string, error) {
+		return fetchIssue(params.ID)
+	})
+lookupIssue.Idempotent = true
+```
+
+**Client turn IDs:** `MessageOptions.ClientTurnID` labels the turn. The runtime copies it into `_meta["com.github.copilot/turnId"]` on every MCP `tools/call` made for that turn (including sub-agents) and echoes it on the turn's `user.message` event.
+
+```go
+_, err := session.Send(ctx, copilot.MessageOptions{
+	Prompt:       "Triage the new issues",
+	ClientTurnID: copilot.String("turn-42"),
+})
+```
+
+**Shell authentication handler:** `Interaction.OnShellAuthenticationRequest` answers `sudo -A`, `ssh`, and `git` prompts from commands the agent runs. The answer goes only to the program that asked; the model never sees it. See [Shell password prompts](../docs/features/shell-password-prompts.md).
+
+```go
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	Interaction: copilot.SessionInteractionOptions{
+		OnShellAuthenticationRequest: func(request copilot.ShellAuthenticationRequest, invocation copilot.ShellAuthenticationInvocation) (copilot.ShellAuthenticationResponse, error) {
+			masked := request.InputKind == copilot.ShellAuthenticationInputKindSecret
+			value, ok := promptUser(invocation.Context, request.Program+" asks: "+request.Prompt, masked)
+			if !ok {
+				return copilot.ShellAuthenticationResponse{Action: copilot.ShellAuthenticationActionCancel}, nil
+			}
+			return copilot.ShellAuthenticationResponse{Action: copilot.ShellAuthenticationActionAccept, Value: value}, nil
+		},
+	},
+})
+```
+
+**Memory store callback (experimental):** `State.StoreMemory` keeps the memories the agent saves in your own storage instead of the built-in backends. It requires `State.Memory.Enabled`. While it is set, the runtime retrieves no memories, so supply recall yourself (for example through `SystemMessage`) and set the callback again on every resume.
+
+```go
+session, err := client.CreateSession(ctx, &copilot.CreateSessionOptions{
+	State: copilot.SessionStateOptions{
+		Memory: &copilot.MemoryConfiguration{Enabled: true},
+		StoreMemory: func(ctx context.Context, memory copilot.StoredMemory) error {
+			return memories.Insert(ctx, memory.Subject, memory.Fact, memory.Citations)
+		},
+	},
+})
+```
+
+**Network callbacks (experimental):** `ClientOptions.Network` lets your app choose the runtime's proxies (`ResolveProxy`) and answer proxy Negotiate (`AuthenticateNegotiate`) and Basic (`AuthenticateBasic`) challenges. See [Network callbacks](#network-callbacks-experimental) for the full contract.
+
+```go
+client := copilot.NewClient(&copilot.ClientOptions{
+	Mode: copilot.ModeCodingAgent,
+	Network: &copilot.NetworkConfig{
+		ResolveProxy: func(ctx context.Context, request copilot.NetworkResolveProxyRequest) (string, error) {
+			return lookupProxy(ctx, request.URL) // "" lets the runtime decide
+		},
+		AuthenticateBasic: func(ctx context.Context, request copilot.NetworkAuthenticateBasicRequest) (*copilot.NetworkAuthenticateBasicResult, error) {
+			return lookupProxyCredentials(ctx, request.Proxy, request.PreviousRejected) // nil when unavailable
+		},
+	},
+})
+```
+
+**Structured Policy Helper failures:** managed-settings snapshots carry `PolicyHelperFailure` (with `Category`, `Severity`, `Message`, and optional `Remediation` and `HelpLink`) plus `PolicyHelperCapabilities`. When `Recheck` is supported, `session.RPC.ManagedSettings.RecheckPolicyHelper(ctx)` runs a fresh helper evaluation. Applicable `CreateSession` and `ResumeSession` failures include the same object as `policyHelperFailure` in the `*copilot.RPCError` data (see [JSON-RPC errors](#json-rpc-errors)).
+
+```go
+snapshot, err := session.RPC.ManagedSettings.Get(ctx)
+if err == nil && snapshot.PolicyHelperFailure != nil &&
+	snapshot.PolicyHelperCapabilities != nil && snapshot.PolicyHelperCapabilities.Recheck {
+	refreshed, err := session.RPC.ManagedSettings.RecheckPolicyHelper(ctx)
+	if err == nil && refreshed.PolicyHelperFailure == nil {
+		log.Println("Policy Helper recovered")
+	}
+}
+```
+
+**Permission-mode refusal reason:** when managed policy refuses a permission mode, the result's `Reason` is set to `"managed_policy"` and `Mode` reports the authoritative mode. The same result is available from `session.PermissionModeResult()` for a `Permissions.Mode` applied at create or resume.
+
+```go
+result, err := session.RPC.Permissions.SetMode(ctx, &rpc.PermissionsSetModeRequest{Mode: rpc.PermissionModeAllowAll})
+if err == nil && !result.Success && result.Reason != nil && *result.Reason == "managed_policy" {
+	log.Printf("managed policy kept the session in %q mode", result.Mode)
+}
+```
+
 ## Recent Features (v2.4–v2.5)
 
-The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#session), [in-process transport](#in-process-transport-experimental), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Fields are set on `copilot.SessionConfig` (and `copilot.ResumeSessionConfig`) unless noted. Optional scalars use the `copilot.Bool`/`copilot.String`/`copilot.Int` helpers.
+The recent CLI syncs added a wave of session controls. A few already have their own sections above ([reasoning effort](#session), [in-process transport](#in-process-transport), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry)), so this section is a compact roundup of the rest, written with the v3.0.0 grouped option names. Fields are set on `copilot.CreateSessionOptions` (and `copilot.ResumeSessionOptions`) unless noted. Optional scalars use the `copilot.Bool`/`copilot.String`/`copilot.Int` helpers.
 
 **v2.5**
 
-- **Tool search** — `ToolSearch *copilot.ToolSearchConfig` (`Enabled`, `DeferThreshold`). Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
-- **Session rewind** — `session.RPC.History.ListRewindPoints(ctx)`, `PreviewRewind(...)`, and `Rewind(...)`. Opt in to file capture with `EnableFileChangeTracking: copilot.Bool(true)`.
-- **Content exclusion** — `session.RPC.ContentExclusion.CheckPaths(ctx, ...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
-- **Additional directories** — `AdditionalDirectories []string`. Extra workspace roots the agent may access beyond `WorkingDirectory`.
-- **Disabled MCP servers** — `DisabledMCPServers []string`.
-- **GitHub MCP tool config** — `GitHubMCPToolConfig *copilot.GitHubMCPToolConfig`.
-- **Canvas provider** — `CanvasProvider *copilot.CanvasProviderIdentity`.
-- **Custom agents local-only** — `CustomAgentsLocalOnly *bool`.
-- **User-prompt-transformed hook** — `OnUserPromptTransformed` in `copilot.SessionHooks`.
-- **Permission decision context** — `DecisionContext` via `copilot.NewAttributedPermissionResult(...)`.
-- **Built-in plugin directories** — `BuiltinPluginDirectories` (client option) and `PluginDirectories` (session option).
-- **Experimental mode** — `EnableExperimentalMode *bool`.
+- **Tool search:** `Tools.Search *copilot.ToolSearchConfig` (`Enabled`, `DeferThreshold`). Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
+- **Session rewind:** `session.RPC.History.ListRewindPoints(ctx)`, `PreviewRewind(...)`, and `Rewind(...)`. Opt in to file capture with `Filesystem.TrackFileChanges: copilot.Bool(true)`.
+- **Content exclusion:** `session.RPC.ContentExclusion.CheckPaths(ctx, ...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories:** `Filesystem.AdditionalDirectories []string`. Extra workspace roots the agent may access beyond `WorkingDirectory`.
+- **Disabled MCP servers:** `MCP.DisabledServers []string`.
+- **GitHub MCP tool config:** `GitHub.MCP *copilot.GitHubMCPToolConfig`.
+- **Canvas provider:** `Canvases.Provider *copilot.CanvasProviderIdentity`.
+- **Custom agents local-only:** `Agents.LocalDiscoveryOnly *bool`.
+- **User-prompt-transformed hook:** `OnUserPromptTransformed` in `copilot.SessionHooks` (set through `Hooks.Handlers`).
+- **Permission decision context:** `DecisionContext` via `copilot.NewAttributedPermissionResult(...)`.
+- **Built-in plugin directories:** `Plugins.BuiltinDirectories` (client option) and `Plugins.Directories` (session option).
+- **Experimental mode:** `Experiments.EnableExperimentalMode *bool`.
 
 **v2.4**
 
-- **BYOK bearer-token provider** — `Provider.BearerTokenProvider` (`func(copilot.ProviderTokenArgs) (string, error)`); see [Custom Providers](#custom-providers).
-- **MCP OAuth handler** — `OnMCPAuthRequest copilot.MCPAuthHandler`.
-- **Session citations** — `EnableCitations *bool`.
-- **Excluded built-in agents** — `ExcludedBuiltInAgents []string`.
-- **Session spending limits** — `SessionLimits *rpc.SessionLimitsConfig` (caps such as `MaxAiCredits`).
-- **Pre-MCP-tool-call hook** — `OnPreMCPToolCall` in `copilot.SessionHooks`.
-- **HTTP request handler** — `RequestHandler *copilot.CopilotRequestHandler` (client option).
-- **GitHub attachments** — `copilot.AttachmentGitHubCommit`, `copilot.AttachmentGitHubRepository`.
+- **BYOK bearer-token provider:** `BearerTokenProvider` (`func(copilot.ProviderTokenArgs) (string, error)`) on an `Inference.Providers` entry (`copilot.NamedProviderConfig`); see [Custom Providers](#custom-providers).
+- **MCP OAuth handler:** `MCP.OnAuthRequest copilot.MCPAuthHandler`.
+- **Session citations:** `Inference.EnableCitations *bool`.
+- **Excluded built-in agents:** `Agents.ExcludedBuiltinAgents []string`.
+- **Session spending limits:** `Execution.Limits *rpc.SessionLimitsConfig` (caps such as `MaxAiCredits`).
+- **Pre-MCP-tool-call hook:** `OnPreMCPToolCall` in `copilot.SessionHooks` (set through `Hooks.Handlers`).
+- **HTTP request handler:** `Models.RequestHandler *copilot.CopilotRequestHandler` (client option).
+- **GitHub attachments:** `copilot.AttachmentGitHubCommit`, `copilot.AttachmentGitHubRepository`.
 
 **Reasoning effort and tool search:**
 
 ```go
-session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Model:                 "claude-sonnet-4.6",
-    ReasoningEffort:       "high",
-    ToolSearch:            &copilot.ToolSearchConfig{Enabled: copilot.Bool(true), DeferThreshold: copilot.Int(30)},
-    AdditionalDirectories: []string{"/repo/shared", "/repo/docs"},
+session, err := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Model:      "claude-sonnet-4.6",
+	Inference:  copilot.SessionInferenceOptions{ReasoningEffort: "high"},
+	Tools:      copilot.SessionToolOptions{Search: &copilot.ToolSearchConfig{Enabled: copilot.Bool(true), DeferThreshold: copilot.Int(30)}},
+	Filesystem: copilot.CreateSessionFilesystemOptions{AdditionalDirectories: []string{"/repo/shared", "/repo/docs"}},
 })
 ```
 
-**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+**Session rewind:** roll a session back to an earlier user turn, optionally restoring files:
 
 ```go
-session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    EnableFileChangeTracking: copilot.Bool(true),
+session, err := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Filesystem: copilot.CreateSessionFilesystemOptions{TrackFileChanges: copilot.Bool(true)},
 })
 // ... send a turn, then rewind it ...
 
 points, err := session.RPC.History.ListRewindPoints(context.Background())
 if err == nil && len(points.Points) > 0 {
-    last := points.Points[len(points.Points)-1]
-    _, err = session.RPC.History.Rewind(context.Background(), &rpc.HistoryRewindRequest{
-        EventID: last.EventID,
-        Mode:    rpc.HistoryRewindModeConversationAndFiles, // or rpc.HistoryRewindModeConversation
-    })
+	last := points.Points[len(points.Points)-1]
+	_, err = session.RPC.History.Rewind(context.Background(), &rpc.HistoryRewindRequest{
+		EventID: last.EventID,
+		Mode:    rpc.HistoryRewindModeConversationAndFiles, // or rpc.HistoryRewindModeConversation
+	})
 }
 ```
 
-**Content exclusion** — check paths against the session's policy:
+**Content exclusion:** check paths against the session's policy:
 
 ```go
 result, err := session.RPC.ContentExclusion.CheckPaths(context.Background(), &rpc.ContentExclusionCheckPathsRequest{
-    Paths: []string{"/repo/src/secret.go", "/repo/README.md"},
+	Paths: []string{"/repo/src/secret.go", "/repo/README.md"},
 })
 ```
 
-**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+**BYOK bearer-token provider:** supply tokens dynamically (never serialized; the runtime calls back before each request):
 
 ```go
-session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
-    Model: "gpt-4",
-    Provider: &copilot.ProviderConfig{
-        Type:    "openai",
-        BaseURL: "https://my-api.example.com/v1",
-        BearerTokenProvider: func(args copilot.ProviderTokenArgs) (string, error) {
-            return acquireAccessToken()
-        },
-    },
+defaultProvider := copilot.String("byok")
+session, err := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{
+	Model:  "gpt-4",
+	GitHub: copilot.SessionGitHubOptions{Capi: &copilot.CapiSessionOptions{Enabled: copilot.Bool(false)}},
+	Inference: copilot.SessionInferenceOptions{
+		DefaultProvider: &defaultProvider,
+		Providers: []copilot.NamedProviderConfig{{
+			Name:    "byok",
+			Type:    "openai",
+			BaseURL: "https://my-api.example.com/v1",
+			BearerTokenProvider: func(args copilot.ProviderTokenArgs) (string, error) {
+				return acquireAccessToken()
+			},
+		}},
+	},
 })
 ```
 

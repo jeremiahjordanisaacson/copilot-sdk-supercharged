@@ -40,6 +40,10 @@ public class CopilotClientOptions {
     private Boolean inProcess;
     /** Identity of the integrating application, sent on the {@code connect} handshake. */
     private Types.ClientInfo clientInfo;
+    /** Client mode: {@code "coding-agent"} (default) or {@code "empty"} (see {@link Types.ClientMode}). */
+    private String mode;
+    /** Network callbacks (proxy resolution and proxy authentication). */
+    private Types.NetworkConfig network;
 
     public CopilotClientOptions() {}
 
@@ -65,6 +69,8 @@ public class CopilotClientOptions {
     public CopilotClientOptions builtinPluginDirectories(List<String> dirs) { this.builtinPluginDirectories = dirs; return this; }
     public CopilotClientOptions inProcess(boolean inProcess) { this.inProcess = inProcess; return this; }
     public CopilotClientOptions clientInfo(Types.ClientInfo clientInfo) { this.clientInfo = clientInfo; return this; }
+    public CopilotClientOptions mode(String mode) { this.mode = mode; return this; }
+    public CopilotClientOptions network(Types.NetworkConfig network) { this.network = network; return this; }
 
     // Getters
     public String getCliPath() { return cliPath; }
@@ -88,4 +94,6 @@ public class CopilotClientOptions {
     public List<String> getBuiltinPluginDirectories() { return builtinPluginDirectories; }
     public Boolean getInProcess() { return inProcess; }
     public Types.ClientInfo getClientInfo() { return clientInfo; }
+    public String getMode() { return mode; }
+    public Types.NetworkConfig getNetwork() { return network; }
 }

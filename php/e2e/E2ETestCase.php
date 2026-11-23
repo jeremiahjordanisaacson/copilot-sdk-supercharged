@@ -86,7 +86,11 @@ abstract class E2ETestCase extends TestCase
             $env = [];
         }
 
+        // Signing keys would make the CLI sign requests the replay proxy cannot verify.
+        unset($env['COPILOT_HMAC_KEY'], $env['CAPI_HMAC_KEY']);
         $env['COPILOT_API_URL'] = static::$proxyUrl;
+        // Route GitHub API calls (including /copilot_internal/user) to the replay proxy.
+        $env['COPILOT_DEBUG_GITHUB_API_URL'] = static::$proxyUrl;
         $env['COPILOT_HOME'] = static::$workDir;
         $env['GH_CONFIG_DIR'] = static::$workDir;
         $env['XDG_CONFIG_HOME'] = static::$workDir;
@@ -119,19 +123,29 @@ abstract class E2ETestCase extends TestCase
 
     /**
      * Get the CLI path for tests.
+     *
+     * Lookup order: COPILOT_CLI_PATH (CI points it at the npm bin shim, which runs
+     * directly), then @github/copilot/npm-loader.js (CLI >= 1.0.10x ships a native
+     * binary that this loader launches; the client runs .js paths with node), then the
+     * legacy index.js entry points of older CLIs.
      */
     protected function getCliPath(): string
     {
         $envPath = getenv('COPILOT_CLI_PATH');
-        if ($envPath !== false && file_exists($envPath)) {
+        if ($envPath !== false && $envPath !== '' && file_exists($envPath)) {
             return realpath($envPath) ?: $envPath;
         }
 
         $githubModules = static::$repoRoot . DIRECTORY_SEPARATOR . 'nodejs'
             . DIRECTORY_SEPARATOR . 'node_modules' . DIRECTORY_SEPARATOR . '@github';
 
-        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
-        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        $loader = $githubModules . DIRECTORY_SEPARATOR . 'copilot' . DIRECTORY_SEPARATOR . 'npm-loader.js';
+        if (file_exists($loader)) {
+            return realpath($loader) ?: $loader;
+        }
+
+        // From CLI 1.0.64-1 until the native-binary releases, the runnable index.js
+        // shipped in a platform-specific package (e.g. @github/copilot-linux-x64).
         foreach (glob($githubModules . DIRECTORY_SEPARATOR . 'copilot-*' . DIRECTORY_SEPARATOR . 'index.js') ?: [] as $match) {
             if (strpos($match, 'language-server') === false && file_exists($match)) {
                 return realpath($match) ?: $match;

@@ -21,6 +21,34 @@ COPILOT_API_URL=""
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _HARNESS_SERVER="$(cd "$_HARNESS_DIR/../../test/harness" && pwd)/server.ts"
 
+# Locate the Copilot CLI for E2E tests and echo its path.
+#
+# Lookup order: COPILOT_CLI_PATH (when the file exists), the CLI 1.0.113+ npm-loader.js entry
+# point, then the legacy index.js entry points under nodejs/node_modules/@github. A .js path is
+# run with node by copilot_jsonrpc_start; other paths (such as node_modules/.bin/copilot) are
+# executed directly.
+#
+# Returns 0 when found, 1 otherwise.
+get_cli_path_for_tests() {
+    if [[ -n "${COPILOT_CLI_PATH:-}" ]] && [[ -e "$COPILOT_CLI_PATH" ]]; then
+        echo "$COPILOT_CLI_PATH"
+        return 0
+    fi
+
+    local github_dir candidate
+    github_dir="$(cd "$_HARNESS_DIR/../.." && pwd)/nodejs/node_modules/@github"
+    for candidate in "$github_dir/copilot/npm-loader.js" "$github_dir"/copilot-*/index.js \
+        "$github_dir/copilot/index.js"; do
+        if [[ -f "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    echo "ERROR: Copilot CLI not found for tests. Run 'npm install' in the nodejs directory." >&2
+    return 1
+}
+
 # Start the replaying CAPI proxy server.
 #
 # Spawns npx tsx test/harness/server.ts, reads its stdout for the

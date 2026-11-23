@@ -8,10 +8,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -267,6 +269,37 @@ std::string TestHarness::snapshotPath(const std::string& relativePath) const {
 #endif
     path += relativePath;
     return path;
+}
+
+std::string TestHarness::cliPath() const {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // 1. COPILOT_CLI_PATH (CI points it at nodejs/node_modules/.bin/copilot)
+    const char* envPath = std::getenv("COPILOT_CLI_PATH");
+    if (envPath && envPath[0] != '\0' && fs::is_regular_file(envPath, ec)) {
+        return envPath;
+    }
+
+    const fs::path modules = fs::path(repoRoot_) / "nodejs" / "node_modules" / "@github";
+
+    // 2. CLI >= 1.0.10x: npm-loader.js launches the native binary
+    const fs::path loader = modules / "copilot" / "npm-loader.js";
+    if (fs::is_regular_file(loader, ec)) return loader.string();
+
+    // 3. Legacy CLIs: @github/copilot-<platform>/index.js, then @github/copilot/index.js
+    if (fs::is_directory(modules, ec)) {
+        for (const auto& entry : fs::directory_iterator(modules, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.rfind("copilot-", 0) != 0) continue;
+            const fs::path index = entry.path() / "index.js";
+            if (fs::is_regular_file(index, ec)) return index.string();
+        }
+    }
+    const fs::path legacyIndex = modules / "copilot" / "index.js";
+    if (fs::is_regular_file(legacyIndex, ec)) return legacyIndex.string();
+
+    return "copilot";
 }
 
 } // namespace e2e

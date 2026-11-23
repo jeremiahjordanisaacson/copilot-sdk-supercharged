@@ -55,6 +55,164 @@ session.disconnect();
 client.stop();
 ```
 
+## What's New in v3.0.0
+
+The MATLAB SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
+protocol). It requires **Copilot CLI 1.0.113 or newer**: `start()` rejects
+older CLIs with `SDK protocol version mismatch: SDK supports version 4, but
+server reports version N. Please update your SDK or server to ensure
+compatibility.` The handshake now uses `connect` (falling back to `ping`).
+
+Existing options keep working. `copilot.SessionConfig` still takes the same
+name-value pairs; `copilot.groupSessionParams` converts the flat payload into
+the protocol 4 grouped shape (`inference`, `tools`, `permissions`, `events`,
+...) right before `session.create` and `session.resume` are sent. Server
+callbacks (token providers, shell authentication, memory store, hooks, network)
+are answered by `copilot.JsonRpcClient` while MATLAB waits or idles.
+
+### Client options
+
+```matlab
+opts = copilot.CopilotClientOptions( ...
+    'ClientInfo', struct('EditorName', 'MyEditor', 'EditorVersion', '1.2.0', ...
+                         'ExtensionName', 'my-ext', 'ExtensionVersion', '0.1.0'), ...
+    'Mode', 'empty', ...                       % or 'coding-agent' (default)
+    'Network', struct( ...
+        'Scope', 'connection', ...
+        'ResolveProxy', @(url) 'http://proxy.local:8080', ...
+        'AuthenticateBasic', @(proxy, realm, previousRejected) ...
+            struct('username', 'me', 'password', getenv('PROXY_PASSWORD'))));
+client = copilot.CopilotClient(opts);
+client.start();
+client.clearManagedSettingsCache();            % managedSettings.clearCache
+```
+
+`'Mode', 'empty'` requires `'AvailableTools'` on every create and resume and
+turns off ambient features (telemetry, repository hooks, embeddings, memory).
+
+### Session options
+
+```matlab
+config = copilot.SessionConfig( ...
+    'Model',                   'claude-sonnet-4.5', ...
+    'AvailableTools',          {'view', 'grep'}, ...
+    'AskUserVariant',          'elicitation', ...
+    'Sandbox',                 copilot.SandboxConfig('Enabled', true, 'AllowBypass', true), ...
+    'FeatureFlags',            struct('my_flag', true), ...
+    'AllowedModels',           {'claude-sonnet-4.5'}, ...
+    'AuthClientIdMetadataUrl', 'https://example.com/client.json', ...
+    'MaxOutputTokens',         4096, ...    % limits.max_output_tokens
+    'AgentDirectories',        {'/repo/.agents'}, ...
+    'HookDirectories',         {'/repo/.hooks'}, ...
+    'WorkingDirectory',        '/repo', ...
+    'TrustWorkingDirectory',   'session', ... % create only: 'session' or 'user'
+    'ImageGeneration',         copilot.ImageGenerationConfig('Enabled', true, 'SaveToDisk', false), ...
+    'Autopilot',               copilot.AutopilotConfig('ContinuationEnabled', true, 'MaxContinues', 5));
+session = client.createSession(config);
+```
+
+### Named BYOK providers
+
+```matlab
+local = copilot.ProviderConfig('Name', 'local', 'Type', 'openai', ...
+    'BaseUrl', 'http://localhost:11434/v1', ...
+    'ApiKeyCommand', 'cat ~/.keys/local');     % apiKeyCommand
+llama = copilot.ProviderModelConfig('Provider', 'local', 'Id', 'llama3', ...
+    'MaxOutputTokens', 2048);
+config = copilot.SessionConfig( ...
+    'Providers', {local}, 'Models', {llama}, ...
+    'DefaultProvider', 'local', 'Model', 'local/llama3', ...
+    'CapiEnabled', false);                       % BYOK only
+```
+
+The legacy single provider still works: `'Provider', copilot.ProviderConfig(...)`
+is sent as the named provider `"default"`.
+
+### Idempotent tools, message options and session methods
+
+```matlab
+tool = copilot.DefineTool('Name', 'lookup', 'Description', 'Read-only lookup', ...
+    'Idempotent', true, 'Handler', @(p) 'ok');
+
+msg = copilot.MessageOptions( ...
+    'Prompt',         'Summarize the diff', ...
+    'Source',         'agent-reviewer', ...   % MessageSource: user, system or agent-<id>
+    'ClientTurnId',   'turn-42', ...
+    'ResponseSchema', struct('type', 'object', ...
+        'properties', struct('summary', struct('type', 'string'))));
+response = session.sendAndWait(msg);
+
+session.switchAutoTier('balance');           % session.model.switchAutoTier
+snapshot = session.recheckPolicyHelper();    % session.managedSettings.recheckPolicyHelper
+result = session.setPermissionMode('allow-all');
+if isfield(result, 'reason') && strcmp(result.reason, copilot.Types.PermissionModeReasonManagedPolicy)
+    disp('Blocked by enterprise policy');
+end
+session.detach();                            % session.detach
+```
+
+### Resume options
+
+```matlab
+session = client.resumeSession(sessionId, copilot.SessionConfig( ...
+    'DisableResume', true, ...               % suppressResumeEvent
+    'AllowTranscriptRecovery', true));
+```
+
+### Callbacks
+
+```matlab
+config = copilot.SessionConfig( ...
+    'GitHubTokenProvider', @(req) struct('accessToken', getenv('GH_TOKEN'), ...
+                                         'tokenType', 'Bearer', 'expiresIn', 3600), ...
+    'OnShellAuthenticationRequest', @(req) getenv('SUDO_PASSWORD'), ... % [] cancels
+    'StoreMemory', @(memory) fprintf('Remember: %s\n', memory.fact), ...
+    'OnSubagentStart', @(input) struct('additionalContext', 'Be concise.'), ...
+    'OnSubagentStop', @(input) struct('modifiedResponse', input.response));
+```
+
+The token provider answers `gitHubToken.getToken` (return `[]` to cancel) and is
+released when the session is detached.
+
+### Events and errors
+
+```matlab
+addlistener(session, 'SessionEvent', @(~, evt) onEvent(evt));
+
+function onEvent(evt)
+    if isfield(evt.Payload, 'event') && ...
+            strcmp(evt.Payload.event.type, copilot.Types.EventToolShellOutput)
+        fprintf('%s', evt.Payload.event.data.text);   % tool.shell_output
+    end
+end
+```
+
+```matlab
+try
+    session = client.createSession(config);
+catch me
+    failure = client.LastPolicyHelperFailure;   % copilot.PolicyHelperFailure or []
+    if ~isempty(failure)
+        fprintf('Policy helper: %s\n', failure.Message);
+    end
+end
+```
+
+JSON-RPC errors (including `session.abort`, `session.delete` and
+`session.setForeground` failures) are raised as `copilot:rpcError`.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*`) is not
+  available: it is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: the MATLAB
+  SDK spawns the Copilot CLI over stdio through Java.
+- Server callbacks run on MATLAB's timer-driven reader, so they are answered
+  only while MATLAB is idle or waiting (`pause`, `sendAndWait`, requests).
+  Shell authentication prompts are answered synchronously, so
+  `shellAuthentication.cancel` is acknowledged without further action.
+
 ## Architecture
 
 ```
@@ -67,7 +225,7 @@ copilot.CopilotClient          (process lifecycle, session registry)
 copilot.JsonRpcClient           (JSON-RPC 2.0 over stdio, Java I/O)
       |
       v
-Copilot CLI  (--server --stdio)  (agent runtime, tool execution)
+Copilot CLI  (--headless --stdio)  (agent runtime, tool execution)
 ```
 
 The SDK uses MATLAB's bundled Java runtime to manage the child process
@@ -96,6 +254,8 @@ and stream JSON-RPC messages through `java.io.BufferedReader` /
 | `getAuthStatus()` | Return the auth status. |
 | `listModels()` | Return available models. |
 | `getLastSessionId()` | Return the last-used session ID. |
+| `clearManagedSettingsCache()` | Clear cached enterprise managed settings. |
+| `LastPolicyHelperFailure` | Policy Helper failure of the last failed create/resume. |
 
 ### copilot.CopilotClientOptions
 
@@ -136,7 +296,11 @@ and stream JSON-RPC messages through `java.io.BufferedReader` /
 | `sendAndWait(msgOpts)` | Send a message and block until the turn completes. |
 | `abort()` | Cancel the active turn. |
 | `getMessages()` | Return all collected messages. |
-| `disconnect()` | Detach from the session. |
+| `disconnect()` | Detach from the session (ignores errors). |
+| `detach()` | Detach from the session (`session.detach`). |
+| `switchAutoTier(tier)` | Request an Auto routing tier. |
+| `recheckPolicyHelper()` | Re-run the enterprise Policy Helper. |
+| `setPermissionMode(mode)` | Change the permission mode. |
 
 **Events:**
 
@@ -168,7 +332,9 @@ and stream JSON-RPC messages through `java.io.BufferedReader` /
 
 | Constant | Value |
 |----------|-------|
-| `VERSION` | `3` |
+| `VERSION` | `4` |
+| `MIN_VERSION` | `4` |
+| `MAX_VERSION` | `4` |
 
 ## Custom Tools
 

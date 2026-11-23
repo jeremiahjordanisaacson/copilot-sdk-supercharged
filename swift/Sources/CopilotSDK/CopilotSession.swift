@@ -40,6 +40,11 @@ public actor CopilotSession {
     private var userInputHandler: UserInputHandler?
     private var hooks: SessionHooks?
     private var exitPlanModeHandler: ExitPlanModeHandler?
+    private var shellAuthenticationHandler: ShellAuthenticationHandler?
+    private var memoryStoreHandler: MemoryStoreHandler?
+    private var pendingShellAuthentications: [String: ShellAuthenticationGate] = [:]
+    private var onClose: (@Sendable () async -> Void)?
+    private var isClosed = false
 
     // MARK: - Init
 
@@ -52,6 +57,11 @@ public actor CopilotSession {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.workspacePath = workspacePath
+    }
+
+    /// Sets the callback invoked once when the session is detached or destroyed.
+    func setOnClose(_ handler: @escaping @Sendable () async -> Void) {
+        onClose = handler
     }
 
     // MARK: - Send Message
@@ -73,8 +83,19 @@ public actor CopilotSession {
         if let mode = options.mode {
             params["mode"] = mode
         }
-        if let responseFormat = options.responseFormat {
-            params["responseFormat"] = responseFormat.rawValue
+        // The legacy `responseFormat` string is not accepted by SDK protocol 4 runtimes;
+        // structured output is requested with `responseSchema`.
+        if let schema = options.responseSchema {
+            params["responseFormat"] = [
+                "type": "json_schema",
+                "jsonSchema": ["name": "response", "strict": true, "schema": schema] as [String: Any],
+            ] as [String: Any]
+        }
+        if let source = options.source {
+            params["source"] = source.rawValue
+        }
+        if let clientTurnId = options.clientTurnId {
+            params["clientTurnId"] = clientTurnId
         }
         if let imageOptions = options.imageOptions {
             var imageDict: [String: Any] = [:]
@@ -202,6 +223,19 @@ public actor CopilotSession {
         }
     }
 
+    /// Subscribes to live shell output of running tools (`tool.shell_output` events).
+    ///
+    /// - Parameter handler: Receives each output chunk in publication order.
+    /// - Returns: An ID that can be used to unsubscribe via `removeEventHandler`.
+    @discardableResult
+    public func onShellOutput(_ handler: @escaping @Sendable (ToolShellOutputData) -> Void) -> UUID {
+        return on(SessionEventTypes.toolShellOutput) { event in
+            if let data = ToolShellOutputData.from(event) {
+                handler(data)
+            }
+        }
+    }
+
     // MARK: - Event Dispatch (Internal)
 
     /// Dispatches an event to all registered handlers.
@@ -304,6 +338,62 @@ public actor CopilotSession {
         }
     }
 
+    // MARK: - Shell Authentication (Internal)
+
+    /// Registers the shell authentication handler.
+    func registerShellAuthenticationHandler(_ handler: ShellAuthenticationHandler?) {
+        shellAuthenticationHandler = handler
+    }
+
+    /// Answers a `shellAuthentication.request`. Resolves to `.cancel` when no handler is
+    /// registered, the handler throws, or the runtime cancels the request first.
+    func handleShellAuthenticationRequest(_ request: ShellAuthenticationRequest) async
+        -> ShellAuthenticationResponse
+    {
+        guard let handler = shellAuthenticationHandler, !isClosed, !request.requestId.isEmpty
+        else {
+            return .cancel
+        }
+        let requestId = request.requestId
+        let gate = ShellAuthenticationGate()
+        pendingShellAuthentications[requestId]?.cancel()
+        pendingShellAuthentications[requestId] = gate
+        let response = await withCheckedContinuation {
+            (continuation: CheckedContinuation<ShellAuthenticationResponse, Never>) in
+            gate.bind(continuation)
+            gate.attach(
+                Task {
+                    let answer = (try? await handler(request)) ?? .cancel
+                    gate.resume(answer)
+                })
+        }
+        if pendingShellAuthentications[requestId] === gate {
+            pendingShellAuthentications.removeValue(forKey: requestId)
+        }
+        return response
+    }
+
+    /// Handles a `shellAuthentication.cancel`: the pending request resolves to `.cancel`
+    /// and any later answer from the handler is ignored.
+    func cancelShellAuthenticationRequest(_ requestId: String) {
+        pendingShellAuthentications.removeValue(forKey: requestId)?.cancel()
+    }
+
+    // MARK: - Memory Store (Internal)
+
+    /// Registers the app-side memory store.
+    func registerMemoryStore(_ handler: MemoryStoreHandler?) {
+        memoryStoreHandler = handler
+    }
+
+    /// Stores a memory with the registered handler (`memoryStore.store`).
+    func handleMemoryStore(_ memory: StoredMemory) async throws {
+        guard let handler = memoryStoreHandler, !isClosed else {
+            throw JsonRpcError(code: -32000, message: "Memory store owner is unavailable")
+        }
+        try await handler(memory)
+    }
+
     /// Handles a hook invocation from the server.
     func handleHooksInvoke(hookType: String, input: Any?) async throws -> Any? {
         guard let hooks = hooks else {
@@ -397,6 +487,30 @@ public actor CopilotSession {
             }
             return nil
 
+        case "subagentStart":
+            guard let handler = hooks.onSubagentStart else { return nil }
+            if let inputDict = input as? [String: Any] {
+                let data = try JSONSerialization.data(withJSONObject: inputDict, options: [])
+                let hookInput = try JSONDecoder().decode(SubagentStartHookInput.self, from: data)
+                let output = try await handler(hookInput, sessionId)
+                if let output = output {
+                    return encodeToDictionary(output)
+                }
+            }
+            return nil
+
+        case "subagentStop":
+            guard let handler = hooks.onSubagentStop else { return nil }
+            if let inputDict = input as? [String: Any] {
+                let data = try JSONSerialization.data(withJSONObject: inputDict, options: [])
+                let hookInput = try JSONDecoder().decode(SubagentStopHookInput.self, from: data)
+                let output = try await handler(hookInput, sessionId)
+                if let output = output {
+                    return encodeToDictionary(output)
+                }
+            }
+            return nil
+
         default:
             return nil
         }
@@ -434,15 +548,46 @@ public actor CopilotSession {
 
     // MARK: - Destroy
 
+    /// Releases this session without deleting its on-disk state (`session.detach`), so it
+    /// can be resumed later with `CopilotClient.resumeSession`. Falls back to the legacy
+    /// `session.destroy` on runtimes without `session.detach`.
+    ///
+    /// After calling this method, the session can no longer be used. All event handlers
+    /// and tool handlers are cleared.
+    public func detach() async throws {
+        if isClosed { return }
+        var response: [String: Any] = [:]
+        do {
+            response = try await rpcClient.sendRequest(
+                method: "session.detach", params: ["sessionId": sessionId])
+            if response["success"] as? Bool == false {
+                response = try await rpcClient.sendRequest(
+                    method: "session.detach", params: ["sessionId": sessionId])
+            }
+        } catch let error as JsonRpcError where error.isMethodNotFound {
+            response = try await rpcClient.sendRequest(
+                method: "session.destroy", params: ["sessionId": sessionId])
+        }
+        if response["success"] as? Bool == false {
+            let message = response["error"] as? String ?? "Unknown error"
+            throw CopilotError.operationFailed("Failed to detach session \(sessionId): \(message)")
+        }
+        await releaseResources()
+    }
+
     /// Destroys this session and releases all associated resources.
     ///
-    /// After calling this method, the session can no longer be used. All event
-    /// handlers and tool handlers are cleared.
+    /// Equivalent to `detach()`: the on-disk state is kept, so the conversation can be
+    /// resumed with `CopilotClient.resumeSession`. To delete it, use
+    /// `CopilotClient.deleteSession`.
     public func destroy() async throws {
-        let _ = try await rpcClient.sendRequest(
-            method: "session.destroy",
-            params: ["sessionId": sessionId]
-        )
+        try await detach()
+    }
+
+    /// Clears local state, resolves pending prompts, and notifies the owning client.
+    private func releaseResources() async {
+        if isClosed { return }
+        isClosed = true
         eventHandlers.removeAll()
         typedEventHandlers.removeAll()
         toolHandlers.removeAll()
@@ -450,18 +595,123 @@ public actor CopilotSession {
         userInputHandler = nil
         hooks = nil
         exitPlanModeHandler = nil
+        shellAuthenticationHandler = nil
+        memoryStoreHandler = nil
+        for gate in pendingShellAuthentications.values {
+            gate.cancel()
+        }
+        pendingShellAuthentications.removeAll()
+        let close = onClose
+        onClose = nil
+        await close?()
     }
 
     // MARK: - Abort
 
     /// Aborts the currently processing message in this session.
     ///
-    /// The session remains valid and can continue to be used for new messages.
+    /// The session remains valid and can continue to be used for new messages. Failures
+    /// arrive as a `JsonRpcError`.
     public func abort() async throws {
         let _ = try await rpcClient.sendRequest(
             method: "session.abort",
             params: ["sessionId": sessionId]
         )
+    }
+
+    // MARK: - Model, Policy, and Permission Controls
+
+    /// Changes the Auto routing preference without changing the session's model
+    /// (`session.model.switchAutoTier`). Pass nil to return to the provider's default Auto
+    /// routing. Requires the session model to be `auto`. Experimental.
+    ///
+    /// - Returns: The raw result dictionary from the runtime.
+    @discardableResult
+    public func switchAutoTier(_ tier: AutoTier?) async throws -> [String: Any] {
+        var params: [String: Any] = ["sessionId": sessionId]
+        if let tier = tier {
+            params["autoTier"] = tier.rawValue
+        } else {
+            params["autoTier"] = NSNull()
+        }
+        return try await rpcClient.sendRequest(
+            method: "session.model.switchAutoTier", params: params)
+    }
+
+    /// Re-runs the managed-settings Policy Helper for this session
+    /// (`session.managedSettings.recheckPolicyHelper`).
+    ///
+    /// - Returns: The managed settings snapshot; when the helper still fails it carries
+    ///   `policyHelperFailure` (parse it with `PolicyHelperFailure.from(_:)`).
+    @discardableResult
+    public func recheckPolicyHelper() async throws -> [String: Any] {
+        return try await rpcClient.sendRequest(
+            method: "session.managedSettings.recheckPolicyHelper",
+            params: ["sessionId": sessionId]
+        )
+    }
+
+    /// Sets the permission mode (`session.permissions.setMode`), for example `"manual"`,
+    /// `"assisted"`, or `"allow-all"`. A refused mode returns `success == false` with a
+    /// `reason` such as `PermissionModeRefusalReason.managedPolicy`.
+    public func setPermissionMode(_ mode: String) async throws -> PermissionModeSetResult {
+        let result = try await rpcClient.sendRequest(
+            method: "session.permissions.setMode",
+            params: ["sessionId": sessionId, "mode": mode]
+        )
+        return PermissionModeSetResult(
+            success: result["success"] as? Bool ?? false,
+            mode: result["mode"] as? String ?? mode,
+            reason: result["reason"] as? String
+        )
+    }
+}
+
+/// Resolves a pending shell authentication request exactly once, whether the handler
+/// answers or the runtime cancels the request first.
+private final class ShellAuthenticationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ShellAuthenticationResponse, Never>?
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+
+    /// Binds the continuation that receives the answer (or `.cancel`).
+    func bind(_ continuation: CheckedContinuation<ShellAuthenticationResponse, Never>) {
+        lock.lock()
+        let alreadyCancelled = cancelled
+        if !alreadyCancelled { self.continuation = continuation }
+        lock.unlock()
+        if alreadyCancelled { continuation.resume(returning: .cancel) }
+    }
+
+    /// Tracks the task running the handler so a cancel can stop it.
+    func attach(_ task: Task<Void, Never>) {
+        lock.lock()
+        let finished = cancelled || continuation == nil
+        if !finished { self.task = task }
+        lock.unlock()
+        if finished { task.cancel() }
+    }
+
+    func resume(_ response: ShellAuthenticationResponse) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        task = nil
+        lock.unlock()
+        continuation?.resume(returning: response)
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let task = self.task
+        self.task = nil
+        lock.unlock()
+        task?.cancel()
+        continuation?.resume(returning: .cancel)
     }
 }
 

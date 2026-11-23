@@ -111,18 +111,24 @@ public struct Tool: Sendable {
     public let handler: ToolHandler
     /// Tool deferral policy: `ToolDefer.auto` (default) or `ToolDefer.never`.
     public let deferMode: String?
+    /// When true, repeating a call with the same arguments has no additional effect beyond
+    /// the first call (true of any tool without side effects). The runtime may then safely
+    /// repeat a call whose outcome was lost.
+    public let idempotent: Bool?
 
     public init(
         name: String,
         description: String? = nil,
         parameters: [String: Any]? = nil,
         deferMode: String? = nil,
+        idempotent: Bool? = nil,
         handler: @escaping ToolHandler
     ) {
         self.name = name
         self.description = description
         self.parameters = parameters
         self.deferMode = deferMode
+        self.idempotent = idempotent
         self.handler = handler
     }
 
@@ -137,6 +143,9 @@ public struct Tool: Sendable {
         }
         if let deferMode = deferMode {
             dict["defer"] = deferMode
+        }
+        if let idempotent = idempotent {
+            dict["idempotent"] = idempotent
         }
         return dict
     }
@@ -572,6 +581,66 @@ public struct ErrorOccurredHookOutput: Codable, Sendable {
 public typealias ErrorOccurredHandler = @Sendable (ErrorOccurredHookInput, String) async throws
     -> ErrorOccurredHookOutput?
 
+/// Input for the `subagentStart` hook, fired before a sub-agent's first turn.
+public struct SubagentStartHookInput: Codable, Sendable {
+    public let timestamp: Double
+    public let cwd: String
+    public let transcriptPath: String
+    public let agentName: String
+    public let agentDisplayName: String?
+    public let agentDescription: String?
+}
+
+/// Output for the `subagentStart` hook.
+public struct SubagentStartHookOutput: Codable, Sendable {
+    /// Context prepended to the sub-agent's initial prompt.
+    public var additionalContext: String?
+
+    public init(additionalContext: String? = nil) {
+        self.additionalContext = additionalContext
+    }
+}
+
+/// Handler for the `subagentStart` hook.
+public typealias SubagentStartHandler = @Sendable (SubagentStartHookInput, String) async throws
+    -> SubagentStartHookOutput?
+
+/// Input for the `subagentStop` hook, fired after a sub-agent completes a turn.
+public struct SubagentStopHookInput: Codable, Sendable {
+    public let timestamp: Double
+    public let cwd: String
+    public let transcriptPath: String
+    public let agentName: String
+    public let agentDisplayName: String?
+    public let agentDescription: String?
+    public let agentId: String?
+    public let agentType: String
+    /// Why the sub-agent stopped (currently always `"end_turn"`).
+    public let stopReason: String
+    /// The sub-agent's last assistant message before any hook rewrite.
+    public let response: String
+}
+
+/// Output for the `subagentStop` hook. `decision: "block"` with a non-empty `reason`
+/// continues the sub-agent; otherwise `modifiedResponse` replaces the response reported
+/// to the parent agent.
+public struct SubagentStopHookOutput: Codable, Sendable {
+    /// `"block"` or `"allow"`.
+    public var decision: String?
+    public var reason: String?
+    public var modifiedResponse: String?
+
+    public init(decision: String? = nil, reason: String? = nil, modifiedResponse: String? = nil) {
+        self.decision = decision
+        self.reason = reason
+        self.modifiedResponse = modifiedResponse
+    }
+}
+
+/// Handler for the `subagentStop` hook.
+public typealias SubagentStopHandler = @Sendable (SubagentStopHookInput, String) async throws
+    -> SubagentStopHookOutput?
+
 /// Configuration for session hooks.
 public struct SessionHooks: Sendable {
     public var onPreToolUse: PreToolUseHandler?
@@ -583,6 +652,10 @@ public struct SessionHooks: Sendable {
     public var onSessionStart: SessionStartHandler?
     public var onSessionEnd: SessionEndHandler?
     public var onErrorOccurred: ErrorOccurredHandler?
+    /// Invoked before a sub-agent's first turn (`subagentStart`).
+    public var onSubagentStart: SubagentStartHandler?
+    /// Invoked after a sub-agent completes a turn (`subagentStop`).
+    public var onSubagentStop: SubagentStopHandler?
 
     public init(
         onPreToolUse: PreToolUseHandler? = nil,
@@ -592,7 +665,9 @@ public struct SessionHooks: Sendable {
         onUserPromptTransformed: UserPromptSubmittedHandler? = nil,
         onSessionStart: SessionStartHandler? = nil,
         onSessionEnd: SessionEndHandler? = nil,
-        onErrorOccurred: ErrorOccurredHandler? = nil
+        onErrorOccurred: ErrorOccurredHandler? = nil,
+        onSubagentStart: SubagentStartHandler? = nil,
+        onSubagentStop: SubagentStopHandler? = nil
     ) {
         self.onPreToolUse = onPreToolUse
         self.onPostToolUse = onPostToolUse
@@ -602,6 +677,8 @@ public struct SessionHooks: Sendable {
         self.onSessionStart = onSessionStart
         self.onSessionEnd = onSessionEnd
         self.onErrorOccurred = onErrorOccurred
+        self.onSubagentStart = onSubagentStart
+        self.onSubagentStop = onSubagentStop
     }
 
     /// Returns true if any hook handler is set.
@@ -609,6 +686,7 @@ public struct SessionHooks: Sendable {
         onPreToolUse != nil || onPostToolUse != nil || onPreMcpToolCall != nil
             || onUserPromptSubmitted != nil || onUserPromptTransformed != nil
             || onSessionStart != nil || onSessionEnd != nil || onErrorOccurred != nil
+            || onSubagentStart != nil || onSubagentStop != nil
     }
 }
 
@@ -730,6 +808,11 @@ public struct InfiniteSessionConfig: Codable, Sendable {
 // MARK: - Provider Configuration
 
 /// Configuration for a custom model API provider (BYOK).
+///
+/// SDK protocol 4 no longer accepts a single `provider`; the SDK translates it into a
+/// named `"default"` provider (`inference.providers`) with Copilot API models disabled.
+/// Model fields (`modelId`, `wireModel`, token limits) become an `inference.models`
+/// entry for the session model.
 public struct ProviderConfig: Codable, Sendable {
     public var type: String?
     public var wireApi: String?
@@ -737,6 +820,22 @@ public struct ProviderConfig: Codable, Sendable {
     public var apiKey: String?
     public var bearerToken: String?
     public var azure: AzureProviderOptions?
+    /// Command run before each request to obtain a fresh API key. Failure fails the
+    /// request without static-key fallback; bearer authentication takes precedence.
+    public var apiKeyCommand: String?
+    /// Transport: `"http"` (default) or `"websockets"` (requires the Responses API).
+    public var transport: String?
+    /// Extra HTTP headers sent with every model request.
+    public var headers: [String: String]?
+    /// Product serving the models (for example `"ollama"`); only affects telemetry.
+    public var modelProvider: String?
+    /// Provider-side model identifier for the session model.
+    public var modelId: String?
+    /// Model name sent on the wire, when it differs from `modelId`.
+    public var wireModel: String?
+    public var maxPromptTokens: Int?
+    public var maxContextWindowTokens: Int?
+    public var maxOutputTokens: Int?
 
     public init(
         baseUrl: String,
@@ -744,7 +843,16 @@ public struct ProviderConfig: Codable, Sendable {
         wireApi: String? = nil,
         apiKey: String? = nil,
         bearerToken: String? = nil,
-        azure: AzureProviderOptions? = nil
+        azure: AzureProviderOptions? = nil,
+        apiKeyCommand: String? = nil,
+        transport: String? = nil,
+        headers: [String: String]? = nil,
+        modelProvider: String? = nil,
+        modelId: String? = nil,
+        wireModel: String? = nil,
+        maxPromptTokens: Int? = nil,
+        maxContextWindowTokens: Int? = nil,
+        maxOutputTokens: Int? = nil
     ) {
         self.baseUrl = baseUrl
         self.type = type
@@ -752,6 +860,15 @@ public struct ProviderConfig: Codable, Sendable {
         self.apiKey = apiKey
         self.bearerToken = bearerToken
         self.azure = azure
+        self.apiKeyCommand = apiKeyCommand
+        self.transport = transport
+        self.headers = headers
+        self.modelProvider = modelProvider
+        self.modelId = modelId
+        self.wireModel = wireModel
+        self.maxPromptTokens = maxPromptTokens
+        self.maxContextWindowTokens = maxContextWindowTokens
+        self.maxOutputTokens = maxOutputTokens
     }
 }
 
@@ -900,9 +1017,13 @@ public struct SessionLimitsConfig: Sendable {
 /// Long-term memory configuration for a session.
 public struct MemoryConfiguration: Sendable {
     public var enabled: Bool
+    /// Stores memories in the app instead of the runtime's built-in store
+    /// (`memoryStore.store`). Requires `enabled` to be true. Experimental.
+    public var storeMemory: MemoryStoreHandler?
 
-    public init(enabled: Bool = true) {
+    public init(enabled: Bool = true, storeMemory: MemoryStoreHandler? = nil) {
         self.enabled = enabled
+        self.storeMemory = storeMemory
     }
 }
 
@@ -982,6 +1103,46 @@ public struct SessionConfig: Sendable {
     /// Enable content-exclusion enforcement.
     public var contentExclusion: Bool?
 
+    // --- v2.6.0 / v3.0.0 upstream-sync session options (SDK protocol 4) ---
+    /// Session name (create only).
+    public var name: String?
+    /// Ask-user tool variant (`interaction.askUserVariant`).
+    public var askUserVariant: AskUserVariant?
+    /// Supplies GitHub tokens on demand. The client registers it under a generated
+    /// registration ID (`github.tokenProviderRegistrationId`) and answers the runtime's
+    /// `gitHubToken.getToken` requests with it. Mutually exclusive with `gitHubToken`.
+    public var gitHubTokenProvider: GitHubTokenProvider?
+    /// Sandbox configuration for tool execution (`permissions.sandbox`).
+    public var sandboxConfig: SandboxConfig?
+    /// Runtime feature flag overrides (`experiments.flags`).
+    public var featureFlags: [String: Bool]?
+    /// Model allowlist (`policy.allowedModels`).
+    public var allowedModels: [String]?
+    /// OAuth Client ID Metadata Document URL for MCP authorization (`mcp.authClientIdMetadataUrl`).
+    public var authClientIdMetadataUrl: String?
+    /// Custom agent definition directories (`agents.directories`).
+    public var agentDirectories: [String]?
+    /// Hook definition directories (`hooks.directories`).
+    public var hookDirectories: [String]?
+    /// Grants trust to the working directory at creation: `WorkingDirectoryTrust.session` or
+    /// `WorkingDirectoryTrust.user` (create only; requires `workingDirectory`).
+    public var trustWorkingDirectory: String?
+    /// Image generation configuration (`tools.imageGeneration`).
+    public var imageGeneration: ImageGenerationConfig?
+    /// Autopilot continuation options (`execution.autopilot`).
+    public var autopilot: AutopilotOptions?
+    /// Named BYOK provider connections (`inference.providers`).
+    public var providers: [NamedProviderConfig]?
+    /// BYOK model definitions (`inference.models`). Select one with `"<provider>/<id>"`.
+    public var models: [ProviderModelConfig]?
+    /// Named connection for unqualified BYOK model selections (`inference.defaultProvider`).
+    public var defaultProvider: String?
+    /// Copilot API options (`github.capi`); `enabled: false` makes a BYOK-only session.
+    public var capi: CapiSessionOptions?
+    /// Answers shell authentication prompts (sudo, ssh, git) for commands the agent runs.
+    /// When set, the client sends `interaction.requestShellAuthentication`.
+    public var onShellAuthenticationRequest: ShellAuthenticationHandler?
+
     public init(
         sessionId: String? = nil,
         model: String? = nil,
@@ -1026,7 +1187,24 @@ public struct SessionConfig: Sendable {
         customAgentsLocalOnly: Bool? = nil,
         toolSearch: [String: AnyCodable]? = nil,
         experimentalMode: Bool? = nil,
-        contentExclusion: Bool? = nil
+        contentExclusion: Bool? = nil,
+        name: String? = nil,
+        askUserVariant: AskUserVariant? = nil,
+        gitHubTokenProvider: GitHubTokenProvider? = nil,
+        sandboxConfig: SandboxConfig? = nil,
+        featureFlags: [String: Bool]? = nil,
+        allowedModels: [String]? = nil,
+        authClientIdMetadataUrl: String? = nil,
+        agentDirectories: [String]? = nil,
+        hookDirectories: [String]? = nil,
+        trustWorkingDirectory: String? = nil,
+        imageGeneration: ImageGenerationConfig? = nil,
+        autopilot: AutopilotOptions? = nil,
+        providers: [NamedProviderConfig]? = nil,
+        models: [ProviderModelConfig]? = nil,
+        defaultProvider: String? = nil,
+        capi: CapiSessionOptions? = nil,
+        onShellAuthenticationRequest: ShellAuthenticationHandler? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -1072,6 +1250,23 @@ public struct SessionConfig: Sendable {
         self.toolSearch = toolSearch
         self.experimentalMode = experimentalMode
         self.contentExclusion = contentExclusion
+        self.name = name
+        self.askUserVariant = askUserVariant
+        self.gitHubTokenProvider = gitHubTokenProvider
+        self.sandboxConfig = sandboxConfig
+        self.featureFlags = featureFlags
+        self.allowedModels = allowedModels
+        self.authClientIdMetadataUrl = authClientIdMetadataUrl
+        self.agentDirectories = agentDirectories
+        self.hookDirectories = hookDirectories
+        self.trustWorkingDirectory = trustWorkingDirectory
+        self.imageGeneration = imageGeneration
+        self.autopilot = autopilot
+        self.providers = providers
+        self.models = models
+        self.defaultProvider = defaultProvider
+        self.capi = capi
+        self.onShellAuthenticationRequest = onShellAuthenticationRequest
     }
 }
 
@@ -1115,6 +1310,50 @@ public struct ResumeSessionConfig: Sendable {
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
 
+    // --- v2.6.0 / v3.0.0 upstream-sync resume options (SDK protocol 4) ---
+    /// Long-term memory configuration (`state.memory`); `storeMemory` keeps memories in the app.
+    public var memory: MemoryConfiguration?
+    /// Ask-user tool variant (`interaction.askUserVariant`).
+    public var askUserVariant: AskUserVariant?
+    /// Supplies GitHub tokens on demand (`gitHubToken.getToken`). Mutually exclusive with
+    /// `gitHubToken`.
+    public var gitHubTokenProvider: GitHubTokenProvider?
+    /// Sandbox configuration for tool execution (`permissions.sandbox`).
+    public var sandboxConfig: SandboxConfig?
+    /// Runtime feature flag overrides (`experiments.flags`).
+    public var featureFlags: [String: Bool]?
+    /// Model allowlist (`policy.allowedModels`).
+    public var allowedModels: [String]?
+    /// OAuth Client ID Metadata Document URL for MCP authorization (`mcp.authClientIdMetadataUrl`).
+    public var authClientIdMetadataUrl: String?
+    /// Custom agent definition directories (`agents.directories`).
+    public var agentDirectories: [String]?
+    /// Hook definition directories (`hooks.directories`).
+    public var hookDirectories: [String]?
+    /// Allows recovering the conversation from the transcript when saved state cannot be
+    /// loaded (resume only).
+    public var allowTranscriptRecovery: Bool?
+    /// Image generation configuration (`tools.imageGeneration`).
+    public var imageGeneration: ImageGenerationConfig?
+    /// Autopilot continuation options (`execution.autopilot`).
+    public var autopilot: AutopilotOptions?
+    /// Named BYOK provider connections (`inference.providers`).
+    public var providers: [NamedProviderConfig]?
+    /// BYOK model definitions (`inference.models`). Select one with `"<provider>/<id>"`.
+    public var models: [ProviderModelConfig]?
+    /// Named connection for unqualified BYOK model selections (`inference.defaultProvider`).
+    public var defaultProvider: String?
+    /// When true (and `defaultProvider` is nil), clears the session's default provider by
+    /// sending `inference.defaultProvider: null`.
+    public var clearDefaultProvider: Bool?
+    /// Copilot API options (`github.capi`).
+    public var capi: CapiSessionOptions?
+    /// Suppresses the `session.resume` event. Preferred over `disableResume`.
+    public var suppressResumeEvent: Bool?
+    /// Answers shell authentication prompts (sudo, ssh, git) for commands the agent runs.
+    /// When set, the client sends `interaction.requestShellAuthentication`.
+    public var onShellAuthenticationRequest: ShellAuthenticationHandler?
+
     public init(
         model: String? = nil,
         reasoningEffort: ReasoningEffort? = nil,
@@ -1142,7 +1381,26 @@ public struct ResumeSessionConfig: Sendable {
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
         onExitPlanMode: ExitPlanModeHandler? = nil,
-        instructionDirectories: [String]? = nil
+        instructionDirectories: [String]? = nil,
+        memory: MemoryConfiguration? = nil,
+        askUserVariant: AskUserVariant? = nil,
+        gitHubTokenProvider: GitHubTokenProvider? = nil,
+        sandboxConfig: SandboxConfig? = nil,
+        featureFlags: [String: Bool]? = nil,
+        allowedModels: [String]? = nil,
+        authClientIdMetadataUrl: String? = nil,
+        agentDirectories: [String]? = nil,
+        hookDirectories: [String]? = nil,
+        allowTranscriptRecovery: Bool? = nil,
+        imageGeneration: ImageGenerationConfig? = nil,
+        autopilot: AutopilotOptions? = nil,
+        providers: [NamedProviderConfig]? = nil,
+        models: [ProviderModelConfig]? = nil,
+        defaultProvider: String? = nil,
+        clearDefaultProvider: Bool? = nil,
+        capi: CapiSessionOptions? = nil,
+        suppressResumeEvent: Bool? = nil,
+        onShellAuthenticationRequest: ShellAuthenticationHandler? = nil
     ) {
         self.model = model
         self.reasoningEffort = reasoningEffort
@@ -1171,6 +1429,25 @@ public struct ResumeSessionConfig: Sendable {
         self.onElicitationRequest = onElicitationRequest
         self.onExitPlanMode = onExitPlanMode
         self.instructionDirectories = instructionDirectories
+        self.memory = memory
+        self.askUserVariant = askUserVariant
+        self.gitHubTokenProvider = gitHubTokenProvider
+        self.sandboxConfig = sandboxConfig
+        self.featureFlags = featureFlags
+        self.allowedModels = allowedModels
+        self.authClientIdMetadataUrl = authClientIdMetadataUrl
+        self.agentDirectories = agentDirectories
+        self.hookDirectories = hookDirectories
+        self.allowTranscriptRecovery = allowTranscriptRecovery
+        self.imageGeneration = imageGeneration
+        self.autopilot = autopilot
+        self.providers = providers
+        self.models = models
+        self.defaultProvider = defaultProvider
+        self.clearDefaultProvider = clearDefaultProvider
+        self.capi = capi
+        self.suppressResumeEvent = suppressResumeEvent
+        self.onShellAuthenticationRequest = onShellAuthenticationRequest
     }
 }
 
@@ -1302,6 +1579,8 @@ public struct MessageOptions: Sendable {
     public var prompt: String
     public var attachments: [Attachment]?
     public var mode: String?
+    /// Legacy response format. SDK protocol 4 runtimes do not accept it, so it is no longer
+    /// sent; use `responseSchema` for structured output.
     public var responseFormat: ResponseFormat?
     public var imageOptions: ImageOptions?
     /// Custom HTTP headers to include in outbound model requests for this turn.
@@ -1310,6 +1589,13 @@ public struct MessageOptions: Sendable {
     public var agentMode: String?
     /// Prompt text to display in the UI in place of the actual prompt.
     public var displayPrompt: String?
+    /// Who the message is from (`MessageSource.user`, `.system`, or `.agent(id)`).
+    public var source: MessageSource?
+    /// JSON schema the final assistant response must match (structured output). Sent as
+    /// `responseFormat: {type: "json_schema", jsonSchema: {name: "response", strict: true, schema}}`.
+    public var responseSchema: [String: Any]?
+    /// Opaque caller-chosen identifier echoed on the events of this turn.
+    public var clientTurnId: String?
 
     public init(
         prompt: String,
@@ -1319,7 +1605,10 @@ public struct MessageOptions: Sendable {
         imageOptions: ImageOptions? = nil,
         requestHeaders: [String: String]? = nil,
         agentMode: String? = nil,
-        displayPrompt: String? = nil
+        displayPrompt: String? = nil,
+        source: MessageSource? = nil,
+        responseSchema: [String: Any]? = nil,
+        clientTurnId: String? = nil
     ) {
         self.prompt = prompt
         self.attachments = attachments
@@ -1329,6 +1618,29 @@ public struct MessageOptions: Sendable {
         self.requestHeaders = requestHeaders
         self.agentMode = agentMode
         self.displayPrompt = displayPrompt
+        self.source = source
+        self.responseSchema = responseSchema
+        self.clientTurnId = clientTurnId
+    }
+}
+
+/// Origin of a message sent with `CopilotSession.send` (`session.send` param `source`).
+public struct MessageSource: Sendable, Hashable {
+    /// The wire value: `"user"`, `"system"`, or `"agent-<id>"`.
+    public let rawValue: String
+
+    public init(_ rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    /// A message typed by the user (the default).
+    public static let user = MessageSource("user")
+    /// A message injected by the host application.
+    public static let system = MessageSource("system")
+
+    /// A message from another agent, identified by `id`.
+    public static func agent(_ id: String) -> MessageSource {
+        MessageSource("agent-\(id)")
     }
 }
 
@@ -1619,6 +1931,19 @@ public struct CopilotClientOptions: Sendable {
     /// Supplies the current W3C trace context for outbound requests.
     public var onGetTraceContext: TraceContextProvider?
 
+    /// Identity of the integrating application, sent as `clientInfo` on the `connect`
+    /// handshake. Empty fields are dropped; an all-empty identity is not sent.
+    public var clientInfo: ClientInfo?
+
+    /// Session defaults profile: `.codingAgent` (default, today's behavior) or `.empty`
+    /// (ambient runtime features off; every session must set `availableTools`).
+    /// `.copilotCli` is a legacy alias of `.codingAgent`.
+    public var mode: ClientMode?
+
+    /// Network callbacks through which the app resolves proxies and supplies proxy
+    /// credentials (`network.setProvider`).
+    public var network: NetworkConfig?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1640,7 +1965,10 @@ public struct CopilotClientOptions: Sendable {
         bearerTokenProvider: BearerTokenProvider? = nil,
         builtinPluginDirectories: [String]? = nil,
         inProcess: Bool? = nil,
-        onGetTraceContext: TraceContextProvider? = nil
+        onGetTraceContext: TraceContextProvider? = nil,
+        clientInfo: ClientInfo? = nil,
+        mode: ClientMode? = nil,
+        network: NetworkConfig? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1663,6 +1991,609 @@ public struct CopilotClientOptions: Sendable {
         self.builtinPluginDirectories = builtinPluginDirectories
         self.inProcess = inProcess
         self.onGetTraceContext = onGetTraceContext
+        self.clientInfo = clientInfo
+        self.mode = mode
+        self.network = network
+    }
+}
+
+// MARK: - SDK Protocol 4 (v3.0.0) Types
+
+/// Identity of the integrating application, sent as `clientInfo` on the `connect`
+/// handshake. Empty fields are dropped; an all-empty identity is not sent.
+public struct ClientInfo: Sendable {
+    /// Name of the application using the SDK (for example "acme-portal").
+    public var editorName: String?
+    /// Version of the application using the SDK.
+    public var editorVersion: String?
+    /// Name of the integration within the application (extension, plugin).
+    public var extensionName: String?
+    /// Version of the integration.
+    public var extensionVersion: String?
+
+    public init(
+        editorName: String? = nil,
+        editorVersion: String? = nil,
+        extensionName: String? = nil,
+        extensionVersion: String? = nil
+    ) {
+        self.editorName = editorName
+        self.editorVersion = editorVersion
+        self.extensionName = extensionName
+        self.extensionVersion = extensionVersion
+    }
+
+    /// The wire form with empty fields dropped, or nil when every field is empty.
+    func toWireFormat() -> [String: Any]? {
+        var wire: [String: Any] = [:]
+        if let value = editorName, !value.isEmpty { wire["editorName"] = value }
+        if let value = editorVersion, !value.isEmpty { wire["editorVersion"] = value }
+        if let value = extensionName, !value.isEmpty { wire["extensionName"] = value }
+        if let value = extensionVersion, !value.isEmpty { wire["extensionVersion"] = value }
+        return wire.isEmpty ? nil : wire
+    }
+}
+
+/// Session defaults profile for `CopilotClientOptions.mode`.
+public enum ClientMode: String, Sendable {
+    /// Default: identical to the Copilot CLI's ambient behavior ("coding-agent").
+    case codingAgent = "coding-agent"
+    /// Legacy alias of `codingAgent`.
+    case copilotCli = "copilot-cli"
+    /// Ambient runtime features off; every session must set `availableTools`. The SDK
+    /// applies conservative defaults under the caller's own session options.
+    case empty
+}
+
+/// Auto routing tiers for `CopilotSession.switchAutoTier(_:)` and `CapiSessionOptions.autoTier`.
+public enum AutoTier: String, Codable, Sendable {
+    case fast
+    case efficiency
+    case balance
+    case intelligence
+}
+
+/// Ask-user tool variants (`interaction.askUserVariant`).
+public enum AskUserVariant: String, Codable, Sendable {
+    case legacy
+    case elicitation
+}
+
+/// Working-directory trust scopes for `SessionConfig.trustWorkingDirectory`.
+public struct WorkingDirectoryTrust {
+    /// Trust applies only to the created session.
+    public static let session = "session"
+    /// Trust is persisted for later sessions.
+    public static let user = "user"
+}
+
+/// Request passed to a `GitHubTokenProvider` (`gitHubToken.getToken`).
+public struct GitHubTokenRequest: Sendable {
+    /// Effective GitHub host the token is for.
+    public let host: String
+    /// Session receiving the token, when known.
+    public let sessionId: String?
+    /// Why the runtime is requesting a credential.
+    public let reason: String
+
+    public init(host: String, sessionId: String? = nil, reason: String) {
+        self.host = host
+        self.sessionId = sessionId
+        self.reason = reason
+    }
+}
+
+/// Result of a `GitHubTokenProvider`: a token or a cancellation.
+public enum GitHubTokenResult: Sendable {
+    /// A token with its remaining lifetime in seconds (more than one hour must remain)
+    /// and an optional OAuth token type (bearer when omitted).
+    case token(accessToken: String, expiresIn: Int, tokenType: String? = nil)
+    /// No token is available; session creation or resume fails.
+    case cancelled
+
+    func toWireFormat() -> [String: Any] {
+        switch self {
+        case .token(let accessToken, let expiresIn, let tokenType):
+            var wire: [String: Any] = [
+                "kind": "token", "accessToken": accessToken, "expiresIn": expiresIn,
+            ]
+            if let tokenType = tokenType { wire["tokenType"] = tokenType }
+            return wire
+        case .cancelled:
+            return ["kind": "cancelled"]
+        }
+    }
+}
+
+/// Acquires a GitHub token for one session on demand.
+public typealias GitHubTokenProvider = @Sendable (GitHubTokenRequest) async throws
+    -> GitHubTokenResult
+
+/// Sandbox configuration for tool execution (`permissions.sandbox`).
+public struct SandboxConfig: Codable, Sendable {
+    public var enabled: Bool
+    /// User sandbox policy (filesystem and network rules), passed through as-is.
+    public var userPolicy: [String: AnyCodable]?
+    public var addCurrentWorkingDirectory: Bool?
+    public var sandboxMcpServers: Bool?
+    public var sandboxLspServers: Bool?
+    public var sandboxExtensions: Bool?
+    /// Lets the agent request an individual command outside the sandbox through the
+    /// normal permission flow.
+    public var allowBypass: Bool?
+
+    public init(
+        enabled: Bool,
+        userPolicy: [String: AnyCodable]? = nil,
+        addCurrentWorkingDirectory: Bool? = nil,
+        sandboxMcpServers: Bool? = nil,
+        sandboxLspServers: Bool? = nil,
+        sandboxExtensions: Bool? = nil,
+        allowBypass: Bool? = nil
+    ) {
+        self.enabled = enabled
+        self.userPolicy = userPolicy
+        self.addCurrentWorkingDirectory = addCurrentWorkingDirectory
+        self.sandboxMcpServers = sandboxMcpServers
+        self.sandboxLspServers = sandboxLspServers
+        self.sandboxExtensions = sandboxExtensions
+        self.allowBypass = allowBypass
+    }
+}
+
+/// Session image generation configuration (`tools.imageGeneration`).
+public struct ImageGenerationConfig: Codable, Sendable {
+    public var enabled: Bool?
+    /// Requests a visible "Made with AI" label on generated images.
+    public var watermark: Bool?
+    /// Saves generated images under the session-state `images` folder.
+    public var saveToDisk: Bool?
+
+    public init(enabled: Bool? = nil, watermark: Bool? = nil, saveToDisk: Bool? = nil) {
+        self.enabled = enabled
+        self.watermark = watermark
+        self.saveToDisk = saveToDisk
+    }
+}
+
+/// Autopilot continuation options (`execution.autopilot`).
+public struct AutopilotOptions: Codable, Sendable {
+    public var continuationEnabled: Bool?
+    public var maxContinues: Int?
+
+    public init(continuationEnabled: Bool? = nil, maxContinues: Int? = nil) {
+        self.continuationEnabled = continuationEnabled
+        self.maxContinues = maxContinues
+    }
+}
+
+/// Model capability limit overrides. Wire keys are snake_case; for example
+/// `maxOutputTokens` is sent as `max_output_tokens`.
+public struct ModelLimitsOverride: Codable, Sendable {
+    public var maxPromptTokens: Int?
+    public var maxOutputTokens: Int?
+    public var maxContextWindowTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case maxPromptTokens = "max_prompt_tokens"
+        case maxOutputTokens = "max_output_tokens"
+        case maxContextWindowTokens = "max_context_window_tokens"
+    }
+
+    public init(
+        maxPromptTokens: Int? = nil,
+        maxOutputTokens: Int? = nil,
+        maxContextWindowTokens: Int? = nil
+    ) {
+        self.maxPromptTokens = maxPromptTokens
+        self.maxOutputTokens = maxOutputTokens
+        self.maxContextWindowTokens = maxContextWindowTokens
+    }
+}
+
+/// Typed builder for `SessionConfig.modelCapabilities` (`inference.capabilities`) and
+/// `ProviderModelConfig.capabilities`.
+public struct ModelCapabilitiesOverride: Codable, Sendable {
+    /// Feature support overrides, for example `["vision": true, "toolCalls": true]`.
+    public var supports: [String: Bool]?
+    public var limits: ModelLimitsOverride?
+
+    public init(supports: [String: Bool]? = nil, limits: ModelLimitsOverride? = nil) {
+        self.supports = supports
+        self.limits = limits
+    }
+
+    /// The override as a `modelCapabilities` dictionary.
+    public func toDictionary() -> [String: AnyCodable] {
+        (encodeToDictionary(self) ?? [:]).mapValues { AnyCodable($0) }
+    }
+}
+
+/// A named BYOK provider connection (`inference.providers`).
+public struct NamedProviderConfig: Codable, Sendable {
+    /// Stable identifier referenced by `ProviderModelConfig.provider`.
+    public var name: String
+    public var type: String?
+    public var baseUrl: String
+    public var apiKey: String?
+    public var apiKeyCommand: String?
+    public var bearerToken: String?
+    public var wireApi: String?
+    public var transport: String?
+    public var azure: AzureProviderOptions?
+    public var headers: [String: String]?
+    public var modelProvider: String?
+
+    public init(
+        name: String,
+        baseUrl: String,
+        type: String? = nil,
+        apiKey: String? = nil,
+        apiKeyCommand: String? = nil,
+        bearerToken: String? = nil,
+        wireApi: String? = nil,
+        transport: String? = nil,
+        azure: AzureProviderOptions? = nil,
+        headers: [String: String]? = nil,
+        modelProvider: String? = nil
+    ) {
+        self.name = name
+        self.baseUrl = baseUrl
+        self.type = type
+        self.apiKey = apiKey
+        self.apiKeyCommand = apiKeyCommand
+        self.bearerToken = bearerToken
+        self.wireApi = wireApi
+        self.transport = transport
+        self.azure = azure
+        self.headers = headers
+        self.modelProvider = modelProvider
+    }
+}
+
+/// A BYOK model definition (`inference.models`) served by a named provider.
+public struct ProviderModelConfig: Codable, Sendable {
+    /// Name of the `NamedProviderConfig` serving this model.
+    public var provider: String
+    /// Provider-local model id; select it with `"<provider>/<id>"`.
+    public var id: String
+    public var modelId: String?
+    public var wireModel: String?
+    public var name: String?
+    public var maxPromptTokens: Int?
+    public var maxContextWindowTokens: Int?
+    public var maxOutputTokens: Int?
+    public var capabilities: ModelCapabilitiesOverride?
+
+    public init(
+        provider: String,
+        id: String,
+        modelId: String? = nil,
+        wireModel: String? = nil,
+        name: String? = nil,
+        maxPromptTokens: Int? = nil,
+        maxContextWindowTokens: Int? = nil,
+        maxOutputTokens: Int? = nil,
+        capabilities: ModelCapabilitiesOverride? = nil
+    ) {
+        self.provider = provider
+        self.id = id
+        self.modelId = modelId
+        self.wireModel = wireModel
+        self.name = name
+        self.maxPromptTokens = maxPromptTokens
+        self.maxContextWindowTokens = maxContextWindowTokens
+        self.maxOutputTokens = maxOutputTokens
+        self.capabilities = capabilities
+    }
+}
+
+/// Copilot API (CAPI) options (`github.capi`).
+public struct CapiSessionOptions: Codable, Sendable {
+    /// Enables Copilot API models; `false` for BYOK-only sessions.
+    public var enabled: Bool?
+    /// Auto routing preference used when the session model is `auto`.
+    public var autoTier: AutoTier?
+    /// Use the WebSocket transport for the Responses API.
+    public var enableWebSocketResponses: Bool?
+
+    public init(enabled: Bool? = nil, autoTier: AutoTier? = nil, enableWebSocketResponses: Bool? = nil) {
+        self.enabled = enabled
+        self.autoTier = autoTier
+        self.enableWebSocketResponses = enableWebSocketResponses
+    }
+}
+
+/// A password or other answer a shell command run by the agent asks for
+/// (`shellAuthentication.request`). The answer goes only to that program.
+public struct ShellAuthenticationRequest: Sendable {
+    public let sessionId: String
+    /// Identifies the request; a `shellAuthentication.cancel` carries it too.
+    public let requestId: String
+    /// The program that asked: `sudo`, `ssh`, or `git`.
+    public let program: String
+    public let prompt: String
+    /// `"secret"` (mask the input), `"text"`, or `"confirm"` (yes/no).
+    public let inputKind: String
+    public let command: String
+    public let cwd: String
+
+    public init(
+        sessionId: String, requestId: String, program: String, prompt: String,
+        inputKind: String, command: String, cwd: String
+    ) {
+        self.sessionId = sessionId
+        self.requestId = requestId
+        self.program = program
+        self.prompt = prompt
+        self.inputKind = inputKind
+        self.command = command
+        self.cwd = cwd
+    }
+
+    static func from(_ params: [String: Any]) -> ShellAuthenticationRequest {
+        ShellAuthenticationRequest(
+            sessionId: params["sessionId"] as? String ?? "",
+            requestId: params["requestId"] as? String ?? "",
+            program: params["program"] as? String ?? "",
+            prompt: params["prompt"] as? String ?? "",
+            inputKind: params["inputKind"] as? String ?? "secret",
+            command: params["command"] as? String ?? "",
+            cwd: params["cwd"] as? String ?? ""
+        )
+    }
+}
+
+/// Answer to a `ShellAuthenticationRequest`.
+public enum ShellAuthenticationResponse: Sendable {
+    /// Answers the prompt with a value (use `"yes"` for a confirm prompt).
+    case accept(String)
+    /// Declines the prompt.
+    case cancel
+
+    func toWireFormat() -> [String: Any] {
+        switch self {
+        case .accept(let value):
+            return ["action": "accept", "value": value]
+        case .cancel:
+            return ["action": "cancel"]
+        }
+    }
+}
+
+/// Answers shell authentication prompts. The answer is ignored when the runtime cancels
+/// the request first (`shellAuthentication.cancel`).
+public typealias ShellAuthenticationHandler = @Sendable (ShellAuthenticationRequest) async throws
+    -> ShellAuthenticationResponse
+
+/// A memory the agent asked to store (`memoryStore.store`), after validation, secret
+/// filtering and approval.
+public struct StoredMemory: Sendable {
+    public let sessionId: String
+    public let subject: String
+    public let fact: String
+    public let citations: String
+    public let reason: String
+
+    public init(sessionId: String, subject: String, fact: String, citations: String, reason: String) {
+        self.sessionId = sessionId
+        self.subject = subject
+        self.fact = fact
+        self.citations = citations
+        self.reason = reason
+    }
+
+    static func from(_ params: [String: Any]) -> StoredMemory {
+        StoredMemory(
+            sessionId: params["sessionId"] as? String ?? "",
+            subject: params["subject"] as? String ?? "",
+            fact: params["fact"] as? String ?? "",
+            citations: params["citations"] as? String ?? "",
+            reason: params["reason"] as? String ?? ""
+        )
+    }
+}
+
+/// Stores a memory in the app. The agent's `store_memory` tool succeeds once this returns.
+public typealias MemoryStoreHandler = @Sendable (StoredMemory) async throws -> Void
+
+/// Scope of the network callbacks registered with `network.setProvider`.
+public enum NetworkScope: String, Sendable {
+    /// Applies to this client connection (default).
+    case connection
+    /// Applies to the whole runtime.
+    case runtime
+}
+
+/// Request for `network.authenticateBasic`.
+public struct NetworkAuthenticateBasicRequest: Sendable {
+    /// Proxy URL that issued the Basic challenge.
+    public let proxy: String
+    /// Realm from the proxy (untrusted text).
+    public let realm: String?
+    /// True when the proxy rejected the previously supplied credentials.
+    public let previousRejected: Bool
+
+    public init(proxy: String, realm: String? = nil, previousRejected: Bool) {
+        self.proxy = proxy
+        self.realm = realm
+        self.previousRejected = previousRejected
+    }
+}
+
+/// Credentials returned for `network.authenticateBasic`.
+public struct NetworkBasicCredentials: Sendable {
+    public var username: String?
+    public var password: String?
+
+    public init(username: String? = nil, password: String? = nil) {
+        self.username = username
+        self.password = password
+    }
+}
+
+/// Network callbacks through which the app decides the runtime's proxies and supplies
+/// proxy credentials. The SDK never logs the returned tokens or passwords.
+public struct NetworkConfig: Sendable {
+    /// `.connection` (default) or `.runtime`.
+    public var scope: NetworkScope?
+    /// Returns a PAC-style proxy list for a URL (`DIRECT` for none), or nil to let the
+    /// runtime resolve it (`network.resolveProxy`).
+    public var resolveProxy: (@Sendable (String) async throws -> String?)?
+    /// Returns a base64 SPNEGO token for a service principal name, or nil
+    /// (`network.authenticateNegotiate`).
+    public var authenticateNegotiate: (@Sendable (String) async throws -> String?)?
+    /// Returns Basic credentials for a proxy, or nil (`network.authenticateBasic`).
+    public var authenticateBasic:
+        (@Sendable (NetworkAuthenticateBasicRequest) async throws -> NetworkBasicCredentials?)?
+
+    public init(
+        scope: NetworkScope? = nil,
+        resolveProxy: (@Sendable (String) async throws -> String?)? = nil,
+        authenticateNegotiate: (@Sendable (String) async throws -> String?)? = nil,
+        authenticateBasic: (
+            @Sendable (NetworkAuthenticateBasicRequest) async throws -> NetworkBasicCredentials?
+        )? = nil
+    ) {
+        self.scope = scope
+        self.resolveProxy = resolveProxy
+        self.authenticateNegotiate = authenticateNegotiate
+        self.authenticateBasic = authenticateBasic
+    }
+
+    /// True when at least one callback is set.
+    public var hasCallbacks: Bool {
+        resolveProxy != nil || authenticateNegotiate != nil || authenticateBasic != nil
+    }
+}
+
+/// Session event type names.
+public struct SessionEventTypes {
+    /// Live, append-only shell output of a running tool (`tool.shell_output`); not persisted.
+    public static let toolShellOutput = "tool.shell_output"
+    /// Removed upstream; still tolerated when received.
+    public static let toolExecutionPartialResult = "tool.execution_partial_result"
+}
+
+/// Data of a `tool.shell_output` event.
+public struct ToolShellOutputData: Sendable {
+    public let toolCallId: String
+    public let text: String
+    /// Zero-based publication sequence across the call's output streams.
+    public let sequence: Int
+    /// `"stdout"`, `"stderr"`, or nil (stdout).
+    public let stream: String?
+
+    public init(toolCallId: String, text: String, sequence: Int, stream: String? = nil) {
+        self.toolCallId = toolCallId
+        self.text = text
+        self.sequence = sequence
+        self.stream = stream
+    }
+
+    /// Parses the data of a `tool.shell_output` event; nil for other event types.
+    public static func from(_ event: SessionEvent) -> ToolShellOutputData? {
+        guard event.type == SessionEventTypes.toolShellOutput else { return nil }
+        let rawSequence = event.data["sequence"]
+        return ToolShellOutputData(
+            toolCallId: event.data["toolCallId"] as? String ?? "",
+            text: event.data["text"] as? String ?? "",
+            sequence: (rawSequence as? Int) ?? (rawSequence as? Double).map { Int($0) } ?? 0,
+            stream: event.data["stream"] as? String
+        )
+    }
+}
+
+/// A field-specific finding reported by a Policy Helper.
+public struct PolicyHelperFailureDetail: Codable, Sendable {
+    public let message: String
+    public let path: String?
+
+    public init(message: String, path: String? = nil) {
+        self.message = message
+        self.path = path
+    }
+}
+
+/// The latest unresolved Policy Helper failure. Exposed from the JSON-RPC error data
+/// (`error.data.policyHelperFailure`) when `session.create` / `session.resume` fails (see
+/// `JsonRpcError.policyHelperFailure`). Helper text is untrusted: render it as plain text.
+public struct PolicyHelperFailure: Codable, Sendable {
+    public let category: String
+    public let failureMode: String
+    public let message: String
+    public let previousPolicyRetained: Bool
+    public let reason: String
+    public let authority: String?
+    public let code: String?
+    public let details: [PolicyHelperFailureDetail]?
+    public let diagnostic: String?
+    /// Validated additional-information link (`{url, label?}`), if any.
+    public let helpLink: [String: AnyCodable]?
+
+    public init(
+        category: String,
+        failureMode: String,
+        message: String,
+        previousPolicyRetained: Bool,
+        reason: String,
+        authority: String? = nil,
+        code: String? = nil,
+        details: [PolicyHelperFailureDetail]? = nil,
+        diagnostic: String? = nil,
+        helpLink: [String: AnyCodable]? = nil
+    ) {
+        self.category = category
+        self.failureMode = failureMode
+        self.message = message
+        self.previousPolicyRetained = previousPolicyRetained
+        self.reason = reason
+        self.authority = authority
+        self.code = code
+        self.details = details
+        self.diagnostic = diagnostic
+        self.helpLink = helpLink
+    }
+
+    /// Parses a failure from a JSON dictionary, tolerating missing fields.
+    public static func from(_ dict: [String: Any]) -> PolicyHelperFailure {
+        let details = (dict["details"] as? [[String: Any]])?.map {
+            PolicyHelperFailureDetail(message: $0["message"] as? String ?? "", path: $0["path"] as? String)
+        }
+        return PolicyHelperFailure(
+            category: dict["category"] as? String ?? "",
+            failureMode: dict["failureMode"] as? String ?? "",
+            message: dict["message"] as? String ?? "",
+            previousPolicyRetained: dict["previousPolicyRetained"] as? Bool ?? false,
+            reason: dict["reason"] as? String ?? "",
+            authority: dict["authority"] as? String,
+            code: dict["code"] as? String,
+            details: details,
+            diagnostic: dict["diagnostic"] as? String,
+            helpLink: (dict["helpLink"] as? [String: Any])?.mapValues { AnyCodable($0) }
+        )
+    }
+}
+
+/// Known refusal reasons on a `PermissionModeSetResult`.
+public struct PermissionModeRefusalReason {
+    /// Managed (enterprise) policy refused the requested permission mode.
+    public static let managedPolicy = "managed_policy"
+}
+
+/// Result of `CopilotSession.setPermissionMode(_:)` (`session.permissions.setMode`).
+public struct PermissionModeSetResult: Sendable {
+    /// Whether the requested mode was applied.
+    public let success: Bool
+    /// Authoritative permission mode after the call.
+    public let mode: String
+    /// Why the mode was refused, when known (see `PermissionModeRefusalReason.managedPolicy`).
+    public let reason: String?
+
+    public init(success: Bool, mode: String, reason: String? = nil) {
+        self.success = success
+        self.mode = mode
+        self.reason = reason
     }
 }
 

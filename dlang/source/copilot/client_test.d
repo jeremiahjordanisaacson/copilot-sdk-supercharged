@@ -23,7 +23,7 @@ unittest
     auto cfg = SessionConfig.init;
     auto j = cfg.toJson();
     assert(j["streaming"].type == JSONType.false_);
-    assert(j["infiniteSessions"].type == JSONType.true_);
+    assert(j["infiniteSessions"]["enabled"].type == JSONType.true_);
     assert("systemMessage" !in j);
     assert("provider" !in j);
     assert("tools" !in j);
@@ -44,9 +44,10 @@ unittest
     );
     auto j = cfg.toJson();
     assert(j["streaming"].type == JSONType.true_);
-    assert(j["infiniteSessions"].type == JSONType.false_);
-    assert(j["systemMessage"].str == "You are a helpful assistant.");
-    assert(j["provider"]["model"].str == "gpt-4");
+    assert(j["infiniteSessions"]["enabled"].type == JSONType.false_);
+    assert(j["systemMessage"]["mode"].str == "append");
+    assert(j["systemMessage"]["content"].str == "You are a helpful assistant.");
+    assert(j["provider"]["wireModel"].str == "gpt-4");
     assert(j["provider"]["baseUrl"].str == "https://api.example.com");
     assert(j["tools"].array.length == 1);
     assert(j["tools"][0]["name"].str == "greet");
@@ -186,7 +187,7 @@ unittest
 {
     auto p = ProviderConfig(Nullable!string("gpt-4"), Nullable!string.init);
     auto j = p.toJson();
-    assert(j["model"].str == "gpt-4");
+    assert(j["wireModel"].str == "gpt-4");
     assert("baseUrl" !in j);
 }
 
@@ -421,6 +422,86 @@ unittest
     auto caps = limits.toModelCapabilities();
     assert(caps["limits"]["max_output_tokens"].integer == 4096);
     assert("max_prompt_tokens" !in caps["limits"]);
+}
+
+// ---------------------------------------------------------------------------
+// SDK protocol 4
+// ---------------------------------------------------------------------------
+
+unittest
+{
+    import copilot.sdk_protocol_version : SdkProtocolVersion;
+    import copilot.client : verifyProtocolVersion;
+    import std.algorithm.searching : canFind;
+    import std.exception : assertThrown, collectException;
+
+    assert(SdkProtocolVersion == 4);
+    verifyProtocolVersion(parseJSON(`{"protocolVersion":4}`));
+    assertThrown(verifyProtocolVersion(parseJSON(`{"protocolVersion":3}`)));
+    auto e = collectException(verifyProtocolVersion(parseJSON(`{"message":"pong"}`)));
+    assert(e !is null && e.msg.canFind("does not report a protocol version"));
+}
+
+unittest
+{
+    import copilot.session_params : groupSessionParams;
+
+    // Flat keys move into groups; resume renames and drops create-only keys.
+    auto flat = parseJSON(`{"sessionId":"s","model":"m","streaming":true,` ~
+        `"requestPermission":true,"tools":[{"name":"t","idempotent":true}],"hooks":true,` ~
+        `"disableResume":true,"trustWorkingDirectory":"session",` ~
+        `"mcpServers":{"x":{"command":"c"}},"futureKey":1}`);
+    auto g = groupSessionParams(flat, true);
+    assert(g["model"].str == "m");
+    assert(g["events"]["streaming"].type == JSONType.true_);
+    assert(g["permissions"]["request"].type == JSONType.true_);
+    assert(g["tools"]["definitions"][0]["idempotent"].type == JSONType.true_);
+    assert(g["hooks"]["hasHandlers"].type == JSONType.true_);
+    assert(g["suppressResumeEvent"].type == JSONType.true_);
+    assert(g["mcp"]["envValueMode"].str == "direct");
+    assert(g["futureKey"].integer == 1);
+    assert("streaming" !in g);
+    assert("filesystem" !in g);
+}
+
+unittest
+{
+    import copilot.session_params : groupSessionParams, applyEmptyModeDefaults;
+
+    // Legacy provider becomes the named "default" provider with CAPI disabled.
+    SessionConfig cfg;
+    cfg.model = "gpt";
+    ProviderConfig provider;
+    provider.type = "openai";
+    provider.baseUrl = "https://example.com/v1";
+    provider.apiKeyCommand = "get-key";
+    provider.maxOutputTokens = 100;
+    cfg.provider = provider;
+    auto g = groupSessionParams(cfg.toJson(), false);
+    assert("provider" !in g);
+    assert(g["inference"]["providers"][0]["name"].str == "default");
+    assert(g["inference"]["providers"][0]["apiKeyCommand"].str == "get-key");
+    assert("maxOutputTokens" !in g["inference"]["providers"][0]);
+    assert(g["inference"]["defaultProvider"].str == "default");
+    assert(g["inference"]["models"][0]["id"].str == "gpt");
+    assert(g["inference"]["models"][0]["maxOutputTokens"].integer == 100);
+    assert(g["github"]["capi"]["enabled"].type == JSONType.false_);
+    assert(g["state"]["infiniteSessions"]["enabled"].type == JSONType.true_);
+
+    // WebSocket responses also live under capi but keep the legacy provider.
+    cfg.enableWebSocketResponses = true;
+    auto ws = groupSessionParams(cfg.toJson(), false);
+    assert(ws["inference"]["defaultProvider"].str == "default");
+    assert(ws["github"]["capi"]["enabled"].type == JSONType.false_);
+    assert(ws["github"]["capi"]["enableWebSocketResponses"].type == JSONType.true_);
+
+    // Empty-mode defaults never override caller values.
+    auto payload = parseJSON(`{"state":{"memory":{"enabled":true}}}`);
+    applyEmptyModeDefaults(payload);
+    assert(payload["state"]["memory"]["enabled"].type == JSONType.true_);
+    assert(payload["state"]["skipEmbeddingRetrieval"].type == JSONType.true_);
+    assert(payload["mcp"]["oauthTokenStorage"].str == "in-memory");
+    assert(parseClientMode("copilot-cli") == ClientMode.codingAgent);
 }
 
 // ---------------------------------------------------------------------------

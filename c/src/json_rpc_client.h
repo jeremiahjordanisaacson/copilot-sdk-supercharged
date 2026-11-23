@@ -61,6 +61,7 @@ typedef struct pending_request {
     cJSON *result;           /**< Set when response arrives */
     int error_code;          /**< Non-zero if error response */
     char *error_message;     /**< Error message from response */
+    cJSON *error_data;       /**< Optional error.data from an error response */
     bool completed;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
@@ -166,6 +167,23 @@ cJSON *json_rpc_client_request(
     int timeout_ms,
     int *out_error_code,
     char **out_error_message
+);
+
+/**
+ * Like json_rpc_client_request(), and additionally returns the JSON-RPC
+ * `error.data` member of an error response.
+ *
+ * @param out_error_data  Output (may be NULL): duplicated error.data (caller must
+ *                        cJSON_Delete), or NULL when the response carried none.
+ */
+cJSON *json_rpc_client_request_ex(
+    json_rpc_client_t *client,
+    const char *method,
+    cJSON *params,
+    int timeout_ms,
+    int *out_error_code,
+    char **out_error_message,
+    cJSON **out_error_data
 );
 
 /**

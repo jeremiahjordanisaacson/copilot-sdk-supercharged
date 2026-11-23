@@ -31,6 +31,7 @@ class DefineTool {
     private String description
     private Map<String, Object> parameters
     private Closure handler
+    private Boolean idempotent
 
     private DefineTool(String name) {
         this.name = name
@@ -54,6 +55,15 @@ class DefineTool {
     }
 
     /**
+     * Declares that repeating a call with the same arguments has no additional effect, so the
+     * runtime may safely retry it (sent as {@code idempotent} in the tool definition).
+     */
+    DefineTool idempotent(boolean idempotent) {
+        this.idempotent = idempotent
+        this
+    }
+
+    /**
      * Sets the handler closure.
      * The closure receives (Object args, ToolInvocation invocation) and returns a result.
      */
@@ -70,6 +80,8 @@ class DefineTool {
         if (handler == null) {
             throw new IllegalStateException('Tool handler is required')
         }
-        new Types.Tool(name, description, parameters, handler)
+        Types.Tool tool = new Types.Tool(name, description, parameters, handler)
+        tool.idempotent = idempotent
+        tool
     }
 }

@@ -69,6 +69,18 @@ class CopilotSession internal constructor(
     private var exitPlanModeHandler: ExitPlanModeHandler? = null
 
     @Volatile
+    private var shellAuthenticationHandler: ShellAuthenticationHandler? = null
+
+    @Volatile
+    private var memoryStoreHandler: MemoryStoreHandler? = null
+
+    /** In-flight shell authentication prompts keyed by request ID, cancelled on `shellAuthentication.cancel`. */
+    private val pendingShellAuthentications = ConcurrentHashMap<String, Deferred<ShellAuthenticationResult?>>()
+
+    /** In-flight external tool calls keyed by request ID, cancelled on `external_tool.completed`. */
+    private val pendingExternalTools = ConcurrentHashMap<String, Job>()
+
+    @Volatile
     private var onDestroyed: (() -> Unit)? = null
 
     /**
@@ -235,11 +247,18 @@ class CopilotSession internal constructor(
             put("sessionId", sessionId)
         }
         try {
-            client.request("session.detach", params)
+            val result = client.request("session.detach", params)
+            val success = ((result as? JsonObject)?.get("success") as? JsonPrimitive)?.booleanOrNull
+            if (success == false) {
+                val error = ((result as? JsonObject)?.get("error") as? JsonPrimitive)?.contentOrNull ?: "Unknown error"
+                throw RuntimeException("Failed to disconnect session $sessionId: $error")
+            }
         } catch (e: JsonRpcException) {
             if (!isMethodNotFound(e, "session.detach")) throw e
             client.request("session.destroy", params)
         }
+        cancelPendingShellAuthentications()
+        pendingExternalTools.keys.toList().forEach { pendingExternalTools.remove(it)?.cancel() }
         eventHandlers.clear()
         typedEventHandlers.clear()
         toolHandlers.clear()
@@ -247,6 +266,8 @@ class CopilotSession internal constructor(
         userInputHandler = null
         elicitationHandler = null
         exitPlanModeHandler = null
+        shellAuthenticationHandler = null
+        memoryStoreHandler = null
         hooks = null
         val callback = onDestroyed
         onDestroyed = null
@@ -298,6 +319,24 @@ class CopilotSession internal constructor(
             put("sessionId", sessionId)
         })
         return result as? JsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * Changes the session's permission mode. A refused change reports `success == false` with the
+     * authoritative mode and, when known, a `reason` such as [PermissionModeRefusalReason.MANAGED_POLICY].
+     *
+     * @param mode The permission mode (see [PermissionMode])
+     */
+    suspend fun setPermissionMode(mode: String): PermissionModeResult {
+        val result = client.request("session.permissions.setMode", buildJsonObject {
+            put("sessionId", sessionId)
+            put("mode", mode)
+        }) as? JsonObject ?: JsonObject(emptyMap())
+        return PermissionModeResult(
+            success = (result["success"] as? JsonPrimitive)?.booleanOrNull ?: false,
+            mode = (result["mode"] as? JsonPrimitive)?.contentOrNull,
+            reason = (result["reason"] as? JsonPrimitive)?.contentOrNull
+        )
     }
 
     // ========================================================================
@@ -370,10 +409,124 @@ class CopilotSession internal constructor(
     }
 
     /**
+     * Registers a shell authentication handler.
+     * @suppress
+     */
+    internal fun registerShellAuthenticationHandler(handler: ShellAuthenticationHandler?) {
+        this.shellAuthenticationHandler = handler
+    }
+
+    /**
+     * Registers the memory store callback.
+     * @suppress
+     */
+    internal fun registerMemoryStore(handler: MemoryStoreHandler?) {
+        this.memoryStoreHandler = handler
+    }
+
+    /**
+     * Answers a `shellAuthentication.request`: runs the handler as a cancellable child job so a
+     * `shellAuthentication.cancel` can release it, and answers `cancel` for invalid requests,
+     * missing handlers, failures, and cancelled prompts. Never logs the answer.
+     * @suppress
+     */
+    internal suspend fun handleShellAuthenticationRequest(params: JsonObject): JsonObject {
+        val handler = shellAuthenticationHandler ?: return shellAuthenticationCancel()
+        val requestId = params.stringMember("requestId")
+        val program = params.stringMember("program")
+        val prompt = params.stringMember("prompt")
+        val inputKind = params.stringMember("inputKind")
+        if (requestId == null || program == null || prompt == null || inputKind == null ||
+            inputKind !in SHELL_AUTH_INPUT_KINDS
+        ) {
+            return shellAuthenticationCancel()
+        }
+        val request = ShellAuthenticationRequest(
+            requestId = requestId,
+            program = program,
+            prompt = prompt,
+            inputKind = inputKind,
+            command = params.stringMember("command") ?: "",
+            cwd = params.stringMember("cwd") ?: ""
+        )
+        val pending = scope.async(start = CoroutineStart.LAZY) { handler(request, sessionId) }
+        if (pendingShellAuthentications.putIfAbsent(requestId, pending) != null) {
+            pending.cancel()
+            return shellAuthenticationCancel()
+        }
+        return try {
+            pending.start()
+            when (val result = pending.await()) {
+                is ShellAuthenticationResult.Accept -> buildJsonObject {
+                    put("action", "accept")
+                    put("value", result.value)
+                }
+                else -> shellAuthenticationCancel()
+            }
+        } catch (e: CancellationException) {
+            // Rethrow only when this request itself is being cancelled; a cancelled prompt answers "cancel".
+            currentCoroutineContext().ensureActive()
+            shellAuthenticationCancel()
+        } catch (_: Exception) {
+            // The handler failed; its error could contain the answer, so it is not reported.
+            shellAuthenticationCancel()
+        } finally {
+            pendingShellAuthentications.remove(requestId, pending)
+        }
+    }
+
+    /**
+     * Cancels a pending shell authentication prompt (`shellAuthentication.cancel`).
+     * @suppress
+     */
+    internal fun cancelShellAuthentication(requestId: String) {
+        pendingShellAuthentications.remove(requestId)?.cancel()
+    }
+
+    private fun cancelPendingShellAuthentications() {
+        for (requestId in pendingShellAuthentications.keys.toList()) {
+            cancelShellAuthentication(requestId)
+        }
+    }
+
+    private fun shellAuthenticationCancel(): JsonObject = buildJsonObject { put("action", "cancel") }
+
+    /**
+     * Invokes the memory store callback for a `memoryStore.store` request.
+     * @suppress
+     */
+    internal suspend fun handleMemoryStore(params: JsonObject) {
+        val handler = memoryStoreHandler ?: throw IllegalStateException("No memory store is registered")
+        val memory = StoredMemory(
+            sessionId = params.stringMember("sessionId") ?: sessionId,
+            subject = params.stringMember("subject") ?: "",
+            fact = params.stringMember("fact") ?: "",
+            citations = params.stringMember("citations") ?: "",
+            reason = params.stringMember("reason") ?: ""
+        )
+        try {
+            handler(memory)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            throw RuntimeException("Memory store callback failed")
+        }
+    }
+
+    private fun JsonObject.stringMember(key: String): String? =
+        (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    private companion object {
+        val SHELL_AUTH_INPUT_KINDS = setOf("secret", "text", "confirm")
+    }
+
+    /**
      * Dispatches a session event to all registered handlers.
      * @suppress
      */
     internal fun dispatchEvent(event: SessionEvent) {
+        handleBroadcastEvent(event)
+
         // Typed handlers
         typedEventHandlers[event.type]?.forEach { handler ->
             try {
@@ -390,6 +543,117 @@ class CopilotSession internal constructor(
             } catch (_: Exception) {
                 // Ignore handler errors
             }
+        }
+    }
+
+    /**
+     * Services the protocol 4 broadcast requests: `external_tool.requested` runs the registered
+     * tool handler and answers via `session.tools.handlePendingToolCall` (`external_tool.completed`
+     * cancels it), and `permission.requested` runs the permission handler and answers via
+     * `session.permissions.handlePendingPermissionRequest`.
+     */
+    private fun handleBroadcastEvent(event: SessionEvent) {
+        val data = event.data ?: return
+        when (event.type) {
+            "external_tool.requested" -> {
+                val requestId = (data["requestId"] as? JsonPrimitive)?.contentOrNull ?: return
+                val toolName = (data["toolName"] as? JsonPrimitive)?.contentOrNull ?: return
+                if ((data["hasHandler"] as? JsonPrimitive)?.booleanOrNull == false) return
+                val handler = toolHandlers[toolName] ?: return
+                val toolCallId = (data["toolCallId"] as? JsonPrimitive)?.contentOrNull ?: ""
+                val arguments = data["arguments"]
+                val job = scope.launch(start = CoroutineStart.LAZY) {
+                    runExternalTool(requestId, toolCallId, toolName, arguments, handler)
+                }
+                if (pendingExternalTools.putIfAbsent(requestId, job) == null) job.start() else job.cancel()
+            }
+            "external_tool.completed" -> {
+                val requestId = (data["requestId"] as? JsonPrimitive)?.contentOrNull ?: return
+                pendingExternalTools.remove(requestId)?.cancel()
+            }
+            "permission.requested" -> {
+                val requestId = (data["requestId"] as? JsonPrimitive)?.contentOrNull ?: return
+                if ((data["resolvedByHook"] as? JsonPrimitive)?.booleanOrNull == true) return
+                if (permissionHandler == null) return
+                val permissionRequest = data["permissionRequest"] as? JsonObject ?: JsonObject(emptyMap())
+                scope.launch { respondToPermissionRequest(requestId, permissionRequest) }
+            }
+        }
+    }
+
+    private suspend fun runExternalTool(
+        requestId: String,
+        toolCallId: String,
+        toolName: String,
+        arguments: JsonElement?,
+        handler: ToolHandler
+    ) {
+        val self = currentCoroutineContext().job
+        val response = try {
+            val result = handler(arguments, ToolInvocation(sessionId, toolCallId, toolName, arguments))
+            // Claim the request; it fails once the call was cancelled or completed elsewhere.
+            if (!pendingExternalTools.remove(requestId, self)) return
+            buildJsonObject {
+                put("sessionId", sessionId)
+                put("requestId", requestId)
+                put("result", externalToolResult(result))
+            }
+        } catch (e: CancellationException) {
+            pendingExternalTools.remove(requestId, self)
+            throw e
+        } catch (e: Exception) {
+            if (!pendingExternalTools.remove(requestId, self)) return
+            buildJsonObject {
+                put("sessionId", sessionId)
+                put("requestId", requestId)
+                put("error", e.message ?: e.toString())
+            }
+        }
+        try {
+            client.request("session.tools.handlePendingToolCall", response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Connection lost or RPC error: nothing more to report.
+        }
+    }
+
+    private fun externalToolResult(result: Any?): JsonElement = when (result) {
+        null -> JsonPrimitive("")
+        is String -> JsonPrimitive(result)
+        is JsonObject -> if (result.containsKey("textResultForLlm")) result else JsonPrimitive(result.toString())
+        is ToolResultObject -> json.encodeToJsonElement(ToolResultObject.serializer(), result)
+        is JsonElement -> JsonPrimitive(result.toString())
+        else -> JsonPrimitive(result.toString())
+    }
+
+    private suspend fun respondToPermissionRequest(requestId: String, permissionRequest: JsonObject) {
+        var decisionContext: Map<String, JsonElement>? = null
+        val decision: JsonObject = try {
+            val result = handlePermissionRequest(permissionRequest)
+            if (result.kind == "no-result") return
+            decisionContext = result.decisionContext
+            buildJsonObject {
+                put("kind", result.kind)
+                result.rules?.let { put("rules", JsonArray(it)) }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            buildJsonObject { put("kind", "user-not-available") }
+        }
+        val context = decisionContext
+        try {
+            client.request("session.permissions.handlePendingPermissionRequest", buildJsonObject {
+                put("sessionId", sessionId)
+                put("requestId", requestId)
+                put("result", decision)
+                context?.let { put("decisionContext", JsonObject(it)) }
+            })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Connection lost or RPC error: nothing more to report.
         }
     }
 

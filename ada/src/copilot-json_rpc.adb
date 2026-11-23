@@ -5,8 +5,10 @@
 with Ada.Strings.Fixed;          use Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;      use Ada.Strings.Unbounded;
 with Ada.Characters.Latin_1;
+with Ada.Exceptions;
 with GNAT.OS_Lib;                use GNAT.OS_Lib;
 with Copilot.Types;              use Copilot.Types;
+with Copilot.Wire;
 
 package body Copilot.JSON_RPC is
 
@@ -128,7 +130,10 @@ package body Copilot.JSON_RPC is
       return (Read_FD  => Read_FD,
               Write_FD => Write_FD,
               Next_Id  => 1,
-              Closed   => False);
+              Closed   => False,
+              Handler  => null,
+              Queue    => Message_Queues.Empty_Vector,
+              Last_Err => Null_Unbounded_String);
    end Create;
 
    procedure Write_Message
@@ -156,6 +161,51 @@ package body Copilot.JSON_RPC is
       return Body_Buf;
    end Read_Message;
 
+   --  Answer a server-to-client request through the registered handler.
+   procedure Answer_Request
+     (Self   : in out RPC_Connection;
+      Id_Raw : String;
+      Method : String;
+      Params : String)
+   is
+      Result  : Unbounded_String;
+      Error   : Unbounded_String;
+      Handled : Boolean := False;
+   begin
+      if Self.Handler /= null then
+         begin
+            Self.Handler (Method, Params, Result, Error, Handled);
+         exception
+            when E : others =>
+               Handled := True;
+               Error := To_Unbounded_String
+                 (Ada.Exceptions.Exception_Message (E));
+         end;
+      end if;
+
+      if not Handled then
+         Write_Message
+           (Self,
+            "{""jsonrpc"":""2.0"",""id"":" & Id_Raw
+            & ",""error"":{""code"":-32601,""message"":"
+            & Copilot.Wire.Quote ("Method not found: " & Method) & "}}");
+      elsif Length (Error) > 0 then
+         Write_Message
+           (Self,
+            "{""jsonrpc"":""2.0"",""id"":" & Id_Raw
+            & ",""error"":{""code"":-32603,""message"":"
+            & Copilot.Wire.Quote (To_String (Error)) & "}}");
+      elsif Length (Result) = 0 then
+         Write_Message
+           (Self, "{""jsonrpc"":""2.0"",""id"":" & Id_Raw & ",""result"":null}");
+      else
+         Write_Message
+           (Self,
+            "{""jsonrpc"":""2.0"",""id"":" & Id_Raw
+            & ",""result"":" & To_String (Result) & "}");
+      end if;
+   end Answer_Request;
+
    function Send_Request
      (Self   : in out RPC_Connection;
       Method : String;
@@ -165,21 +215,88 @@ package body Copilot.JSON_RPC is
       Payload : constant String := Build_Request (Req_Id, Method, Params);
    begin
       Self.Next_Id := Self.Next_Id + 1;
+      Self.Last_Err := Null_Unbounded_String;
       Write_Message (Self, Payload);
 
-      --  Read responses until we get one matching our request id.
+      --  Read messages until the response matching our request id arrives.
       loop
          declare
-            Resp : constant String := Read_Message (Self);
+            Msg        : constant String := Read_Message (Self);
+            Msg_Method : constant String :=
+              Copilot.Wire.String_Member (Msg, "method");
+            Id_Raw     : constant String := Copilot.Wire.Member (Msg, "id");
          begin
-            --  Simple check: look for our id in the response.
-            if Index (Resp, """id"":" & Int_Image (Req_Id)) > 0 then
-               return Resp;
+            if Msg_Method'Length > 0 then
+               if Id_Raw'Length > 0 then
+                  --  Server-to-client request (hooks, token providers, ...).
+                  Answer_Request
+                    (Self, Id_Raw, Msg_Method,
+                     Copilot.Wire.Member (Msg, "params"));
+               else
+                  --  Notification: keep it for Read_Notification.
+                  Self.Queue.Append (Msg);
+               end if;
+            elsif Id_Raw = Int_Image (Req_Id) then
+               declare
+                  Err : constant String := Copilot.Wire.Member (Msg, "error");
+               begin
+                  if Err'Length > 0 then
+                     Self.Last_Err := To_Unbounded_String (Err);
+                     raise Protocol_Error
+                       with "JSON-RPC error for " & Method & ": "
+                          & Copilot.Wire.String_Member (Err, "message")
+                          & " (code " & Copilot.Wire.Member (Err, "code")
+                          & ")";
+                  end if;
+               end;
+               return Msg;
             end if;
-            --  Otherwise it is a notification/event; skip it for now.
          end;
       end loop;
    end Send_Request;
+
+   procedure Set_Server_Request_Handler
+     (Self    : in out RPC_Connection;
+      Handler : Server_Request_Handler) is
+   begin
+      Self.Handler := Handler;
+   end Set_Server_Request_Handler;
+
+   function Read_Notification (Self : in out RPC_Connection) return String is
+   begin
+      if not Self.Queue.Is_Empty then
+         declare
+            Msg : constant String := Self.Queue.First_Element;
+         begin
+            Self.Queue.Delete_First;
+            return Msg;
+         end;
+      end if;
+
+      loop
+         declare
+            Msg        : constant String := Read_Message (Self);
+            Msg_Method : constant String :=
+              Copilot.Wire.String_Member (Msg, "method");
+            Id_Raw     : constant String := Copilot.Wire.Member (Msg, "id");
+         begin
+            if Msg_Method'Length > 0 then
+               if Id_Raw'Length = 0 then
+                  return Msg;
+               end if;
+               Answer_Request
+                 (Self, Id_Raw, Msg_Method,
+                  Copilot.Wire.Member (Msg, "params"));
+            end if;
+            --  Stray responses (no pending request) are ignored.
+         end;
+      end loop;
+   end Read_Notification;
+
+   function Last_Error (Self : RPC_Connection) return String is
+   begin
+      return To_String (Self.Last_Err);
+   end Last_Error;
 
    procedure Send_Notification
      (Self   : in out RPC_Connection;

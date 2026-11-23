@@ -23,6 +23,9 @@ module CopilotSDK
   class ToolBuilder
     getter name : String
     property description : String?
+    # When true, repeating a call with the same arguments has no additional
+    # effect, so the runtime may safely retry a call whose outcome was lost.
+    property idempotent : Bool?
 
     @parameters : Hash(String, JSON::Any)
     @required : Array(String)
@@ -80,7 +83,8 @@ module CopilotSDK
       ToolDefinition.new(
         name: @name,
         description: @description,
-        parameters: params
+        parameters: params,
+        idempotent: @idempotent
       )
     end
 

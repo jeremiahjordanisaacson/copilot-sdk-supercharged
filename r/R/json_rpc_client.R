@@ -26,6 +26,12 @@ json_rpc_error <- function(code, message, data = NULL) {
   )
 }
 
+#' Marker a server-request handler returns to reply with a JSON \code{null} result.
+#' @keywords internal
+json_rpc_null <- function() {
+  structure(list(), class = "json_rpc_null")
+}
+
 
 #' JsonRpcClient
 #'
@@ -139,6 +145,24 @@ JsonRpcClient <- R6::R6Class(
       private$send_message(message)
     },
 
+    #' @description Send a JSON-RPC request without waiting for its response. Used to answer
+    #'   session events from inside the message loop, where a blocking \code{request()} could
+    #'   consume the response that an outer \code{request()} is waiting for. The response is
+    #'   ignored when it arrives.
+    #' @param method Character. Method name.
+    #' @param params Named list or NULL.
+    #' @return The request ID (invisibly).
+    request_no_wait = function(method, params = list()) {
+      request_id <- private$new_id()
+      private$send_message(list(
+        jsonrpc = "2.0",
+        id = request_id,
+        method = method,
+        params = params
+      ))
+      invisible(request_id)
+    },
+
     #' @description Set handler for incoming notifications from server.
     #' @param handler Function(method, params) or NULL.
     set_notification_handler = function(handler) {
@@ -199,13 +223,19 @@ JsonRpcClient <- R6::R6Class(
       # Try to read a complete message from the process stdout.
       # Uses Content-Length header framing.
 
+      # Return a message that is already buffered before waiting for more output
+      buffered <- private$try_parse_message()
+      if (!is.null(buffered)) return(buffered)
+
       # First, try to poll for available data
       poll_result <- self$process$poll_io(timeout_ms)
 
-      # Read any available stdout data into our buffer
+      # Read any available stdout data into our buffer. processx decodes stdout as UTF-8
+      # text (its raw byte readers return no data on some platforms), so convert it back
+      # to bytes for the Content-Length framing.
       if (!is.null(poll_result) && "output" %in% names(poll_result) &&
           poll_result[["output"]] == "ready") {
-        new_data <- self$process$read_output_raw()
+        new_data <- charToRaw(enc2utf8(paste(self$process$read_output(), collapse = "")))
         if (length(new_data) > 0) {
           private$read_buffer <- c(private$read_buffer, new_data)
         }
@@ -288,7 +318,11 @@ JsonRpcClient <- R6::R6Class(
         tryCatch(
           {
             outcome <- handler(params)
-            if (is.null(outcome)) outcome <- list()
+            if (inherits(outcome, "json_rpc_null")) {
+              outcome <- NULL
+            } else if (is.null(outcome)) {
+              outcome <- list()
+            }
             private$send_response(msg$id, outcome)
           },
           json_rpc_error = function(e) {

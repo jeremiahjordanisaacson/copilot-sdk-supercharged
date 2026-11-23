@@ -213,8 +213,15 @@ let read_loop (t : t) : unit Lwt.t =
             handle_response t id result_opt error_opt;
             Lwt.return_unit
           | Some id, Some method_ ->
-            (* Incoming request *)
-            handle_request t id method_ (try json |> member "params" with _ -> `Null)
+            (* Incoming request. Answered asynchronously so a slow handler
+               (for example a shell authentication prompt waiting for its
+               shellAuthentication.cancel) never blocks the read loop. *)
+            let params = try json |> member "params" with _ -> `Null in
+            Lwt.async (fun () ->
+              Lwt.catch
+                (fun () -> handle_request t id method_ params)
+                (fun _exn -> Lwt.return_unit));
+            Lwt.return_unit
           | None, Some method_ ->
             (* Incoming notification *)
             handle_notification t method_ (try json |> member "params" with _ -> `Null)

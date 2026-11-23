@@ -17,6 +17,22 @@ module CopilotSDK
     def initialize(message : String, @code = -32603, @data = nil)
       super(message)
     end
+
+    # True when the server does not implement the requested method.
+    def method_not_found? : Bool
+      code == -32601 || (message || "").starts_with?("Unhandled method")
+    end
+
+    # The Policy Helper failure attached to the error data
+    # (`error.data.policyHelperFailure`), for example when `session.create` or
+    # `session.resume` fails because of managed policy.
+    def policy_helper_failure : PolicyHelperFailure?
+      failure = data.try(&.as_h?).try(&.["policyHelperFailure"]?)
+      return nil unless failure && failure.as_h?
+      PolicyHelperFailure.from_json(failure.to_json)
+    rescue JSON::ParseException
+      nil
+    end
   end
 
   # A pending request waiting for its response.
@@ -176,8 +192,10 @@ module CopilotSDK
     private def handle_message(msg : JSON::Any) : Nil
       if msg["id"]?
         if msg["method"]?
-          # Incoming request
-          handle_incoming_request(msg)
+          # Incoming request: answer it in its own fiber so a long-running
+          # handler (a tool, a shell authentication prompt) neither blocks
+          # reading the next message nor prevents a later cancel request.
+          spawn { handle_incoming_request(msg) }
         else
           # Response to our request
           handle_response(msg)

@@ -86,7 +86,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -123,7 +123,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -168,7 +168,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   // Configure SessionFs with a workspace root
   FsConfig := Default(TSessionFsConfig);
@@ -211,7 +211,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -255,7 +255,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -296,7 +296,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -329,7 +329,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -365,7 +365,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -408,7 +408,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -437,7 +437,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -467,7 +467,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -495,7 +495,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -524,7 +524,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -563,7 +563,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -613,7 +613,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -657,7 +657,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -697,7 +697,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   FsConfig := Default(TSessionFsConfig);
   FsConfig.InitialCwd := '/workspace/project';
@@ -731,7 +731,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -779,7 +779,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try
@@ -823,7 +823,7 @@ begin
   );
 
   Options := Default(TCopilotClientOptions);
-  Options.CliUrl := FProxy.ProxyUrl;
+  Options.CliPath := FProxy.CliPath;
 
   Client := TCopilotClient.Create(Options);
   try

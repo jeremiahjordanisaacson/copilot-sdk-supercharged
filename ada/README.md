@@ -84,6 +84,255 @@ begin
 end Quick_Start;
 ```
 
+## What's New in v3.0.0
+
+The Ada SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
+protocol). It requires **Copilot CLI 1.0.113 or newer**: `Start` rejects older
+CLIs with `SDK protocol version mismatch: SDK supports version 4, but server
+reports version N. Please update your SDK or server to ensure compatibility.`
+
+Existing options keep working. `Create_Session` and `Resume_Session` take the
+same `Session_Config` fields as before; `Copilot.Wire.Group_Session_Params`
+converts the flat payload into the protocol 4 grouped shape (`inference`,
+`tools`, `permissions`, `events`, ...) right before `session.create` and
+`session.resume` are sent. Server-to-client callbacks (token providers, shell
+authentication, memory store, hooks, network) are answered while the SDK reads
+from the CLI (inside requests and `Send_And_Wait`).
+
+The examples below assume `use Copilot.Types; use Copilot.Client;
+use Copilot.Session;` and a running `Client`.
+
+### Client options
+
+```ada
+declare
+   Opts : Client_Options := Default_Options;
+begin
+   --  Client info handshake: sent as clientInfo on connect.
+   Opts.Client_Info := (Editor_Name       => +"MyEditor",
+                        Editor_Version    => +"1.2.0",
+                        Extension_Name    => +"my-extension",
+                        Extension_Version => +"0.1.0");
+   --  Client mode: "coding-agent" (default) or "empty".  Empty mode needs
+   --  Available_Tools_Json on every session and turns off ambient features.
+   Opts.Mode := +Client_Mode_Empty;
+   --  Network callbacks (network.setProvider); see My_Proxy below.
+   Opts.Network := (Scope         => +"connection",
+                    Resolve_Proxy => My_Proxy'Access,
+                    others        => <>);
+   Client := Create (Opts);
+end;
+```
+
+```ada
+function My_Proxy (Url : String) return String is
+begin
+   return (if Url'Length > 0 then "http://proxy.local:8080" else "");
+end My_Proxy;
+```
+
+### Session options
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Available_Tools_Json := +"[""view"",""grep""]";
+   Cfg.Ask_User_Variant     := +Ask_User_Variant_Elicitation;
+   Cfg.Sandbox              := (Enabled => True, Allow_Bypass => True,
+                                others  => <>);
+   Cfg.Feature_Flags_Json   := +"{""my-flag"":true}";
+   Cfg.Allowed_Models_Json  := +"[""claude-sonnet-4.5""]";
+   Cfg.Auth_Client_Id_Metadata_Url := +"https://example.com/client.json";
+   Cfg.Max_Output_Tokens    := 4096;  --  limits.max_output_tokens
+   Cfg.Agent_Directories_Json := +"[""/repo/.agents""]";
+   Cfg.Hook_Directories_Json  := +"[""/repo/.hooks""]";
+   Cfg.Working_Directory    := +"/repo";
+   Cfg.Trust_Working_Directory := +Working_Directory_Trust_Session;  --  create only
+   Cfg.Image_Generation := (Enabled => Yes, Watermark => No,
+                            Save_To_Disk => Yes);
+   Cfg.Autopilot := (Continuation_Enabled => Yes, Max_Continues => 5);
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+### Named BYOK providers
+
+`Api_Key_Command` runs a command whose output is the API key. Select a
+registered model with `"provider/id"`.
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Providers.Append
+     ((Name            => +"local",
+       Provider_Type   => +"openai",
+       Base_Url        => +"http://localhost:11434/v1",
+       Api_Key_Command => +"cat ~/.keys/local",
+       others          => <>));
+   Cfg.Models.Append
+     ((Provider => +"local", Id => +"llama3", Max_Output_Tokens => 2048,
+       others   => <>));
+   Cfg.Default_Provider := +"local";
+   Cfg.Model            := +"local/llama3";
+   Cfg.Capi_Enabled     := No;  --  BYOK only
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+The legacy single provider still works: set `Cfg.Provider_Json` to the v1
+`provider` object and the SDK sends it as the `"default"` named provider.
+
+### Idempotent tools
+
+```ada
+declare
+   Defs : Tool_List;
+   Def  : Tool_Definition := Define_Tool ("lookup", "Read-only lookup");
+   Cfg  : Session_Config := Default_Session_Config;
+begin
+   Def.Idempotent := True;  --  safe to retry
+   Defs.Append (Def);
+   Cfg.Tools_Json := +Tools_To_Json (Defs);
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+### Message options
+
+```ada
+declare
+   Opts : Message_Options;
+begin
+   Opts.Prompt         := +"Summarize the diff";
+   Opts.Source         := +Agent_Message_Source ("reviewer");  --  MessageSource
+   Opts.Client_Turn_Id := +"turn-42";
+   --  Structured output: sent as responseFormat json_schema.
+   Opts.Response_Schema_Json :=
+     +"{""type"":""object"",""properties"":{""summary"":{""type"":""string""}}}";
+   Send (Sess, Opts);
+end;
+```
+
+### Session methods
+
+```ada
+Switch_Auto_Tier (Sess, Auto_Tier_Balance);           --  session.model.switchAutoTier
+declare
+   Snapshot : constant String := Recheck_Policy_Helper (Sess);
+   Result   : constant Permission_Mode_Result :=
+     Set_Permission_Mode (Sess, "allow-all");
+begin
+   if To_String (Result.Reason) = Permission_Mode_Reason_Managed_Policy then
+      Put_Line ("Blocked by policy; snapshot: " & Snapshot);
+   end if;
+end;
+Clear_Managed_Settings_Cache (Client);                --  managedSettings.clearCache
+Detach (Sess);                                        --  session.detach
+```
+
+### Resume options
+
+```ada
+declare
+   RCfg : Resume_Session_Config;
+begin
+   RCfg.Session_Id                := +"saved-session-id";
+   RCfg.Disable_Resume            := True;  --  suppressResumeEvent
+   RCfg.Allow_Transcript_Recovery := True;
+   RCfg.Options.Available_Tools_Json := +"[""view""]";
+   Sess := Resume_Session (Client, RCfg);
+end;
+```
+
+### Callbacks
+
+```ada
+function Mint_Token (Request : GitHub_Token_Request) return GitHub_Token_Result is
+begin
+   return (Access_Token => +"ghu_example", Token_Type => +"Bearer",
+           Expires_In => 3600, others => <>);
+end Mint_Token;
+
+function Ask_Password (Request : Shell_Authentication_Request)
+  return Shell_Authentication_Response is
+begin
+   return (Accepted => To_String (Request.Input_Kind) = "secret",
+           Value    => +"s3cret");
+end Ask_Password;
+
+procedure Remember (Memory : Stored_Memory) is
+begin
+   Put_Line ("Remember: " & To_String (Memory.Fact));
+end Remember;
+
+function On_Start (Input : Subagent_Hook_Input) return String is
+begin
+   return "You are helping " & To_String (Input.Agent_Name);
+end On_Start;
+
+function On_Stop (Input : Subagent_Hook_Input) return Subagent_Stop_Decision is
+begin
+   return (Block => False, Reason => Null_UString,
+           Modified_Response => Input.Response);
+end On_Stop;
+
+--  ...
+Cfg.GitHub_Token_Provider   := Mint_Token'Access;   --  gitHubToken.getToken
+Cfg.On_Shell_Authentication := Ask_Password'Access; --  shellAuthentication.request
+Cfg.On_Store_Memory         := Remember'Access;     --  memoryStore.store
+Cfg.On_Subagent_Start       := On_Start'Access;     --  hooks: subagentStart
+Cfg.On_Subagent_Stop        := On_Stop'Access;      --  hooks: subagentStop
+```
+
+`GitHub_Token_Provider` and `Github_Token` are mutually exclusive; the
+registration is released when the session is detached.
+
+### Events and errors
+
+```ada
+--  Shell output streams arrive as tool.shell_output events.
+if To_String (Evt.Event_Type) = Event_Tool_Shell_Output then
+   Put_Line (To_String (Shell_Output (Evt).Text));
+end if;
+
+--  Policy Helper failures attached to a failed create/resume.
+begin
+   Sess := Create_Session (Client, Cfg);
+exception
+   when Protocol_Error =>
+      declare
+         Failure : constant Policy_Helper_Failure :=
+           Last_Policy_Helper_Failure (Client);
+      begin
+         if Failure.Present then
+            Put_Line ("Policy helper: " & To_String (Failure.Message));
+         end if;
+      end;
+end;
+```
+
+JSON-RPC errors (including `session.abort`, `session.delete` and
+`session.setForeground` failures) are raised as `Protocol_Error`.
+
+### Known limitations
+
+- The runtime-supervised AHP host (`startAhpHost`, `ahp.*` / `host.*`) is not
+  available: it is an experimental upstream surface that depends on the
+  runtime's in-process hosting library.
+- In-process native runtime hosting is not the default connection: the Ada SDK
+  spawns the Copilot CLI over stdio (`CLI_Url` TCP connections are still not
+  implemented).
+- Server-to-client callbacks are answered only while the SDK is reading from
+  the CLI (`Send_Request`, `Send_And_Wait`, `Read_Notification`); there is no
+  background reader task. Callback registrations are process-wide, so use one
+  `Copilot_Client` per process when you rely on network callbacks.
+- Shell authentication prompts are answered synchronously, so
+  `shellAuthentication.cancel` is acknowledged without further action.
+- The CLI's stderr is a separate pipe that the SDK does not drain; keep the
+  CLI log level low for long sessions.
+
 ## Custom Tools
 
 Define tools that the Copilot agent can call during a session:
@@ -170,6 +419,7 @@ Register_User_Input_Handler (Sess, My_Input_Handler'Access);
 | `tool.execution_start` | Tool execution started |
 | `tool.execution_complete` | Tool execution finished |
 | `tool.execution_progress` | Tool execution progress |
+| `tool.shell_output` | Streamed shell command output (protocol 4) |
 | `abort` | Session aborted |
 
 ## Session Idle Timeout
@@ -254,6 +504,8 @@ end;
 | `List_Models (Client)` | List available models |
 | `Get_State (Client)` | Get current connection state |
 | `Is_Connected (Client)` | Check if connected |
+| `Clear_Managed_Settings_Cache (Client)` | Clear cached managed settings |
+| `Last_Policy_Helper_Failure (Client)` | Policy Helper failure of the last failed create/resume |
 
 ### Copilot_Session
 
@@ -263,7 +515,12 @@ end;
 | `Send_And_Wait (Session, Options, Timeout)` | Send and wait for idle |
 | `Get_Messages (Session)` | Get session history |
 | `Abort_Turn (Session)` | Abort current processing |
-| `Destroy (Session)` | Destroy the session |
+| `Destroy (Session)` | Detach from the session and release its callbacks |
+| `Detach (Session)` | Detach from the session (`session.detach`) |
+| `Switch_Auto_Tier (Session, Tier)` | Request an Auto routing tier |
+| `Recheck_Policy_Helper (Session)` | Re-run the enterprise Policy Helper |
+| `Set_Permission_Mode (Session, Mode)` | Change the permission mode |
+| `Shell_Output (Event)` | Decode a `tool.shell_output` event |
 | `Register_Tool (Session, Name, Handler)` | Register a tool handler |
 | `Register_Permission_Handler (Session, H)` | Register permission handler |
 | `Register_User_Input_Handler (Session, H)` | Register user input handler |
