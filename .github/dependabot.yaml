@@ -17,13 +17,6 @@ updates:
       # Major versions can change action inputs; adopt them deliberately.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-  - package-ecosystem: 'devcontainers'
-    directory: '/'
-    multi-ecosystem-group: 'all'
-    patterns: ['*']
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
   # Node.js dependencies
   - package-ecosystem: 'npm'
     directory: '/nodejs'
