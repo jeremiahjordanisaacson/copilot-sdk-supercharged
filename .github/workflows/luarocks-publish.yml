@@ -78,9 +78,20 @@ jobs:
           }
           SPEC
           cat "$ROCKSPEC"
-          luarocks upload "$ROCKSPEC" --api-key="$LUAROCKS_API_KEY" || {
-            echo "::warning::LuaRocks upload failed (version may already exist)"
+          if luarocks upload "$ROCKSPEC" --api-key="$LUAROCKS_API_KEY" > upload.log 2>&1; then
+            cat upload.log
             exit 0
-          }
+          fi
+          cat upload.log
+          if luarocks search --porcelain copilot-sdk-supercharged "${VERSION}-1" 2>/dev/null | grep -q "${VERSION}-1"; then
+            echo "copilot-sdk-supercharged ${VERSION}-1 is already on LuaRocks."
+            exit 0
+          fi
+          if grep -q '/status' upload.log; then
+            echo "::error title=LuaRocks API key rejected::LuaRocks rejected LUAROCKS_API_KEY. Create a new key at https://luarocks.org/settings/api-keys, update the secret, then run: gh workflow run luarocks-publish.yml --ref main -f tag=${RELEASE_TAG}"
+          else
+            echo "::error::LuaRocks upload failed; see the output above."
+          fi
+          exit 1
         env:
           LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}

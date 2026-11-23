@@ -80,7 +80,7 @@ jobs:
             # 4xx responses (credentials, permissions, package validation) need a human
             # fix, and retrying cannot help. Report them loudly instead of failing.
             if grep -qiE 'http code 4[0-9][0-9]|forbidden|unauthori[sz]ed|not authori[sz]ed|uploaders' upload.log; then
-              MSG="Hackage rejected the upload for account '${HACKAGE_USERNAME}': $(grep -iE 'error|http code' upload.log | head -1). Check the HACKAGE_USERNAME/HACKAGE_PASSWORD secrets, that the account has upload rights (new Hackage accounts must be added to the uploaders group), and the cabal check output above."
+              MSG="Hackage rejected the upload for account '${HACKAGE_USERNAME}': $(grep -v '^[[:space:]]*$' upload.log | tail -3 | tr '\n' ' ') Check the HACKAGE_USERNAME/HACKAGE_PASSWORD secrets, that the account has upload rights (new Hackage accounts must be added to the uploaders group), and the cabal check output above."
               echo "::warning title=Hackage publish skipped::$MSG"
               { echo "### Hackage publish skipped"; echo "$MSG"; echo '```'; cat upload.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
               exit 0
