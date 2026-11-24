@@ -420,11 +420,11 @@ git push origin "v$VERSION"
 
 # The tag push triggers these workflows automatically:
 # - release.yml         → Creates GitHub Release with SDK zip archives + checksums
-# - pypi-publish.yml    → Publishes to PyPI (OIDC trusted publishing, PYPI_TOKEN fallback)
+# - pypi-publish.yml    → Publishes to PyPI (OIDC trusted publishing, no secret)
 # - npm-publish.yml     → Publishes to npm (OIDC trusted publishing — no token, auto-provenance)
-# - cargo-publish.yml   → Publishes to crates.io (needs CARGO_REGISTRY_TOKEN)
-# - rubygems-publish.yml → Publishes to RubyGems (needs RUBYGEMS_API_KEY)
-# - nuget-publish.yml   → Publishes to NuGet (needs NUGET_API_KEY)
+# - cargo-publish.yml   → Publishes to crates.io (OIDC trusted publishing, no secret)
+# - rubygems-publish.yml → Publishes to RubyGems (OIDC trusted publishing, no secret)
+# - nuget-publish.yml   → Publishes to NuGet (OIDC trusted publishing via NuGet/login, no secret)
 # - hex-publish.yml     → Publishes to Hex.pm (needs HEX_API_KEY)
 # - maven-publish.yml   → Publishes to Maven Central (needs MAVEN_* secrets)
 # - pub-publish.yml     → Publishes to pub.dev (OIDC — after manual first publish + automated publishing enabled)
@@ -704,9 +704,9 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 - Maven Central: The artifact name in the publish workflow MUST match `<artifactId>` in `pom.xml` (currently `copilot-sdk-java`)
 - Dart/pub.dev: Must have LICENSE file in dart/ directory, CHANGELOG.md must mention current version, `dart analyze` warnings block publish
 - pub.dev first publish: "Only users are allowed to upload new packages" — requires manual first upload. Until then `pub-publish.yml` detects the 404 and skips with a warning and job summary instead of failing.
-- PyPI: no trusted publisher is configured on pypi.org (`invalid-publisher`), so `pypi-publish.yml` tries OIDC first and falls back to the `PYPI_TOKEN` secret (`skip-existing: true` keeps re-runs idempotent).
+- Trusted publishing (no stored keys) since 2026-11-23 for npm, PyPI, NuGet, RubyGems and crates.io: repo owner `jeremiahjordanisaacson`, repo `copilot-sdk-supercharged`, workflow = the `*-publish.yml` filename, no environment. The old key secrets were deleted. If one fails with an OIDC or "invalid publisher" error, check that registry's trusted publisher settings, not secrets. RubyGems and crates.io accept `-f dry_run=true` on dispatch to verify the exchange without publishing. `skip-existing: true` keeps PyPI re-runs idempotent.
 - NuGet: the SDK targets net10.0 and `dotnet/global.json` pins SDK 10, so `nuget-publish.yml` sets up .NET 10.0.x and runs from `dotnet/`.
-- NuGet: NUGET_API_KEY secret expires — if 403, regenerate at nuget.org/account/apikeys
+- NuGet: trusted publishing policy `copilot-sdk-supercharged` (owner jeremiahisaacson, package CopilotSDK.Supercharged, push only new versions) on nuget.org > account > Trusted Publishing.
 - crates.io: Must accept ownership invitation before publishing
 - CRAN: Use `error_on = "error"` in `devtools::check_built()` to pass on warnings
 - Hex.pm: Use `mix hex.publish --yes --replace` to allow re-publishing same version
@@ -742,7 +742,7 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 | TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"` |
 | Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run` |
 | npm publish 403 "2FA required" | Token needs "bypass 2fa" enabled. User must regenerate. |
-| NuGet 403 "API key invalid" | NUGET_API_KEY expired. Regenerate at nuget.org/account/apikeys. |
+| NuGet login (OIDC) fails | Check the trusted publishing policy on nuget.org (workflow `nuget-publish.yml`, owner `jeremiahjordanisaacson`). |
 | crates.io 403 "not an owner" | Accept ownership invitation at crates.io/me/pending-invites. |
 | pub.dev "Only users allowed" | First publish must be done manually by a user, not CI. |
 | Maven "cp: cannot stat" | Artifact name in workflow doesn't match pom.xml artifactId. |

@@ -54,35 +54,15 @@ jobs:
         with:
           subject-path: ruby/*.gem
 
-      # Trusted publishing: a short-lived OIDC credential instead of a stored API key.
-      # Falls back to RUBYGEMS_API_KEY until a trusted publisher for
-      # rubygems-publish.yml is configured on rubygems.org.
+      # Trusted publishing: a short-lived OIDC credential from the trusted publisher
+      # for rubygems-publish.yml on rubygems.org. No stored API key.
       - name: Configure RubyGems credentials (trusted publishing)
-        id: rubygems-oidc
-        continue-on-error: true
         uses: rubygems/configure-rubygems-credentials@v2.1.0
 
       - name: Verify trusted publishing (dry run)
         if: ${{ inputs.dry_run }}
-        env:
-          OIDC_OUTCOME: ${{ steps.rubygems-oidc.outcome }}
-        run: |
-          if [ "$OIDC_OUTCOME" != "success" ]; then
-            echo "::error::rubygems.org did not issue trusted publishing credentials; check the trusted publisher for rubygems-publish.yml."
-            exit 1
-          fi
-          echo "rubygems.org issued trusted publishing credentials."
+        run: echo "rubygems.org issued trusted publishing credentials."
 
       - name: Publish to RubyGems
         if: ${{ !inputs.dry_run }}
-        run: |
-          if [ "$OIDC_OUTCOME" != "success" ]; then
-            mkdir -p ~/.gem
-            echo "---" > ~/.gem/credentials
-            echo ":rubygems_api_key: $RUBYGEMS_API_KEY" >> ~/.gem/credentials
-            chmod 0600 ~/.gem/credentials
-          fi
-          gem push copilot-sdk-supercharged-*.gem
-        env:
-          OIDC_OUTCOME: ${{ steps.rubygems-oidc.outcome }}
-          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: gem push copilot-sdk-supercharged-*.gem

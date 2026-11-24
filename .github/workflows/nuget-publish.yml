@@ -44,19 +44,17 @@ jobs:
       - name: Build and pack
         run: dotnet pack src/Microsoft.Copilot.SDK.csproj -c Release -p:Version=$VERSION -o ./nupkg
 
-      # Trusted publishing: exchange the job's OIDC token for a one-hour NuGet key,
-      # so no long-lived key has to be renewed. Falls back to NUGET_API_KEY until a
-      # trusted publishing policy for nuget-publish.yml exists on nuget.org.
+      # Trusted publishing: exchange the job's OIDC token for a one-hour NuGet key
+      # (policy on nuget.org for nuget-publish.yml). No stored key to renew.
       - name: NuGet login (trusted publishing)
         id: nuget-login
-        continue-on-error: true
         uses: NuGet/login@v1
         with:
           user: ${{ vars.NUGET_USER || 'jeremiahisaacson' }}
 
       - name: Publish to NuGet
         env:
-          NUGET_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY || secrets.NUGET_API_KEY }}
+          NUGET_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: dotnet nuget push ./nupkg/*.nupkg --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Attest build provenance
