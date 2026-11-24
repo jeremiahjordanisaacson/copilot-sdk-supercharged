@@ -84,8 +84,9 @@ import           Copilot.SdkProtocolVersion (sdkProtocolVersion)
 import           Copilot.Session           (CopilotSession, newCopilotSession, dispatchSessionEvent,
                                             registerSessionTools, registerSessionPermissionHandler,
                                             registerSessionUserInputHandler, registerSessionHooks,
+                                            registerSessionUserInputImageHandler,
                                             getSessionToolHandler, handleSessionPermissionRequest,
-                                            handleSessionUserInputRequest, handleSessionHooksInvoke,
+                                            handleSessionUserInputImageRequest, handleSessionHooksInvoke,
                                             registerExitPlanModeHandler, handleExitPlanModeRequest,
                                             registerTraceContextProvider,
                                             registerSessionShellAuthenticationHandler,
@@ -366,7 +367,8 @@ createSession client config = do
         , "excludedTools"      .= scExcludedTools config
         , "provider"           .= scProvider config
         , "requestPermission"  .= (isJust (scOnPermissionRequest config))
-        , "requestUserInput"   .= (isJust (scOnUserInputRequest config))
+        , "requestUserInput"   .= (isJust (scOnUserInputRequest config)
+                                     || isJust (scOnUserInputImageRequest config))
         , "hooks"              .= hasHooks (scHooks config)
         , "workingDirectory"   .= scWorkingDirectory config
         , "streaming"          .= scStreaming config
@@ -444,6 +446,9 @@ createSession client config = do
           case scOnUserInputRequest config of
             Just h  -> registerSessionUserInputHandler session h
             Nothing -> pure ()
+          case scOnUserInputImageRequest config of
+            Just h  -> registerSessionUserInputImageHandler session h
+            Nothing -> pure ()
           case scHooks config of
             Just h  -> registerSessionHooks session h
             Nothing -> pure ()
@@ -489,7 +494,8 @@ resumeSession client sessionId config = do
         , "excludedTools"      .= rscExcludedTools config
         , "provider"           .= rscProvider config
         , "requestPermission"  .= (isJust (rscOnPermissionRequest config))
-        , "requestUserInput"   .= (isJust (rscOnUserInputRequest config))
+        , "requestUserInput"   .= (isJust (rscOnUserInputRequest config)
+                                     || isJust (rscOnUserInputImageRequest config))
         , "hooks"              .= hasHooks (rscHooks config)
         , "workingDirectory"   .= rscWorkingDirectory config
         , "configDir"          .= rscConfigDir config
@@ -552,6 +558,9 @@ resumeSession client sessionId config = do
             Nothing -> pure ()
           case rscOnUserInputRequest config of
             Just h  -> registerSessionUserInputHandler session h
+            Nothing -> pure ()
+          case rscOnUserInputImageRequest config of
+            Just h  -> registerSessionUserInputImageHandler session h
             Nothing -> pure ()
           case rscHooks config of
             Just h  -> registerSessionHooks session h
@@ -1155,7 +1164,9 @@ handleUserInputReq client params = do
                 , uirImageAttachmentConstraints = case mImages of Just i -> i; Nothing -> Nothing
                 , uirMeta          = case mMeta of Just m -> m; Nothing -> Nothing
                 }
-          result <- try $ handleSessionUserInputRequest session req sid
+          -- The image-capable handler takes precedence; a plain handler's answer
+          -- is sent without attachments, exactly as before.
+          result <- try $ handleSessionUserInputImageRequest session req sid
           case result of
             Right resp -> pure $ Right $ Aeson.toJSON resp
             Left (e :: SomeException) ->

@@ -164,11 +164,13 @@ module Copilot.Types
     -- * User input types
   , UserInputRequest (..)
   , UserInputResponse (..)
-  , defaultUserInputResponse
+  , UserInputHandler
   , UserInputImageAttachmentConstraints (..)
   , UserInputImageAttachment (..)
   , defaultUserInputImageAttachment
-  , UserInputHandler
+  , UserInputImageResponse (..)
+  , defaultUserInputImageResponse
+  , UserInputImageHandler
 
     -- * Exit plan mode types
   , ExitPlanModeRequest (..)
@@ -905,6 +907,8 @@ data SessionConfig = SessionConfig
   , scCapi                           :: !(Maybe CapiConfig)  -- ^ Copilot API options (github.capi)
   , scOnShellAuthenticationRequest   :: !(Maybe ShellAuthenticationHandler)  -- ^ Answers sudo/ssh/git prompts
   , scOnStoreMemory                  :: !(Maybe StoreMemoryHandler)  -- ^ Stores memories the agent asks to keep
+  -- --- v3.1.0 session options ---
+  , scOnUserInputImageRequest        :: !(Maybe UserInputImageHandler)  -- ^ ask_user handler that can answer with images; takes precedence over 'scOnUserInputRequest'
   }
 
 -- | Default (empty) session configuration.
@@ -970,6 +974,7 @@ defaultSessionConfig = SessionConfig
   , scCapi                           = Nothing
   , scOnShellAuthenticationRequest   = Nothing
   , scOnStoreMemory                  = Nothing
+  , scOnUserInputImageRequest        = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -1019,6 +1024,8 @@ data ResumeSessionConfig = ResumeSessionConfig
   , rscCapi                           :: !(Maybe CapiConfig)
   , rscOnShellAuthenticationRequest   :: !(Maybe ShellAuthenticationHandler)
   , rscOnStoreMemory                  :: !(Maybe StoreMemoryHandler)
+  -- --- v3.1.0 resume options ---
+  , rscOnUserInputImageRequest        :: !(Maybe UserInputImageHandler)  -- ^ ask_user handler that can answer with images; takes precedence over 'rscOnUserInputRequest'
   }
 
 -- | Default (empty) resume session configuration.
@@ -1068,6 +1075,7 @@ defaultResumeSessionConfig = ResumeSessionConfig
   , rscCapi                           = Nothing
   , rscOnShellAuthenticationRequest   = Nothing
   , rscOnStoreMemory                  = Nothing
+  , rscOnUserInputImageRequest        = Nothing
   }
 
 -- ============================================================================
@@ -1878,9 +1886,9 @@ type PermissionHandler = PermissionRequest -> Text -> IO PermissionRequestResult
 -- | Request for user input from the agent.
 --
 -- 'uirImageAttachmentConstraints' is set when the runtime accepts image
--- attachments in the answer ('uirAttachments') and 'Nothing' otherwise.
--- 'uirRequestId' is the pending request ID and 'uirMeta' the request's opaque
--- @_meta@ object, when the runtime sends them.
+-- attachments in the answer (see 'UserInputImageResponse') and 'Nothing'
+-- otherwise. 'uirRequestId' is the pending request ID and 'uirMeta' the
+-- request's opaque @_meta@ object, when the runtime sends them.
 data UserInputRequest = UserInputRequest
   { uirQuestion                   :: !Text
   , uirChoices                    :: !(Maybe [Text])
@@ -1911,26 +1919,17 @@ instance FromJSON UserInputRequest where
       <*> o .:? "imageAttachmentConstraints"
       <*> o .:? "_meta"
 
--- | Response to a user input request. 'uirAttachments' is only valid when the
--- request advertised 'uirImageAttachmentConstraints' and is sent only when
--- set; for an image-only answer use an empty 'uirAnswer' and 'uirWasFreeform'
--- 'True'. Build one with 'defaultUserInputResponse'.
+-- | Response to a user input request. It is text only; to answer with images,
+-- return a 'UserInputImageResponse' from a 'UserInputImageHandler'.
 data UserInputResponse = UserInputResponse
   { uirAnswer      :: !Text
   , uirWasFreeform :: !Bool
-  , uirAttachments :: !(Maybe [UserInputImageAttachment])
   } deriving (Show, Eq, Generic)
 
--- | A response with the given answer and freeform flag and no attachments.
-defaultUserInputResponse :: Text -> Bool -> UserInputResponse
-defaultUserInputResponse answer wasFreeform = UserInputResponse answer wasFreeform Nothing
-
 instance ToJSON UserInputResponse where
-  toJSON UserInputResponse{..} = object $
+  toJSON UserInputResponse{..} = object
     [ "answer"      .= uirAnswer
     , "wasFreeform" .= uirWasFreeform
-    ] ++ catMaybes
-    [ ("attachments" .=) <$> uirAttachments
     ]
 
 instance FromJSON UserInputResponse where
@@ -1938,7 +1937,6 @@ instance FromJSON UserInputResponse where
     UserInputResponse
       <$> o .:  "answer"
       <*> o .:  "wasFreeform"
-      <*> o .:? "attachments"
 
 -- | User input handler callback.
 type UserInputHandler = UserInputRequest -> Text -> IO UserInputResponse
@@ -1966,7 +1964,7 @@ instance FromJSON UserInputImageAttachmentConstraints where
       <*> o .:? "maxBytesPerImage" .!= 0
       <*> o .:? "maxCount" .!= 0
 
--- | An inline image attached to an ask_user answer ('uirAttachments'). The
+-- | An inline image attached to an ask_user answer ('uiirAttachments'). The
 -- wire @type@ is always @image@ and 'uiaData' is the base64-encoded image.
 -- The runtime enforces the advertised MIME types, size, and count limits.
 data UserInputImageAttachment = UserInputImageAttachment
@@ -1998,6 +1996,46 @@ instance FromJSON UserInputImageAttachment where
       <*> o .:  "mimeType"
       <*> o .:? "description"
       <*> o .:? "displayName"
+
+-- | A user input answer that can carry image attachments, returned by a
+-- 'UserInputImageHandler'. 'uiirAttachments' is only valid when the request
+-- advertised 'uirImageAttachmentConstraints' and is sent only when non-empty.
+-- For an image-only answer use an empty 'uiirAnswer' and 'uiirWasFreeform'
+-- 'True', as 'defaultUserInputImageResponse' does.
+data UserInputImageResponse = UserInputImageResponse
+  { uiirAnswer      :: !Text
+  , uiirWasFreeform :: !Bool
+  , uiirAttachments :: ![UserInputImageAttachment]
+  } deriving (Show, Eq, Generic)
+
+-- | An image-only answer without images yet: empty 'uiirAnswer',
+-- 'uiirWasFreeform' 'True', and no 'uiirAttachments'. Fill it in with record
+-- update syntax.
+defaultUserInputImageResponse :: UserInputImageResponse
+defaultUserInputImageResponse = UserInputImageResponse
+  { uiirAnswer      = ""
+  , uiirWasFreeform = True
+  , uiirAttachments = []
+  }
+
+instance ToJSON UserInputImageResponse where
+  toJSON UserInputImageResponse{..} = object $
+    [ "answer"      .= uiirAnswer
+    , "wasFreeform" .= uiirWasFreeform
+    ] ++
+    [ "attachments" .= uiirAttachments | not (null uiirAttachments) ]
+
+instance FromJSON UserInputImageResponse where
+  parseJSON = withObject "UserInputImageResponse" $ \o ->
+    UserInputImageResponse
+      <$> o .:  "answer"
+      <*> o .:  "wasFreeform"
+      <*> o .:? "attachments" .!= []
+
+-- | User input handler whose answers can carry image attachments. Set it with
+-- 'scOnUserInputImageRequest' (or 'rscOnUserInputImageRequest'); when both it
+-- and the plain 'UserInputHandler' are set, it takes precedence.
+type UserInputImageHandler = UserInputRequest -> Text -> IO UserInputImageResponse
 
 -- ============================================================================
 -- Exit Plan Mode Types

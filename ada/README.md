@@ -144,22 +144,29 @@ end loop;
 
 ### Ask-user image attachments
 
-`Session_Config.On_User_Input_Request` now answers the runtime's
-`userInput.request` (the ask_user tool) and enables the tool. The
-`User_Input_Request` carries `Request_Id`, `Choices_Json`, `Allow_Freeform`,
-`Meta_Json` (the opaque `_meta` object) and `Image_Attachment_Constraints`
-(`Present`, `Allowed_Mime_Types_Json`, `Max_Bytes_Per_Image`, `Max_Count`);
-`Present` is False when the runtime does not accept images. Answer with
-`Attachments`, a `User_Input_Image_Attachment_List` of
+The client now answers the runtime's `userInput.request` (the ask_user tool).
+Setting `Session_Config.On_User_Input_Request` (a text handler, see
+[User Input Handling](#user-input-handling)) or the new
+`On_User_Input_Image_Request` sends `requestUserInput`, so the runtime offers
+the tool. `User_Input_Request` now also carries `Request_Id`, `Choices_Json`,
+`Allow_Freeform`, `Meta_Json` (the opaque `_meta` object) and
+`Image_Attachment_Constraints` (`Present`, `Allowed_Mime_Types_Json`,
+`Max_Bytes_Per_Image`, `Max_Count`); `Present` is False when the runtime does
+not accept images. `User_Input_Response` and `User_Input_Handler` are
+unchanged, so existing handlers keep working.
+
+To answer with images, set `Session_Config.On_User_Input_Image_Request` to a
+`User_Input_Image_Handler`. It returns a `User_Input_Image_Response`: `Answer`,
+`Was_Freeform` and `Attachments`, a `User_Input_Image_Attachment_List` of
 `User_Input_Image_Attachment` (base64 `Data`, `Mime_Type`, optional
-`Description` and `Display_Name`; the wire `type` is always `"image"`). It is
-sent only when not empty. Image-only answers use an empty `Answer` and
-`Was_Freeform => True`; the runtime enforces the limits. `User_Input_Response`
-aggregates now need a value for `Attachments` (`Attachments => <>` for none).
+`Description` and `Display_Name`; the wire `type` is always `"image"`).
+`attachments` is sent only when the list is not empty. Image-only answers use
+an empty `Answer` and `Was_Freeform => True`; the runtime enforces the limits.
+When both handlers are set, the image handler answers.
 
 ```ada
 function Answer_With_Screenshot
-  (Req : User_Input_Request) return User_Input_Response
+  (Req : User_Input_Request) return User_Input_Image_Response
 is
    Images : User_Input_Image_Attachment_List;
 begin
@@ -176,11 +183,11 @@ begin
               Attachments => Images);
    end if;
    return (Answer => +"No screenshot available", Was_Freeform => True,
-           Attachments => <>);
+           Attachments => <>);  --  no images
 end Answer_With_Screenshot;
 
 --  ...
-Cfg.On_User_Input_Request := Answer_With_Screenshot'Access;
+Cfg.On_User_Input_Image_Request := Answer_With_Screenshot'Access;
 ```
 
 ## What's New in v3.0.0
@@ -482,7 +489,9 @@ Register_Permission_Handler (Sess, My_Permission_Handler'Access);
 Enable the ask_user tool by setting `Session_Config.On_User_Input_Request`
 before creating (or resuming) the session; the client then answers the
 runtime's `userInput.request`. `Register_User_Input_Handler` replaces the
-handler of a live session.
+handler of a live session. To answer with images, set
+`On_User_Input_Image_Request` instead (see
+[Ask-user image attachments](#ask-user-image-attachments)).
 
 ```ada
 function My_Input_Handler
@@ -491,8 +500,7 @@ is
 begin
    Put_Line ("Agent asks: " & To_String (Req.Question));
    return (Answer       => To_Unbounded_String ("Yes, proceed."),
-           Was_Freeform => True,
-           Attachments  => <>);  --  no images
+           Was_Freeform => True);
 end My_Input_Handler;
 
 Cfg.On_User_Input_Request := My_Input_Handler'Access;

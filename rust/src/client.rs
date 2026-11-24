@@ -56,15 +56,20 @@ fn insert_flag(params: &mut Value, key: &str) {
 /// Application callbacks declared on a session config and installed on the opened session.
 struct SessionCallbacks {
     shell_authentication: Option<ShellAuthenticationHandlerFn>,
+    user_input_image: Option<UserInputImageHandlerFn>,
     memory_store: Option<MemoryStoreHandlerFn>,
 }
 
 impl SessionCallbacks {
     /// Adds the capability flags that tell the runtime which callbacks are registered
-    /// (`interaction.requestShellAuthentication`, `state.hasMemoryStore`).
+    /// (`interaction.requestShellAuthentication`, `interaction.requestUserInput`,
+    /// `state.hasMemoryStore`).
     fn declare(&self, params: &mut Value) {
         if self.shell_authentication.is_some() {
             insert_flag(params, "requestShellAuthentication");
+        }
+        if self.user_input_image.is_some() {
+            insert_flag(params, "requestUserInput");
         }
         if self.memory_store.is_some() {
             insert_flag(params, "hasMemoryStore");
@@ -783,6 +788,7 @@ impl CopilotClient {
         );
         let callbacks = SessionCallbacks {
             shell_authentication: config.on_shell_authentication_request.clone(),
+            user_input_image: config.on_user_input_request_with_images.clone(),
             memory_store: config.store_memory.clone(),
         };
         callbacks.declare(&mut params);
@@ -826,6 +832,7 @@ impl CopilotClient {
         );
         let callbacks = SessionCallbacks {
             shell_authentication: config.on_shell_authentication_request.clone(),
+            user_input_image: config.on_user_input_request_with_images.clone(),
             memory_store: config.store_memory.clone(),
         };
         callbacks.declare(&mut params);
@@ -917,6 +924,9 @@ impl CopilotClient {
         ));
         if let Some(handler) = callbacks.shell_authentication {
             session.set_shell_authentication_handler(handler).await;
+        }
+        if let Some(handler) = callbacks.user_input_image {
+            session.set_user_input_image_handler(handler).await;
         }
         if let Some(store) = callbacks.memory_store {
             session.set_memory_store(store).await;
@@ -2270,7 +2280,28 @@ mod tests {
         let rpc = Arc::new(JsonRpcClient::new(client_read, client_write));
         client.attach_connection_handlers(&rpc).await;
         *client.rpc_client.lock().await = Some(rpc);
+        *client.state.lock().await = ConnectionState::Connected;
         (client, server_read, server_write)
+    }
+
+    /// A `userInput.request` for session `s1` that accepts PNG image answers.
+    fn user_input_request(id: u64) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "userInput.request",
+            "params": {
+                "sessionId": "s1",
+                "question": "Attach a screenshot?",
+                "requestId": "req-1",
+                "imageAttachmentConstraints": {
+                    "allowedMimeTypes": ["image/png"],
+                    "maxBytesPerImage": 1048576,
+                    "maxCount": 2
+                },
+                "_meta": { "ext": { "k": 1 } }
+            }
+        })
     }
 
     #[tokio::test]
@@ -2320,23 +2351,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn user_input_request_passes_image_constraints_and_returns_attachments() {
+    async fn plain_user_input_handler_still_answers_text_only() {
         let (client, mut server_read, mut server_write) = connected_client().await;
         let rpc = client.get_rpc_client().await.unwrap();
         let session = Arc::new(CopilotSession::new("s1".to_string(), rpc, None));
         let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        // A v3.0.0 handler: `UserInputResponse` is still built from exactly these two fields.
         session
             .register_user_input_handler(Arc::new(move |request: UserInputRequest, _session_id| {
                 let _ = seen_tx.send(request);
                 Box::pin(async move {
                     Ok(UserInputResponse {
-                        answer: String::new(),
-                        was_freeform: true,
-                        attachments: Some(vec![UserInputImageAttachment {
-                            data: "aGVsbG8=".to_string(),
-                            mime_type: "image/png".to_string(),
-                            ..Default::default()
-                        }]),
+                        answer: "yes".to_string(),
+                        was_freeform: false,
                     })
                 })
             }))
@@ -2347,36 +2374,13 @@ mod tests {
             .await
             .insert("s1".to_string(), session);
 
-        write_framed(
-            &mut server_write,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "userInput.request",
-                "params": {
-                    "sessionId": "s1",
-                    "question": "Attach a screenshot?",
-                    "requestId": "req-1",
-                    "imageAttachmentConstraints": {
-                        "allowedMimeTypes": ["image/png"],
-                        "maxBytesPerImage": 1048576,
-                        "maxCount": 2
-                    },
-                    "_meta": { "ext": { "k": 1 } }
-                }
-            }),
-        )
-        .await;
+        write_framed(&mut server_write, user_input_request(7)).await;
         let response = read_framed(&mut server_read).await;
 
         assert_eq!(response["id"], 7);
         assert_eq!(
             response["result"],
-            json!({
-                "answer": "",
-                "wasFreeform": true,
-                "attachments": [{ "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" }]
-            })
+            json!({ "answer": "yes", "wasFreeform": false })
         );
         let request = seen_rx.recv().await.unwrap();
         assert_eq!(request.request_id.as_deref(), Some("req-1"));
@@ -2391,16 +2395,66 @@ mod tests {
         assert_eq!(request.meta, Some(json!({ "ext": { "k": 1 } })));
     }
 
-    #[test]
-    fn user_input_response_omits_attachments_when_unset() {
-        let response = UserInputResponse {
-            answer: "yes".to_string(),
-            was_freeform: false,
+    #[tokio::test]
+    async fn image_user_input_handler_returns_attachments_and_takes_precedence() {
+        let (client, mut server_read, mut server_write) = connected_client().await;
+        let config = SessionConfig {
+            on_user_input_request_with_images: Some(UserInputImageHandlerFn::new(
+                |_request: UserInputRequest, _session_id: String| async move {
+                    Ok(UserInputImageResponse {
+                        answer: String::new(),
+                        was_freeform: true,
+                        attachments: vec![UserInputImageAttachment {
+                            data: "aGVsbG8=".to_string(),
+                            mime_type: "image/png".to_string(),
+                            ..Default::default()
+                        }],
+                    })
+                },
+            )),
             ..Default::default()
         };
+
+        let server = async {
+            let create = read_framed(&mut server_read).await;
+            write_framed(
+                &mut server_write,
+                json!({ "jsonrpc": "2.0", "id": create["id"], "result": { "sessionId": "s1" } }),
+            )
+            .await;
+            create
+        };
+        let (create, session) = tokio::join!(server, client.create_session(config));
+        let session = session.unwrap();
+        assert_eq!(create["method"], "session.create");
         assert_eq!(
-            serde_json::to_value(response).unwrap(),
-            json!({ "answer": "yes", "wasFreeform": false })
+            create["params"]["interaction"]["requestUserInput"],
+            json!(true)
+        );
+
+        // A plain handler registered later does not replace the config's image handler.
+        session
+            .register_user_input_handler(Arc::new(|_request: UserInputRequest, _session_id| {
+                Box::pin(async move {
+                    Ok(UserInputResponse {
+                        answer: "plain".to_string(),
+                        was_freeform: false,
+                    })
+                })
+            }))
+            .await;
+
+        write_framed(&mut server_write, user_input_request(8)).await;
+        let response = read_framed(&mut server_read).await;
+
+        assert_eq!(response["id"], 8);
+        assert_eq!(
+            response["result"],
+            json!({
+                "answer": "",
+                "wasFreeform": true,
+                "attachments": [{ "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" }]
+            })
         );
     }
 }

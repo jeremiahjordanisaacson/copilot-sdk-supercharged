@@ -48,10 +48,14 @@
     state/1
 ]).
 
-%% Internal: SDK protocol 4 payload translation (exported for unit tests).
+%% Internal: session payload construction, SDK protocol 4 translation and the
+%% client-level request handlers (exported for unit tests).
 -export([
+    build_session_params/3,
     group_session_params/2,
-    apply_mode_defaults/2
+    apply_mode_defaults/2,
+    client_request_handlers/4,
+    put_session_callbacks/3
 ]).
 
 %% gen_server callbacks
@@ -85,8 +89,9 @@
     %% Client mode: coding_agent (default) or empty
     mode          :: coding_agent | empty,
     %% Per-session callbacks answered by client-level request handlers
-    %% (tool.call, hooks.invoke, shellAuthentication.*, memoryStore.store):
-    %% {SessionId, #{tools, hooks, on_shell_authentication_request, store_memory}}
+    %% (tool.call, hooks.invoke, shellAuthentication.*, memoryStore.store,
+    %% userInput.request): {SessionId, #{tools, hooks,
+    %% on_shell_authentication_request, store_memory, on_user_input_request}}
     session_callbacks :: ets:tid(),
     %% Pending shell authentication prompts: {{SessionId, RequestId}, Waiter, Ref}
     shell_auth_requests :: ets:tid()
@@ -821,11 +826,15 @@ build_session_params(Mode, Config, _State) ->
             Params4
     end,
     %% Capability flags for client-side callbacks: hooks.hasHandlers,
-    %% interaction.requestShellAuthentication and state.hasMemoryStore.
+    %% interaction.requestShellAuthentication, interaction.requestUserInput
+    %% (the runtime then sends ask_user questions as userInput.request) and
+    %% state.hasMemoryStore. Sent on both session.create and session.resume.
     Flags = [
         {<<"hooks">>, has_hook_handlers(maps:get(hooks, Config, undefined))},
         {<<"requestShellAuthentication">>,
          is_function(maps:get(on_shell_authentication_request, Config, undefined), 1)},
+        {<<"requestUserInput">>,
+         is_function(maps:get(on_user_input_request, Config, undefined), 1)},
         {<<"hasMemoryStore">>, is_function(maps:get(store_memory, Config, undefined), 1)}
     ],
     lists:foldl(fun
@@ -1176,27 +1185,42 @@ register_client_handlers(RpcPid, #state{github_token_providers = Tab,
                                         session_callbacks = Callbacks,
                                         shell_auth_requests = Pending,
                                         options = Options}) ->
-    Handlers = [
-        {<<"gitHubToken.getToken">>,         github_token_handler(Tab)},
-        {<<"tool.call">>,                    tool_call_handler(Callbacks)},
-        {<<"hooks.invoke">>,                 hooks_invoke_handler(Callbacks)},
-        {<<"shellAuthentication.request">>,  shell_authentication_handler(Callbacks, Pending)},
-        {<<"shellAuthentication.cancel">>,   shell_authentication_cancel_handler(Pending)},
-        {<<"memoryStore.store">>,            memory_store_handler(Callbacks)}
-    ] ++ network_handlers(network_options(Options)),
+    Handlers = client_request_handlers(Tab, Callbacks, Pending, Options),
     lists:foreach(fun({Method, Handler}) ->
         copilot_jsonrpc:set_request_handler(RpcPid, Method, Handler)
     end, Handlers).
 
+%% @doc The client-level request handlers as [{Method, Handler}]. Per-session
+%% requests are routed by their `sessionId` through the session callbacks
+%% table (see put_session_callbacks/3), so a request for one session never
+%% runs another session's callback.
+-spec client_request_handlers(ets:tid(), ets:tid(), ets:tid(), map()) -> [{binary(), fun()}].
+client_request_handlers(TokenProviders, Callbacks, Pending, Options) ->
+    [
+        {<<"gitHubToken.getToken">>,         github_token_handler(TokenProviders)},
+        {<<"tool.call">>,                    tool_call_handler(Callbacks)},
+        {<<"hooks.invoke">>,                 hooks_invoke_handler(Callbacks)},
+        {<<"shellAuthentication.request">>,  shell_authentication_handler(Callbacks, Pending)},
+        {<<"shellAuthentication.cancel">>,   shell_authentication_cancel_handler(Pending)},
+        {<<"memoryStore.store">>,            memory_store_handler(Callbacks)},
+        {<<"userInput.request">>,            user_input_handler(Callbacks)}
+    ] ++ network_handlers(network_options(Options)).
+
 %% ---------------------------------------------------------------------------
 %% Per-session callbacks (tool.call, hooks.invoke, shellAuthentication.*,
-%% memoryStore.store)
+%% memoryStore.store, userInput.request)
 %% ---------------------------------------------------------------------------
 
 %% The request handlers run outside the client process, so the per-session
 %% callbacks live in an ETS table (no gen_server round-trip, which could
 %% deadlock while session.create / session.resume is in flight).
 register_session_callbacks(SessionId, Config, #state{session_callbacks = Tab}) ->
+    put_session_callbacks(Tab, SessionId, Config).
+
+%% @doc Store the per-session callbacks of a session config under `SessionId`
+%% (replacing those of an earlier create or resume of the same session).
+-spec put_session_callbacks(ets:tid(), binary(), map()) -> ok.
+put_session_callbacks(Tab, SessionId, Config) ->
     Hooks = case maps:get(hooks, Config, undefined) of
         H when is_map(H) -> H;
         _                -> #{}
@@ -1205,7 +1229,8 @@ register_session_callbacks(SessionId, Config, #state{session_callbacks = Tab}) -
         tools                           => tool_handlers(maps:get(tools, Config, [])),
         hooks                           => Hooks,
         on_shell_authentication_request => maps:get(on_shell_authentication_request, Config, undefined),
-        store_memory                    => maps:get(store_memory, Config, undefined)
+        store_memory                    => maps:get(store_memory, Config, undefined),
+        on_user_input_request           => maps:get(on_user_input_request, Config, undefined)
     },
     true = ets:insert(Tab, {SessionId, Callbacks}),
     ok.
@@ -1369,6 +1394,20 @@ memory_store_handler(Tab) ->
                 end;
             _ ->
                 error({no_memory_store_registered, SessionId})
+        end
+    end.
+
+%% userInput.request {sessionId, question, choices?, allowFreeform?, requestId?,
+%% imageAttachmentConstraints?, _meta?} => {answer, wasFreeform, attachments?}.
+%% The session's `on_user_input_request` handler receives the request map
+%% unchanged and answers with copilot_types:user_input_response/2,3, which sends
+%% attachments only when set. A session without a handler gets a JSON-RPC error.
+user_input_handler(Tab) ->
+    fun(Params) ->
+        SessionId = maps:get(<<"sessionId">>, Params, <<>>),
+        case session_callback(Tab, SessionId, on_user_input_request, undefined) of
+            Handler when is_function(Handler, 1) -> Handler(Params);
+            _                                    -> error({no_user_input_handler, SessionId})
         end
     end.
 
@@ -1571,8 +1610,9 @@ new_registration_id() ->
                                    [A, B, C, D bor 16#8000, E])).
 
 register_session_handlers(Rpc, SessionId, SessionPid, Config) ->
-    %% Tool calls arrive as `tool.call` requests and are routed by the
-    %% client-level handler (see tool_call_handler/1).
+    %% Tool calls (`tool.call`) and ask_user questions (`userInput.request`)
+    %% arrive as client-level requests routed by sessionId (see
+    %% client_request_handlers/4).
     %% Register permission handler
     case maps:get(on_permission_request, Config, undefined) of
         undefined -> ok;
@@ -1582,18 +1622,6 @@ register_session_handlers(Rpc, SessionId, SessionPid, Config) ->
                     case maps:get(<<"sessionId">>, Params, <<>>) of
                         SessionId -> PermHandler(Params);
                         _         -> copilot_types:permission_result(denied)
-                    end
-                end)
-    end,
-    %% Register user input handler
-    case maps:get(on_user_input_request, Config, undefined) of
-        undefined -> ok;
-        InputHandler ->
-            copilot_jsonrpc:set_request_handler(Rpc, <<"userInputRequest">>,
-                fun(Params) ->
-                    case maps:get(<<"sessionId">>, Params, <<>>) of
-                        SessionId -> InputHandler(Params);
-                        _         -> copilot_types:user_input_response(<<>>, false)
                     end
                 end)
     end,

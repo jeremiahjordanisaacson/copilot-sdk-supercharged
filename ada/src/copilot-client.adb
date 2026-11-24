@@ -335,7 +335,9 @@ package body Copilot.Client is
       Add_Flag ("requestShellAuthentication",
                 Config.On_Shell_Authentication /= null);
       Add_Flag ("hasMemoryStore", Config.On_Store_Memory /= null);
-      Add_Flag ("requestUserInput", Config.On_User_Input_Request /= null);
+      Add_Flag ("requestUserInput",
+                Config.On_User_Input_Request /= null
+                  or else Config.On_User_Input_Image_Request /= null);
       return Params;
    end Build_Flat_Params;
 
@@ -372,7 +374,8 @@ package body Copilot.Client is
          Store_Memory      => Config.On_Store_Memory,
          On_Subagent_Start => Config.On_Subagent_Start,
          On_Subagent_Stop  => Config.On_Subagent_Stop,
-         User_Input        => Config.On_User_Input_Request);
+         User_Input        => Config.On_User_Input_Request,
+         User_Input_Image  => Config.On_User_Input_Image_Request);
    end Register_Session_Callbacks;
 
    --  Decode error.data.policyHelperFailure from a JSON-RPC error object.

@@ -7,7 +7,7 @@ See [GitHub Releases](https://github.com/github/copilot-sdk/releases) for the fu
 
 ## [v3.1.0](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/releases/tag/v3.1.0) (2026-11-24)
 
-Upstream sync: 2 snapshot commits from `github/copilot-sdk` (Microsoft Copilot SDK 2.0.2-preview.7 and 2.0.3-preview.0). The new public APIs are ported to all 40 SDKs. No breaking changes.
+Upstream sync: 2 snapshot commits from `github/copilot-sdk` (Microsoft Copilot SDK 2.0.2-preview.7 and 2.0.3-preview.0). The new public APIs are ported to all 40 SDKs, and existing handlers compile unchanged.
 
 ### New features (all 40 SDKs)
 
@@ -17,6 +17,15 @@ Upstream sync: 2 snapshot commits from `github/copilot-sdk` (Microsoft Copilot S
 - **Ask-user handlers fixed or added**: Objective-C, Crystal, Nim, V, D, MATLAB, COBOL, F#, OCaml, Fortran, Shell, Tcl, Julia, and Zig gain an ask-user handler option, and Visual Basic, Ada, Delphi, and Erlang now route `userInput.request` to their existing handler. Before this release, ask-user requests never reached a handler in these SDKs. Each sends `requestUserInput` on create and resume only when a handler is set.
 - **Elicitation metadata**: elicitation handlers receive the runtime's `requestId` and opaque `_meta`, and a result's `_meta` is forwarded back unchanged, in the SDKs that dispatch elicitation requests: Node.js, Python, Go, .NET, Kotlin, Groovy, Erlang, R, Shell, and Solidity. Nim passes `requestId` and `_meta` to its handler but can't return `_meta`. The other additional SDKs declare an elicitation option but don't dispatch elicitation requests yet.
 - Not ported: the private RPCs upstream added for its own runtime host (`permissions.folderTrust.checkTrust`, `permissions.evaluateManagedPolicy`, `permissions.locations.cleanupOrphaned`, and `secrets.filterForHost`).
+
+### Compatibility notes
+
+- Existing user input handlers compile and behave as before in every SDK. Rust, Haskell, and Ada return image answers through a new type and handler option instead of changing the existing response type: `UserInputImageResponse` with `on_user_input_request_with_images` (Rust), `UserInputImageResponse` with `scOnUserInputImageRequest` and `rscOnUserInputImageRequest` (Haskell), and `User_Input_Image_Response` with `On_User_Input_Image_Request` (Ada).
+- User input request types gain fields (request id, image constraints, and `_meta`). Code that builds a request value itself, for example a Rust struct literal or a Haskell positional pattern in tests, must account for them.
+
+### Known issues
+
+- Erlang: the SDK opens the Copilot CLI port from the client process but reads JSON-RPC in a separate process, and the port uses line mode, so it can't complete the handshake with a real CLI. This predates v3.1.0; the Erlang E2E suite talks to the replay proxy directly, so CI didn't catch it.
 
 ### Docs
 

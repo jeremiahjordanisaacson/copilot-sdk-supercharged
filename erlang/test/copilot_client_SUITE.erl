@@ -41,6 +41,7 @@
     test_normalize_result_passthrough/1,
     test_client_start_link_defaults/1,
     test_client_state_disconnected/1,
+    test_user_input_request_wiring/1,
     test_session_subscribe_unsubscribe/1,
     test_jsonrpc_content_length_framing/1,
     test_tool_handler_receives_args/1,
@@ -93,7 +94,8 @@ groups() ->
         ]},
         {client, [sequence], [
             test_client_start_link_defaults,
-            test_client_state_disconnected
+            test_client_state_disconnected,
+            test_user_input_request_wiring
         ]},
         {session, [sequence], [
             test_session_subscribe_unsubscribe,
@@ -463,6 +465,68 @@ test_client_state_disconnected(_Config) ->
     {error, not_connected} = copilot_client:ping(Client),
     copilot_client:stop(Client),
     ok.
+
+test_user_input_request_wiring(_Config) ->
+    Self = self(),
+    Recorder = fun(Tag, Reply) ->
+        fun(Req) ->
+            Self ! {user_input, Tag, Req},
+            Reply
+        end
+    end,
+    Image = copilot_types:user_input_image_attachment(<<"aGk=">>, <<"image/png">>),
+    HandlerA = Recorder(a, copilot_types:user_input_response(<<>>, true, [Image])),
+    HandlerB = Recorder(b, copilot_types:user_input_response(<<"from b">>, false)),
+    %% A fun/1 handler sends requestUserInput on create and resume; SDK protocol 4
+    %% moves it to interaction.requestUserInput.
+    lists:foreach(fun(Mode) ->
+        WithHandler = copilot_client:build_session_params(
+                          Mode, #{on_user_input_request => HandlerA}, undefined),
+        true = maps:get(<<"requestUserInput">>, WithHandler),
+        #{<<"interaction">> := #{<<"requestUserInput">> := true}} =
+            copilot_client:group_session_params(WithHandler, Mode),
+        false = maps:is_key(<<"requestUserInput">>,
+                            copilot_client:build_session_params(Mode, #{}, undefined))
+    end, [create, resume]),
+    %% userInput.request is one client-level handler that routes by sessionId.
+    Callbacks = ets:new(session_callbacks, [set]),
+    ok = copilot_client:put_session_callbacks(Callbacks, <<"session-a">>,
+                                              #{on_user_input_request => HandlerA}),
+    ok = copilot_client:put_session_callbacks(Callbacks, <<"session-b">>,
+                                              #{on_user_input_request => HandlerB}),
+    Handlers = copilot_client:client_request_handlers(
+                   ets:new(token_providers, [set]), Callbacks, ets:new(shell_auth, [set]), #{}),
+    false = lists:keymember(<<"userInputRequest">>, 1, Handlers),
+    {_, UserInput} = lists:keyfind(<<"userInput.request">>, 1, Handlers),
+    RequestA = #{
+        <<"sessionId">>                  => <<"session-a">>,
+        <<"question">>                   => <<"Attach a screenshot?">>,
+        <<"requestId">>                  => <<"req-1">>,
+        <<"_meta">>                      => #{<<"ext">> => 1},
+        <<"imageAttachmentConstraints">> => #{<<"allowedMimeTypes">> => [<<"image/png">>],
+                                               <<"maxBytesPerImage">> => 1024,
+                                               <<"maxCount">> => 1}
+    },
+    #{<<"answer">> := <<>>, <<"wasFreeform">> := true,
+      <<"attachments">> := [#{<<"type">> := <<"image">>, <<"mimeType">> := <<"image/png">>}]} =
+        UserInput(RequestA),
+    RequestB = RequestA#{<<"sessionId">> => <<"session-b">>},
+    ReplyB = UserInput(RequestB),
+    #{<<"answer">> := <<"from b">>, <<"wasFreeform">> := false} = ReplyB,
+    false = maps:is_key(<<"attachments">>, ReplyB),
+    %% Each request ran only its own session's handler, with the request unchanged.
+    [{a, RequestA}, {b, RequestB}] = recorded_user_input(),
+    {'EXIT', {{no_user_input_handler, <<"session-c">>}, _}} =
+        (catch UserInput(RequestA#{<<"sessionId">> => <<"session-c">>})),
+    [] = recorded_user_input(),
+    ok.
+
+recorded_user_input() ->
+    receive
+        {user_input, Tag, Req} -> [{Tag, Req} | recorded_user_input()]
+    after 0 ->
+        []
+    end.
 
 %% ---------------------------------------------------------------------------
 %% Session tests

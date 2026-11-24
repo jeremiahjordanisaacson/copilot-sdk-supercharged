@@ -81,7 +81,7 @@ See the individual SDK READMEs for usage examples and API reference. For archite
 
 ## What's New in v3.1.0
 
-**Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0.** The MCP secret store, plugin extension approvals, and ask-user image answers are in all 40 SDKs, with no breaking changes. See the [CHANGELOG](./CHANGELOG.md) for details.
+**Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0.** The MCP secret store, plugin extension approvals, and ask-user image answers are in all 40 SDKs, and existing handlers compile unchanged. See the [CHANGELOG](./CHANGELOG.md) for details.
 
 - **MCP secret store**: `mcp.secrets.save`, `delete`, and `deleteServer` store legacy MCP configuration credentials in the OS keychain (or the runtime's file backend) and remove them by secret or by server.
 - **Plugin extension approvals**: `permissions.extensionApprovals.grant`, `list`, and `revoke` persist the approval for a live extension permission request, list persisted approvals, and revoke one installation's approval.

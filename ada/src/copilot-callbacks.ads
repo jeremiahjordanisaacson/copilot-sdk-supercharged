@@ -28,17 +28,21 @@ with Copilot.Types;         use Copilot.Types;
 package Copilot.Callbacks is
 
    --  Register the callbacks of a session (null handlers are ignored).
+   --  User_Input_Image takes precedence over User_Input when both are set.
    procedure Register_Session
      (Session_Id        : String;
       Shell_Auth        : Shell_Authentication_Handler_Access;
       Store_Memory      : Memory_Store_Handler_Access;
       On_Subagent_Start : Subagent_Start_Hook_Access;
       On_Subagent_Stop  : Subagent_Stop_Hook_Access;
-      User_Input        : User_Input_Handler := null);
+      User_Input        : User_Input_Handler := null;
+      User_Input_Image  : User_Input_Image_Handler := null);
 
    procedure Unregister_Session (Session_Id : String);
 
-   --  Replace the user input (ask_user) handler of a session.
+   --  Replace the user input (ask_user) handler of a session.  Handler
+   --  answers from now on: it also replaces an image handler registered with
+   --  the session.
    procedure Set_User_Input_Handler
      (Session_Id : String;
       Handler    : User_Input_Handler);

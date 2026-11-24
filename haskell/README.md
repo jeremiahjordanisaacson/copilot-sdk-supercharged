@@ -132,23 +132,25 @@ A `PermissionsExtensionApproval` carries `peaExtensionName` (stable identity, fo
 
 ### Ask-user image attachments
 
-When the runtime accepts images, the `UserInputRequest` passed to `scOnUserInputRequest` carries `uirImageAttachmentConstraints` (`uiacAllowedMimeTypes`, `uiacMaxBytesPerImage`, `uiacMaxCount`); it is `Nothing` otherwise. The request also carries `uirRequestId` and `uirMeta` (the opaque `_meta` object) when the runtime sends them. Answer with images through the optional `uirAttachments` of `UserInputResponse`:
+When the runtime accepts images, the `UserInputRequest` passed to your user input handler carries `uirImageAttachmentConstraints` (`uiacAllowedMimeTypes`, `uiacMaxBytesPerImage`, `uiacMaxCount`); it is `Nothing` otherwise. The request also carries `uirRequestId` and `uirMeta` (the opaque `_meta` object) when the runtime sends them.
+
+`UserInputResponse` stays text only, so existing `scOnUserInputRequest` handlers keep working unchanged. To answer with images, set `scOnUserInputImageRequest` (`rscOnUserInputImageRequest` on resume) instead: its `UserInputImageHandler` returns a `UserInputImageResponse` (`uiirAnswer`, `uiirWasFreeform`, `uiirAttachments`). When both handlers are set, the image handler takes precedence and `scOnUserInputRequest` is not called.
 
 ```haskell
 session <- createSession client defaultSessionConfig
-  { scOnUserInputRequest = Just $ \req _sessionId ->
+  { scOnUserInputImageRequest = Just $ \req _sessionId ->
       pure $ case uirImageAttachmentConstraints req of
-        -- Image-only answer: empty answer and wasFreeform True
-        Just _constraints -> (defaultUserInputResponse "" True)
-          { uirAttachments = Just
+        -- Image-only answer: defaultUserInputImageResponse has an empty answer and wasFreeform True
+        Just _constraints -> defaultUserInputImageResponse
+          { uiirAttachments =
               [ (defaultUserInputImageAttachment screenshotBase64 "image/png")
                   { uiaDisplayName = Just "screenshot.png" } ]
           }
-        Nothing -> defaultUserInputResponse "yes" True
+        Nothing -> defaultUserInputImageResponse { uiirAnswer = "yes" }
   }
 ```
 
-`uirAttachments` (each `UserInputImageAttachment` is sent as `{"type": "image", "data", "mimeType"}` plus optional `description` and `displayName`) is sent only when set, and is only valid when the request advertised `uirImageAttachmentConstraints`; the runtime enforces the MIME type, size, and count limits. `UserInputResponse` gained this third field, so build responses with `defaultUserInputResponse answer wasFreeform` (or pass `Nothing` as the third constructor argument).
+`uiirAttachments` (each `UserInputImageAttachment` is sent as `{"type": "image", "data", "mimeType"}` plus optional `description` and `displayName`) is sent only when non-empty, and is only valid when the request advertised `uirImageAttachmentConstraints`; the runtime enforces the MIME type, size, and count limits.
 
 ## What's New in v3.0.0
 
@@ -446,7 +448,7 @@ Allow the assistant to ask the user questions:
 session <- createSession client defaultSessionConfig
   { scOnUserInputRequest = Just $ \req sessionId -> do
       putStrLn $ "Question: " ++ show (uirQuestion req)
-      pure $ defaultUserInputResponse "yes" True
+      pure $ UserInputResponse "yes" True
   }
 ```
 

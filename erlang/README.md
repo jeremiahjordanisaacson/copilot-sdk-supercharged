@@ -354,6 +354,8 @@ Register a handler to respond to user input requests:
 }).
 ```
 
+A `fun/1` handler makes `create_session/2` and `resume_session/3` send `interaction.requestUserInput`, so the runtime asks ask_user questions through `userInput.request`. Requests are routed by `sessionId`: each session's handler only answers its own questions, and a request for a session without a handler gets a JSON-RPC error.
+
 ## Hooks
 
 Register lifecycle hooks. The runtime calls them through `hooks.invoke` requests

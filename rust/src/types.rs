@@ -250,7 +250,8 @@ pub struct UserInputRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     /// Image limits (`imageAttachmentConstraints`); `None` when the runtime does not
-    /// accept image attachments in the answer.
+    /// accept image attachments in the answer. Answer with images from an
+    /// `on_user_input_request_with_images` handler ([`UserInputImageHandlerFn`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_attachment_constraints: Option<UserInputImageAttachmentConstraints>,
     /// Opaque request metadata (`_meta`), forwarded unchanged.
@@ -260,17 +261,74 @@ pub struct UserInputRequest {
 
 /// Response to a user input request.
 ///
-/// For an image-only answer, use an empty `answer` with `was_freeform: true`.
+/// Text only. To answer with images, return a [`UserInputImageResponse`] from an
+/// `on_user_input_request_with_images` handler ([`UserInputImageHandlerFn`]).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputResponse {
     pub answer: String,
     pub was_freeform: bool,
-    /// Images sent with the answer (`attachments`), omitted from the response when `None`.
+}
+
+/// Answer to a user input request that can include images, returned by a
+/// [`UserInputImageHandlerFn`] (`on_user_input_request_with_images`).
+///
+/// For an image-only answer, use an empty `answer` with `was_freeform: true`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputImageResponse {
+    pub answer: String,
+    pub was_freeform: bool,
+    /// Images sent with the answer (`attachments`), omitted from the response when empty.
     /// Only valid when the request advertised `image_attachment_constraints`; the runtime
     /// enforces the limits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Vec<UserInputImageAttachment>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<UserInputImageAttachment>,
+}
+
+impl From<UserInputResponse> for UserInputImageResponse {
+    /// A text-only answer (no attachments).
+    fn from(response: UserInputResponse) -> Self {
+        Self {
+            answer: response.answer,
+            was_freeform: response.was_freeform,
+            attachments: Vec::new(),
+        }
+    }
+}
+
+/// Future returned by a [`UserInputImageHandlerFn`].
+pub type UserInputImageFuture =
+    Pin<Box<dyn Future<Output = Result<UserInputImageResponse, CallbackError>> + Send>>;
+
+/// Clonable, debuggable async handler for the agent's ask_user questions that can answer
+/// with images (`on_user_input_request_with_images`).
+///
+/// Receives the request and the session ID. An error fails the request.
+#[derive(Clone)]
+pub struct UserInputImageHandlerFn(
+    pub Arc<dyn Fn(UserInputRequest, String) -> UserInputImageFuture + Send + Sync>,
+);
+
+impl UserInputImageHandlerFn {
+    /// Wraps an async closure as a user input handler that can answer with images.
+    pub fn new<F, Fut>(handler: F) -> Self
+    where
+        F: Fn(UserInputRequest, String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<UserInputImageResponse, CallbackError>> + Send + 'static,
+    {
+        Self(Arc::new(
+            move |request: UserInputRequest, session_id: String| -> UserInputImageFuture {
+                Box::pin(handler(request, session_id))
+            },
+        ))
+    }
+}
+
+impl std::fmt::Debug for UserInputImageHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<user_input_image_handler>")
+    }
 }
 
 /// Image limits a user input request advertises when the runtime accepts image
@@ -286,7 +344,7 @@ pub struct UserInputImageAttachmentConstraints {
     pub max_count: u64,
 }
 
-/// An inline image attached to a user input answer ([`UserInputResponse::attachments`]).
+/// An inline image attached to a user input answer ([`UserInputImageResponse::attachments`]).
 ///
 /// Serialized with `type: "image"`; `data` holds the base64-encoded image bytes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -967,6 +1025,12 @@ pub struct SessionConfig {
     /// `interaction.requestShellAuthentication` and answers `shellAuthentication.request`.
     #[serde(skip)]
     pub on_shell_authentication_request: Option<ShellAuthenticationHandlerFn>,
+    /// Handler for the agent's ask_user questions that can answer with images (not
+    /// serialized). When set, the SDK sends `interaction.requestUserInput`, and this handler
+    /// answers `userInput.request` instead of one registered with
+    /// [`crate::CopilotSession::register_user_input_handler`].
+    #[serde(skip)]
+    pub on_user_input_request_with_images: Option<UserInputImageHandlerFn>,
     /// Stores memories in the application instead of the built-in memory backends
     /// (not serialized). When set, the SDK sends `state.hasMemoryStore` and answers
     /// `memoryStore.store`.
@@ -1198,6 +1262,12 @@ pub struct ResumeSessionConfig {
     /// `interaction.requestShellAuthentication` and answers `shellAuthentication.request`.
     #[serde(skip)]
     pub on_shell_authentication_request: Option<ShellAuthenticationHandlerFn>,
+    /// Handler for the agent's ask_user questions that can answer with images (not
+    /// serialized). When set, the SDK sends `interaction.requestUserInput`, and this handler
+    /// answers `userInput.request` instead of one registered with
+    /// [`crate::CopilotSession::register_user_input_handler`].
+    #[serde(skip)]
+    pub on_user_input_request_with_images: Option<UserInputImageHandlerFn>,
     /// Stores memories in the application (not serialized). When set, the SDK sends
     /// `state.hasMemoryStore` and answers `memoryStore.store`.
     #[serde(skip)]

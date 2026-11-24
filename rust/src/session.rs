@@ -45,7 +45,8 @@ pub type PermissionHandlerFn = Arc<
 >;
 
 /// A user input handler is an async function that takes a user input request
-/// and returns a response.
+/// and returns a response. To answer with images, use an
+/// `on_user_input_request_with_images` handler ([`UserInputImageHandlerFn`]) instead.
 pub type UserInputHandlerFn = Arc<
     dyn Fn(
             UserInputRequest,
@@ -204,6 +205,9 @@ pub struct CopilotSession {
     permission_handler: Arc<Mutex<Option<PermissionHandlerFn>>>,
     /// User input request handler.
     user_input_handler: Arc<Mutex<Option<UserInputHandlerFn>>>,
+    /// User input handler that can answer with images (`on_user_input_request_with_images`);
+    /// takes precedence over `user_input_handler`.
+    user_input_image_handler: Mutex<Option<UserInputImageHandlerFn>>,
     /// Hooks handler.
     hooks_handler: Arc<Mutex<Option<HooksHandlerFn>>>,
     /// Wildcard event handlers.
@@ -236,6 +240,7 @@ impl CopilotSession {
             tool_handlers: Arc::new(Mutex::new(HashMap::new())),
             permission_handler: Arc::new(Mutex::new(None)),
             user_input_handler: Arc::new(Mutex::new(None)),
+            user_input_image_handler: Mutex::new(None),
             hooks_handler: Arc::new(Mutex::new(None)),
             event_handlers: Arc::new(Mutex::new(Vec::new())),
             typed_event_handlers: Arc::new(Mutex::new(HashMap::new())),
@@ -561,16 +566,37 @@ impl CopilotSession {
         *h = Some(handler);
     }
 
+    /// Installs the image-capable user input handler declared on the session config
+    /// (`on_user_input_request_with_images`).
+    pub(crate) async fn set_user_input_image_handler(&self, handler: UserInputImageHandlerFn) {
+        *self.user_input_image_handler.lock().await = Some(handler);
+    }
+
     /// Handles an incoming user input request from the server.
+    ///
+    /// The image-capable handler takes precedence; a plain handler's answer is sent
+    /// without attachments.
     pub(crate) async fn handle_user_input_request(
         &self,
         request: Value,
-    ) -> Result<UserInputResponse, CopilotError> {
+    ) -> Result<UserInputImageResponse, CopilotError> {
+        let image_handler = self.user_input_image_handler.lock().await.clone();
+        if let Some(handler) = image_handler {
+            let input_request: UserInputRequest = serde_json::from_value(request)
+                .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+            return (handler.0)(input_request, self.session_id.clone())
+                .await
+                .map_err(|e| {
+                    CopilotError::SessionError(format!("User input handler failed: {}", e))
+                });
+        }
         let handler = self.user_input_handler.lock().await;
         if let Some(ref h) = *handler {
             let input_request: UserInputRequest = serde_json::from_value(request)
                 .map_err(|e| CopilotError::Serialization(e.to_string()))?;
-            h(input_request, self.session_id.clone()).await
+            h(input_request, self.session_id.clone())
+                .await
+                .map(UserInputImageResponse::from)
         } else {
             Err(CopilotError::NoHandler(
                 "User input requested but no handler registered".to_string(),
@@ -770,6 +796,7 @@ impl CopilotSession {
             let mut handler = self.user_input_handler.lock().await;
             *handler = None;
         }
+        *self.user_input_image_handler.lock().await = None;
         *self.shell_authentication_handler.lock().await = None;
         for (_, cancel) in self.pending_shell_authentications.lock().await.drain() {
             let _ = cancel.send(());

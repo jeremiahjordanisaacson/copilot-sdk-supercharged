@@ -124,6 +124,8 @@ Register_Permission_Handler (Sess, My_Permission_Handler'Access);
 Enable the ask_user tool so the agent can prompt the user: set
 `Session_Config.On_User_Input_Request` before creating (or resuming) the
 session. `Register_User_Input_Handler` replaces the handler of a live session.
+To answer with images, set `On_User_Input_Image_Request` instead (see the
+README).
 
 ```ada
 function My_Input_Handler
@@ -132,8 +134,7 @@ is
 begin
    Put_Line ("Agent asks: " & To_String (Req.Question));
    return (Answer       => To_Unbounded_String ("Yes, proceed."),
-           Was_Freeform => True,
-           Attachments  => <>);  --  no images
+           Was_Freeform => True);
 end My_Input_Handler;
 
 Cfg.On_User_Input_Request := My_Input_Handler'Access;

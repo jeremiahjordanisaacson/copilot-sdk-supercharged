@@ -14,6 +14,7 @@ package body Copilot.Callbacks is
       On_Subagent_Start : Subagent_Start_Hook_Access := null;
       On_Subagent_Stop  : Subagent_Stop_Hook_Access := null;
       User_Input        : User_Input_Handler := null;
+      User_Input_Image  : User_Input_Image_Handler := null;
    end record;
 
    package Session_Maps is new Ada.Containers.Indefinite_Hashed_Maps
@@ -51,7 +52,8 @@ package body Copilot.Callbacks is
       Store_Memory      : Memory_Store_Handler_Access;
       On_Subagent_Start : Subagent_Start_Hook_Access;
       On_Subagent_Stop  : Subagent_Stop_Hook_Access;
-      User_Input        : User_Input_Handler := null) is
+      User_Input        : User_Input_Handler := null;
+      User_Input_Image  : User_Input_Image_Handler := null) is
    begin
       if Session_Id'Length = 0 then
          return;
@@ -62,7 +64,8 @@ package body Copilot.Callbacks is
           Store_Memory      => Store_Memory,
           On_Subagent_Start => On_Subagent_Start,
           On_Subagent_Stop  => On_Subagent_Stop,
-          User_Input        => User_Input));
+          User_Input        => User_Input,
+          User_Input_Image  => User_Input_Image));
    end Register_Session;
 
    procedure Unregister_Session (Session_Id : String) is
@@ -84,7 +87,8 @@ package body Copilot.Callbacks is
       if Sessions.Contains (Session_Id) then
          Callbacks := Sessions.Element (Session_Id);
       end if;
-      Callbacks.User_Input := Handler;
+      Callbacks.User_Input       := Handler;
+      Callbacks.User_Input_Image := null;
       Sessions.Include (Session_Id, Callbacks);
    end Set_User_Input_Handler;
 
@@ -247,7 +251,9 @@ package body Copilot.Callbacks is
 
    --  Wire form of an ask_user answer: answer, wasFreeform and, only when
    --  images were attached, attachments (each {"type":"image",...}).
-   function User_Input_Reply (Reply : User_Input_Response) return String is
+   function User_Input_Reply
+     (Reply : User_Input_Image_Response) return String
+   is
       Json           : Unbounded_String :=
         U ("{""answer"":" & Quote (To_String (Reply.Answer))
            & ",""wasFreeform"":"
@@ -281,7 +287,8 @@ package body Copilot.Callbacks is
       return To_String (Json);
    end User_Input_Reply;
 
-   --  Answer a userInput.request (ask_user) with the session's handler.  The
+   --  Answer a userInput.request (ask_user) with the session's handler: the
+   --  image handler when one is registered, otherwise the text handler.  The
    --  request's imageAttachmentConstraints, requestId and _meta are passed
    --  through.
    function Ask_User
@@ -293,7 +300,9 @@ package body Copilot.Callbacks is
         Member (Params, "imageAttachmentConstraints");
       Request     : User_Input_Request;
    begin
-      if Callbacks.User_Input = null then
+      if Callbacks.User_Input = null
+        and then Callbacks.User_Input_Image = null
+      then
          Error := U ("User input requested but no handler registered");
          return "";
       end if;
@@ -315,7 +324,20 @@ package body Copilot.Callbacks is
             Max_Count               =>
               Natural_Member (Constraints, "maxCount"));
       end if;
-      return User_Input_Reply (Callbacks.User_Input.all (Request));
+
+      if Callbacks.User_Input_Image /= null then
+         return User_Input_Reply (Callbacks.User_Input_Image.all (Request));
+      end if;
+
+      declare
+         Text_Reply : constant User_Input_Response :=
+           Callbacks.User_Input.all (Request);
+      begin
+         return User_Input_Reply
+           ((Answer       => Text_Reply.Answer,
+             Was_Freeform => Text_Reply.Was_Freeform,
+             Attachments  => <>));
+      end;
    end Ask_User;
 
    function Network_Reply (Method : String; Params : String) return String is

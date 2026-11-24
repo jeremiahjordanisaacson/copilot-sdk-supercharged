@@ -49,9 +49,11 @@ package Copilot.Session is
       Handler : Permission_Handler);
 
    --  Register (or replace) the handler that answers this session's
-   --  userInput.request (ask_user) requests.  The runtime offers the
-   --  ask_user tool only when the session was created or resumed with
-   --  Session_Config.On_User_Input_Request set.
+   --  userInput.request (ask_user) requests; it also replaces an
+   --  On_User_Input_Image_Request handler.  The runtime offers the ask_user
+   --  tool only when the session was created or resumed with
+   --  Session_Config.On_User_Input_Request or On_User_Input_Image_Request
+   --  set.
    procedure Register_User_Input_Handler
      (Self    : in out Copilot_Session;
       Handler : User_Input_Handler);

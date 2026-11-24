@@ -404,8 +404,9 @@ package Copilot.Types is
       Max_Count               : Natural := 0;
    end record;
 
-   --  An inline image attached to an ask_user answer.  Data is the base64
-   --  encoded image; the wire type is always "image".
+   --  An inline image attached to an ask_user answer (see
+   --  User_Input_Image_Response).  Data is the base64 encoded image; the wire
+   --  type is always "image".
    type User_Input_Image_Attachment is record
       Data         : UString := Null_UString;
       Mime_Type    : UString := Null_UString;
@@ -433,18 +434,31 @@ package Copilot.Types is
       Meta_Json                    : UString := Null_UString;
    end record;
 
-   --  Attachments are only valid when the request advertised image support
-   --  and are sent only when the list is not empty.  An image-only answer
-   --  uses an empty Answer and Was_Freeform => True.
+   --  A text-only answer.  To answer with images, register a
+   --  User_Input_Image_Handler (Session_Config.On_User_Input_Image_Request).
    type User_Input_Response is record
       Answer       : UString  := Null_UString;
       Was_Freeform : Boolean  := True;
-      Attachments  : User_Input_Image_Attachment_List :=
-        User_Input_Image_Attachment_Vectors.Empty_Vector;
    end record;
 
    type User_Input_Handler is access
      function (Req : User_Input_Request) return User_Input_Response;
+
+   --  An answer that can also carry images, returned by a
+   --  User_Input_Image_Handler.  Attachments are only valid when the request
+   --  advertised image support and are sent only when the list is not empty.
+   --  An image-only answer uses an empty Answer and Was_Freeform => True.
+   type User_Input_Image_Response is record
+      Answer       : UString := Null_UString;
+      Was_Freeform : Boolean := True;
+      Attachments  : User_Input_Image_Attachment_List :=
+        User_Input_Image_Attachment_Vectors.Empty_Vector;
+   end record;
+
+   --  Ask_user handler whose answers can include images
+   --  (Session_Config.On_User_Input_Image_Request).
+   type User_Input_Image_Handler is access
+     function (Req : User_Input_Request) return User_Input_Image_Response;
 
    --  -----------------------------------------------------------------------
    --  v3.1.0 feature types (Microsoft Copilot SDK 2.0.3-preview.0)
@@ -653,9 +667,13 @@ package Copilot.Types is
         null;
       On_Store_Memory               : Memory_Store_Handler_Access := null;
       --  --- v3.1.0 session options ---
-      --  Answers ask_user requests (userInput.request); setting it enables
-      --  the ask_user tool (interaction.requestUserInput).
+      --  Answers ask_user requests (userInput.request) with text.  Setting it
+      --  or On_User_Input_Image_Request enables the ask_user tool
+      --  (interaction.requestUserInput).
       On_User_Input_Request         : User_Input_Handler := null;
+      --  Answers ask_user requests and can attach images.  Takes precedence
+      --  over On_User_Input_Request when both are set.
+      On_User_Input_Image_Request   : User_Input_Image_Handler := null;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -731,7 +749,8 @@ package Copilot.Types is
        Capi_Enabled                  => Unset,
        On_Shell_Authentication       => null,
        On_Store_Memory               => null,
-       On_User_Input_Request         => null);
+       On_User_Input_Request         => null,
+       On_User_Input_Image_Request   => null);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration

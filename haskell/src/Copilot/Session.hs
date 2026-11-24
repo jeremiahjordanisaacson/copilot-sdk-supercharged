@@ -39,9 +39,11 @@ module Copilot.Session
     -- * Permission / user-input / hooks handlers (internal)
   , registerSessionPermissionHandler
   , registerSessionUserInputHandler
+  , registerSessionUserInputImageHandler
   , registerSessionHooks
   , handleSessionPermissionRequest
   , handleSessionUserInputRequest
+  , handleSessionUserInputImageRequest
   , handleSessionHooksInvoke
 
     -- * Shell authentication / memory store handlers (internal)
@@ -112,6 +114,7 @@ data CopilotSession = CopilotSession
   , csToolHandlers      :: !(IORef (Map.Map Text ToolHandler))
   , csPermissionHandler :: !(IORef (Maybe PermissionHandler))
   , csUserInputHandler  :: !(IORef (Maybe UserInputHandler))
+  , csUserInputImageHandler :: !(IORef (Maybe UserInputImageHandler))
   , csHooks             :: !(IORef (Maybe SessionHooks))
   , csExitPlanModeHandler :: !(IORef (Maybe ExitPlanModeHandler))
   , csTraceContextProvider :: !(IORef (Maybe TraceContextProvider))
@@ -127,6 +130,7 @@ newCopilotSession sid rpc wsp = do
   toolH      <- newIORef Map.empty
   permH      <- newIORef Nothing
   userInputH <- newIORef Nothing
+  userInputImageH <- newIORef Nothing
   hooksRef   <- newIORef Nothing
   exitPlanH  <- newIORef Nothing
   traceCtxP  <- newIORef Nothing
@@ -141,6 +145,7 @@ newCopilotSession sid rpc wsp = do
     , csToolHandlers      = toolH
     , csPermissionHandler = permH
     , csUserInputHandler  = userInputH
+    , csUserInputImageHandler = userInputImageH
     , csHooks             = hooksRef
     , csExitPlanModeHandler = exitPlanH
     , csTraceContextProvider = traceCtxP
@@ -334,6 +339,28 @@ handleSessionUserInputRequest session req sid = do
   case mHandler of
     Nothing -> throwIO $ SessionRpcError "No user input handler registered"
     Just handler -> handler req sid
+
+-- | Register a user input handler that can answer with image attachments.
+-- (Internal)
+registerSessionUserInputImageHandler :: CopilotSession -> UserInputImageHandler -> IO ()
+registerSessionUserInputImageHandler session handler =
+  writeIORef (csUserInputImageHandler session) (Just handler)
+
+-- | Handle a user input request with the image-capable handler when one is
+-- registered, otherwise with the plain handler (whose text-only answer carries
+-- no attachments). (Internal)
+handleSessionUserInputImageRequest :: CopilotSession -> UserInputRequest -> Text -> IO UserInputImageResponse
+handleSessionUserInputImageRequest session req sid = do
+  mImageHandler <- readIORef (csUserInputImageHandler session)
+  case mImageHandler of
+    Just handler -> handler req sid
+    Nothing -> do
+      resp <- handleSessionUserInputRequest session req sid
+      pure UserInputImageResponse
+        { uiirAnswer      = uirAnswer resp
+        , uiirWasFreeform = uirWasFreeform resp
+        , uiirAttachments = []
+        }
 
 -- ============================================================================
 -- Hooks
@@ -560,6 +587,7 @@ detachSession session = do
           writeIORef (csToolHandlers session) Map.empty
           writeIORef (csPermissionHandler session) Nothing
           writeIORef (csUserInputHandler session) Nothing
+          writeIORef (csUserInputImageHandler session) Nothing
           writeIORef (csHooks session) Nothing
           writeIORef (csExitPlanModeHandler session) Nothing
           writeIORef (csTraceContextProvider session) Nothing

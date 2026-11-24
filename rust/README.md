@@ -115,35 +115,39 @@ for approval in &list.approvals {
 
 ### Ask-user image attachments
 
-Create the session with `request_user_input: Some(true)` and register a `UserInputHandlerFn`. When the runtime accepts images in an answer, the `UserInputRequest` carries `image_attachment_constraints` (`UserInputImageAttachmentConstraints`: `allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `None` otherwise. The request also exposes `request_id` and `meta` (the opaque `_meta` object) when sent. Answer with `UserInputResponse::attachments`, a `Vec<UserInputImageAttachment>` (base64 `data`, `mime_type`, optional `description` and `display_name`; serialized with `type: "image"`), which is sent only when `Some`. Image-only answers use an empty `answer` with `was_freeform: true`; the runtime enforces the limits.
+`UserInputResponse` stays text only, so existing `UserInputHandlerFn` handlers keep compiling and working unchanged. To answer with images, set `on_user_input_request_with_images` on `SessionConfig` (or `ResumeSessionConfig`) to a `UserInputImageHandlerFn` that returns a `UserInputImageResponse`. The SDK then sends `requestUserInput` for you, and this handler takes precedence over one registered with `session.register_user_input_handler`.
+
+When the runtime accepts images in an answer, the `UserInputRequest` carries `image_attachment_constraints` (`UserInputImageAttachmentConstraints`: `allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `None` otherwise. Both kinds of handler also see `request_id` and `meta` (the opaque `_meta` object) when the runtime sends them. `UserInputImageResponse::attachments` is a `Vec<UserInputImageAttachment>` (base64 `data`, `mime_type`, optional `description` and `display_name`; serialized with `type: "image"`) and is left out of the response when empty. Image-only answers use an empty `answer` with `was_freeform: true`; the runtime enforces the limits.
 
 ```rust
-let input_handler: UserInputHandlerFn = Arc::new(|request, _session_id| {
-    Box::pin(async move {
-        let accepts_png = request
-            .image_attachment_constraints
-            .as_ref()
-            .is_some_and(|c| c.allowed_mime_types.iter().any(|m| m == "image/png"));
-        if !accepts_png {
-            return Ok(UserInputResponse {
-                answer: "No screenshot available".into(),
+let session = client.create_session(SessionConfig {
+    on_user_input_request_with_images: Some(UserInputImageHandlerFn::new(
+        |request: UserInputRequest, _session_id: String| async move {
+            let accepts_png = request
+                .image_attachment_constraints
+                .as_ref()
+                .is_some_and(|c| c.allowed_mime_types.iter().any(|m| m == "image/png"));
+            if !accepts_png {
+                return Ok(UserInputImageResponse {
+                    answer: "No screenshot available".into(),
+                    was_freeform: true,
+                    ..Default::default()
+                });
+            }
+            Ok(UserInputImageResponse {
+                answer: String::new(),
                 was_freeform: true,
-                ..Default::default()
-            });
-        }
-        Ok(UserInputResponse {
-            answer: String::new(),
-            was_freeform: true,
-            attachments: Some(vec![UserInputImageAttachment {
-                data: screenshot_base64(), // your base64-encoded PNG bytes
-                mime_type: "image/png".into(),
-                display_name: Some("screenshot.png".into()),
-                ..Default::default()
-            }]),
-        })
-    })
-});
-session.register_user_input_handler(input_handler).await;
+                attachments: vec![UserInputImageAttachment {
+                    data: screenshot_base64(), // your base64-encoded PNG bytes
+                    mime_type: "image/png".into(),
+                    display_name: Some("screenshot.png".into()),
+                    ..Default::default()
+                }],
+            })
+        },
+    )),
+    ..Default::default()
+}).await?;
 ```
 
 ## What's New in v3.0.0
@@ -376,7 +380,6 @@ let input_handler: UserInputHandlerFn = Arc::new(|request, _session_id| {
         Ok(UserInputResponse {
             answer: "Yes, proceed.".to_string(),
             was_freeform: true,
-            ..Default::default()
         })
     })
 });
