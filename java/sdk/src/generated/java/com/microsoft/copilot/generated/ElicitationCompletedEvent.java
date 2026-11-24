@@ -40,7 +40,9 @@ public final class ElicitationCompletedEvent extends SessionEvent {
         /** The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed) */
         @JsonProperty("action") ElicitationCompletedAction action,
         /** The submitted form data when action is 'accept'; keys match the requested schema fields */
-        @JsonProperty("content") Map<String, Object> content
+        @JsonProperty("content") Map<String, Object> content,
+        /** Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard. */
+        @JsonProperty("_meta") Map<String, Object> meta
     ) {
 
         /**
@@ -48,6 +50,16 @@ public final class ElicitationCompletedEvent extends SessionEvent {
          * Use {@link #builder()} for named construction.
          */
         public ElicitationCompletedEventData {}
+
+        /**
+         * Creates a text-only value using the existing v2 positional signature.
+         * @param requestId the requestId property
+         * @param action the action property
+         * @param content the content property
+         */
+        public ElicitationCompletedEventData(String requestId, ElicitationCompletedAction action, Map<String, Object> content) {
+            this(requestId, action, content, null);
+        }
 
         /**
          * Returns a named builder.
@@ -65,6 +77,7 @@ public final class ElicitationCompletedEvent extends SessionEvent {
             private String requestId;
             private ElicitationCompletedAction action;
             private Map<String, Object> content;
+            private Map<String, Object> meta;
 
             /**
              * Sets the {@code requestId} property.
@@ -100,6 +113,17 @@ public final class ElicitationCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code _meta} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder meta(Map<String, Object> value) {
+                this.meta = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -107,7 +131,7 @@ public final class ElicitationCompletedEvent extends SessionEvent {
              */
             public ElicitationCompletedEventData build() {
                 if (requestId == null) throw new IllegalStateException("Missing required property: requestId");
-                return new ElicitationCompletedEventData(requestId, action, content);
+                return new ElicitationCompletedEventData(requestId, action, content, meta);
             }
         }
     }

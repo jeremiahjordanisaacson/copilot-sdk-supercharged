@@ -234,6 +234,7 @@ public class CopilotClientTest {
 
         assertTrue(invoked.await(1, TimeUnit.SECONDS));
         var observed = invocation.get();
+        assertEquals("permission-1", observed.getRequestId());
         assertTrue(observed.isManagedSettingsEnabled());
         assertEquals(programToolCallId, observed.getProgramToolCallId());
         assertNotNull(observed.getPromptRequest());

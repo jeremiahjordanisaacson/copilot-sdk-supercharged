@@ -131,6 +131,7 @@ import type {
     TraceContextProvider,
     TranscriptRecovery,
     TypedSessionLifecycleHandler,
+    UserInputRequest,
     UserInputResponse,
 } from "./types.js";
 import { defaultJoinSessionPermissionHandler, RuntimeConnection } from "./types.js";
@@ -5057,13 +5058,8 @@ export class CopilotClient {
 
         this.connection.onRequest(
             "userInput.request",
-            async (params: {
-                sessionId: string;
-                question: string;
-                choices?: string[];
-                allowFreeform?: boolean;
-                requestId?: string;
-            }): Promise<UserInputResponse> => await this.handleUserInputRequest(params)
+            async (params: UserInputRequest & { sessionId: string }): Promise<UserInputResponse> =>
+                await this.handleUserInputRequest(params)
         );
 
         this.connection.onRequest<ShellAuthenticationResponse, unknown>(
@@ -5588,13 +5584,9 @@ export class CopilotClient {
         }
     }
 
-    private async handleUserInputRequest(params: {
-        sessionId: string;
-        question: string;
-        choices?: string[];
-        allowFreeform?: boolean;
-        requestId?: string;
-    }): Promise<UserInputResponse> {
+    private async handleUserInputRequest(
+        params: UserInputRequest & { sessionId: string }
+    ): Promise<UserInputResponse> {
         if (
             !params ||
             typeof params.sessionId !== "string" ||
@@ -5613,6 +5605,7 @@ export class CopilotClient {
             choices: params.choices,
             allowFreeform: params.allowFreeform,
             requestId: params.requestId,
+            imageAttachmentConstraints: params.imageAttachmentConstraints,
         });
         return result;
     }

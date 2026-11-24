@@ -17,10 +17,12 @@ import javax.annotation.processing.Generated;
  * @since 1.0.0
  */
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
-final class ServerPermissionsApi {
+public final class ServerPermissionsApi {
 
     private final RpcCaller caller;
 
+    /** API methods for the {@code permissions.extensionApprovals} sub-namespace. */
+    public final ServerPermissionsExtensionApprovalsApi extensionApprovals;
     /** API methods for the {@code permissions.locations} sub-namespace. */
     final ServerPermissionsLocationsApi locations;
     /** API methods for the {@code permissions.folderTrust} sub-namespace. */
@@ -29,6 +31,7 @@ final class ServerPermissionsApi {
     /** @param caller the RPC transport function */
     ServerPermissionsApi(RpcCaller caller) {
         this.caller = caller;
+        this.extensionApprovals = new ServerPermissionsExtensionApprovalsApi(caller);
         this.locations = new ServerPermissionsLocationsApi(caller);
         this.folderTrust = new ServerPermissionsFolderTrustApi(caller);
     }

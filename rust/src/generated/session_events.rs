@@ -3578,6 +3578,15 @@ pub struct SessionFusionResolvedData {
     pub policy_version: Option<String>,
     /// Concrete model selected for the primary solver phase.
     pub primary_model: String,
+    /// Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    pub primary_reasoning_effort: Option<String>,
     /// Concrete model selected for Cascade repair, when required.
     ///
     /// <div class="warning">
@@ -3615,7 +3624,7 @@ pub struct SessionFusionResolvedData {
     /// Identifier of the session turn associated with the route.
     pub turn_id: String,
 }
-crate::record_serde::wire_record!(SessionFusionResolvedData { contract_version: "contractVersion", critics: "critics" if is_none, fallback_model: "fallbackModel", follow_up: "followUp" if is_none, follow_up_model: "followUpModel", fusion_id: "fusionId", hint: "hint" if is_none, judge_model: "judgeModel" if is_none, model_universe_version: "modelUniverseVersion" if is_none, pattern: "pattern", phase_plan: "phasePlan" if is_none, plan_version: "planVersion" if is_none, policy: "policy", policy_version: "policyVersion" if is_none, primary_model: "primaryModel", repair_model: "repairModel" if is_none, route_source: "routeSource" if is_none, routing_latency_ms: "routingLatencyMs" if is_none, rule_id: "ruleId" if is_none, rule_index: "ruleIndex" if is_none, rule_name: "ruleName" if is_none, scores: "scores" if is_none, secondary_model: "secondaryModel", selected_rule_id: "selectedRuleId" if is_none, synthetic_model: "syntheticModel", turn_id: "turnId" });
+crate::record_serde::wire_record!(SessionFusionResolvedData { contract_version: "contractVersion", critics: "critics" if is_none, fallback_model: "fallbackModel", follow_up: "followUp" if is_none, follow_up_model: "followUpModel", fusion_id: "fusionId", hint: "hint" if is_none, judge_model: "judgeModel" if is_none, model_universe_version: "modelUniverseVersion" if is_none, pattern: "pattern", phase_plan: "phasePlan" if is_none, plan_version: "planVersion" if is_none, policy: "policy", policy_version: "policyVersion" if is_none, primary_model: "primaryModel", primary_reasoning_effort: "primaryReasoningEffort" if is_none, repair_model: "repairModel" if is_none, route_source: "routeSource" if is_none, routing_latency_ms: "routingLatencyMs" if is_none, rule_id: "ruleId" if is_none, rule_index: "ruleIndex" if is_none, rule_name: "ruleName" if is_none, scores: "scores" if is_none, secondary_model: "secondaryModel", selected_rule_id: "selectedRuleId" if is_none, synthetic_model: "syntheticModel", turn_id: "turnId" });
 
 /// Session event "session.fusion_completed". Experimental durable aggregate outcome of a HydraFusion turn. Phase-free Single reports completed, failed, or cancelled; staged patterns emit this event only on successful or degraded completion.
 ///
@@ -8197,6 +8206,23 @@ crate::record_serde::wire_record!(PermissionContextualAuthorizationData {
     turn_index: "turnIndex"
 });
 
+/// Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images.
+#[derive(Debug, Clone, Default)]
+pub struct UserInputImageAttachmentConstraints {
+    /// MIME types accepted by this request. Images must have readable nonzero
+    /// dimensions; GIF and WebP images must not exceed 2,000 pixels per side.
+    pub allowed_mime_types: Vec<String>,
+    /// Maximum decoded byte length of each image.
+    pub max_bytes_per_image: i64,
+    /// Maximum number of images accepted in one answer.
+    pub max_count: i64,
+}
+crate::record_serde::wire_record!(UserInputImageAttachmentConstraints {
+    allowed_mime_types: "allowedMimeTypes",
+    max_bytes_per_image: "maxBytesPerImage",
+    max_count: "maxCount"
+});
+
 /// Session event "user_input.requested". User input request notification with question and optional predefined choices
 #[derive(Debug, Clone, Default)]
 pub struct UserInputRequestedData {
@@ -8204,6 +8230,8 @@ pub struct UserInputRequestedData {
     pub allow_freeform: Option<bool>,
     /// Predefined choices for the user to select from, if applicable
     pub choices: Option<Vec<String>>,
+    /// Runtime-advertised image attachment support. Absent when images are unsupported.
+    pub image_attachment_constraints: Option<UserInputImageAttachmentConstraints>,
     /// The question or prompt to present to the user
     pub question: String,
     /// Unique identifier for this input request; used to respond via session.respondToUserInput()
@@ -8211,19 +8239,39 @@ pub struct UserInputRequestedData {
     /// The LLM-assigned tool call ID that triggered this request; used by remote UIs to correlate responses
     pub tool_call_id: Option<String>,
 }
-crate::record_serde::wire_record!(UserInputRequestedData { allow_freeform: "allowFreeform" if is_none, choices: "choices" if is_none, question: "question", request_id: "requestId", tool_call_id: "toolCallId" if is_none });
+crate::record_serde::wire_record!(UserInputRequestedData { allow_freeform: "allowFreeform" if is_none, choices: "choices" if is_none, image_attachment_constraints: "imageAttachmentConstraints" if is_none, question: "question", request_id: "requestId", tool_call_id: "toolCallId" if is_none });
+
+/// An inline image supplied in an answer to a legacy ask_user request that advertises image support.
+#[derive(Debug, Clone, Default)]
+pub struct UserInputImageAttachment {
+    /// Nonempty image bytes encoded as strict padded standard base64, without a data URL prefix or whitespace.
+    pub data: String,
+    /// Optional description of the image.
+    pub description: Option<String>,
+    /// Optional client-facing name of the image.
+    pub display_name: Option<String>,
+    /// MIME type of the image, matching an advertised allowed MIME type.
+    pub mime_type: String,
+    /// Attachment type. Always image.
+    pub r#type: UserInputImageAttachmentType,
+}
+crate::record_serde::wire_record!(UserInputImageAttachment { data: "data", description: "description" if is_none, display_name: "displayName" if is_none, mime_type: "mimeType", r#type: "type" });
 
 /// Session event "user_input.completed". User input request completion with the user's response
 #[derive(Debug, Clone, Default)]
 pub struct UserInputCompletedData {
     /// The user's answer to the input request
     pub answer: Option<String>,
+    /// Optional image payloads from completion sources that include them.
+    /// Runtime notifications omit this field; accepted images are available
+    /// in the associated canonical tool.execution_complete result.
+    pub attachments: Option<Vec<UserInputImageAttachment>>,
     /// Request ID of the resolved user input request; clients should dismiss any UI for this request
     pub request_id: RequestId,
     /// Whether the answer was typed as free-form text rather than selected from choices
     pub was_freeform: Option<bool>,
 }
-crate::record_serde::wire_record!(UserInputCompletedData { answer: "answer" if is_none, request_id: "requestId", was_freeform: "wasFreeform" if is_none });
+crate::record_serde::wire_record!(UserInputCompletedData { answer: "answer" if is_none, attachments: "attachments" if is_none, request_id: "requestId", was_freeform: "wasFreeform" if is_none });
 
 /// JSON Schema describing the form fields to present to the user (form mode only)
 #[derive(Debug, Clone, Default)]
@@ -8238,30 +8286,41 @@ pub struct ElicitationRequestedSchema {
 crate::record_serde::wire_record!(ElicitationRequestedSchema { properties: "properties", required: "required" if is_none, r#type: "type" });
 
 /// Session event "elicitation.requested". Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ElicitationRequestedData {
+    /// Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<HashMap<String, serde_json::Value>>,
     /// The source that initiated the request (MCP server name, or absent for agent-initiated)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub elicitation_source: Option<String>,
     /// Display label for a Connector-owned MCP server that initiated the request, from the trusted Connector catalog; absent for other sources. `elicitationSource` stays the identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub elicitation_source_display_name: Option<String>,
     /// Message describing what information is needed from the user
     pub message: String,
     /// Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<ElicitationRequestedMode>,
     /// JSON Schema describing the form fields to present to the user (form mode only)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub requested_schema: Option<ElicitationRequestedSchema>,
     /// Unique identifier for this elicitation request; used to respond via session.respondToElicitation()
     pub request_id: RequestId,
     /// Tool call ID from the LLM completion; used to correlate with CompletionChunk.toolCall.id for remote UIs
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     /// URL to open in the user's browser (url mode only)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
-crate::record_serde::wire_record!(ElicitationRequestedData { elicitation_source: "elicitationSource" if is_none, elicitation_source_display_name: "elicitationSourceDisplayName" if is_none, message: "message", mode: "mode" if is_none, requested_schema: "requestedSchema" if is_none, request_id: "requestId", tool_call_id: "toolCallId" if is_none, url: "url" if is_none });
 
 /// Session event "elicitation.completed". Elicitation request completion with the user's response
 #[derive(Debug, Clone, Default)]
 pub struct ElicitationCompletedData {
+    /// Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard.
+    pub meta: Option<HashMap<String, serde_json::Value>>,
     /// The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
     pub action: Option<ElicitationCompletedAction>,
     /// The submitted form data when action is 'accept'; keys match the requested schema fields
@@ -8269,7 +8328,7 @@ pub struct ElicitationCompletedData {
     /// Request ID of the resolved elicitation request; clients should dismiss any UI for this request
     pub request_id: RequestId,
 }
-crate::record_serde::wire_record!(ElicitationCompletedData { action: "action" if is_none, content: "content" if is_none, request_id: "requestId" });
+crate::record_serde::wire_record!(ElicitationCompletedData { meta: "_meta" if is_none, action: "action" if is_none, content: "content" if is_none, request_id: "requestId" });
 
 /// Session event "sampling.requested". Sampling request from an MCP server; contains the server name and a requestId for correlation
 #[derive(Debug, Clone, Default)]
@@ -9142,10 +9201,14 @@ crate::record_serde::wire_record!(SkillsLoadedSkill { argument_hint: "argumentHi
 /// Session event "session.skills_loaded". Payload of `session.skills_loaded` listing resolved skill metadata.
 #[derive(Debug, Clone, Default)]
 pub struct SessionSkillsLoadedData {
+    /// Errors from the published skill catalog. Older hosts can omit this snapshot.
+    pub errors: Option<Vec<String>>,
     /// Array of resolved skill metadata
     pub skills: Vec<SkillsLoadedSkill>,
+    /// Warnings from the published skill catalog. Older hosts can omit this snapshot.
+    pub warnings: Option<Vec<String>>,
 }
-crate::record_serde::wire_record!(SessionSkillsLoadedData { skills: "skills" });
+crate::record_serde::wire_record!(SessionSkillsLoadedData { errors: "errors" if is_none, skills: "skills", warnings: "warnings" if is_none });
 
 /// A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and authored model configuration.
 #[derive(Debug, Clone, Default)]
@@ -16287,6 +16350,25 @@ impl<'de> Deserialize<'de> for PermissionMessageAuthorizationPolarity {
             1 => Self::Denial,
             _ => Self::Unknown,
         })
+    }
+}
+
+/// Attachment type. Always image.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum UserInputImageAttachmentType {
+    #[serde(rename = "image")]
+    #[default]
+    Image,
+}
+impl<'de> Deserialize<'de> for UserInputImageAttachmentType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::enum_serde::deserialize_variant(
+            deserializer,
+            "UserInputImageAttachmentType",
+            &["image"],
+            None,
+        )?;
+        Ok(Self::Image)
     }
 }
 

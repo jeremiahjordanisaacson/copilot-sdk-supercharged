@@ -528,6 +528,91 @@ class JsonRpcClientTest {
     }
 
     @Test
+    void testImageAnswersAreRedactedWithoutChangingWireResponseOrCompletion() throws Exception {
+        Logger logger = Logger.getLogger(JsonRpcClient.class.getName());
+        Logger dispatcherLogger = Logger.getLogger(RpcHandlerDispatcher.class.getName());
+        Level previousLevel = logger.getLevel();
+        Level previousDispatcherLevel = dispatcherLogger.getLevel();
+        var sent = new CompletableFuture<String>();
+        var received = new CompletableFuture<String>();
+        var dispatched = new CompletableFuture<String>();
+        var completion = new CompletableFuture<JsonNode>();
+        String eventId = java.util.UUID.randomUUID().toString();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                String message = record.getMessage();
+                if (message != null && message.startsWith("Sent: ")
+                        && message.contains("\"id\":\"image-answer-diagnostics\"")) {
+                    sent.complete(message.substring("Sent: ".length()));
+                } else if (message != null && message.startsWith("Received: ")
+                        && message.contains("\"sessionId\":\"image-answer-diagnostics\"")) {
+                    received.complete(message.substring("Received: ".length()));
+                } else if (message != null && message.startsWith("Received session.event: ")
+                        && message.contains("\"id\":\"" + eventId + "\"")) {
+                    dispatched.complete(message.substring("Received session.event: ".length()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        handler.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        logger.setLevel(Level.FINE);
+        dispatcherLogger.addHandler(handler);
+        dispatcherLogger.setLevel(Level.FINE);
+        String imageData = "c2NyZWVuc2hvdC1jb250ZW50";
+        var image = Map.of("type", "image", "data", imageData, "mimeType", "image/png");
+        var answer = Map.of("answer", "", "wasFreeform", true, "attachments", List.of(image));
+        try (var pair = createSocketPair()) {
+            pair.serverSide.setSoTimeout(5_000);
+            var session = new CopilotSession("image-answer-diagnostics", pair.client);
+            var sessions = Map.of(session.getSessionId(), session);
+            new RpcHandlerDispatcher(sessions, event -> {
+            }, null, new GitHubTokenProviderRegistry(), sessions.values()).registerHandlers(pair.client);
+            session.on(event -> completion.complete(MAPPER.valueToTree(event)));
+            pair.client.sendResponse("image-answer-diagnostics", answer);
+            JsonNode response = MAPPER.readTree(readRpcMessage(pair.serverSide.getInputStream()));
+            assertEquals(imageData, response.at("/result/attachments/0/data").asText());
+            ObjectNode completionData = MAPPER.valueToTree(answer);
+            completionData.put("requestId", "image-answer-diagnostics");
+            writeRpcMessage(pair.serverSide.getOutputStream(),
+                    MAPPER.writeValueAsString(Map.of("jsonrpc", "2.0", "method", "session.event", "params",
+                            Map.of("sessionId", "image-answer-diagnostics", "event",
+                                    Map.of("id", eventId, "type", "user_input.completed", "timestamp",
+                                            "2026-01-01T00:00:00Z", "data", completionData)))));
+            assertEquals(imageData, completion.get(5, TimeUnit.SECONDS).at("/data/attachments/0/data").asText());
+
+            String sentLog = sent.get(5, TimeUnit.SECONDS);
+            String receivedLog = received.get(5, TimeUnit.SECONDS);
+            String dispatchedLog = dispatched.get(5, TimeUnit.SECONDS);
+            for (String logged : List.of(sentLog, receivedLog, dispatchedLog)) {
+                assertFalse(logged.contains(imageData));
+            }
+            JsonNode sentImage = MAPPER.readTree(sentLog).at("/result/attachments/0");
+            JsonNode receivedImage = MAPPER.readTree(receivedLog).at("/params/event/data/attachments/0");
+            JsonNode dispatchedImage = MAPPER.readTree(dispatchedLog).at("/data/attachments/0");
+            for (JsonNode loggedImage : List.of(sentImage, receivedImage, dispatchedImage)) {
+                assertEquals("<redacted>", loggedImage.path("data").asText());
+                assertEquals("image", loggedImage.path("type").asText());
+                assertEquals("image/png", loggedImage.path("mimeType").asText());
+            }
+            assertEquals(imageData, image.get("data"));
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+            dispatcherLogger.removeHandler(handler);
+            dispatcherLogger.setLevel(previousDispatcherLevel);
+        }
+    }
+
+    @Test
     void testHostEnvironmentIsRedactedWithoutChangingWireRequestOrResponse() throws Exception {
         Logger logger = Logger.getLogger(JsonRpcClient.class.getName());
         Level previousLevel = logger.getLevel();
@@ -605,6 +690,7 @@ class JsonRpcClientTest {
         requests.put("logging.file.write",
                 Map.of("logId", "fixture-log", "operation", "log", "message", "opaque-sensitive-write"));
         requests.put("logging.file.open", Map.of("secretValues", List.of("opaque-sensitive-open")));
+        requests.put("mcp.secrets.save", Map.of("secretId", "server/key", "value", "opaque-sensitive-mcp"));
         requests.put("sessions.import", Map.of("jsonl", "{\"token\":\"opaque-sensitive-session-import\"}\n"));
         requests.put("memories.import", Map.of("jsonl", "{\"token\":\"opaque-sensitive-memory-import\"}\n"));
         var sent = new LinkedHashMap<String, CompletableFuture<String>>();

@@ -8,6 +8,8 @@ export default defineConfig({
     ...base,
     test: {
         ...base.test,
+        projects: undefined,
+        globalSetup: ["./test/e2e/harness/globalSetup.ts"],
         include: ["test/e2e/network/os_proxy.e2e.test.ts"],
         exclude: base.test?.exclude?.filter(
             (pattern: string) => !pattern.includes("os_proxy.e2e.test.ts")

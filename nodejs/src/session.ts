@@ -1831,10 +1831,12 @@ export class CopilotSession {
             void this._executeCommandAndRespond(requestId, commandName, command, args);
         } else if (event.type === "elicitation.requested") {
             if (this.elicitationHandler) {
-                const { message, requestedSchema, mode, elicitationSource, url, requestId } =
+                const { message, requestedSchema, mode, elicitationSource, url, requestId, _meta } =
                     event.data;
                 void this._handleElicitationRequest(
                     {
+                        _meta: _meta === undefined ? undefined : structuredClone(_meta),
+                        requestId,
                         sessionId: this.sessionId,
                         message,
                         requestedSchema: requestedSchema as ElicitationContext["requestedSchema"],
@@ -2069,6 +2071,7 @@ export class CopilotSession {
         try {
             const invocation: PermissionHandlerInvocation = {
                 sessionId: this.sessionId,
+                requestId,
                 managedSettingsEnabled: this.managedSettingsEnabled,
                 ...(promptRequest === undefined ? {} : { promptRequest }),
                 ...(assistedApprovalAssessment === undefined ? {} : { assistedApprovalAssessment }),
@@ -2649,6 +2652,7 @@ export class CopilotSession {
                 result: {
                     action: result.action,
                     ...(result.content ? { content: result.content } : {}),
+                    ...(result._meta !== undefined ? { _meta: result._meta } : {}),
                 },
                 ...(result.decisionContext !== undefined
                     ? { decisionContext: result.decisionContext }

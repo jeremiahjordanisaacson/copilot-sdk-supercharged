@@ -10,7 +10,7 @@ package com.microsoft.copilot.generated.rpc;
 import javax.annotation.processing.Generated;
 
 /**
- * Effective extension loading and agent-management mode
+ * Compatibility mode for the persisted extension preference, not session activation. Current runtimes never return load_only and report disabled instead.
  *
  * @since 1.0.0
  */

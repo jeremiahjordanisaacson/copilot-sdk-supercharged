@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Map;
 import javax.annotation.processing.Generated;
 
 /**
@@ -49,7 +50,9 @@ public final class ElicitationRequestedEvent extends SessionEvent {
         /** JSON Schema describing the form fields to present to the user (form mode only) */
         @JsonProperty("requestedSchema") ElicitationRequestedSchema requestedSchema,
         /** URL to open in the user's browser (url mode only) */
-        @JsonProperty("url") String url
+        @JsonProperty("url") String url,
+        /** Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport. */
+        @JsonProperty("_meta") Map<String, Object> meta
     ) {
 
         /**
@@ -57,6 +60,21 @@ public final class ElicitationRequestedEvent extends SessionEvent {
          * Use {@link #builder()} for named construction.
          */
         public ElicitationRequestedEventData {}
+
+        /**
+         * Creates a text-only value using the existing v2 positional signature.
+         * @param requestId the requestId property
+         * @param toolCallId the toolCallId property
+         * @param elicitationSource the elicitationSource property
+         * @param elicitationSourceDisplayName the elicitationSourceDisplayName property
+         * @param message the message property
+         * @param mode the mode property
+         * @param requestedSchema the requestedSchema property
+         * @param url the url property
+         */
+        public ElicitationRequestedEventData(String requestId, String toolCallId, String elicitationSource, String elicitationSourceDisplayName, String message, ElicitationRequestedMode mode, ElicitationRequestedSchema requestedSchema, String url) {
+            this(requestId, toolCallId, elicitationSource, elicitationSourceDisplayName, message, mode, requestedSchema, url, null);
+        }
 
         /**
          * Returns a named builder.
@@ -79,6 +97,7 @@ public final class ElicitationRequestedEvent extends SessionEvent {
             private ElicitationRequestedMode mode;
             private ElicitationRequestedSchema requestedSchema;
             private String url;
+            private Map<String, Object> meta;
 
             /**
              * Sets the {@code requestId} property.
@@ -169,6 +188,17 @@ public final class ElicitationRequestedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code _meta} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder meta(Map<String, Object> value) {
+                this.meta = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -177,7 +207,7 @@ public final class ElicitationRequestedEvent extends SessionEvent {
             public ElicitationRequestedEventData build() {
                 if (requestId == null) throw new IllegalStateException("Missing required property: requestId");
                 if (message == null) throw new IllegalStateException("Missing required property: message");
-                return new ElicitationRequestedEventData(requestId, toolCallId, elicitationSource, elicitationSourceDisplayName, message, mode, requestedSchema, url);
+                return new ElicitationRequestedEventData(requestId, toolCallId, elicitationSource, elicitationSourceDisplayName, message, mode, requestedSchema, url, meta);
             }
         }
     }

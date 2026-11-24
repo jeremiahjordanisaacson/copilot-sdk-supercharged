@@ -18,6 +18,7 @@ import pathlib
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -111,6 +112,8 @@ from ._generated.session_events import (
     SessionIdleData,
     SessionMode,
     SessionWarningData,
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
     UserMessageData,
     session_event_from_dict,
 )
@@ -619,6 +622,7 @@ def create_attributed_result(
 
 class PermissionInvocation(TypedDict, total=False):
     session_id: Required[str]
+    request_id: NotRequired[str]
     managed_settings_enabled: NotRequired[bool]
     # Experimental: owning program invocation, absent for ordinary requests.
     program_tool_call_id: NotRequired[str]
@@ -730,6 +734,8 @@ class UserInputRequest(TypedDict, total=False):
     question: str
     choices: list[str]
     allowFreeform: bool
+    imageAttachmentConstraints: UserInputImageAttachmentConstraints
+    """Runtime-advertised image support. Absent when images are unsupported."""
     requestId: str
     """Runtime request ID of the pending ``user_input.requested`` event.
 
@@ -745,6 +751,8 @@ class UserInputResponse(TypedDict):
 
     answer: str
     wasFreeform: bool
+    attachments: NotRequired[list[UserInputImageAttachment]]
+    """Optional images. Image-only answers use answer="" and wasFreeform=True."""
     decisionContext: NotRequired[PermissionDecisionContext]
     """Who answered and how (see :func:`create_attributed_result`).
 
@@ -964,6 +972,8 @@ class ElicitationResult(TypedDict, total=False):
     or ``"cancel"`` (dismissed)."""
     content: dict[str, ElicitationFieldValue]
     """Form values submitted by the user (present when action is ``"accept"``)."""
+    _meta: dict[str, Any]
+    """Negotiated metadata, including private built-in ask_user image answers."""
 
 
 class ElicitationHandlerResult(ElicitationResult, total=False):
@@ -1015,6 +1025,8 @@ class ElicitationContext(TypedDict, total=False):
 
     session_id: Required[str]
     """Identifier of the session that triggered the elicitation request."""
+    requestId: NotRequired[str]
+    """Pending request ID for correlated out-of-band elicitation answers."""
     message: Required[str]
     """Message describing what information is needed from the user."""
     requestedSchema: dict[str, Any]
@@ -1025,6 +1037,8 @@ class ElicitationContext(TypedDict, total=False):
     """The source that initiated the request (e.g. MCP server name)."""
     url: str
     """URL to open in the browser (when mode is ``"url"``)."""
+    _meta: dict[str, Any]
+    """Request metadata, including negotiated built-in ask_user image constraints."""
 
 
 ElicitationHandler = Callable[
@@ -1080,6 +1094,8 @@ class SessionUiApi:
         result: ElicitationResult = {"action": rpc_result.action.value}
         if rpc_result.content is not None:
             result["content"] = rpc_result.content
+        if rpc_result.meta is not None:
+            result["_meta"] = rpc_result.meta
         return result
 
     async def confirm(self, message: str) -> bool:
@@ -3259,6 +3275,7 @@ class CopilotSession:
                     return
                 context: ElicitationContext = {
                     "session_id": self.session_id,
+                    "requestId": request_id,
                     "message": data.message or "",
                 }
                 if data.requested_schema is not None:
@@ -3269,6 +3286,8 @@ class CopilotSession:
                     context["elicitationSource"] = data.elicitation_source
                 if data.url is not None:
                     context["url"] = data.url
+                if data._meta is not None:
+                    context["_meta"] = deepcopy(data._meta)
                 asyncio.ensure_future(self._handle_elicitation_request(context, request_id))
 
             case CapabilitiesChangedData() as data:
@@ -3483,6 +3502,7 @@ class CopilotSession:
             handler_start = time.perf_counter()
             invocation: PermissionInvocation = {
                 "session_id": self.session_id,
+                "request_id": request_id,
                 "managed_settings_enabled": self._managed_settings_enabled,
             }
             if prompt_request is not None:
@@ -3700,6 +3720,7 @@ class CopilotSession:
             rpc_result = UIElicitationResponse(
                 action=UIElicitationResponseAction(action_val),
                 content=result.get("content"),
+                meta=result.get("_meta"),
             )
             rpc_start = time.perf_counter()
             await self.rpc.ui.handle_pending_elicitation(
@@ -4092,6 +4113,8 @@ class CopilotSession:
                 choices=request.get("choices") or [],
                 allowFreeform=request.get("allowFreeform", True),
             )
+            if "imageAttachmentConstraints" in request:
+                typed_request["imageAttachmentConstraints"] = request["imageAttachmentConstraints"]
             request_id = request.get("requestId")
             if isinstance(request_id, str) and request_id:
                 typed_request["requestId"] = request_id

@@ -19,7 +19,8 @@ pub use session_events::{
     PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
     PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
     RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
-    TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
+    TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment,
+    UserToolSessionApproval, Verbosity,
 };
 
 use super::sdk_api_shared::*;
@@ -15093,6 +15094,36 @@ pub struct VisibilitySetResult {
     pub synced: bool,
 }
 crate::record_serde::wire_record!(VisibilitySetResult { share_url: "shareUrl" if is_none, status: "status" if is_none, synced: "synced" });
+
+/// User response for a pending user-input request, with answer text and whether it was typed freeform.
+#[derive(Debug, Clone, Default)]
+pub struct UIUserInputResponseWithImages {
+    /// The user's answer text
+    pub answer: String,
+    /// Optional images, accepted only when the request advertises image attachment constraints. For an image-only answer, use an empty answer and wasFreeform true.
+    pub attachments: Option<Vec<UserInputImageAttachment>>,
+    /// True if the user typed a freeform response, false if they selected a presented choice. Used by telemetry to differentiate between free text input and choice selection.
+    pub was_freeform: bool,
+}
+crate::record_serde::wire_record!(UIUserInputResponseWithImages { answer: "answer", attachments: "attachments" if is_none, was_freeform: "wasFreeform" });
+
+/// Request ID of a pending `user_input.requested` event and the user's response.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct UIHandlePendingUserInputWithImagesRequest {
+    /// Who answered and how. When it says a person answered interactively (`source` `human_response` with `responseCapability` `interactive`), the runtime records the answer as the person's own authority for Assisted Permissions, but only from the session's authenticated owning connection or the in-process host; an answer from any other caller settles without it. The runtime decides which answers carry authority. Omit for automated answers.
+    pub decision_context: Option<PermissionDecisionContext>,
+    /// The unique request ID from the user_input.requested event
+    pub request_id: RequestId,
+    pub response: UIUserInputResponseWithImages,
+}
+crate::record_serde::wire_record!(UIHandlePendingUserInputWithImagesRequest { decision_context: "decisionContext" if is_none, request_id: "requestId", response: "response" });
 
 /// Stable compute identity stored atomically in the canonical settings document.
 ///

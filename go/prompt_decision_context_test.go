@@ -91,6 +91,28 @@ func TestUserInputReplyCarriesDecisionContextOnlyWhenLabeled(t *testing.T) {
 	}
 }
 
+func TestUserInputImageAnswerWithoutDecisionLabel(t *testing.T) {
+	session := &Session{SessionID: "s1"}
+	client := &Client{sessions: map[string]*Session{"s1": session}}
+	session.registerAttributedUserInputHandler(func(request UserInputRequest, _ UserInputInvocation) (AttributedUserInputResponse, error) {
+		if request.ImageAttachmentConstraints == nil || request.ImageAttachmentConstraints.MaxCount != 1 {
+			t.Fatalf("image constraints were dropped: %+v", request.ImageAttachmentConstraints)
+		}
+		return AttributedUserInputResponse{
+			UserInputResponse: UserInputResponse{Answer: "", WasFreeform: true},
+			Attachments: []rpc.UserInputImageAttachment{{
+				Type: "image", Data: "aW1hZ2U=", MIMEType: "image/png",
+			}},
+		}, nil
+	})
+	handler := jsonrpc2.RequestHandlerFor(client.handleUserInputRequest)
+	reply, rpcErr := handler(json.RawMessage(`{"sessionId":"s1","question":"Share a screenshot","imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],"maxCount":1,"maxBytesPerImage":1024}}`))
+	if rpcErr != nil {
+		t.Fatalf("unexpected RPC error: %v", rpcErr)
+	}
+	assertWireJSON(t, "image answer", reply, `{"answer":"","wasFreeform":true,"attachments":[{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}]}`)
+}
+
 func TestExitPlanModeReplyCarriesDecisionContextOnlyWhenLabeled(t *testing.T) {
 	review := ExitPlanModeResult{Approved: true, SelectedAction: "interactive"}
 	for _, tc := range []struct {
@@ -208,6 +230,131 @@ func TestElicitationAnswerSendsDecisionContextBesideResult(t *testing.T) {
 			}
 			assertWireJSON(t, "session.ui.handlePendingElicitation params", got, tc.want)
 		})
+	}
+}
+
+func TestElicitationImageMetadataDoesNotImplyHumanAttribution(t *testing.T) {
+	const key = "github.com/copilot/ask-user-images"
+	metadata := map[string]any{key: map[string]any{"version": 1, "fieldNames": []any{"screenshot"}}}
+	method, params := dispatchAndCaptureReply(t, func(s *Session) {
+		s.registerAttributedElicitationHandler(func(context ElicitationContext) (AttributedElicitationResult, error) {
+			if context.RequestID != "image-1" {
+				t.Errorf("request correlation was lost: %q", context.RequestID)
+			}
+			if context.Meta == nil || !reflect.DeepEqual(*context.Meta, metadata) {
+				t.Errorf("negotiated image constraints were lost: %+v", context.Meta)
+			}
+			return AttributedElicitationResult{
+				ElicitationResult: ElicitationResult{Action: ElicitationActionAccept, Content: map[string]ElicitationFieldValue{"screenshot": ""}},
+				Meta: map[string]any{key: map[string]any{"version": 1, "attachments": map[string]any{
+					"screenshot": []any{map[string]any{"type": "image", "data": "aW1hZ2U=", "mimeType": "image/png"}},
+				}}},
+			}, nil
+		})
+	}, SessionEvent{Data: &ElicitationRequestedData{RequestID: "image-1", Message: "Show screenshot", Meta: metadata}})
+	if method != "session.ui.handlePendingElicitation" {
+		t.Fatalf("unexpected RPC %q", method)
+	}
+	got, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWireJSON(t, "image answer remains unlabeled", got, `{"sessionId":"session-1","requestId":"image-1","result":{"action":"accept","content":{"screenshot":""},"_meta":{"github.com/copilot/ask-user-images":{"version":1,"attachments":{"screenshot":[{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}]}}}}}`)
+}
+
+func TestElicitationMetadataIsIsolatedFromEventSubscribers(t *testing.T) {
+	const key = "github.com/copilot/ask-user-images"
+	callbackEntered := make(chan struct{})
+	observerEdited := make(chan struct{})
+	callbackEdited := make(chan struct{})
+	observerValue := make(chan any, 1)
+	metadata := map[string]any{key: map[string]any{"fields": []any{map[string]any{"name": "screenshot"}}}}
+	field := func(meta map[string]any) map[string]any {
+		return meta[key].(map[string]any)["fields"].([]any)[0].(map[string]any)
+	}
+	method, params := dispatchAndCaptureReply(t, func(s *Session) {
+		s.On(func(event SessionEvent) {
+			data, ok := event.Data.(*ElicitationRequestedData)
+			if !ok {
+				return
+			}
+			<-callbackEntered
+			field(data.Meta)["name"] = "redacted"
+			close(observerEdited)
+			<-callbackEdited
+			observerValue <- field(data.Meta)["name"]
+		})
+		s.registerElicitationHandler(func(context ElicitationContext) (ElicitationResult, error) {
+			defer close(callbackEdited)
+			// Existing callers can still use contexts as map keys.
+			_ = map[ElicitationContext]bool{context: true}
+			close(callbackEntered)
+			<-observerEdited
+			if context.Meta == nil {
+				return ElicitationResult{}, fmt.Errorf("callback metadata was lost")
+			}
+			if got := field(*context.Meta)["name"]; got != "screenshot" {
+				t.Errorf("observer changed callback metadata: %v", got)
+			}
+			field(*context.Meta)["name"] = "callback"
+			return ElicitationResult{Action: ElicitationActionAccept}, nil
+		})
+	}, SessionEvent{Data: &ElicitationRequestedData{RequestID: "isolated-meta", Meta: metadata}})
+	if method != "session.ui.handlePendingElicitation" {
+		t.Errorf("method = %q, want session.ui.handlePendingElicitation", method)
+	}
+	assertWireJSON(t, "elicitation callback result", params["result"], `{"action":"accept"}`)
+	select {
+	case got := <-observerValue:
+		if got != "redacted" {
+			t.Errorf("callback changed observer metadata: %v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the observer metadata")
+	}
+}
+
+func TestElicitationRejectedImageAnswerCancelsWithoutHumanAttribution(t *testing.T) {
+	client, server, _ := newRuntimeShutdownRpcPair(t)
+	t.Cleanup(server.Stop)
+	calls := make(chan json.RawMessage, 2)
+	server.SetRequestHandler("session.ui.handlePendingElicitation", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+		calls <- append(json.RawMessage(nil), params...)
+		var request struct {
+			Result struct {
+				Action string `json:"action"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(params, &request); err != nil {
+			t.Errorf("decode answer: %v", err)
+		}
+		if request.Result.Action == "accept" {
+			return nil, &jsonrpc2.Error{Code: -32602, Message: "Invalid user-input image response"}
+		}
+		return []byte(`{"success":true}`), nil
+	})
+	session := &Session{SessionID: "session-1", client: client, RPC: rpc.NewSessionRPC(client, "session-1")}
+	session.registerAttributedElicitationHandler(func(ElicitationContext) (AttributedElicitationResult, error) {
+		return AttributedElicitationResult{
+			ElicitationResult: ElicitationResult{Action: ElicitationActionAccept, Content: map[string]ElicitationFieldValue{"screenshot": ""}},
+			Meta: map[string]any{"github.com/copilot/ask-user-images": map[string]any{
+				"version": 1, "attachments": map[string]any{"screenshot": []any{
+					map[string]any{"type": "image", "data": "invalid", "mimeType": "image/png"},
+				}},
+			}},
+			DecisionContext: personAnsweredContext(),
+		}, nil
+	})
+	session.handleElicitationRequest(ElicitationContext{RequestID: "invalid-image"}, "invalid-image")
+	if len(calls) != 2 {
+		t.Fatalf("rejected callback returned after %d requests, want answer and cancellation", len(calls))
+	}
+	<-calls
+	select {
+	case cancel := <-calls:
+		assertWireJSON(t, "SDK cancellation is unattributed", cancel, `{"sessionId":"session-1","requestId":"invalid-image","result":{"action":"cancel"}}`)
+	default:
+		t.Fatal("rejected callback returned without cancelling the pending question")
 	}
 }
 

@@ -4,6 +4,7 @@
 
 package com.microsoft.copilot.rpc;
 
+import com.microsoft.copilot.generated.UserInputImageAttachmentConstraints;
 import java.util.Collections;
 import java.util.List;
 
@@ -36,6 +37,30 @@ public class UserInputRequest {
 
     @JsonProperty("requestId")
     private String requestId;
+
+    @JsonProperty("imageAttachmentConstraints")
+    private UserInputImageAttachmentConstraints imageAttachmentConstraints;
+
+    /**
+     * Gets runtime-advertised image support.
+     *
+     * @return the constraints, or {@code null} when images are unsupported
+     */
+    public UserInputImageAttachmentConstraints getImageAttachmentConstraints() {
+        return imageAttachmentConstraints;
+    }
+
+    /**
+     * Sets runtime-advertised image support.
+     *
+     * @param constraints
+     *            the image constraints, or {@code null} when unsupported
+     * @return this instance for method chaining
+     */
+    public UserInputRequest setImageAttachmentConstraints(UserInputImageAttachmentConstraints constraints) {
+        this.imageAttachmentConstraints = constraints;
+        return this;
+    }
 
     /**
      * Gets the question to ask the user.

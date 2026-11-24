@@ -27,12 +27,16 @@ use crate::generated::api_types::{
     McpOauthPendingRequestResponseTokenKind, PermissionDecision, PermissionDecisionApproveOnce,
     PermissionDecisionContext, PermissionDecisionReject, PermissionDecisionUserNotAvailable,
 };
+pub use crate::generated::api_types::{
+    UIUserInputResponseWithImages as ImageUserInputResponse, UserInputImageAttachment,
+};
+pub use crate::session_events::UserInputImageAttachmentConstraints;
 use crate::session_events::{
     McpOauthRequestReason, McpOauthRequiredStaticClientConfig, McpOauthWWWAuthenticateParams,
 };
 use crate::types::{
-    AutoModeRecoveryContext, ElicitationRequest, ElicitationResult, ExitPlanModeData,
-    PermissionRequestData, RequestId, SessionId,
+    AutoModeRecoveryContext, ElicitationRequest, ElicitationRequestWithMetadata, ElicitationResult,
+    ElicitationResultWithMetadata, ExitPlanModeData, PermissionRequestData, RequestId, SessionId,
 };
 
 /// Decision returned by a [`PermissionHandler`].
@@ -148,13 +152,31 @@ pub(crate) fn permission_handler_failure(message: &str) -> PermissionResult {
     PermissionResult::user_not_available()
 }
 
-/// Response to a user input request.
+/// Text-only response to a user input request.
+///
+/// For image answers, return [`ImageUserInputResponse`] from
+/// [`UserInputHandler::handle_with_images`].
 #[derive(Debug, Clone)]
 pub struct UserInputResponse {
     /// The user's answer text.
     pub answer: String,
     /// Whether the answer was free-form (not a preset choice).
     pub was_freeform: bool,
+}
+
+/// A legacy ask_user request, including optional runtime-advertised image support.
+#[derive(Debug, Clone)]
+pub struct UserInputRequest {
+    /// Runtime ID of the pending request, if advertised.
+    pub request_id: Option<RequestId>,
+    /// Question to present to the user.
+    pub question: String,
+    /// Optional predefined choices.
+    pub choices: Option<Vec<String>>,
+    /// Whether freeform input is permitted.
+    pub allow_freeform: Option<bool>,
+    /// Image constraints, absent when the request cannot accept images.
+    pub image_attachment_constraints: Option<UserInputImageAttachmentConstraints>,
 }
 
 /// Result of an exit-plan-mode request.
@@ -258,6 +280,29 @@ pub trait PermissionHandler: Send + Sync + 'static {
 /// When unset, `requestElicitation: false` goes on the wire.
 #[async_trait]
 pub trait ElicitationHandler: Send + Sync + 'static {
+    /// Handle negotiated request/response metadata without breaking existing handlers.
+    ///
+    /// Built-in ask_user image answers use the private
+    /// `github.com/copilot/ask-user-images` metadata key; external MCP requests cannot opt in.
+    /// The default preserves existing text-only dispatch and attribution.
+    async fn handle_with_metadata(
+        &self,
+        session_id: SessionId,
+        request_id: RequestId,
+        request: ElicitationRequestWithMetadata,
+    ) -> AttributedResult<ElicitationResultWithMetadata> {
+        let response = self
+            .handle_attributed(session_id, request_id, request.request)
+            .await;
+        AttributedResult {
+            result: ElicitationResultWithMetadata {
+                result: response.result,
+                meta: None,
+            },
+            decision_context: response.decision_context,
+        }
+    }
+
     /// Respond to an elicitation prompt (form, URL confirm, etc.).
     async fn handle(
         &self,
@@ -401,6 +446,34 @@ pub trait McpAuthHandler: Send + Sync + 'static {
 /// cannot handle legacy user-input requests.
 #[async_trait]
 pub trait UserInputHandler: Send + Sync + 'static {
+    /// Answer a request with optional images and an optional attribution label.
+    ///
+    /// Override this method to inspect image constraints and return attachments.
+    /// Image-only responses use an empty answer and `was_freeform: true`.
+    /// The default preserves existing text-only handlers and attribution.
+    async fn handle_with_images(
+        &self,
+        session_id: SessionId,
+        request: UserInputRequest,
+    ) -> Option<AttributedResult<ImageUserInputResponse>> {
+        self.handle_attributed(
+            session_id,
+            request.request_id,
+            request.question,
+            request.choices,
+            request.allow_freeform,
+        )
+        .await
+        .map(|response| AttributedResult {
+            result: ImageUserInputResponse {
+                answer: response.result.answer,
+                was_freeform: response.result.was_freeform,
+                attachments: None,
+            },
+            decision_context: response.decision_context,
+        })
+    }
+
     /// Answer a question on behalf of the user. Return `None` to signal
     /// "no answer available".
     ///

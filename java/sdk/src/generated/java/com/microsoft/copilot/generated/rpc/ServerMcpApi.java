@@ -24,6 +24,8 @@ public final class ServerMcpApi {
 
     /** API methods for the {@code mcp.config} sub-namespace. */
     public final ServerMcpConfigApi config;
+    /** API methods for the {@code mcp.secrets} sub-namespace. */
+    public final ServerMcpSecretsApi secrets;
     /** API methods for the {@code mcp.registry} sub-namespace. */
     final ServerMcpRegistryApi registry;
     /** API methods for the {@code mcp.oauth} sub-namespace. */
@@ -39,6 +41,7 @@ public final class ServerMcpApi {
     ServerMcpApi(RpcCaller caller) {
         this.caller = caller;
         this.config = new ServerMcpConfigApi(caller);
+        this.secrets = new ServerMcpSecretsApi(caller);
         this.registry = new ServerMcpRegistryApi(caller);
         this.oauth = new ServerMcpOauthApi(caller);
         this.installations = new ServerMcpInstallationsApi(caller);

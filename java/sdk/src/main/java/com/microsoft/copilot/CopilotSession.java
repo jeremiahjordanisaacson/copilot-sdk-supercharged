@@ -33,6 +33,7 @@ import java.util.logging.Logger;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -1789,9 +1790,14 @@ public final class CopilotSession implements AutoCloseable {
                             .setProperties(data.requestedSchema().properties())
                             .setRequired(data.requestedSchema().required());
                 }
-                var context = new ElicitationContext().setSessionId(sessionId).setMessage(data.message())
-                        .setRequestedSchema(schema).setMode(data.mode() != null ? data.mode().getValue() : null)
-                        .setElicitationSource(data.elicitationSource()).setUrl(data.url());
+                var context = new ElicitationContext().setRequestId(data.requestId()).setSessionId(sessionId)
+                        .setMessage(data.message()).setRequestedSchema(schema)
+                        .setMode(data.mode() != null ? data.mode().getValue() : null)
+                        .setElicitationSource(data.elicitationSource()).setUrl(data.url())
+                        .setMeta(data.meta() == null
+                                ? null
+                                : MAPPER.convertValue(data.meta(), new TypeReference<Map<String, Object>>() {
+                                }));
                 handleElicitationRequestAsync(context, data.requestId());
             }
         } else if (event instanceof CapabilitiesChangedEvent capEvent) {
@@ -2055,6 +2061,7 @@ public final class CopilotSession implements AutoCloseable {
             try {
                 var invocation = new PermissionInvocation();
                 invocation.setSessionId(sessionId);
+                invocation.setRequestId(requestId);
                 invocation.setManagedSettingsEnabled(managedSettingsEnabled);
                 invocation.setAssistedApprovalAssessment(assistedApprovalAssessment);
                 invocation.setPromptRequest(promptRequest);
@@ -2291,7 +2298,7 @@ public final class CopilotSession implements AutoCloseable {
                             : ElicitationResultAction.CANCEL.getValue();
                     var parsedAction = UIElicitationResponseAction.fromValue(actionStr);
                     var elicitationResult = UIElicitationResponse.builder().action(parsedAction)
-                            .content(result.getContent()).build();
+                            .content(result.getContent()).meta(result.getMeta()).build();
                     return getRpc().ui.handlePendingElicitation(
                             SessionUiHandlePendingElicitationParams.builder().requestId(requestId)
                                     .result(elicitationResult).decisionContext(result.getDecisionContext()).build());
@@ -2372,6 +2379,7 @@ public final class CopilotSession implements AutoCloseable {
                             result.setAction(ElicitationResultAction.CANCEL);
                         }
                         result.setContent(resp.content());
+                        result.setMeta(resp.meta());
                         return result;
                     });
         }

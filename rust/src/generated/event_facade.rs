@@ -207,6 +207,7 @@ pub use payloads::{
     UsageMetricsCodeChanges, UsageMetricsModelMetric, UsageMetricsModelMetricRequests,
     UsageMetricsModelMetricTokenDetail, UsageMetricsModelMetricUsage,
     UsageMetricsProviderModelMetric, UsageMetricsTokenDetail, UserInputCompletedData,
+    UserInputImageAttachment, UserInputImageAttachmentConstraints, UserInputImageAttachmentType,
     UserInputRequestedData, UserMessageAgentMode, UserMessageData, UserMessageDelivery,
     UserToolSessionApproval, UserToolSessionApprovalCommands, UserToolSessionApprovalCommandsKind,
     UserToolSessionApprovalCustomTool, UserToolSessionApprovalCustomToolKind,

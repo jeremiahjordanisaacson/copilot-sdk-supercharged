@@ -402,9 +402,10 @@ class JsonRpcClient implements AutoCloseable {
             redactCredentials(root);
             String method = root.path("method").asText();
             if (("secrets.filter".equals(method) || "secrets.removeFilterValues".equals(method)
-                    || "logging.file.open".equals(method) || "logging.file.write".equals(method)
-                    || "sessions.import".equals(method) || "memories.import".equals(method))
-                    && root instanceof ObjectNode request && request.has("params")) {
+                    || "mcp.secrets.save".equals(method) || "logging.file.open".equals(method)
+                    || "logging.file.write".equals(method) || "sessions.import".equals(method)
+                    || "memories.import".equals(method)) && root instanceof ObjectNode request
+                    && request.has("params")) {
                 request.put("params", "<redacted>");
             }
             if (redaction == ResponseLogRedaction.PAYLOAD && root instanceof ObjectNode response) {
@@ -427,8 +428,9 @@ class JsonRpcClient implements AutoCloseable {
     private static void redactCredentials(JsonNode node) {
         if (node.isObject()) {
             var object = (ObjectNode) node;
+            boolean imageAttachment = "image".equals(object.path("type").asText());
             object.properties().forEach(entry -> {
-                if (isCredentialField(entry.getKey())) {
+                if (isCredentialField(entry.getKey()) || (imageAttachment && entry.getKey().equals("data"))) {
                     object.put(entry.getKey(), "<redacted>");
                 } else {
                     redactCredentials(entry.getValue());

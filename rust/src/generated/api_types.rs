@@ -20,7 +20,8 @@ pub use super::session_events::{
     PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
     PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
     RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
-    TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
+    TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment,
+    UserToolSessionApproval, Verbosity,
 };
 use crate::types::{RequestId, SessionEvent, SessionId};
 
@@ -531,6 +532,20 @@ pub mod rpc_methods {
     pub(crate) const SANDBOX_GETDOCSURL: &str = "sandbox.getDocsUrl";
     /// `sandbox.getHostSupport`
     pub const SANDBOX_GETHOSTSUPPORT: &str = "sandbox.getHostSupport";
+    /// `permissions.extensionApprovals.grant`
+    pub const PERMISSIONS_EXTENSIONAPPROVALS_GRANT: &str = "permissions.extensionApprovals.grant";
+    /// `permissions.extensionApprovals.list`
+    pub const PERMISSIONS_EXTENSIONAPPROVALS_LIST: &str = "permissions.extensionApprovals.list";
+    /// `permissions.extensionApprovals.revoke`
+    pub const PERMISSIONS_EXTENSIONAPPROVALS_REVOKE: &str = "permissions.extensionApprovals.revoke";
+    /// `permissions.locations.cleanupOrphaned`
+    pub(crate) const PERMISSIONS_LOCATIONS_CLEANUPORPHANED: &str =
+        "permissions.locations.cleanupOrphaned";
+    /// `permissions.folderTrust.checkTrust`
+    pub(crate) const PERMISSIONS_FOLDERTRUST_CHECKTRUST: &str =
+        "permissions.folderTrust.checkTrust";
+    /// `permissions.evaluateManagedPolicy`
+    pub(crate) const PERMISSIONS_EVALUATEMANAGEDPOLICY: &str = "permissions.evaluateManagedPolicy";
     /// `feedback.upload.start`
     pub(crate) const FEEDBACK_UPLOAD_START: &str = "feedback.upload.start";
     /// `feedback.upload.read`
@@ -623,14 +638,6 @@ pub mod rpc_methods {
     pub(crate) const FEATUREFLAGS_LISTMETADATA: &str = "featureFlags.listMetadata";
     /// `featureFlags.resolve`
     pub(crate) const FEATUREFLAGS_RESOLVE: &str = "featureFlags.resolve";
-    /// `permissions.locations.cleanupOrphaned`
-    pub(crate) const PERMISSIONS_LOCATIONS_CLEANUPORPHANED: &str =
-        "permissions.locations.cleanupOrphaned";
-    /// `permissions.folderTrust.checkTrust`
-    pub(crate) const PERMISSIONS_FOLDERTRUST_CHECKTRUST: &str =
-        "permissions.folderTrust.checkTrust";
-    /// `permissions.evaluateManagedPolicy`
-    pub(crate) const PERMISSIONS_EVALUATEMANAGEDPOLICY: &str = "permissions.evaluateManagedPolicy";
     /// `managedSettings.readDevice`
     pub(crate) const MANAGEDSETTINGS_READDEVICE: &str = "managedSettings.readDevice";
     /// `managedSettings.retainPolicy`
@@ -742,6 +749,12 @@ pub mod rpc_methods {
         "mcp.config.userServerNamesForConfigDir";
     /// `mcp.config.mergeSources`
     pub(crate) const MCP_CONFIG_MERGESOURCES: &str = "mcp.config.mergeSources";
+    /// `mcp.secrets.save`
+    pub const MCP_SECRETS_SAVE: &str = "mcp.secrets.save";
+    /// `mcp.secrets.delete`
+    pub const MCP_SECRETS_DELETE: &str = "mcp.secrets.delete";
+    /// `mcp.secrets.deleteServer`
+    pub const MCP_SECRETS_DELETESERVER: &str = "mcp.secrets.deleteServer";
     /// `mcp.registry.allocateRequestId`
     pub(crate) const MCP_REGISTRY_ALLOCATEREQUESTID: &str = "mcp.registry.allocateRequestId";
     /// `mcp.registry.search`
@@ -2241,8 +2254,12 @@ pub use sdk_api_session::{
     PermissionsConfigureAdditionalContentExclusionPolicyScope,
     PermissionsConfigureAssistedApprovalContext, PermissionsConfigureParams,
     PermissionsConfigureResult, PermissionsEvaluateManagedPolicyResult,
-    PermissionsFolderTrustAddTrustedResult, PermissionsFolderTrustCheckTrustResult,
-    PermissionsGetAllowAllResult, PermissionsGetModeRequest, PermissionsGetModeResult,
+    PermissionsExtensionApproval, PermissionsExtensionApprovalsGrantRequest,
+    PermissionsExtensionApprovalsGrantResult, PermissionsExtensionApprovalsListRequest,
+    PermissionsExtensionApprovalsListResult, PermissionsExtensionApprovalsRevokeRequest,
+    PermissionsExtensionApprovalsRevokeResult, PermissionsFolderTrustAddTrustedResult,
+    PermissionsFolderTrustCheckTrustResult, PermissionsGetAllowAllResult,
+    PermissionsGetModeRequest, PermissionsGetModeResult,
     PermissionsLocationsAddToolApprovalDetails, PermissionsLocationsAddToolApprovalDetailsCommands,
     PermissionsLocationsAddToolApprovalDetailsCommandsKind,
     PermissionsLocationsAddToolApprovalDetailsCustomTool,
@@ -2849,16 +2866,18 @@ pub use sdk_api_integrations::{
     McpResourcesListRequest, McpResourcesListResult, McpResourcesListTemplatesRequest,
     McpResourcesListTemplatesResult, McpResourcesReadRequest, McpResourcesReadResult,
     McpRestartServerRequest, McpSafeForTelemetryFields, McpSamplingExecutionResult,
-    McpServerAuthConfigRedirectPort, McpServerCardEmbedded, McpServerCardEmbeddedKind,
-    McpServerCardReference, McpServerCardUrl, McpServerCardUrlKind, McpServerConfigDeferTools,
-    McpServerConfigHttp, McpServerConfigHttpOauthGrantType, McpServerConfigHttpType,
-    McpServerConfigLocal, McpServerConfigLocalType, McpServerConfigStdio, McpServerConfigStdioType,
-    McpServerList, McpSetEnvValueModeParams, McpSetEnvValueModeResult, McpSourceFile,
-    McpSourcePlugin, McpSourceRef, McpStartServerRequest, McpStartServersResult,
-    McpStopPluginServersRequest, McpStopPluginServersResult, McpStopServerRequest,
-    McpToolTokenBreakdownResult, McpUninstallPlan, PluginActivationStatus,
-    PluginApplyInstallRequest, PluginBuiltinDiscoverResult, PluginCheckUpdateRequest,
-    PluginInstallResult, PluginInstallationFailureReason, PluginInstallationManagementOutcome,
+    McpSecretDeleteRequest, McpSecretDeleteServerRequest, McpSecretSaveRequest,
+    McpSecretSaveResult, McpSecretsSaveResult, McpServerAuthConfigRedirectPort,
+    McpServerCardEmbedded, McpServerCardEmbeddedKind, McpServerCardReference, McpServerCardUrl,
+    McpServerCardUrlKind, McpServerConfigDeferTools, McpServerConfigHttp,
+    McpServerConfigHttpOauthGrantType, McpServerConfigHttpType, McpServerConfigLocal,
+    McpServerConfigLocalType, McpServerConfigStdio, McpServerConfigStdioType, McpServerList,
+    McpSetEnvValueModeParams, McpSetEnvValueModeResult, McpSourceFile, McpSourcePlugin,
+    McpSourceRef, McpStartServerRequest, McpStartServersResult, McpStopPluginServersRequest,
+    McpStopPluginServersResult, McpStopServerRequest, McpToolTokenBreakdownResult,
+    McpUninstallPlan, PluginActivationStatus, PluginApplyInstallRequest,
+    PluginBuiltinDiscoverResult, PluginCheckUpdateRequest, PluginInstallResult,
+    PluginInstallationFailureReason, PluginInstallationManagementOutcome,
     PluginInstallationManagementOutcomeInstallPlanned,
     PluginInstallationManagementOutcomeInstallPlannedKind,
     PluginInstallationManagementOutcomeRefused, PluginInstallationManagementOutcomeRefusedKind,
@@ -3552,11 +3571,13 @@ pub use sdk_api_services::{
     UIHandlePendingElicitationRequest, UIHandlePendingExitPlanModeRequest, UIHandlePendingResult,
     UIHandlePendingSamplingRequest, UIHandlePendingSamplingResponse,
     UIHandlePendingSessionLimitsExhaustedRequest, UIHandlePendingUserInputRequest,
-    UIRegisterDirectAutoModeSwitchHandlerRequest, UIRegisterDirectAutoModeSwitchHandlerResult,
-    UISessionLimitsExhaustedResponse, UISessionLimitsExhaustedResponseAction, UISnapshot,
+    UIHandlePendingUserInputWithImagesRequest, UIRegisterDirectAutoModeSwitchHandlerRequest,
+    UIRegisterDirectAutoModeSwitchHandlerResult, UISessionLimitsExhaustedResponse,
+    UISessionLimitsExhaustedResponseAction, UISnapshot,
     UIUnregisterDirectAutoModeSwitchHandlerRequest, UIUnregisterDirectAutoModeSwitchHandlerResult,
-    UIUserInputResponse, UiThreadRunRequest, UnsupportedEnqueueCommandResult,
-    UpdateSubagentSettingsRequest, VisibilityGetResult, VisibilitySetRequest, VisibilitySetResult,
+    UIUserInputResponse, UIUserInputResponseWithImages, UiThreadRunRequest,
+    UnsupportedEnqueueCommandResult, UpdateSubagentSettingsRequest, VisibilityGetResult,
+    VisibilitySetRequest, VisibilitySetResult,
 };
 pub(crate) use sdk_api_services::{
     AgentsCustomAgentInitialModelDecisionParams, AgentsCustomAgentInitialModelDecisionResult,

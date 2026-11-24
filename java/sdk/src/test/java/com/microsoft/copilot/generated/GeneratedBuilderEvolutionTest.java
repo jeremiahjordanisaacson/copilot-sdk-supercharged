@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.Arrays;
@@ -79,11 +80,23 @@ class GeneratedBuilderEvolutionTest {
             assertTrue(java.lang.reflect.Modifier.isPublic(canonical.getModifiers()), name);
         }
         Class<?>[] compatibilityParameters = switch (name) {
+            case "com.microsoft.copilot.generated.rpc.UIUserInputResponse" ->
+                new Class<?>[]{String.class, Boolean.class};
+            case "com.microsoft.copilot.generated.UserInputCompletedEvent$UserInputCompletedEventData" ->
+                new Class<?>[]{String.class, String.class, Boolean.class};
+            case "com.microsoft.copilot.generated.UserInputRequestedEvent$UserInputRequestedEventData" ->
+                new Class<?>[]{String.class, String.class, List.class, Boolean.class, String.class};
+            case "com.microsoft.copilot.generated.ElicitationCompletedEvent$ElicitationCompletedEventData" ->
+                new Class<?>[]{String.class, ElicitationCompletedAction.class, Map.class};
+            case "com.microsoft.copilot.generated.ElicitationRequestedEvent$ElicitationRequestedEventData" ->
+                new Class<?>[]{String.class, String.class, String.class, String.class, String.class,
+                        ElicitationRequestedMode.class, ElicitationRequestedSchema.class, String.class};
             case "com.microsoft.copilot.generated.rpc.Extension" ->
                 new Class<?>[]{String.class, String.class, com.microsoft.copilot.generated.rpc.ExtensionSource.class,
                         com.microsoft.copilot.generated.rpc.ExtensionStatus.class, Long.class};
             case "com.microsoft.copilot.generated.rpc.SessionExtensionsListResult",
-                    "com.microsoft.copilot.generated.rpc.SessionExtensionsReconcileResult" ->
+                    "com.microsoft.copilot.generated.rpc.SessionExtensionsReconcileResult",
+                    "com.microsoft.copilot.generated.SessionSkillsLoadedEvent$SessionSkillsLoadedEventData" ->
                 new Class<?>[]{List.class};
             case "com.microsoft.copilot.generated.rpc.AutopilotObjectiveState" -> new Class<?>[]{Long.class,
                     String.class, com.microsoft.copilot.generated.rpc.AutopilotObjectiveStatus.class, Long.class,
@@ -107,10 +120,18 @@ class GeneratedBuilderEvolutionTest {
         if (compatibilityParameters != null) {
             var compatibility = type.getDeclaredConstructor(compatibilityParameters);
             assertTrue(java.lang.reflect.Modifier.isPublic(compatibility.getModifiers()), name);
+            assertFalse(compatibility.isAnnotationPresent(Deprecated.class), name);
             expected = Set.of(canonical, compatibility);
         }
         assertEquals(expected, Set.of(type.getDeclaredConstructors()),
                 name + " must expose exactly its canonical and published compatibility constructors");
+    }
+
+    @Test
+    @Tag("java-compatibility")
+    void legacySkillsLoadedConstructorPreservesAbsentDiagnostics() throws Exception {
+        var data = new SessionSkillsLoadedEvent.SessionSkillsLoadedEventData(List.of());
+        assertEquals(JSON.readTree("{\"skills\":[]}"), JSON.valueToTree(data));
     }
 
     @Test
@@ -130,7 +151,7 @@ class GeneratedBuilderEvolutionTest {
 
     @Test
     @Tag("java-compatibility")
-    void migratedBuilderConsumerPreservesFormerPositionalWireValues() throws Exception {
+    void migratedConsumerPreservesExistingUserInputConstructorsAndWireValues() throws Exception {
         Path source = Path.of(GeneratedBuilderEvolutionTest.class
                 .getResource("/generated-builder-evolution/consumers/ReleasedConstructorCaller.java").toURI());
         Path caller = tempDirectory.resolve("released-consumer");
@@ -142,7 +163,17 @@ class GeneratedBuilderEvolutionTest {
                 Path.of(com.microsoft.copilot.generated.rpc.TaskBlocker.class.getProtectionDomain().getCodeSource()
                         .getLocation().toURI()))
                 .strip().split("\\R");
-        assertEquals(8, output.length);
+        assertEquals(13, output.length);
+        assertEquals(JSON.readTree("{\"answer\":\"yes\",\"wasFreeform\":true}"), JSON.readTree(output[8]));
+        assertEquals(JSON.readTree("{\"requestId\":\"input\",\"answer\":\"yes\",\"wasFreeform\":true}"),
+                JSON.readTree(output[9]));
+        assertEquals(JSON.readTree(
+                "{\"requestId\":\"input\",\"question\":\"Question?\",\"choices\":[\"yes\"],\"allowFreeform\":true,\"toolCallId\":\"tool\"}"),
+                JSON.readTree(output[10]));
+        assertEquals(JSON.readTree("{\"requestId\":\"input\",\"action\":\"accept\",\"content\":{\"screenshot\":\"\"}}"),
+                JSON.readTree(output[11]));
+        assertEquals(JSON.readTree("{\"requestId\":\"input\",\"toolCallId\":\"tool\",\"message\":\"Question?\"}"),
+                JSON.readTree(output[12]));
         JsonNode skill = JSON.readTree(output[0]);
         assertEquals("example", skill.path("name").asText());
         assertEquals("content", skill.path("content").asText());

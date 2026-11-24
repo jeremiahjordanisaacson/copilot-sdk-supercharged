@@ -11,6 +11,23 @@ from copilot._generated.rpc import (
 from copilot._generated.session_events import _load_AssistedApprovalAssessment
 
 
+def test_user_input_events_preserve_the_positional_text_only_wire_contract():
+    completed = session_events.UserInputCompletedData("request", "yes", True)
+    assert completed.to_dict() == {
+        "requestId": "request",
+        "answer": "yes",
+        "wasFreeform": True,
+    }
+    requested = session_events.UserInputRequestedData("Question?", "request", True, ["yes"], "tool")
+    assert requested.to_dict() == {
+        "question": "Question?",
+        "requestId": "request",
+        "allowFreeform": True,
+        "choices": ["yes"],
+        "toolCallId": "tool",
+    }
+
+
 async def test_forge_manifest_retains_nullable_metadata():
     base = {"path": ".github/skills/demo/SKILL.md", "change_type": "added"}
     for metadata in [

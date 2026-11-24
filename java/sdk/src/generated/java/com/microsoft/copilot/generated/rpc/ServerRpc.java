@@ -53,6 +53,8 @@ public final class ServerRpc {
     final ServerAhpApi ahp;
     /** API methods for the {@code sandbox} namespace. */
     public final ServerSandboxApi sandbox;
+    /** API methods for the {@code permissions} namespace. */
+    public final ServerPermissionsApi permissions;
     /** API methods for the {@code feedback} namespace. */
     final ServerFeedbackApi feedback;
     /** API methods for the {@code persistence} namespace. */
@@ -63,8 +65,6 @@ public final class ServerRpc {
     final ServerRepoApi repo;
     /** API methods for the {@code featureFlags} namespace. */
     final ServerFeatureFlagsApi featureFlags;
-    /** API methods for the {@code permissions} namespace. */
-    final ServerPermissionsApi permissions;
     /** API methods for the {@code managedSettings} namespace. */
     public final ServerManagedSettingsApi managedSettings;
     /** API methods for the {@code environments} namespace. */
@@ -157,12 +157,12 @@ public final class ServerRpc {
         this.logging = new ServerLoggingApi(caller);
         this.ahp = new ServerAhpApi(caller);
         this.sandbox = new ServerSandboxApi(caller);
+        this.permissions = new ServerPermissionsApi(caller);
         this.feedback = new ServerFeedbackApi(caller);
         this.persistence = new ServerPersistenceApi(caller);
         this.user = new ServerUserApi(caller);
         this.repo = new ServerRepoApi(caller);
         this.featureFlags = new ServerFeatureFlagsApi(caller);
-        this.permissions = new ServerPermissionsApi(caller);
         this.managedSettings = new ServerManagedSettingsApi(caller);
         this.environments = new ServerEnvironmentsApi(caller);
         this.hooks = new ServerHooksApi(caller);

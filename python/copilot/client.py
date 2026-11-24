@@ -80,6 +80,7 @@ from ._generated.rpc import FusionTier as _RpcFusionTier
 from ._generated.session_events import (
     PermissionMode,
     SessionEvent,
+    UserInputImageAttachmentConstraints,
     session_event_from_dict,
 )
 from ._jsonrpc import JsonRpcClient, JsonRpcError, ProcessExitedError
@@ -7404,8 +7405,15 @@ class CopilotClient:
         if not session:
             raise ValueError(f"unknown session {session_id}")
 
-        result = await session._handle_user_input_request(params)
+        request = dict(params)
+        if "imageAttachmentConstraints" in request:
+            request["imageAttachmentConstraints"] = UserInputImageAttachmentConstraints.from_dict(
+                request["imageAttachmentConstraints"]
+            )
+        result = await session._handle_user_input_request(request)
         reply: dict[str, Any] = {"answer": result["answer"], "wasFreeform": result["wasFreeform"]}
+        if "attachments" in result:
+            reply["attachments"] = [attachment.to_dict() for attachment in result["attachments"]]
         decision_context = result.get("decisionContext")
         if decision_context is not None:
             reply["decisionContext"] = decision_context.to_dict()

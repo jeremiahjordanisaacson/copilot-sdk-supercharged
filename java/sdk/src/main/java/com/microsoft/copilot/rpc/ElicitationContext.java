@@ -11,6 +11,32 @@ package com.microsoft.copilot.rpc;
  */
 public class ElicitationContext {
 
+    private String requestId;
+
+    /** Gets the pending request ID. @return the request ID or null */
+    public String getRequestId() {
+        return requestId;
+    }
+
+    /** Sets the pending request ID. @param requestId request ID @return this */
+    public ElicitationContext setRequestId(String requestId) {
+        this.requestId = requestId;
+        return this;
+    }
+
+    private java.util.Map<String, Object> meta;
+
+    /** Gets negotiated request metadata. @return metadata or null */
+    public java.util.Map<String, Object> getMeta() {
+        return meta;
+    }
+
+    /** Sets negotiated request metadata. @param meta metadata @return this */
+    public ElicitationContext setMeta(java.util.Map<String, Object> meta) {
+        this.meta = meta;
+        return this;
+    }
+
     private String sessionId;
     private String message;
     private ElicitationSchema requestedSchema;

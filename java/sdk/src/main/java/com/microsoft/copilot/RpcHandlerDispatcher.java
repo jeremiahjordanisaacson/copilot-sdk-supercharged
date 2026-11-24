@@ -512,7 +512,8 @@ final class RpcHandlerDispatcher {
         try {
             String sessionId = params.get("sessionId").asText();
             JsonNode eventNode = params.get("event");
-            LOG.fine("Received session.event: " + eventNode);
+            LOG.fine(() -> "Received session.event: "
+                    + JsonRpcClient.redactCredentialsForLogging(String.valueOf(eventNode)));
 
             CopilotSession session = sessions.get(sessionId);
             if (eventNode != null) {
@@ -693,6 +694,11 @@ final class RpcHandlerDispatcher {
                 }
 
                 var request = new UserInputRequest().setQuestion(question);
+                JsonNode imageConstraints = params.get("imageAttachmentConstraints");
+                if (imageConstraints != null && !imageConstraints.isNull()) {
+                    request.setImageAttachmentConstraints(MAPPER.treeToValue(imageConstraints,
+                            com.microsoft.copilot.generated.UserInputImageAttachmentConstraints.class));
+                }
                 if (choicesNode != null && choicesNode.isArray()) {
                     var choices = new ArrayList<String>();
                     for (JsonNode choice : choicesNode) {
@@ -717,6 +723,9 @@ final class RpcHandlerDispatcher {
                         Map<String, Object> reply = new LinkedHashMap<>();
                         reply.put("answer", answer);
                         reply.put("wasFreeform", response.isWasFreeform());
+                        if (response.getAttachments() != null) {
+                            reply.put("attachments", response.getAttachments());
+                        }
                         if (response.getDecisionContext() != null) {
                             reply.put("decisionContext", response.getDecisionContext());
                         }

@@ -1,4 +1,4 @@
-use copilot_sdk::SessionId;
+use copilot_sdk::{ErrorKind, SessionErrorKind, SessionId};
 
 use super::support::wait_for_condition;
 
@@ -53,10 +53,9 @@ async fn should_report_error_when_deleting_unknown_session_id() {
                     .delete_session(&unknown)
                     .await
                     .expect_err("delete unknown session must fail");
-                assert_eq!(error.rpc_code(), Some(-32603), "{error}");
                 assert!(
-                    error.to_string().contains("Session file not found"),
-                    "{error}"
+                    matches!(error.kind(), ErrorKind::Session(SessionErrorKind::NotFound(id)) if id == unknown),
+                    "expected NotFound with the requested session ID"
                 );
                 let metadata = client
                     .get_session_metadata(&unknown)

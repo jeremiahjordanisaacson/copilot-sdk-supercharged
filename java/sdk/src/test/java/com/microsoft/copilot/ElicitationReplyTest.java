@@ -10,6 +10,7 @@ import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +22,13 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.microsoft.copilot.generated.SessionEvent;
+import com.microsoft.copilot.generated.ElicitationRequestedEvent;
+import com.microsoft.copilot.generated.rpc.SessionUiElicitationResult;
+import com.microsoft.copilot.generated.rpc.UIElicitationResponseAction;
+import com.microsoft.copilot.rpc.ElicitationParams;
+import com.microsoft.copilot.rpc.ElicitationSchema;
+import com.microsoft.copilot.rpc.SessionCapabilities;
+import com.microsoft.copilot.rpc.SessionUiCapabilities;
 import com.microsoft.copilot.generated.rpc.PermissionDecisionContext;
 import com.microsoft.copilot.generated.rpc.PermissionDecisionOutcome;
 import com.microsoft.copilot.generated.rpc.PermissionDecisionSource;
@@ -56,12 +64,55 @@ class ElicitationReplyTest {
 
     @Test
     void acceptedResultIsSent() throws Exception {
-        ObjectNode reply = reply("accepted", context -> CompletableFuture.completedFuture(
-                new ElicitationResult().setAction(ElicitationResultAction.ACCEPT).setContent(Map.of("name", "Ada"))));
+        ObjectNode reply = reply("accepted", context -> {
+            assertEquals("accepted", context.getRequestId());
+            return CompletableFuture.completedFuture(new ElicitationResult().setAction(ElicitationResultAction.ACCEPT)
+                    .setContent(Map.of("name", "Ada")));
+        });
 
         assertEquals("accept", reply.path("result").path("action").asText());
         assertEquals("Ada", reply.path("result").path("content").path("name").asText());
         assertFalse(reply.has("decisionContext"), "an unlabeled answer must not send decisionContext: " + reply);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void eventRedactionCannotChangeCallbackMetadata() throws Exception {
+        String key = "github.com/copilot/ask-user-images";
+        var redacted = new CompletableFuture<Map<String, Object>>();
+        try (var subscription = session.on(event -> {
+            if (event instanceof ElicitationRequestedEvent requested) {
+                var meta = requested.getData().meta();
+                ((List<Object>) ((Map<String, Object>) meta.get(key)).get("fieldNames")).set(0, "redacted");
+                redacted.complete(meta);
+            }
+        })) {
+            dispatch("isolated-meta", context -> redacted.thenApply(observerMeta -> {
+                var fields = (List<Object>) ((Map<String, Object>) context.getMeta().get(key)).get("fieldNames");
+                assertEquals(List.of("screenshot"), fields);
+                fields.set(0, "callback");
+                assertEquals(List.of("redacted"), ((Map<String, Object>) observerMeta.get(key)).get("fieldNames"));
+                return new ElicitationResult().setAction(ElicitationResultAction.ACCEPT);
+            }), Map.of(key, Map.of("fieldNames", List.of("screenshot"))));
+            assertEquals("accept", awaitReply("isolated-meta").path("result").path("action").asText());
+        }
+    }
+
+    @Test
+    void publicElicitationPreservesApplicationMetadata() throws Exception {
+        var metadata = Map.<String, Object>of("example.com/form", Map.of("receipt", List.of("saved")));
+        when(rpc.invoke(eq("session.ui.elicitation"), any(), eq(SessionUiElicitationResult.class)))
+                .thenReturn(CompletableFuture
+                        .completedFuture(SessionUiElicitationResult.builder().action(UIElicitationResponseAction.ACCEPT)
+                                .content(Map.of("name", "Ada")).meta(metadata).build()));
+        session.setCapabilities(new SessionCapabilities().setUi(new SessionUiCapabilities().setElicitation(true)));
+
+        var result = session.getUi().elicitation(new ElicitationParams().setMessage("Name?")
+                .setRequestedSchema(new ElicitationSchema().setProperties(Map.of()))).get(5, TimeUnit.SECONDS);
+
+        assertEquals(ElicitationResultAction.ACCEPT, result.getAction());
+        assertEquals("Ada", result.getContent().get("name"));
+        assertEquals(metadata, result.getMeta());
     }
 
     @Test
@@ -138,10 +189,13 @@ class ElicitationReplyTest {
     }
 
     private void dispatch(String requestId, ElicitationHandler handler) throws Exception {
+        dispatch(requestId, handler, Map.of());
+    }
+
+    private void dispatch(String requestId, ElicitationHandler handler, Map<String, Object> metadata) throws Exception {
         session.registerElicitationHandler(handler);
-        SessionEvent event = JsonRpcClient.getObjectMapper().convertValue(
-                Map.of("type", "elicitation.requested", "data", Map.of("requestId", requestId, "message", "Name?")),
-                SessionEvent.class);
+        SessionEvent event = JsonRpcClient.getObjectMapper().convertValue(Map.of("type", "elicitation.requested",
+                "data", Map.of("requestId", requestId, "message", "Name?", "_meta", metadata)), SessionEvent.class);
         Method dispatchMethod = CopilotSession.class.getDeclaredMethod("dispatchEvent", SessionEvent.class);
         dispatchMethod.setAccessible(true);
         dispatchMethod.invoke(session, event);

@@ -7,6 +7,8 @@ package com.microsoft.copilot.rpc;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.microsoft.copilot.generated.rpc.PermissionDecisionContext;
+import com.microsoft.copilot.generated.rpc.UserInputImageAttachment;
+import java.util.List;
 
 /**
  * Response to a user input request.
@@ -14,6 +16,32 @@ import com.microsoft.copilot.generated.rpc.PermissionDecisionContext;
  * @since 1.0.6
  */
 public class UserInputResponse {
+
+    @JsonProperty("attachments")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<UserInputImageAttachment> attachments;
+
+    /**
+     * Gets optional images supplied with this answer.
+     *
+     * @return the images, or {@code null} for a text-only answer
+     */
+    public List<UserInputImageAttachment> getAttachments() {
+        return attachments;
+    }
+
+    /**
+     * Sets images for a request that advertised image support. An image-only answer
+     * uses an empty answer and {@code wasFreeform=true}.
+     *
+     * @param attachments
+     *            the images, or {@code null} for none
+     * @return this instance for method chaining
+     */
+    public UserInputResponse setAttachments(List<UserInputImageAttachment> attachments) {
+        this.attachments = attachments;
+        return this;
+    }
 
     @JsonProperty("answer")
     private String answer;

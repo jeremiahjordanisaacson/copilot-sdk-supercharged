@@ -17,6 +17,7 @@ public class ElicitationResult {
 
     private ElicitationResultAction action;
     private Map<String, Object> content;
+    private Map<String, Object> meta;
     private PermissionDecisionContext decisionContext;
 
     /**
@@ -66,6 +67,17 @@ public class ElicitationResult {
      */
     public ElicitationResult setContent(Map<String, Object> content) {
         this.content = content;
+        return this;
+    }
+
+    /** Gets negotiated response metadata. @return metadata or null */
+    public Map<String, Object> getMeta() {
+        return meta;
+    }
+
+    /** Sets negotiated response metadata. @param meta metadata @return this */
+    public ElicitationResult setMeta(Map<String, Object> meta) {
+        this.meta = meta;
         return this;
     }
 

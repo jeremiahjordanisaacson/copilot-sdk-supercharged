@@ -546,6 +546,8 @@ type (
 	UsageMetricsProviderModelMetric                                = rpc.UsageMetricsProviderModelMetric
 	UsageMetricsTokenDetail                                        = rpc.UsageMetricsTokenDetail
 	UserInputCompletedData                                         = rpc.UserInputCompletedData
+	UserInputImageAttachment                                       = rpc.UserInputImageAttachment
+	UserInputImageAttachmentConstraints                            = rpc.UserInputImageAttachmentConstraints
 	UserInputRequestedData                                         = rpc.UserInputRequestedData
 	UserMessageAgentMode                                           = rpc.UserMessageAgentMode
 	UserMessageData                                                = rpc.UserMessageData

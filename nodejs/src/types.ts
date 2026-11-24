@@ -23,6 +23,7 @@ import type {
     ReasoningSummary,
     SessionLimitsConfig,
     SessionEvent as GeneratedSessionEvent,
+    UserInputImageAttachmentConstraints,
 } from "./generated/session-events.js";
 import type { CopilotSession } from "./session.js";
 import type { JsonValue } from "./workflow.js";
@@ -51,6 +52,7 @@ import type {
     SandboxConfig,
     SessionManagementCreateHostRequest,
     SessionManagementCreateResult,
+    UIUserInputResponse,
 } from "./generated/rpc.js";
 import type { ToolSet } from "./toolSet.js";
 export type {
@@ -62,6 +64,10 @@ export type {
 } from "./generated/rpc.js";
 export type { RemoteSessionMode } from "./generated/rpc.js";
 export type { AutopilotOptions } from "./generated/rpc.js";
+export type {
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
+} from "./generated/session-events.js";
 export type { CurrentToolMetadata } from "./generated/rpc.js";
 export type { SandboxConfig, SandboxConfigSource } from "./generated/rpc.js";
 export type {
@@ -1187,6 +1193,8 @@ export interface ElicitationResult {
     action: "accept" | "decline" | "cancel";
     /** Form values submitted by the user (present when action is "accept"). */
     content?: Record<string, ElicitationFieldValue | undefined>;
+    /** Private negotiated extensions; never put image bytes in primitive content. */
+    _meta?: Record<string, unknown>;
 }
 
 /**
@@ -1218,6 +1226,10 @@ export interface ElicitationParams {
  * with session context. Mirrors the single-argument pattern of {@link CommandContext}.
  */
 export interface ElicitationContext {
+    /** Authoritative pending request ID when dispatched by the runtime. */
+    requestId?: string;
+    /** Request metadata, including negotiated built-in ask_user image constraints. */
+    _meta?: Record<string, unknown>;
     /** Identifier of the session that triggered the elicitation request. */
     sessionId: string;
     /** Message describing what information is needed from the user. */
@@ -1581,6 +1593,8 @@ export interface PromptDecisionLabel {
  */
 export interface PermissionHandlerInvocation {
     sessionId: string;
+    /** Identifier of the pending request that the handler will answer. */
+    requestId?: string;
     managedSettingsEnabled?: boolean;
     /**
      * Program invocation owning this permission request; absent for ordinary requests.
@@ -1645,6 +1659,8 @@ export const defaultJoinSessionPermissionHandler: PermissionHandler =
  * Legacy question-and-answer request from the `ask_user` tool.
  */
 export interface UserInputRequest {
+    /** Runtime-advertised image support. Absent when images are unsupported. */
+    imageAttachmentConstraints?: UserInputImageAttachmentConstraints;
     /**
      * The question to ask the user
      */
@@ -1672,17 +1688,7 @@ export interface UserInputRequest {
 /**
  * Response to a user input request
  */
-export interface UserInputResponse {
-    /**
-     * The user's answer
-     */
-    answer: string;
-
-    /**
-     * Whether the answer was freeform (not from choices)
-     */
-    wasFreeform: boolean;
-
+export interface UserInputResponse extends UIUserInputResponse {
     /**
      * Who answered and how (see {@link createAttributedResult}). When it says a
      * person answered interactively, the runtime counts the answer as the

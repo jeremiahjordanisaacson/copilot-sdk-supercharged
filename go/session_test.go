@@ -111,6 +111,9 @@ func TestPermissionHandlerReceivesDerivedPromptContext(t *testing.T) {
 	if observed.PromptRequest != promptRequest {
 		t.Fatalf("expected derived prompt context, got %#v", observed.PromptRequest)
 	}
+	if observed.RequestID != "permission-1" {
+		t.Fatalf("expected request ID, got %q", observed.RequestID)
+	}
 	if !observed.ManagedSettingsEnabled {
 		t.Fatal("expected managed settings context")
 	}

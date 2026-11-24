@@ -2922,6 +2922,83 @@ async fn elicitation_returns_typed_result() {
     assert_eq!(result.content.unwrap()["name"], "Octocat");
 }
 
+#[tokio::test]
+async fn user_input_image_handler_preserves_constraints_and_image_only_answer() {
+    struct ImageHandler;
+    #[async_trait]
+    impl UserInputHandler for ImageHandler {
+        async fn handle(
+            &self,
+            _session_id: SessionId,
+            _request_id: Option<RequestId>,
+            _question: String,
+            _choices: Option<Vec<String>>,
+            _allow_freeform: Option<bool>,
+        ) -> Option<UserInputResponse> {
+            panic!("image-aware callback must be used")
+        }
+
+        async fn handle_with_images(
+            &self,
+            _session_id: SessionId,
+            request: copilot_sdk::handler::UserInputRequest,
+        ) -> Option<
+            copilot_sdk::handler::AttributedResult<copilot_sdk::handler::ImageUserInputResponse>,
+        > {
+            let constraints = request.image_attachment_constraints.unwrap();
+            assert_eq!(constraints.allowed_mime_types, ["image/png"]);
+            assert_eq!(constraints.max_count, 1);
+            assert_eq!(constraints.max_bytes_per_image, 1024);
+            Some(copilot_sdk::handler::AttributedResult::unattributed(
+                serde_json::from_value(serde_json::json!({
+                    "answer": "",
+                    "wasFreeform": true,
+                    "attachments": [{
+                        "type": "image",
+                        "data": "aW1hZ2U=",
+                        "mimeType": "image/png"
+                    }]
+                }))
+                .unwrap(),
+            ))
+        }
+    }
+
+    let (_session, mut server) = create_session_pair_with_config(|cfg| {
+        cfg.with_interaction(|group| group.with_on_user_input_request(Arc::new(ImageHandler)))
+    })
+    .await;
+    server
+        .send_request(
+            301,
+            "userInput.request",
+            serde_json::json!({
+                "sessionId": server.session_id,
+                "question": "Share a screenshot",
+                "imageAttachmentConstraints": {
+                    "allowedMimeTypes": ["image/png"],
+                    "maxCount": 1,
+                    "maxBytesPerImage": 1024
+                }
+            }),
+        )
+        .await;
+
+    let response = timeout(TIMEOUT, server.read_response()).await.unwrap();
+    assert_eq!(
+        response["result"],
+        serde_json::json!({
+            "answer": "",
+            "wasFreeform": true,
+            "attachments": [{
+                "type": "image",
+                "data": "aW1hZ2U=",
+                "mimeType": "image/png"
+            }]
+        })
+    );
+}
+
 /// Answers each shell password prompt, or waits until it is cancelled.
 #[derive(Default)]
 struct SecretPrompts {
@@ -6730,6 +6807,75 @@ async fn elicitation_requested_forwards_the_wire_schema_verbatim() {
             .collect()
     };
     assert_eq!(keys(&seen), ["service", "replicas", "tier"]);
+}
+
+#[tokio::test]
+async fn elicitation_image_metadata_preserves_field_association_without_authority() {
+    use copilot_sdk::types::{ElicitationRequestWithMetadata, ElicitationResultWithMetadata};
+    const KEY: &str = "github.com/copilot/ask-user-images";
+    struct ImageHandler;
+    #[async_trait]
+    impl ElicitationHandler for ImageHandler {
+        async fn handle(
+            &self,
+            _: SessionId,
+            _: RequestId,
+            _: ElicitationRequest,
+        ) -> ElicitationResult {
+            panic!("metadata-aware handlers must receive negotiated constraints")
+        }
+
+        async fn handle_with_metadata(
+            &self,
+            _: SessionId,
+            _: RequestId,
+            request: ElicitationRequestWithMetadata,
+        ) -> AttributedResult<ElicitationResultWithMetadata> {
+            assert_eq!(
+                request.meta.as_ref().unwrap()[KEY]["fieldNames"],
+                serde_json::json!(["screenshot"])
+            );
+            AttributedResult::unattributed(ElicitationResultWithMetadata {
+                result: ElicitationResult {
+                    action: "accept".to_owned(),
+                    content: Some(serde_json::json!({"screenshot": ""})),
+                },
+                meta: Some(std::collections::HashMap::from([(
+                    KEY.to_owned(),
+                    serde_json::json!({
+                        "version": 1,
+                        "attachments": {"screenshot": [{"type": "image", "data": "aW1hZ2U=", "mimeType": "image/png"}]},
+                    }),
+                )])),
+            })
+        }
+    }
+    let (_session, mut server) = create_session_pair_with_config(|config| {
+        config
+            .with_interaction(|options| options.with_on_elicitation_request(Arc::new(ImageHandler)))
+    })
+    .await;
+    server
+        .send_event(
+            "elicitation.requested",
+            serde_json::json!({
+                "requestId": "image-answer", "message": "Show screenshot", "mode": "form",
+                "_meta": {(KEY): {"version": 1, "fieldNames": ["screenshot"]}},
+            }),
+        )
+        .await;
+    let call = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(call["method"], "session.ui.handlePendingElicitation");
+    assert_eq!(
+        call["params"]["result"],
+        serde_json::json!({
+            "action": "accept", "content": {"screenshot": ""},
+            "_meta": {(KEY): {"version": 1, "attachments": {
+                "screenshot": [{"type": "image", "data": "aW1hZ2U=", "mimeType": "image/png"}],
+            }}},
+        })
+    );
+    assert!(call["params"].get("decisionContext").is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -3924,7 +3924,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             lifecycleEvents.Enqueue(evt);
         }
 
-        public async ValueTask<UserInputRequestResponse> OnUserInputRequest(string sessionId, string question, IList<string>? choices = null, bool? allowFreeform = null, string? requestId = null)
+        public async ValueTask<UserInputRequestResponse> OnUserInputRequest(string sessionId, string question, IList<string>? choices = null, bool? allowFreeform = null, string? requestId = null, UserInputImageAttachmentConstraints? imageAttachmentConstraints = null)
         {
             var session = client.GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
             var request = new UserInputRequest
@@ -3932,11 +3932,12 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 Question = question,
                 Choices = choices,
                 AllowFreeform = allowFreeform,
-                RequestId = requestId
+                RequestId = requestId,
+                ImageAttachmentConstraints = imageAttachmentConstraints
             };
 
             var result = await session.HandleUserInputRequestAsync(request);
-            return new UserInputRequestResponse(result.Answer, result.WasFreeform, result.DecisionContext);
+            return new UserInputRequestResponse(result.Answer, result.WasFreeform, result.DecisionContext, result.Attachments);
         }
 
         public async ValueTask<ShellAuthenticationResponse> OnShellAuthenticationRequest(ShellAuthenticationRequestParams request, CancellationToken cancellationToken) =>
@@ -4321,7 +4322,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     internal record UserInputRequestResponse(
         string Answer,
         bool WasFreeform,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PermissionDecisionContext? DecisionContext = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PermissionDecisionContext? DecisionContext = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IList<UserInputImageAttachment>? Attachments = null);
 
     internal record ShellAuthenticationRequestParams(
         string? SessionId,

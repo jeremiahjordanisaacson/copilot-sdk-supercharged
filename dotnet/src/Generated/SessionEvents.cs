@@ -4807,6 +4807,12 @@ public sealed partial class SessionFusionResolvedData
     [JsonPropertyName("primaryModel")]
     public required string PrimaryModel { get; set; }
 
+    /// <summary>Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("primaryReasoningEffort")]
+    public string? PrimaryReasoningEffort { get; set; }
+
     /// <summary>Concrete model selected for Cascade repair, when required.</summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -7892,6 +7898,11 @@ public sealed partial class UserInputRequestedData
     [JsonPropertyName("choices")]
     public string[]? Choices { get; set; }
 
+    /// <summary>Runtime-advertised image attachment support. Absent when images are unsupported.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("imageAttachmentConstraints")]
+    public UserInputImageAttachmentConstraints? ImageAttachmentConstraints { get; set; }
+
     /// <summary>The question or prompt to present to the user.</summary>
     [JsonPropertyName("question")]
     public required string Question { get; set; }
@@ -7914,6 +7925,15 @@ public sealed partial class UserInputCompletedData
     [JsonPropertyName("answer")]
     public string? Answer { get; set; }
 
+    /// <summary>
+    /// Optional image payloads from completion sources that include them.
+    /// Runtime notifications omit this field; accepted images are available
+    /// in the associated canonical tool.execution_complete result.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("attachments")]
+    public UserInputImageAttachment[]? Attachments { get; set; }
+
     /// <summary>Request ID of the resolved user input request; clients should dismiss any UI for this request.</summary>
     [JsonPropertyName("requestId")]
     public required string RequestId { get; set; }
@@ -7927,6 +7947,11 @@ public sealed partial class UserInputCompletedData
 /// <summary>Elicitation request; may be form-based (structured input) or URL-based (browser redirect).</summary>
 public sealed partial class ElicitationRequestedData
 {
+    /// <summary>Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("_meta")]
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
     /// <summary>The source that initiated the request (MCP server name, or absent for agent-initiated).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("elicitationSource")]
@@ -7969,6 +7994,11 @@ public sealed partial class ElicitationRequestedData
 /// <summary>Elicitation request completion with the user's response.</summary>
 public sealed partial class ElicitationCompletedData
 {
+    /// <summary>Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("_meta")]
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
     /// <summary>The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("action")]
@@ -8782,9 +8812,19 @@ public sealed partial class WorkflowRunSettledData
 /// <summary>Payload of `session.skills_loaded` listing resolved skill metadata.</summary>
 public sealed partial class SessionSkillsLoadedData
 {
+    /// <summary>Errors from the published skill catalog. Older hosts can omit this snapshot.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("errors")]
+    public string[]? Errors { get; set; }
+
     /// <summary>Array of resolved skill metadata.</summary>
     [JsonPropertyName("skills")]
     public required SkillsLoadedSkill[] Skills { get; set; }
+
+    /// <summary>Warnings from the published skill catalog. Older hosts can omit this snapshot.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("warnings")]
+    public string[]? Warnings { get; set; }
 }
 
 /// <summary>Payload of `session.custom_agents_updated` with loaded custom agents plus non-fatal warnings and fatal errors.</summary>
@@ -15514,6 +15554,56 @@ public partial class PermissionResult
     public virtual string Kind { get; set; } = string.Empty;
 }
 
+
+/// <summary>Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images.</summary>
+/// <remarks>Nested data type for <c>UserInputImageAttachmentConstraints</c>.</remarks>
+public sealed partial class UserInputImageAttachmentConstraints
+{
+    /// <summary>
+    /// MIME types accepted by this request. Images must have readable nonzero
+    /// dimensions; GIF and WebP images must not exceed 2,000 pixels per side.
+    /// </summary>
+    [JsonPropertyName("allowedMimeTypes")]
+    public required string[] AllowedMimeTypes { get; set; }
+
+    /// <summary>Maximum decoded byte length of each image.</summary>
+    [JsonPropertyName("maxBytesPerImage")]
+    public required long MaxBytesPerImage { get; set; }
+
+    /// <summary>Maximum number of images accepted in one answer.</summary>
+    [JsonPropertyName("maxCount")]
+    public required long MaxCount { get; set; }
+}
+
+/// <summary>An inline image supplied in an answer to a legacy ask_user request that advertises image support.</summary>
+/// <remarks>Nested data type for <c>UserInputImageAttachment</c>.</remarks>
+public sealed partial class UserInputImageAttachment
+{
+    /// <summary>Nonempty image bytes encoded as strict padded standard base64, without a data URL prefix or whitespace.</summary>
+    [RegularExpression("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Safe for generated string properties: JSON Schema minLength/maxLength map to string length validation, not reflection over trimmed Count members")]
+    [MinLength(4)]
+    [JsonPropertyName("data")]
+    public required string Data { get; set; }
+
+    /// <summary>Optional description of the image.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    /// <summary>Optional client-facing name of the image.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; set; }
+
+    /// <summary>MIME type of the image, matching an advertised allowed MIME type.</summary>
+    [JsonPropertyName("mimeType")]
+    public required string MimeType { get; set; }
+
+    /// <summary>Attachment type. Always image.</summary>
+    [JsonPropertyName("type")]
+    public required string Type { get; set; }
+}
 
 /// <summary>JSON Schema describing the form fields to present to the user (form mode only).</summary>
 /// <remarks>Nested data type for <c>ElicitationRequestedSchema</c>.</remarks>
@@ -26993,6 +27083,8 @@ public readonly struct ExtensionsLoadedExtensionStatus : IEquatable<ExtensionsLo
 [JsonSerializable(typeof(UsageMetricsTokenDetail))]
 [JsonSerializable(typeof(UserInputCompletedData))]
 [JsonSerializable(typeof(UserInputCompletedEvent))]
+[JsonSerializable(typeof(UserInputImageAttachment))]
+[JsonSerializable(typeof(UserInputImageAttachmentConstraints))]
 [JsonSerializable(typeof(UserInputRequestedData))]
 [JsonSerializable(typeof(UserInputRequestedEvent))]
 [JsonSerializable(typeof(UserMessageData))]

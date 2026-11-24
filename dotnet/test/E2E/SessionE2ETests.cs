@@ -797,21 +797,19 @@ public class SessionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) :
         var session = await Ctx.CreateSessionAsync(
             client,
             new CreateSessionOptions { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll } });
-        var disposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposalStarted = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        session.On<SessionEvent>(evt =>
+        session.On<SessionIdleEvent>(_ =>
         {
-            if (evt is SessionInfoEvent)
-            {
-                // Call DisposeAsync from within a handler — must not deadlock.
-                session.DisposeAsync().AsTask().ContinueWith(_ => disposed.TrySetResult());
-            }
+            // Isolate handler reentrancy from active-turn cancellation.
+            disposalStarted.TrySetResult(session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)));
         });
 
-        await session.LogAsync("Dispose from handler trigger");
+        // Wait only for admission, not completion that the handler's disposal can cancel.
+        await session.SendAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
-        // If this times out, we deadlocked.
-        await disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var disposal = await disposalStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await disposal;
 
         await client.ForceStopAsync();
     }

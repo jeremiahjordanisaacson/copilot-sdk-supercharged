@@ -115,6 +115,7 @@ genrule(
         "//src/native/schema-codegen:generated/lifecycle-diagnostics.schema.json",
         "//src/native/schema-codegen:generated/session-events.schema.json",
         "scripts/codegen/go.ts",
+        "scripts/codegen/image-user-input.ts",
     ] + HAND_WRITTEN_GO_INPUTS + SHARED_CODEGEN_INPUTS,
     outs = ["projections/go.tar"],
     cmd = """
@@ -192,6 +193,7 @@ genrule(
         "//src/native/schema-codegen:generated/lifecycle-diagnostics.schema.json",
         "//src/native/schema-codegen:generated/session-events.schema.json",
         "scripts/codegen/rust.ts",
+        "scripts/codegen/image-user-input.ts",
         "scripts/codegen/rust-layout.mjs",
         "scripts/codegen/rust-api-domains.mjs",
         "//src/sdk/rust:.rustfmt.toml",

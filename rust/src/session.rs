@@ -30,7 +30,6 @@ use crate::handler::{
     AttributedResult, AutoModeSwitchHandler, AutoModeSwitchResponse, ElicitationHandler,
     ExitPlanModeHandler, McpAuthHandler, McpAuthRequest, McpAuthResponse, McpAuthResult,
     PermissionHandler, PermissionResult, ShellAuthenticationHandler, UserInputHandler,
-    UserInputResponse,
 };
 use crate::hooks::SessionHooks;
 use crate::memory_store::{MemoryStore, StoredMemory};
@@ -4786,6 +4785,20 @@ async fn handle_notification(
                 elicitation_source: elicitation_data.elicitation_source,
                 url: elicitation_data.url,
             };
+            let request = crate::types::ElicitationRequestWithMetadata {
+                request,
+                meta: notification
+                    .event
+                    .data
+                    .get("_meta")
+                    .and_then(serde_json::Value::as_object)
+                    .map(|metadata| {
+                        metadata
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect()
+                    }),
+            };
             let client = client.clone();
             let sid = session_id.clone();
             let span = tracing::error_span!(
@@ -4813,7 +4826,7 @@ async fn handle_notification(
                             async move {
                                 let handler_start = Instant::now();
                                 let response = elicitation_handler
-                                    .handle_attributed(sid.clone(), request_id.clone(), request)
+                                    .handle_with_metadata(sid.clone(), request_id.clone(), request)
                                     .await;
                                 tracing::debug!(
                                     elapsed_ms = handler_start.elapsed().as_millis(),
@@ -4835,7 +4848,12 @@ async fn handle_notification(
                         Ok(r) => r,
                         // Startup abort is not a handler failure: no fallback RPC.
                         Err(error) if error.is_cancelled() => return,
-                        Err(_) => AttributedResult::unattributed(cancel.clone()),
+                        Err(_) => AttributedResult::unattributed(
+                            crate::types::ElicitationResultWithMetadata {
+                                result: cancel.clone(),
+                                meta: None,
+                            },
+                        ),
                     };
                     let mut params = serde_json::json!({
                         "sessionId": sid,
@@ -5383,7 +5401,18 @@ async fn handle_request(
             let handler_start = Instant::now();
             let response = if let Some(user_input_handler) = handlers.user_input.as_ref() {
                 user_input_handler
-                    .handle_attributed(sid.clone(), request_id, question, choices, allow_freeform)
+                    .handle_with_images(
+                        sid.clone(),
+                        crate::handler::UserInputRequest {
+                            request_id,
+                            question,
+                            choices,
+                            allow_freeform,
+                            image_attachment_constraints: params
+                                .and_then(|p| p.get("imageAttachmentConstraints"))
+                                .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        },
+                    )
                     .await
             } else {
                 None
@@ -5397,9 +5426,10 @@ async fn handle_request(
             let rpc_result = match response {
                 Some(AttributedResult {
                     result:
-                        UserInputResponse {
+                        crate::handler::ImageUserInputResponse {
                             answer,
                             was_freeform,
+                            attachments,
                         },
                     decision_context,
                 }) => {
@@ -5410,6 +5440,10 @@ async fn handle_request(
                     if let Some(decision_context) = decision_context {
                         reply["decisionContext"] = serde_json::to_value(decision_context)
                             .expect("PermissionDecisionContext serialization cannot fail");
+                    }
+                    if let Some(attachments) = attachments {
+                        reply["attachments"] = serde_json::to_value(attachments)
+                            .expect("UserInputImageAttachment serialization cannot fail");
                     }
                     reply
                 }

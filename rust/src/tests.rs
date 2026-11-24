@@ -11,6 +11,57 @@ use crate::entra::{EntraTokenProviderArgs, EntraTokenProviderContext, EntraToken
 mod process_lifecycle;
 
 #[test]
+fn session_not_found_rpc_errors_preserve_the_requested_id() {
+    let session_id = SessionId::new("missing-session");
+    let file_error = format!("Session file not found for {session_id}");
+    for (case, message) in [
+        ("legacy wording", format!("Session not found: {session_id}")),
+        (
+            "sessions.delete wrapper",
+            format!("Request sessions.delete failed with message: {file_error}"),
+        ),
+        ("bare missing-file error", file_error),
+    ] {
+        let error = Client::call_error(
+            JsonRpcError {
+                code: -32603,
+                message,
+                data: None,
+            },
+            Some(session_id.clone()),
+            false,
+        );
+        assert!(
+            matches!(error.kind(), ErrorKind::Session(SessionErrorKind::NotFound(id)) if id == session_id),
+            "{case}: expected NotFound with the requested session ID"
+        );
+    }
+}
+
+#[test]
+fn session_not_found_text_does_not_reclassify_unrelated_rpc_errors() {
+    for (message, is_repo_settings_write) in [
+        ("Cannot write settings in /repos/Session not found", true),
+        ("Session file not found for repository settings path", true),
+        (
+            "Request session.delete failed with message: Cannot read /worktrees/Session file not found for project",
+            false,
+        ),
+    ] {
+        let error = Client::call_error(
+            JsonRpcError {
+                code: -32603,
+                message: message.to_string(),
+                data: None,
+            },
+            None,
+            is_repo_settings_write,
+        );
+        assert_eq!(error.kind(), &ErrorKind::Rpc { code: -32603 }, "{message}");
+    }
+}
+
+#[test]
 fn ui_elicitation_preserves_mcp_extension_wire_fields() {
     use crate::generated::api_types::UIElicitationPrompt;
 

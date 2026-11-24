@@ -1402,7 +1402,7 @@ impl<'a> ClientRpc<'a> {
     }
 
     /// `permissions.*` sub-namespace.
-    pub(crate) fn permissions(&self) -> ClientRpcPermissions<'a> {
+    pub fn permissions(&self) -> ClientRpcPermissions<'a> {
         ClientRpcPermissions {
             client: self.client,
         }
@@ -8063,6 +8063,13 @@ impl<'a> ClientRpcMcp<'a> {
         }
     }
 
+    /// `mcp.secrets.*` sub-namespace.
+    pub fn secrets(&self) -> ClientRpcMcpSecrets<'a> {
+        ClientRpcMcpSecrets {
+            client: self.client,
+        }
+    }
+
     /// Discovers MCP servers from user, workspace, plugin, and builtin sources.
     ///
     /// Wire method: `mcp.discover`.
@@ -9166,6 +9173,88 @@ impl<'a> ClientRpcMcpRegistry<'a> {
     }
 }
 
+/// `mcp.secrets.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcMcpSecrets<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcMcpSecrets<'a> {
+    /// Persists a legacy MCP configuration credential in the runtime-owned store. Returns the selected backend; storage and installation-ownership errors propagate. Installation-owned credentials require the installation APIs.
+    ///
+    /// Wire method: `mcp.secrets.save`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A legacy MCP configuration credential to persist in the host's secret store.
+    ///
+    /// # Returns
+    ///
+    /// Whether the OS keychain accepted the saved MCP credential.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn save(&self, params: McpSecretSaveRequest) -> Result<McpSecretSaveResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(rpc_methods::MCP_SECRETS_SAVE, Some(wire_params))
+            .await
+    }
+
+    /// Deletes a legacy MCP configuration credential from the runtime-owned store. Installation-owned credentials require the installation APIs.
+    ///
+    /// Wire method: `mcp.secrets.delete`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - An MCP configuration credential to remove from the host's secret store.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn delete(&self, params: McpSecretDeleteRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::MCP_SECRETS_DELETE, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes legacy credentials indexed for an MCP server. Slash-named servers require MCP configuration removal to preserve shared credential ownership.
+    ///
+    /// Wire method: `mcp.secrets.deleteServer`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A legacy MCP server whose configuration credentials must be removed.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn delete_server(&self, params: McpSecretDeleteServerRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _: serde::de::IgnoredAny = self
+            .client
+            .call_typed(rpc_methods::MCP_SECRETS_DELETESERVER, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+}
+
 /// `mcpSource.*` RPCs.
 #[derive(Clone, Copy)]
 pub(crate) struct ClientRpcMcpSource<'a> {
@@ -9429,11 +9518,18 @@ impl<'a> ClientRpcNetwork<'a> {
 
 /// `permissions.*` RPCs.
 #[derive(Clone, Copy)]
-pub(crate) struct ClientRpcPermissions<'a> {
+pub struct ClientRpcPermissions<'a> {
     pub(crate) client: &'a Client,
 }
 
 impl<'a> ClientRpcPermissions<'a> {
+    /// `permissions.extensionApprovals.*` sub-namespace.
+    pub fn extension_approvals(&self) -> ClientRpcPermissionsExtensionApprovals<'a> {
+        ClientRpcPermissionsExtensionApprovals {
+            client: self.client,
+        }
+    }
+
     /// `permissions.folderTrust.*` sub-namespace.
     pub(crate) fn folder_trust(&self) -> ClientRpcPermissionsFolderTrust<'a> {
         ClientRpcPermissionsFolderTrust {
@@ -9475,6 +9571,110 @@ impl<'a> ClientRpcPermissions<'a> {
         self.client
             .call_typed(
                 rpc_methods::PERMISSIONS_EVALUATEMANAGEDPOLICY,
+                Some(wire_params),
+            )
+            .await
+    }
+}
+
+/// `permissions.extensionApprovals.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcPermissionsExtensionApprovals<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcPermissionsExtensionApprovals<'a> {
+    /// Persists an eligible live plugin extension permission request for the user before the host answers that request normally.
+    ///
+    /// Wire method: `permissions.extensionApprovals.grant`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies a live extension permission request to persist before the host answers it normally.
+    ///
+    /// # Returns
+    ///
+    /// Whether the pending request was eligible and persisted.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn grant(
+        &self,
+        params: PermissionsExtensionApprovalsGrantRequest,
+    ) -> Result<PermissionsExtensionApprovalsGrantResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::PERMISSIONS_EXTENSIONAPPROVALS_GRANT,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Lists user-scoped plugin extension approvals across sessions.
+    ///
+    /// Wire method: `permissions.extensionApprovals.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Lists user-scoped plugin extension approvals for the server profile or an attached session profile.
+    ///
+    /// # Returns
+    ///
+    /// All user-scoped plugin extension approvals.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list(
+        &self,
+        params: PermissionsExtensionApprovalsListRequest,
+    ) -> Result<PermissionsExtensionApprovalsListResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::PERMISSIONS_EXTENSIONAPPROVALS_LIST,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Revokes one user-scoped plugin extension approval by extension and installation identity.
+    ///
+    /// Wire method: `permissions.extensionApprovals.revoke`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Identifies one plugin extension installation approval to revoke.
+    ///
+    /// # Returns
+    ///
+    /// Whether a matching approval was revoked.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn revoke(
+        &self,
+        params: PermissionsExtensionApprovalsRevokeRequest,
+    ) -> Result<PermissionsExtensionApprovalsRevokeResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        self.client
+            .call_typed(
+                rpc_methods::PERMISSIONS_EXTENSIONAPPROVALS_REVOKE,
                 Some(wire_params),
             )
             .await
@@ -28883,6 +29083,42 @@ impl<'a> SessionRpcUi<'a> {
             .await
     }
 
+    /// Resolves a pending `user_input.requested` event with the user's response.
+    ///
+    /// Wire method: `session.ui.handlePendingUserInput`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request ID of a pending `user_input.requested` event and the user's response.
+    ///
+    /// # Returns
+    ///
+    /// Indicates whether the pending UI request was resolved by this call.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts image-only or text-and-image answers without changing legacy response literals.
+    pub async fn handle_pending_user_input_with_images(
+        &self,
+        params: UIHandlePendingUserInputWithImagesRequest,
+    ) -> Result<UIHandlePendingResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_UI_HANDLEPENDINGUSERINPUT,
+                Some(wire_params),
+            )
+            .await
+    }
+
     /// Resolves a pending `user_input.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
     ///
     /// Wire method: `session.ui.handleHumanUserInput`.
@@ -28905,6 +29141,42 @@ impl<'a> SessionRpcUi<'a> {
     pub(crate) async fn handle_human_user_input(
         &self,
         params: UIHandlePendingUserInputRequest,
+    ) -> Result<UIHandlePendingResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(
+                rpc_methods::SESSION_UI_HANDLEHUMANUSERINPUT,
+                Some(wire_params),
+            )
+            .await
+    }
+
+    /// Resolves a pending `user_input.requested` event after direct interaction in the trusted in-process client or authenticated owning host.
+    ///
+    /// Wire method: `session.ui.handleHumanUserInput`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Request ID of a pending `user_input.requested` event and the user's response.
+    ///
+    /// # Returns
+    ///
+    /// Indicates whether the pending UI request was resolved by this call.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts image-only or text-and-image answers without changing legacy response literals.
+    pub(crate) async fn handle_human_user_input_with_images(
+        &self,
+        params: UIHandlePendingUserInputWithImagesRequest,
     ) -> Result<UIHandlePendingResult, Error> {
         let mut wire_params = serde_json::to_value(params)?;
         wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());

@@ -9,7 +9,7 @@ import { sendCancellableRequest } from "../rpcCancellation.js";
 import { sendRequestWithSignal } from "../jsonrpcTypes.js";
 import { assertStrictJson } from "../jsonValue.js";
 import { settingsResponseParams, type SettingsResponse, type SettingsResponseOptions } from "../settingsJson.js";
-import type { AbortReason, AgentModelPolicy, AssistedApprovalAssessment, Attachment, AutoTier, ContextTier, EmbeddedBlobResourceContents, EmbeddedTextResourceContents, IdeConnectionState, IndexedSearchState, ManagedPermissionsContext, ManagedSettingsResolvedData, McpOauthHttpResponse, McpOauthWWWAuthenticateParams, McpServerMetadata, McpServerSource, McpServerStatus, McpSkillOrigin, ModelChangeSource, ModelProviderKind, ModelProviderRef, PermissionDecisionSource, PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary, RemediationAction, SessionEvent, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskCompleteData, TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity } from "./session-events.js";
+import type { AbortReason, AgentModelPolicy, AssistedApprovalAssessment, Attachment, AutoTier, ContextTier, EmbeddedBlobResourceContents, EmbeddedTextResourceContents, IdeConnectionState, IndexedSearchState, ManagedPermissionsContext, ManagedSettingsResolvedData, McpOauthHttpResponse, McpOauthWWWAuthenticateParams, McpServerMetadata, McpServerSource, McpServerStatus, McpSkillOrigin, ModelChangeSource, ModelProviderKind, ModelProviderRef, PermissionDecisionSource, PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary, RemediationAction, SessionEvent, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskCompleteData, TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment, UserToolSessionApproval, Verbosity } from "./session-events.js";
 import type { LifecycleDiagnosticEvent } from "./lifecycle-diagnostics.js";
 
 import type { PermissionRequest } from "./session-events.js";
@@ -3184,18 +3184,18 @@ export type DiscoveredExtensionSource =
   /** Extension contributed by an installed plugin. */
   | "plugin";
 /**
- * Effective extension loading and agent-management mode
+ * Compatibility mode for the persisted extension preference, not session activation. Current runtimes never return load_only and report disabled instead.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "DiscoveredExtensionMode".
  */
 /** @experimental */
 export type DiscoveredExtensionMode =
-  /** Extensions are not loaded. */
+  /** The extension preference is disabled. */
   | "disabled"
-  /** Extensions are loaded, but the agent cannot create, reload, or manage them. */
+  /** Legacy compatibility value. Current runtimes report disabled instead. */
   | "load_only"
-  /** Extensions are loaded and the agent can create, reload, and manage them. */
+  /** The extension preference permits loading and management, subject to activation and permissions. */
   | "load_and_augment";
 /**
  * Hook event name. Discovery emits the file-configurable subset; SDK callbacks additionally support callback-only events.
@@ -34329,6 +34329,74 @@ export interface McpSamplingExecutionResult {
   error?: string;
 }
 /**
+ * An MCP configuration credential to remove from the host's secret store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretDeleteRequest".
+ */
+/** @experimental */
+export interface McpSecretDeleteRequest {
+  /**
+   * Secret reference to remove.
+   */
+  secretId: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
+ * A legacy MCP server whose configuration credentials must be removed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretDeleteServerRequest".
+ */
+/** @experimental */
+export interface McpSecretDeleteServerRequest {
+  /**
+   * Server name used by the legacy credential index.
+   */
+  serverName: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
+ * A legacy MCP configuration credential to persist in the host's secret store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretSaveRequest".
+ */
+/** @experimental */
+export interface McpSecretSaveRequest {
+  /**
+   * Secret reference used by an MCP server configuration.
+   */
+  secretId: string;
+  /**
+   * Credential value to persist.
+   */
+  value: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
+ * Whether the OS keychain accepted the saved MCP credential.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretSaveResult".
+ */
+/** @experimental */
+export interface McpSecretSaveResult {
+  /**
+   * True for keychain storage; false for the existing file backend.
+   */
+  usedKeychain: boolean;
+}
+/**
  * MCP server status entry, including config source/plugin source and any connection error.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -38680,6 +38748,133 @@ export interface PermissionsEvaluateManagedPolicyResult {
    * True when the managed layer supplies permission rules that the session must enforce.
    */
   permissionRulesActive: boolean;
+}
+/**
+ * A user-scoped approval for one installed plugin extension and capability set.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApproval".
+ */
+/** @experimental */
+export interface PermissionsExtensionApproval {
+  /**
+   * Stable extension identity, such as `plugin:plugin-name:extension-name`.
+   */
+  extensionName: string;
+  /**
+   * Name of the plugin that contributed the extension.
+   */
+  pluginName: string;
+  /**
+   * Exact privileged capabilities the user approved. A later request is covered only when its capabilities are a subset.
+   */
+  capabilities: string[];
+  /**
+   * RFC 3339 timestamp when the approval was last granted.
+   */
+  grantedAt: string;
+  /**
+   * Opaque stable identity of the installed plugin source. Hosts must return it unchanged when revoking.
+   */
+  installationKey: string;
+  /**
+   * Optional human-readable installation source label.
+   */
+  installationLabel?: string;
+}
+/**
+ * Identifies a live extension permission request to persist before the host answers it normally.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsGrantRequest".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsGrantRequest {
+  /**
+   * Session that owns the pending extension permission request.
+   */
+  sessionId: string;
+  /**
+   * Identifier of the pending extension permission request.
+   */
+  requestId: string;
+}
+/**
+ * Whether the pending request was eligible and persisted.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsGrantResult".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsGrantResult {
+  /**
+   * Whether the pending request was eligible and its approval was persisted.
+   */
+  granted: boolean;
+  /**
+   * The persisted approval when `granted` is true.
+   */
+  approval?: PermissionsExtensionApproval;
+}
+/**
+ * Lists user-scoped plugin extension approvals for the server profile or an attached session profile.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsListRequest".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsListRequest {
+  /**
+   * Optional attached session whose configuration profile should be listed.
+   */
+  sessionId?: string | null;
+}
+/**
+ * All user-scoped plugin extension approvals.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsListResult".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsListResult {
+  /**
+   * Stored user-scoped plugin extension approvals.
+   */
+  approvals: PermissionsExtensionApproval[];
+}
+/**
+ * Identifies one plugin extension installation approval to revoke.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsRevokeRequest".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsRevokeRequest {
+  /**
+   * Stable extension identity of the approval to revoke.
+   */
+  extensionName: string;
+  /**
+   * Opaque installation identity returned by the list or grant operation.
+   */
+  installationKey: string;
+  /**
+   * Optional attached session whose configuration profile contains the approval.
+   */
+  sessionId?: string | null;
+}
+/**
+ * Whether a matching approval was revoked.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsExtensionApprovalsRevokeResult".
+ */
+/** @experimental */
+export interface PermissionsExtensionApprovalsRevokeResult {
+  /**
+   * Whether a matching approval existed and was removed.
+   */
+  revoked: boolean;
 }
 /**
  * Indicates whether the operation succeeded.
@@ -53938,6 +54133,10 @@ export interface UIUserInputResponse {
    * True if the user typed a freeform response, false if they selected a presented choice. Used by telemetry to differentiate between free text input and choice selection.
    */
   wasFreeform: boolean;
+  /**
+   * Optional images, accepted only when the request advertises image attachment constraints. For an image-only answer, use an empty answer and wasFreeform true.
+   */
+  attachments?: UserInputImageAttachment[];
 }
 /**
  * An unanswered elicitation request.
@@ -59442,6 +59641,74 @@ export interface ProvidersSourceAddModelRequest {
   configuration: SavedProviderConfigurationAddModelRequest;
 }
 /**
+ * Whether the OS keychain accepted the saved MCP credential.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretsSaveResult".
+ */
+/** @experimental */
+export interface McpSecretsSaveResult {
+  /**
+   * True for keychain storage; false for the existing file backend.
+   */
+  usedKeychain: boolean;
+}
+/**
+ * A legacy MCP configuration credential to persist in the host's secret store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretsSaveRequest".
+ */
+/** @experimental */
+export interface McpSecretsSaveRequest {
+  /**
+   * Secret reference used by an MCP server configuration.
+   */
+  secretId: string;
+  /**
+   * Credential value to persist.
+   */
+  value: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
+ * An MCP configuration credential to remove from the host's secret store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretsDeleteRequest".
+ */
+/** @experimental */
+export interface McpSecretsDeleteRequest {
+  /**
+   * Secret reference to remove.
+   */
+  secretId: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
+ * A legacy MCP server whose configuration credentials must be removed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSecretsDeleteServerRequest".
+ */
+/** @experimental */
+export interface McpSecretsDeleteServerRequest {
+  /**
+   * Server name used by the legacy credential index.
+   */
+  serverName: string;
+  /**
+   * Expected mcp-secrets directory. Omit to use the runtime configuration root.
+   */
+  configDir?: string;
+}
+/**
  * A secret-free GitHub descriptor, an ordinary signed-out result, or a bounded degraded result.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -63193,6 +63460,39 @@ export function createServerRpc(connection: MessageConnection) {
                 connection.sendRequest("sandbox.getHostSupport", {}),
         },
         /** @experimental */
+        permissions: {
+            /** @experimental */
+            extensionApprovals: {
+                /**
+                 * Persists an eligible live plugin extension permission request for the user before the host answers that request normally.
+                 *
+                 * @param params Identifies a live extension permission request to persist before the host answers it normally.
+                 *
+                 * @returns Whether the pending request was eligible and persisted.
+                 */
+                grant: async (params: PermissionsExtensionApprovalsGrantRequest): Promise<PermissionsExtensionApprovalsGrantResult> =>
+                    connection.sendRequest("permissions.extensionApprovals.grant", params),
+                /**
+                 * Lists user-scoped plugin extension approvals across sessions.
+                 *
+                 * @param params Lists user-scoped plugin extension approvals for the server profile or an attached session profile.
+                 *
+                 * @returns All user-scoped plugin extension approvals.
+                 */
+                list: async (params: PermissionsExtensionApprovalsListRequest): Promise<PermissionsExtensionApprovalsListResult> =>
+                    connection.sendRequest("permissions.extensionApprovals.list", params),
+                /**
+                 * Revokes one user-scoped plugin extension approval by extension and installation identity.
+                 *
+                 * @param params Identifies one plugin extension installation approval to revoke.
+                 *
+                 * @returns Whether a matching approval was revoked.
+                 */
+                revoke: async (params: PermissionsExtensionApprovalsRevokeRequest): Promise<PermissionsExtensionApprovalsRevokeResult> =>
+                    connection.sendRequest("permissions.extensionApprovals.revoke", params),
+            },
+        },
+        /** @experimental */
         user: {
             /** @experimental */
             settings: {
@@ -63550,6 +63850,32 @@ export function createServerRpc(connection: MessageConnection) {
                  */
                 reload: async (): Promise<void> =>
                     connection.sendRequest("mcp.config.reload", {}),
+            },
+            /** @experimental */
+            secrets: {
+                /**
+                 * Persists a legacy MCP configuration credential in the runtime-owned store. Returns the selected backend; storage and installation-ownership errors propagate. Installation-owned credentials require the installation APIs.
+                 *
+                 * @param params A legacy MCP configuration credential to persist in the host's secret store.
+                 *
+                 * @returns Whether the OS keychain accepted the saved MCP credential.
+                 */
+                save: async (params: McpSecretsSaveRequest): Promise<McpSecretsSaveResult> =>
+                    connection.sendRequest("mcp.secrets.save", params),
+                /**
+                 * Deletes a legacy MCP configuration credential from the runtime-owned store. Installation-owned credentials require the installation APIs.
+                 *
+                 * @param params An MCP configuration credential to remove from the host's secret store.
+                 */
+                delete: async (params: McpSecretsDeleteRequest): Promise<void> =>
+                    connection.sendRequest("mcp.secrets.delete", params),
+                /**
+                 * Deletes legacy credentials indexed for an MCP server. Slash-named servers require MCP configuration removal to preserve shared credential ownership.
+                 *
+                 * @param params A legacy MCP server whose configuration credentials must be removed.
+                 */
+                deleteServer: async (params: McpSecretsDeleteServerRequest): Promise<void> =>
+                    connection.sendRequest("mcp.secrets.deleteServer", params),
             },
             /**
              * Discovers MCP servers from user, workspace, plugin, and builtin sources.
@@ -65243,6 +65569,40 @@ export function createInternalServerRpc(connection: MessageConnection) {
                 connection.sendRequest("sandbox.getDocsUrl", {}),
         },
         /** @experimental */
+        permissions: {
+            /** @experimental */
+            locations: {
+                /**
+                 * Drops stored per-location permission grants whose directory no longer exists, and reports which location keys were removed. Runs against the permission store under the runtime's own Copilot home, the same store `session.permissions.locations.resolve` reads. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on. It can become public once an SDK consumer needs to prune its own permission store.
+                 *
+                 * @returns Which stored location permissions were dropped because their directory is gone.
+                 */
+                cleanupOrphaned: async (): Promise<LocationPermissionsCleanupResult> =>
+                    connection.sendRequest("permissions.locations.cleanupOrphaned", {}),
+            },
+            /** @experimental */
+            folderTrust: {
+                /**
+                 * Reports whether a folder is trusted, reading the persisted trusted-folders list directly rather than through a session. Use this from a host that has no session yet, such as a one-shot command deciding whether to honor a checkout's own settings. It differs from the session-scoped check in two ways that matter: it takes the configuration directory to read the list from, instead of inheriting the session's, and it answers only from the persisted list, so trust a user granted for the lifetime of one session is not visible here. A host that has a session should prefer the session-scoped check, which also covers session-only trust.
+                 *
+                 * @param params A folder to check against a persisted trusted-folders list, and the configuration directory holding that list.
+                 *
+                 * @returns Folder trust check result.
+                 */
+                checkTrust: async (params: FolderTrustIsTrustedParams): Promise<FolderTrustCheckResult> =>
+                    connection.sendRequest("permissions.folderTrust.checkTrust", params),
+            },
+            /**
+             * Interprets a verbatim managed `permissions` slice into the three policy questions a host asks before granting elevated permissions: whether bypass-permissions mode is forbidden, whether a policy exists that this build could not determine, and whether the layer supplies permission rules the session must enforce. An absent or empty slice means no managed policy applies. The runtime and its permission service share one policy type, so a new managed permission setting is interpreted in exactly one place; a host that reimplements the reading would silently diverge the first time that set grows. Hosts must fail closed on an undetermined policy rather than treating it as permission granted.
+             *
+             * @param params The verbatim managed `permissions` slice to interpret.
+             *
+             * @returns The policy questions a host asks before granting elevated permissions.
+             */
+            evaluateManagedPolicy: async (params: PermissionsEvaluateManagedPolicyParams): Promise<PermissionsEvaluateManagedPolicyResult> =>
+                connection.sendRequest("permissions.evaluateManagedPolicy", params),
+        },
+        /** @experimental */
         feedback: {
             /** @experimental */
             upload: {
@@ -65688,40 +66048,6 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             resolve: async (params: FeatureFlagsResolveRequest): Promise<FeatureFlagsResolveResult> =>
                 connection.sendRequest("featureFlags.resolve", params),
-        },
-        /** @experimental */
-        permissions: {
-            /** @experimental */
-            locations: {
-                /**
-                 * Drops stored per-location permission grants whose directory no longer exists, and reports which location keys were removed. Runs against the permission store under the runtime's own Copilot home, the same store `session.permissions.locations.resolve` reads. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on. It can become public once an SDK consumer needs to prune its own permission store.
-                 *
-                 * @returns Which stored location permissions were dropped because their directory is gone.
-                 */
-                cleanupOrphaned: async (): Promise<LocationPermissionsCleanupResult> =>
-                    connection.sendRequest("permissions.locations.cleanupOrphaned", {}),
-            },
-            /** @experimental */
-            folderTrust: {
-                /**
-                 * Reports whether a folder is trusted, reading the persisted trusted-folders list directly rather than through a session. Use this from a host that has no session yet, such as a one-shot command deciding whether to honor a checkout's own settings. It differs from the session-scoped check in two ways that matter: it takes the configuration directory to read the list from, instead of inheriting the session's, and it answers only from the persisted list, so trust a user granted for the lifetime of one session is not visible here. A host that has a session should prefer the session-scoped check, which also covers session-only trust.
-                 *
-                 * @param params A folder to check against a persisted trusted-folders list, and the configuration directory holding that list.
-                 *
-                 * @returns Folder trust check result.
-                 */
-                checkTrust: async (params: FolderTrustIsTrustedParams): Promise<FolderTrustCheckResult> =>
-                    connection.sendRequest("permissions.folderTrust.checkTrust", params),
-            },
-            /**
-             * Interprets a verbatim managed `permissions` slice into the three policy questions a host asks before granting elevated permissions: whether bypass-permissions mode is forbidden, whether a policy exists that this build could not determine, and whether the layer supplies permission rules the session must enforce. An absent or empty slice means no managed policy applies. The runtime and its permission service share one policy type, so a new managed permission setting is interpreted in exactly one place; a host that reimplements the reading would silently diverge the first time that set grows. Hosts must fail closed on an undetermined policy rather than treating it as permission granted.
-             *
-             * @param params The verbatim managed `permissions` slice to interpret.
-             *
-             * @returns The policy questions a host asks before granting elevated permissions.
-             */
-            evaluateManagedPolicy: async (params: PermissionsEvaluateManagedPolicyParams): Promise<PermissionsEvaluateManagedPolicyResult> =>
-                connection.sendRequest("permissions.evaluateManagedPolicy", params),
         },
         /** @experimental */
         managedSettings: {

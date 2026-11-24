@@ -79,6 +79,9 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
         @JsonProperty("phasePlan") List<FusionPhasePlanStep> phasePlan,
         /** Concrete model selected for the primary solver phase. */
         @JsonProperty("primaryModel") String primaryModel,
+        /** Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none. */
+        @CopilotExperimental
+        @JsonProperty("primaryReasoningEffort") String primaryReasoningEffort,
         /** Concrete model selected for Critique review, or the legacy Cascade judge/repair model when role-specific fields are absent. */
         @JsonInclude(JsonInclude.Include.ALWAYS)
         @JsonProperty("secondaryModel") String secondaryModel,
@@ -140,8 +143,9 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
             private String hint;
             private List<FusionPhasePlanStep> phasePlan;
             private String primaryModel;
+            private String primaryReasoningEffort;
             private String secondaryModel;
-            private boolean $presence18;
+            private boolean $presence19;
             private String judgeModel;
             private String repairModel;
             private List<FusionCritic> critics;
@@ -367,6 +371,18 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code primaryReasoningEffort} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder primaryReasoningEffort(String value) {
+                this.primaryReasoningEffort = value;
+                return this;
+            }
+
+            /**
              * Sets the {@code secondaryModel} property.
              * @param value the property value
              * @return this builder
@@ -375,7 +391,7 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
             @com.microsoft.copilot.CopilotExperimental
             public Builder secondaryModel(String value) {
                 this.secondaryModel = value;
-                this.$presence18 = true;
+                this.$presence19 = true;
                 return this;
             }
 
@@ -477,10 +493,10 @@ public final class SessionFusionResolvedEvent extends SessionEvent {
                 if (policy == null) throw new IllegalStateException("Missing required property: policy");
                 if (pattern == null) throw new IllegalStateException("Missing required property: pattern");
                 if (primaryModel == null) throw new IllegalStateException("Missing required property: primaryModel");
-                if (!$presence18) throw new IllegalStateException("Missing required property: secondaryModel");
+                if (!$presence19) throw new IllegalStateException("Missing required property: secondaryModel");
                 if (fallbackModel == null) throw new IllegalStateException("Missing required property: fallbackModel");
                 if (followUpModel == null) throw new IllegalStateException("Missing required property: followUpModel");
-                return new SessionFusionResolvedEventData(fusionId, turnId, contractVersion, syntheticModel, policy, routeSource, planVersion, policyVersion, modelUniverseVersion, ruleId, selectedRuleId, ruleIndex, ruleName, scores, pattern, hint, phasePlan, primaryModel, secondaryModel, judgeModel, repairModel, critics, fallbackModel, followUpModel, followUp, routingLatencyMs);
+                return new SessionFusionResolvedEventData(fusionId, turnId, contractVersion, syntheticModel, policy, routeSource, planVersion, policyVersion, modelUniverseVersion, ruleId, selectedRuleId, ruleIndex, ruleName, scores, pattern, hint, phasePlan, primaryModel, primaryReasoningEffort, secondaryModel, judgeModel, repairModel, critics, fallbackModel, followUpModel, followUp, routingLatencyMs);
             }
         }
     }

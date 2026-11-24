@@ -15,6 +15,7 @@ export default defineConfig({
     ...base,
     test: {
         ...base.test,
+        projects: undefined,
         include: ["test/e2e/network/dns_wpad.e2e.test.ts"],
         exclude: base.test?.exclude?.filter(
             (pattern: string) => !pattern.includes("dns_wpad.e2e.test.ts")

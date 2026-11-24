@@ -47,6 +47,15 @@ public final class GeneratedConstructorMigrationGuard {
     private static final List<CompatibilityConstruction> APPROVED = List.of(
             new CompatibilityConstruction(
                     new Construction(
+                            "src/test/java/com/microsoft/copilot/generated/GeneratedBuilderEvolutionTest.java",
+                            "com.microsoft.copilot.generated.GeneratedBuilderEvolutionTest"
+                                    + "#legacySkillsLoadedConstructorPreservesAbsentDiagnostics()V",
+                            "com.microsoft.copilot.generated.SessionSkillsLoadedEvent$SessionSkillsLoadedEventData",
+                            "(Ljava/util/List;)V",
+                            "new"),
+                    "The published skills-only constructor preserves absent errors and warnings in the legacy payload."),
+            new CompatibilityConstruction(
+                    new Construction(
                             "src/main/java/com/microsoft/copilot/CopilotSession.java",
                             "com.microsoft.copilot.CopilotSession#setModel(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;"
                                     + "Lcom/microsoft/copilot/rpc/ModelCapabilitiesOverride;)"

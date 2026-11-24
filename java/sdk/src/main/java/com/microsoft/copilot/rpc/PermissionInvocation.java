@@ -19,6 +19,7 @@ import com.microsoft.copilot.generated.AssistedApprovalAssessment;
 public final class PermissionInvocation {
 
     private String sessionId;
+    private String requestId;
     private boolean managedSettingsEnabled;
     private AssistedApprovalAssessment assistedApprovalAssessment;
     private PermissionRequest promptRequest;
@@ -66,6 +67,27 @@ public final class PermissionInvocation {
      */
     public PermissionInvocation setSessionId(String sessionId) {
         this.sessionId = sessionId;
+        return this;
+    }
+
+    /**
+     * Gets the identifier of the pending request that the handler will answer.
+     *
+     * @return the pending request ID, or {@code null} for legacy direct callbacks
+     */
+    public String getRequestId() {
+        return requestId;
+    }
+
+    /**
+     * Sets the identifier of the pending request that the handler will answer.
+     *
+     * @param requestId
+     *            the pending request ID
+     * @return this invocation for method chaining
+     */
+    public PermissionInvocation setRequestId(String requestId) {
+        this.requestId = requestId;
         return this;
     }
 

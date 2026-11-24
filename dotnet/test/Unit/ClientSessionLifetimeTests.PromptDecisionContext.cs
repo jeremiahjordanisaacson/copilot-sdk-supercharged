@@ -129,12 +129,16 @@ public sealed partial class ClientSessionLifetimeTests
         {
             Interaction = new SessionInteractionOptions
             {
-                OnElicitationRequest = _ => Task.FromResult(new ElicitationResult
+                OnElicitationRequest = context =>
                 {
-                    Action = UIElicitationResponseAction.Accept,
-                    Content = new Dictionary<string, object> { ["name"] = "scenario" },
-                    DecisionContext = labeled ? PersonAnswered() : null,
-                })
+                    Assert.Equal("elicitation-1", context.RequestId);
+                    return Task.FromResult(new ElicitationResult
+                    {
+                        Action = UIElicitationResponseAction.Accept,
+                        Content = new Dictionary<string, object> { ["name"] = "scenario" },
+                        DecisionContext = labeled ? PersonAnswered() : null,
+                    });
+                }
             }
         });
 
@@ -168,6 +172,67 @@ public sealed partial class ClientSessionLifetimeTests
         else
         {
             Assert.False(request.Params.TryGetProperty("decisionContext", out var unexpected), $"Unexpected decisionContext ({unexpected.ValueKind}): {unexpected}");
+        }
+    }
+
+    [Fact]
+    public async Task Elicitation_Handler_Metadata_Is_Isolated_From_Event_Subscribers()
+    {
+        const string key = "github.com/copilot/ask-user-images";
+        var subscriberFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "session.ui.handlePendingElicitation"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        {
+            Interaction = new SessionInteractionOptions
+            {
+                OnElicitationRequest = async context =>
+                {
+                    await subscriberFinished.Task;
+                    return new ElicitationResult
+                    {
+                        Action = UIElicitationResponseAction.Accept,
+                        Content = new Dictionary<string, object> { ["name"] = "scenario" },
+                        Meta = context.Meta,
+                    };
+                }
+            }
+        });
+        using var subscription = session.On<ElicitationRequestedEvent>(evt =>
+        {
+            evt.Data.Meta?.Clear();
+            subscriberFinished.TrySetResult();
+        });
+        try
+        {
+            await server.SendSessionEventAsync(session.SessionId, "elicitation.requested", new()
+            {
+                ["requestId"] = "isolated-elicitation",
+                ["message"] = "Show the error",
+                ["_meta"] = new Dictionary<string, object?>
+                {
+                    [key] = new Dictionary<string, object?>
+                    {
+                        ["version"] = 1,
+                        ["imageAttachmentConstraints"] = new Dictionary<string, object?>
+                        {
+                            ["allowedMimeTypes"] = new object?[] { "image/png" },
+                        },
+                    },
+                },
+            });
+
+            var request = await WaitForRequestAsync(server, "session.ui.handlePendingElicitation");
+            var allowedMimeTypes = request.Params.GetProperty("result").GetProperty("_meta")
+                .GetProperty(key).GetProperty("imageAttachmentConstraints").GetProperty("allowedMimeTypes");
+            Assert.Equal("image/png", Assert.Single(allowedMimeTypes.EnumerateArray()).GetString());
+        }
+        finally
+        {
+            subscriberFinished.TrySetResult();
         }
     }
 }

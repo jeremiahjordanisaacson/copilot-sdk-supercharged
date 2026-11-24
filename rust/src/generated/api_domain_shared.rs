@@ -19,7 +19,8 @@ pub use session_events::{
     PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
     PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
     RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
-    TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
+    TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment,
+    UserToolSessionApproval, Verbosity,
 };
 
 use crate::generated::{lifecycle_diagnostics, session_events};
@@ -10174,7 +10175,7 @@ impl<'de> Deserialize<'de> for DiscoveredExtensionSource {
     }
 }
 
-/// Effective extension loading and agent-management mode
+/// Compatibility mode for the persisted extension preference, not session activation. Current runtimes never return load_only and report disabled instead.
 ///
 /// <div class="warning">
 ///
@@ -10184,13 +10185,13 @@ impl<'de> Deserialize<'de> for DiscoveredExtensionSource {
 /// </div>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum DiscoveredExtensionMode {
-    /// Extensions are not loaded.
+    /// The extension preference is disabled.
     #[serde(rename = "disabled")]
     Disabled,
-    /// Extensions are loaded, but the agent cannot create, reload, or manage them.
+    /// Legacy compatibility value. Current runtimes report disabled instead.
     #[serde(rename = "load_only")]
     LoadOnly,
-    /// Extensions are loaded and the agent can create, reload, and manage them.
+    /// The extension preference permits loading and management, subject to activation and permissions.
     #[serde(rename = "load_and_augment")]
     LoadAndAugment,
     /// Unknown variant for forward compatibility.

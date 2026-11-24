@@ -527,6 +527,7 @@ type PermissionHandlerFunc func(request PermissionRequest, invocation Permission
 // PermissionInvocation provides context about a permission request.
 type PermissionInvocation struct {
 	SessionID              string
+	RequestID              string
 	ManagedSettingsEnabled bool
 	// ProgramToolCallID identifies the owning program invocation, or is nil for
 	// ordinary requests.
@@ -713,9 +714,12 @@ type UserInputRequest struct {
 	// (or the trusted handleHumanUserInput path) to correlate an out-of-band
 	// answer. It is empty when the runtime predates this field.
 	RequestID string
+	// ImageAttachmentConstraints advertises image support; nil means unsupported.
+	ImageAttachmentConstraints *rpc.UserInputImageAttachmentConstraints
 }
 
-// UserInputResponse represents the user's response to an input request
+// UserInputResponse represents a text-only answer. For image answers, use
+// AttributedUserInputResponse.Attachments with an AttributedUserInputHandler.
 type UserInputResponse struct {
 	Answer      string
 	WasFreeform bool
@@ -732,6 +736,10 @@ type UserInputHandler func(request UserInputRequest, invocation UserInputInvocat
 // may change or be removed.
 type AttributedUserInputResponse struct {
 	UserInputResponse
+	// Attachments contains images for a request that advertised image support.
+	// For image-only answers, Answer is empty and WasFreeform is true.
+	// A DecisionContext is not required to return images.
+	Attachments []rpc.UserInputImageAttachment
 	// DecisionContext says who answered and how. When a person answered, set
 	// Source [PermissionDecisionSourceHumanResponse], ResponseCapability
 	// [PermissionResponseCapabilityInteractive] and Outcome
@@ -2676,6 +2684,8 @@ type ElicitationSchema struct {
 type ElicitationContext struct {
 	// SessionID is the identifier of the session that triggered the request.
 	SessionID string
+	// RequestID identifies the pending request for correlated out-of-band answers.
+	RequestID string
 	// Message describes what information is needed from the user.
 	Message string
 	// RequestedSchema is a JSON Schema describing the form fields (form mode only).
@@ -2686,6 +2696,10 @@ type ElicitationContext struct {
 	ElicitationSource *string
 	// URL to open in the user's browser (url mode only).
 	URL *string
+	// Meta carries an independent snapshot of request metadata, including private
+	// built-in ask_user image constraints. Nil means no metadata was supplied.
+	// A pointer keeps ElicitationContext comparable; metadata compares by identity.
+	Meta *map[string]any
 }
 
 // ElicitationHandler handles elicitation requests from the server (e.g. from MCP tools).
@@ -2700,6 +2714,9 @@ type ElicitationHandler func(ctx ElicitationContext) (ElicitationResult, error)
 // may change or be removed.
 type AttributedElicitationResult struct {
 	ElicitationResult
+	// Meta carries negotiated metadata, including built-in ask_user image answers.
+	// It does not assert human attribution; DecisionContext may remain nil.
+	Meta map[string]any `json:"_meta,omitzero"`
 	// DecisionContext says who answered and how. When a person answered, set
 	// Source [PermissionDecisionSourceHumanResponse], ResponseCapability
 	// [PermissionResponseCapabilityInteractive] and Outcome
@@ -4047,18 +4064,20 @@ type sessionEventRequest struct {
 
 // userInputRequest represents a request for user input from the agent
 type userInputRequest struct {
-	SessionID     string   `json:"sessionId"`
-	Question      string   `json:"question"`
-	Choices       []string `json:"choices,omitempty"`
-	AllowFreeform *bool    `json:"allowFreeform,omitempty"`
-	RequestID     string   `json:"requestId,omitempty"`
+	SessionID                  string                                   `json:"sessionId"`
+	Question                   string                                   `json:"question"`
+	Choices                    []string                                 `json:"choices,omitempty"`
+	AllowFreeform              *bool                                    `json:"allowFreeform,omitempty"`
+	RequestID                  string                                   `json:"requestId,omitempty"`
+	ImageAttachmentConstraints *rpc.UserInputImageAttachmentConstraints `json:"imageAttachmentConstraints,omitempty"`
 }
 
 // userInputResponse represents the user's response to an input request
 type userInputResponse struct {
-	Answer          string                     `json:"answer"`
-	WasFreeform     bool                       `json:"wasFreeform"`
-	DecisionContext *PermissionDecisionContext `json:"decisionContext,omitempty"`
+	Answer          string                         `json:"answer"`
+	WasFreeform     bool                           `json:"wasFreeform"`
+	DecisionContext *PermissionDecisionContext     `json:"decisionContext,omitempty"`
+	Attachments     []rpc.UserInputImageAttachment `json:"attachments,omitempty"`
 }
 
 // shellAuthenticationRequest is the shellAuthentication.request payload: a shell command the

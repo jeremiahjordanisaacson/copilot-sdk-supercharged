@@ -6934,6 +6934,12 @@ export interface FusionResolvedData {
    */
   primaryModel: string;
   /**
+   * Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none.
+   *
+   * @experimental
+   */
+  primaryReasoningEffort?: string;
+  /**
    * Concrete model selected for Cascade repair, when required.
    *
    * @experimental
@@ -14942,6 +14948,10 @@ export interface UserInputRequestedData {
    */
   choices?: string[];
   /**
+   * Runtime-advertised image attachment support. Absent when images are unsupported.
+   */
+  imageAttachmentConstraints?: UserInputImageAttachmentConstraints;
+  /**
    * The question or prompt to present to the user
    */
   question: string;
@@ -14953,6 +14963,24 @@ export interface UserInputRequestedData {
    * The LLM-assigned tool call ID that triggered this request; used by remote UIs to correlate responses
    */
   toolCallId?: string;
+}
+/**
+ * Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images.
+ */
+export interface UserInputImageAttachmentConstraints {
+  /**
+   * MIME types accepted by this request. Images must have readable nonzero
+   * dimensions; GIF and WebP images must not exceed 2,000 pixels per side.
+   */
+  allowedMimeTypes: string[];
+  /**
+   * Maximum decoded byte length of each image.
+   */
+  maxBytesPerImage: number;
+  /**
+   * Maximum number of images accepted in one answer.
+   */
+  maxCount: number;
 }
 /**
  * Session event "user_input.completed". User input request completion with the user's response
@@ -15000,6 +15028,12 @@ export interface UserInputCompletedData {
    */
   answer?: string;
   /**
+   * Optional image payloads from completion sources that include them.
+   * Runtime notifications omit this field; accepted images are available
+   * in the associated canonical tool.execution_complete result.
+   */
+  attachments?: UserInputImageAttachment[];
+  /**
    * Request ID of the resolved user input request; clients should dismiss any UI for this request
    */
   requestId: string;
@@ -15007,6 +15041,31 @@ export interface UserInputCompletedData {
    * Whether the answer was typed as free-form text rather than selected from choices
    */
   wasFreeform?: boolean;
+}
+/**
+ * An inline image supplied in an answer to a legacy ask_user request that advertises image support.
+ */
+export interface UserInputImageAttachment {
+  /**
+   * Nonempty image bytes encoded as strict padded standard base64, without a data URL prefix or whitespace.
+   */
+  data: string;
+  /**
+   * Optional description of the image.
+   */
+  description?: string;
+  /**
+   * Optional client-facing name of the image.
+   */
+  displayName?: string;
+  /**
+   * MIME type of the image, matching an advertised allowed MIME type.
+   */
+  mimeType: string;
+  /**
+   * Attachment type. Always image.
+   */
+  type: "image";
 }
 /**
  * Session event "elicitation.requested". Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
@@ -15049,6 +15108,12 @@ export interface ElicitationRequestedEvent {
  * Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
  */
 export interface ElicitationRequestedData {
+  /**
+   * Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport.
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
   /**
    * The source that initiated the request (MCP server name, or absent for agent-initiated)
    */
@@ -15142,6 +15207,12 @@ export interface ElicitationCompletedEvent {
  * Elicitation request completion with the user's response
  */
 export interface ElicitationCompletedData {
+  /**
+   * Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard.
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
   /**
    * The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
    */
@@ -17506,9 +17577,17 @@ export interface SkillsLoadedEvent {
  */
 export interface SkillsLoadedData {
   /**
+   * Errors from the published skill catalog. Older hosts can omit this snapshot.
+   */
+  errors?: string[];
+  /**
    * Array of resolved skill metadata
    */
   skills: SkillsLoadedSkill[];
+  /**
+   * Warnings from the published skill catalog. Older hosts can omit this snapshot.
+   */
+  warnings?: string[];
 }
 /**
  * A single resolved skill in `session.skills_loaded`, including source, invocability, enabled state, path, and argument hint.

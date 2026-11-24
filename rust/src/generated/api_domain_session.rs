@@ -19,7 +19,8 @@ pub use session_events::{
     PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
     PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
     RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
-    TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
+    TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment,
+    UserToolSessionApproval, Verbosity,
 };
 
 use super::sdk_api_shared::*;
@@ -2065,6 +2066,134 @@ crate::record_serde::wire_record!(PermissionsEvaluateManagedPolicyResult {
     permission_rules_active: "permissionRulesActive",
     policy_undetermined: "policyUndetermined"
 });
+
+/// A user-scoped approval for one installed plugin extension and capability set.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApproval {
+    /// Exact privileged capabilities the user approved. A later request is covered only when its capabilities are a subset.
+    pub capabilities: Vec<String>,
+    /// Stable extension identity, such as `plugin:plugin-name:extension-name`.
+    pub extension_name: String,
+    /// RFC 3339 timestamp when the approval was last granted.
+    pub granted_at: String,
+    /// Opaque stable identity of the installed plugin source. Hosts must return it unchanged when revoking.
+    pub installation_key: String,
+    /// Optional human-readable installation source label.
+    pub installation_label: Option<String>,
+    /// Name of the plugin that contributed the extension.
+    pub plugin_name: String,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApproval { capabilities: "capabilities", extension_name: "extensionName", granted_at: "grantedAt", installation_key: "installationKey", installation_label: "installationLabel" if is_none, plugin_name: "pluginName" });
+
+/// Identifies a live extension permission request to persist before the host answers it normally.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsGrantRequest {
+    /// Identifier of the pending extension permission request.
+    pub request_id: RequestId,
+    /// Session that owns the pending extension permission request.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsGrantRequest {
+    request_id: "requestId",
+    session_id: "sessionId"
+});
+
+/// Whether the pending request was eligible and persisted.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsGrantResult {
+    /// The persisted approval when `granted` is true.
+    pub approval: Option<PermissionsExtensionApproval>,
+    /// Whether the pending request was eligible and its approval was persisted.
+    pub granted: bool,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsGrantResult { approval: "approval" if is_none, granted: "granted" });
+
+/// Lists user-scoped plugin extension approvals for the server profile or an attached session profile.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsListRequest {
+    /// Optional attached session whose configuration profile should be listed.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsListRequest { session_id: "sessionId" if is_none });
+
+/// All user-scoped plugin extension approvals.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsListResult {
+    /// Stored user-scoped plugin extension approvals.
+    pub approvals: Vec<PermissionsExtensionApproval>,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsListResult {
+    approvals: "approvals"
+});
+
+/// Identifies one plugin extension installation approval to revoke.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsRevokeRequest {
+    /// Stable extension identity of the approval to revoke.
+    pub extension_name: String,
+    /// Opaque installation identity returned by the list or grant operation.
+    pub installation_key: String,
+    /// Optional attached session whose configuration profile contains the approval.
+    pub session_id: Option<SessionId>,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsRevokeRequest { extension_name: "extensionName", installation_key: "installationKey", session_id: "sessionId" if is_none });
+
+/// Whether a matching approval was revoked.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsExtensionApprovalsRevokeResult {
+    /// Whether a matching approval existed and was removed.
+    pub revoked: bool,
+}
+crate::record_serde::wire_record!(PermissionsExtensionApprovalsRevokeResult { revoked: "revoked" });
 
 /// Indicates whether the operation succeeded.
 ///

@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated.rpc;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -24,7 +25,9 @@ public record UIUserInputResponse(
     /** The user's answer text */
     @JsonProperty("answer") String answer,
     /** True if the user typed a freeform response, false if they selected a presented choice. Used by telemetry to differentiate between free text input and choice selection. */
-    @JsonProperty("wasFreeform") Boolean wasFreeform
+    @JsonProperty("wasFreeform") Boolean wasFreeform,
+    /** Optional images, accepted only when the request advertises image attachment constraints. For an image-only answer, use an empty answer and wasFreeform true. */
+    @JsonProperty("attachments") List<UserInputImageAttachment> attachments
 ) {
 
     /**
@@ -32,6 +35,15 @@ public record UIUserInputResponse(
      * Use {@link #builder()} for named construction.
      */
     public UIUserInputResponse {}
+
+    /**
+     * Creates a text-only value using the existing v2 positional signature.
+     * @param answer the answer property
+     * @param wasFreeform the wasFreeform property
+     */
+    public UIUserInputResponse(String answer, Boolean wasFreeform) {
+        this(answer, wasFreeform, null);
+    }
 
     /**
      * Returns a named builder.
@@ -48,6 +60,7 @@ public record UIUserInputResponse(
         private Builder() {}
         private String answer;
         private Boolean wasFreeform;
+        private List<UserInputImageAttachment> attachments;
 
         /**
          * Sets the {@code answer} property.
@@ -72,6 +85,17 @@ public record UIUserInputResponse(
         }
 
         /**
+         * Sets the {@code attachments} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder attachments(List<UserInputImageAttachment> value) {
+            this.attachments = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -80,7 +104,7 @@ public record UIUserInputResponse(
         public UIUserInputResponse build() {
             if (answer == null) throw new IllegalStateException("Missing required property: answer");
             if (wasFreeform == null) throw new IllegalStateException("Missing required property: wasFreeform");
-            return new UIUserInputResponse(answer, wasFreeform);
+            return new UIUserInputResponse(answer, wasFreeform, attachments);
         }
     }
 }

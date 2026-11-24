@@ -19,7 +19,8 @@ pub use session_events::{
     PermissionMode, PermissionPromptRequest, PermissionRule, PermissionSandboxPathGrant,
     PolicyHelperCapabilities, PolicyHelperFailure, ProviderQuotaState, ReasoningSummary,
     RemediationAction, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskBlocker,
-    TaskCompletionOutcome, UsageGetMetricsResult, UserToolSessionApproval, Verbosity,
+    TaskCompletionOutcome, UsageGetMetricsResult, UserInputImageAttachment,
+    UserToolSessionApproval, Verbosity,
 };
 
 use super::sdk_api_shared::*;
@@ -4779,6 +4780,87 @@ pub struct McpSamplingExecutionResult {
 }
 crate::record_serde::wire_record!(McpSamplingExecutionResult { action: "action", error: "error" if is_none, result: "result" if is_none });
 
+/// An MCP configuration credential to remove from the host's secret store.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpSecretDeleteRequest {
+    /// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+    pub config_dir: Option<String>,
+    /// Secret reference to remove.
+    pub secret_id: String,
+}
+crate::record_serde::wire_record!(McpSecretDeleteRequest { config_dir: "configDir" if is_none, secret_id: "secretId" });
+
+/// A legacy MCP server whose configuration credentials must be removed.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpSecretDeleteServerRequest {
+    /// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+    pub config_dir: Option<String>,
+    /// Server name used by the legacy credential index.
+    pub server_name: String,
+}
+crate::record_serde::wire_record!(McpSecretDeleteServerRequest { config_dir: "configDir" if is_none, server_name: "serverName" });
+
+/// A legacy MCP configuration credential to persist in the host's secret store.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSecretSaveRequest {
+    /// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+    /// Secret reference used by an MCP server configuration.
+    pub secret_id: String,
+    /// Credential value to persist.
+    pub value: String,
+}
+
+impl std::fmt::Debug for McpSecretSaveRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpSecretSaveRequest")
+            .field("config_dir", &self.config_dir)
+            .field("secret_id", &self.secret_id)
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Whether the OS keychain accepted the saved MCP credential.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct McpSecretSaveResult {
+    /// True for keychain storage; false for the existing file backend.
+    pub used_keychain: bool,
+}
+crate::record_serde::wire_record!(McpSecretSaveResult {
+    used_keychain: "usedKeychain"
+});
+
 /// Authentication settings with optional redirect port configuration.
 ///
 /// <div class="warning">
@@ -7876,6 +7958,16 @@ pub type McpCallToolResult = Option<McpToolResult>;
 ///
 /// </div>
 pub type McpPlanSecretReference = String;
+
+/// Whether the OS keychain accepted the saved MCP credential.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type McpSecretsSaveResult = McpSecretSaveResult;
 
 /// Canonical digest algorithm for a validated MCP card
 ///

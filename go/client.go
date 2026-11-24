@@ -4206,10 +4206,11 @@ func (c *Client) handleUserInputRequest(req userInputRequest) (*userInputRespons
 	}
 
 	response, err := session.handleUserInputRequest(UserInputRequest{
-		Question:      req.Question,
-		Choices:       req.Choices,
-		AllowFreeform: req.AllowFreeform,
-		RequestID:     req.RequestID,
+		Question:                   req.Question,
+		Choices:                    req.Choices,
+		AllowFreeform:              req.AllowFreeform,
+		RequestID:                  req.RequestID,
+		ImageAttachmentConstraints: req.ImageAttachmentConstraints,
 	})
 	if err != nil {
 		return nil, &jsonrpc2.Error{Code: -32603, Message: err.Error()}
@@ -4218,6 +4219,7 @@ func (c *Client) handleUserInputRequest(req userInputRequest) (*userInputRespons
 	return &userInputResponse{
 		Answer:          response.Answer,
 		WasFreeform:     response.WasFreeform,
+		Attachments:     response.Attachments,
 		DecisionContext: response.DecisionContext,
 	}, nil
 }

@@ -1796,14 +1796,24 @@ func (s *Session) handleElicitationRequest(elicitCtx ElicitationContext, request
 		}
 	}
 
-	s.RPC.UI.HandlePendingElicitation(ctx, &rpc.UIHandlePendingElicitationRequest{
+	_, err = s.RPC.UI.HandlePendingElicitation(ctx, &rpc.UIHandlePendingElicitationRequest{
 		RequestID: requestID,
 		Result: rpc.UIElicitationResponse{
 			Action:  result.Action,
 			Content: rpcContent,
+			Meta:    result.Meta,
 		},
 		DecisionContext: result.DecisionContext,
 	})
+	if err != nil {
+		log.Printf("elicitation answer rejected: session_id=%s request_id=%s error_type=%T", s.SessionID, requestID, err)
+		if _, cancelErr := s.RPC.UI.HandlePendingElicitation(ctx, &rpc.UIHandlePendingElicitationRequest{
+			RequestID: requestID,
+			Result:    rpc.UIElicitationResponse{Action: rpc.UIElicitationResponseActionCancel},
+		}); cancelErr != nil {
+			log.Printf("elicitation cancellation failed: session_id=%s request_id=%s error_type=%T", s.SessionID, requestID, cancelErr)
+		}
+	}
 }
 
 // callElicitationHandler runs an elicitation handler and returns a panic as an
@@ -2174,6 +2184,13 @@ func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelo
 
 	broadcastHandled := false
 	switch data := event.Data.(type) {
+	case *ElicitationRequestedData:
+		// Snapshot metadata before either independently scheduled consumer can edit it.
+		request := *data
+		if data.Meta != nil {
+			request.Meta = cloneElicitationMetadata(data.Meta).(map[string]any)
+		}
+		event.Data = &request
 	case *CapabilitiesChangedData:
 		// Apply deltas in notification order before subscribers can observe them.
 		if data.UI != nil {
@@ -2198,6 +2215,25 @@ func (s *Session) dispatchEventWithPermissionEnvelope(event SessionEvent, envelo
 	}
 
 	s.enqueueEvent(subscriberEvent)
+}
+
+func cloneElicitationMetadata(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for key, item := range value {
+			result[key] = cloneElicitationMetadata(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = cloneElicitationMetadata(item)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 // enqueueEvent hands event to processEvents without blocking the caller, which
@@ -2453,13 +2489,19 @@ func (s *Session) handleBroadcastEvent(event SessionEvent, envelope *PermissionR
 		if handler == nil {
 			return
 		}
+		var meta *map[string]any
+		if d.Meta != nil {
+			meta = &d.Meta
+		}
 		s.handleElicitationRequest(ElicitationContext{
 			SessionID:         s.SessionID,
+			RequestID:         d.RequestID,
 			Message:           d.Message,
 			RequestedSchema:   fromRPCElicitationRequestedSchema(d.RequestedSchema),
 			Mode:              d.Mode,
 			ElicitationSource: d.ElicitationSource,
 			URL:               d.URL,
+			Meta:              meta,
 		}, d.RequestID)
 	}
 }
@@ -2771,6 +2813,7 @@ func (s *Session) executePermissionAndRespond(
 
 	invocation := PermissionInvocation{
 		SessionID:              s.SessionID,
+		RequestID:              requestID,
 		ManagedSettingsEnabled: s.managedSettings,
 		ProgramToolCallID:      programToolCallID,
 	}

@@ -44,7 +44,9 @@ public final class UserInputRequestedEvent extends SessionEvent {
         /** Whether the user can provide a free-form text response in addition to predefined choices */
         @JsonProperty("allowFreeform") Boolean allowFreeform,
         /** The LLM-assigned tool call ID that triggered this request; used by remote UIs to correlate responses */
-        @JsonProperty("toolCallId") String toolCallId
+        @JsonProperty("toolCallId") String toolCallId,
+        /** Runtime-advertised image attachment support. Absent when images are unsupported. */
+        @JsonProperty("imageAttachmentConstraints") UserInputImageAttachmentConstraints imageAttachmentConstraints
     ) {
 
         /**
@@ -52,6 +54,18 @@ public final class UserInputRequestedEvent extends SessionEvent {
          * Use {@link #builder()} for named construction.
          */
         public UserInputRequestedEventData {}
+
+        /**
+         * Creates a text-only value using the existing v2 positional signature.
+         * @param requestId the requestId property
+         * @param question the question property
+         * @param choices the choices property
+         * @param allowFreeform the allowFreeform property
+         * @param toolCallId the toolCallId property
+         */
+        public UserInputRequestedEventData(String requestId, String question, List<String> choices, Boolean allowFreeform, String toolCallId) {
+            this(requestId, question, choices, allowFreeform, toolCallId, null);
+        }
 
         /**
          * Returns a named builder.
@@ -71,6 +85,7 @@ public final class UserInputRequestedEvent extends SessionEvent {
             private List<String> choices;
             private Boolean allowFreeform;
             private String toolCallId;
+            private UserInputImageAttachmentConstraints imageAttachmentConstraints;
 
             /**
              * Sets the {@code requestId} property.
@@ -128,6 +143,17 @@ public final class UserInputRequestedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code imageAttachmentConstraints} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder imageAttachmentConstraints(UserInputImageAttachmentConstraints value) {
+                this.imageAttachmentConstraints = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -136,7 +162,7 @@ public final class UserInputRequestedEvent extends SessionEvent {
             public UserInputRequestedEventData build() {
                 if (requestId == null) throw new IllegalStateException("Missing required property: requestId");
                 if (question == null) throw new IllegalStateException("Missing required property: question");
-                return new UserInputRequestedEventData(requestId, question, choices, allowFreeform, toolCallId);
+                return new UserInputRequestedEventData(requestId, question, choices, allowFreeform, toolCallId, imageAttachmentConstraints);
             }
         }
     }

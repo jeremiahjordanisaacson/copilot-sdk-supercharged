@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.microsoft.copilot.generated.CommandQueuedEvent.CommandQueuedEventData;
+import com.microsoft.copilot.generated.UserInputCompletedEvent.UserInputCompletedEventData;
+import com.microsoft.copilot.generated.UserInputRequestedEvent.UserInputRequestedEventData;
+import com.microsoft.copilot.generated.ElicitationCompletedEvent.ElicitationCompletedEventData;
+import com.microsoft.copilot.generated.ElicitationCompletedAction;
+import com.microsoft.copilot.generated.ElicitationRequestedEvent.ElicitationRequestedEventData;
 import com.microsoft.copilot.generated.rpc.SessionAccountsLoginBeginResult;
 import com.microsoft.copilot.generated.rpc.MarketplaceInfo;
 import com.microsoft.copilot.generated.rpc.SandboxConfigUserPolicyFilesystem;
@@ -19,6 +24,7 @@ import com.microsoft.copilot.generated.rpc.PermissionRecoveryData;
 import com.microsoft.copilot.generated.rpc.PermissionRecoveryReason;
 import com.microsoft.copilot.generated.rpc.PermissionRecoveryStatus;
 import com.microsoft.copilot.generated.rpc.PermissionRecoveryOnBlocked;
+import com.microsoft.copilot.generated.rpc.UIUserInputResponse;
 import java.util.List;
 import java.util.Map;
 import java.time.OffsetDateTime;
@@ -59,5 +65,14 @@ public final class ReleasedConstructorCaller {
                 .initialName("snapshot-name").clientName("snapshot-client").summary("snapshot-summary")
                 .workingDirectory("/work").currentMode(MetadataSnapshotCurrentMode.PLAN)
                 .selectedModel("snapshot-model").sessionLimits(null).workspace(null).build()));
+        System.out.println(mapper.writeValueAsString(new UIUserInputResponse("yes", true)));
+        System.out.println(mapper.writeValueAsString(
+                new UserInputCompletedEventData("input", "yes", true)));
+        System.out.println(mapper.writeValueAsString(
+                new UserInputRequestedEventData("input", "Question?", List.of("yes"), true, "tool")));
+        System.out.println(mapper.writeValueAsString(
+                new ElicitationCompletedEventData("input", ElicitationCompletedAction.ACCEPT, Map.of("screenshot", ""))));
+        System.out.println(mapper.writeValueAsString(
+                new ElicitationRequestedEventData("input", "tool", null, null, "Question?", null, null, null)));
     }
 }

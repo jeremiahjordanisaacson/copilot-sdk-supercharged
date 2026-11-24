@@ -10,6 +10,7 @@ package com.microsoft.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import javax.annotation.processing.Generated;
 
 /**
@@ -39,7 +40,11 @@ public final class UserInputCompletedEvent extends SessionEvent {
         /** The user's answer to the input request */
         @JsonProperty("answer") String answer,
         /** Whether the answer was typed as free-form text rather than selected from choices */
-        @JsonProperty("wasFreeform") Boolean wasFreeform
+        @JsonProperty("wasFreeform") Boolean wasFreeform,
+        /** Optional image payloads from completion sources that include them.
+Runtime notifications omit this field; accepted images are available
+in the associated canonical tool.execution_complete result. */
+        @JsonProperty("attachments") List<UserInputImageAttachment> attachments
     ) {
 
         /**
@@ -47,6 +52,16 @@ public final class UserInputCompletedEvent extends SessionEvent {
          * Use {@link #builder()} for named construction.
          */
         public UserInputCompletedEventData {}
+
+        /**
+         * Creates a text-only value using the existing v2 positional signature.
+         * @param requestId the requestId property
+         * @param answer the answer property
+         * @param wasFreeform the wasFreeform property
+         */
+        public UserInputCompletedEventData(String requestId, String answer, Boolean wasFreeform) {
+            this(requestId, answer, wasFreeform, null);
+        }
 
         /**
          * Returns a named builder.
@@ -64,6 +79,7 @@ public final class UserInputCompletedEvent extends SessionEvent {
             private String requestId;
             private String answer;
             private Boolean wasFreeform;
+            private List<UserInputImageAttachment> attachments;
 
             /**
              * Sets the {@code requestId} property.
@@ -99,6 +115,17 @@ public final class UserInputCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code attachments} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            public Builder attachments(List<UserInputImageAttachment> value) {
+                this.attachments = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -106,7 +133,7 @@ public final class UserInputCompletedEvent extends SessionEvent {
              */
             public UserInputCompletedEventData build() {
                 if (requestId == null) throw new IllegalStateException("Missing required property: requestId");
-                return new UserInputCompletedEventData(requestId, answer, wasFreeform);
+                return new UserInputCompletedEventData(requestId, answer, wasFreeform, attachments);
             }
         }
     }

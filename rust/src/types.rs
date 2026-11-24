@@ -6807,6 +6807,42 @@ pub struct ElicitationRequest {
     pub url: Option<String>,
 }
 
+/// An elicitation request with negotiated metadata, preserving the original request API.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ElicitationRequestWithMetadata {
+    /// The original primitive form request.
+    #[serde(flatten)]
+    pub request: ElicitationRequest,
+    /// Private extensions, including built-in ask_user image constraints.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<std::collections::HashMap<String, Value>>,
+}
+
+impl std::fmt::Debug for ElicitationRequestWithMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElicitationRequestWithMetadata")
+            .finish_non_exhaustive()
+    }
+}
+
+/// An elicitation answer with negotiated metadata, preserving two-field result literals.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ElicitationResultWithMetadata {
+    /// The primitive action and form values.
+    #[serde(flatten)]
+    pub result: ElicitationResult,
+    /// Private extensions. Built-in images are associated with exact form property names.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<std::collections::HashMap<String, Value>>,
+}
+
+impl std::fmt::Debug for ElicitationResultWithMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElicitationResultWithMetadata")
+            .finish_non_exhaustive()
+    }
+}
+
 /// Context for an offer to recover the active request using Auto.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6944,6 +6980,8 @@ pub enum PermissionRequestKind {
     Memory,
     /// Run a hook callback.
     Hook,
+    /// Let an extension access permission-gated capabilities.
+    ExtensionPermissionAccess,
     /// Unrecognized kind. The original wire string is available in
     /// [`PermissionRequestData::extra`] under the `kind` key.
     #[serde(other)]

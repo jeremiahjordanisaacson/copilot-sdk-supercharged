@@ -3639,8 +3639,16 @@ impl Client {
         session_id: Option<SessionId>,
         is_repo_settings_write: bool,
     ) -> Error {
-        // Repository paths can contain this text without referring to a session.
-        if !is_repo_settings_write && error.message.contains("Session not found") {
+        let message = error.message.as_str();
+        let delete_reason = match message.split_once(" failed with message: ") {
+            Some(("Request session.delete" | "Request sessions.delete", reason)) => reason,
+            _ => message,
+        };
+        // Repository paths can contain these messages without referring to a session.
+        if !is_repo_settings_write
+            && (message.contains("Session not found")
+                || delete_reason.starts_with("Session file not found for "))
+        {
             return ErrorKind::Session(SessionErrorKind::NotFound(
                 session_id.unwrap_or_else(|| "unknown".into()),
             ))
@@ -3992,6 +4000,7 @@ impl Client {
     ///
     /// Use the full session ID. The server may accept a UUID prefix, but its
     /// reply supplies no canonical ID, so clearing held events is not guaranteed.
+    /// A missing-session RPC error is reported as [`SessionErrorKind::NotFound`].
     pub async fn delete_session(&self, session_id: &SessionId) -> Result<()> {
         self.delete_session_request(session_id).await?;
         self.retire_github_token_provider(session_id);

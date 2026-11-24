@@ -5,10 +5,82 @@ use copilot_sdk::Error;
 use copilot_sdk::rpc::{
     CatalogClientContract, CatalogSearchRequest, ClientRpcCatalog, ClientRpcMcp, ClientRpcSessions,
     McpPlanInstallRequest, McpPlanInstallSource, McpPlanInstallSourceCandidate,
-    McpPlanInstallSourceCandidateKind, PermissionsSetRequiredRequest, SessionRpcPermissions,
+    McpPlanInstallSourceCandidateKind, McpSecretSaveRequest, McpSecretSaveResult,
+    McpSecretsSaveResult, PermissionsSetRequiredRequest, SessionRpcPermissions,
     SessionUpdateInferenceOptions, SessionUpdateOptionsParams, SessionsCloseRequest,
 };
 use serde_json::json;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, duplex};
+
+#[tokio::test]
+async fn mcp_save_result_accepts_canonical_and_plural_consumers() {
+    fn canonical_consumer(result: &McpSecretSaveResult) -> bool {
+        result.used_keychain
+    }
+
+    fn plural_consumer(result: &McpSecretsSaveResult) -> bool {
+        canonical_consumer(result)
+    }
+
+    let workspace = tempfile::tempdir().unwrap();
+    let (client_write, server_read) = duplex(4096);
+    let (mut server_write, client_read) = duplex(4096);
+    let client = copilot_sdk::Client::from_streams(
+        copilot_sdk::ClientMode::CodingAgent,
+        client_read,
+        client_write,
+        workspace.path().to_path_buf(),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let mut reader = BufReader::new(server_read);
+        let mut header = String::new();
+        reader.read_line(&mut header).await.unwrap();
+        let length: usize = header
+            .trim()
+            .strip_prefix("Content-Length: ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut separator = String::new();
+        reader.read_line(&mut separator).await.unwrap();
+        assert_eq!(separator, "\r\n");
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).await.unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(request["method"], "mcp.secrets.save");
+        assert_eq!(
+            request["params"],
+            json!({"secretId": "consumer/key", "value": "wire-value"})
+        );
+        let response = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": request["id"],
+            "result": {"usedKeychain": true}
+        }))
+        .unwrap();
+        server_write
+            .write_all(format!("Content-Length: {}\r\n\r\n", response.len()).as_bytes())
+            .await
+            .unwrap();
+        server_write.write_all(&response).await.unwrap();
+        server_write.flush().await.unwrap();
+    });
+    let result = client
+        .rpc()
+        .mcp()
+        .secrets()
+        .save(McpSecretSaveRequest {
+            config_dir: None,
+            secret_id: "consumer/key".to_owned(),
+            value: "wire-value".to_owned(),
+        })
+        .await
+        .unwrap();
+    server.await.unwrap();
+    assert!(canonical_consumer(&result));
+    assert!(plural_consumer(&result));
+}
 
 #[test]
 fn grouped_options_update_preserves_default_provider_omission_selection_and_clear() {

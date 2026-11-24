@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use super::{
     Attachment, AttachmentSelectionPosition, AttachmentSelectionRange, CreateSessionOptions,
     GitHubReferenceType, McpServerConfig, McpStdioServerConfig, PermissionRequestData,
-    ProviderConfig, ResumeSessionOptions, SessionId, Tool, ensure_attachment_display_names,
+    PermissionRequestKind, ProviderConfig, ResumeSessionOptions, SessionId, Tool,
+    ensure_attachment_display_names,
 };
 use crate::generated::session_events::{
     AssistedApprovalAssessment, AssistedApprovalCompletedRecommendation,
@@ -105,6 +106,24 @@ fn permission_request_conversion_preserves_legacy_direct_json() {
         assert_eq!(Value::from(&data), original);
         assert_eq!(Value::from(data), original);
     }
+}
+
+#[test]
+fn permission_request_recognizes_extension_permission_access() {
+    let data: PermissionRequestData = serde_json::from_value(json!({
+        "kind": "extension-permission-access",
+        "requestId": "permission-1",
+        "permissionRequest": {
+            "kind": "extension-permission-access",
+            "extensionName": "plugin:demo:hooks",
+        },
+    }))
+    .unwrap();
+
+    assert_eq!(
+        data.kind,
+        Some(PermissionRequestKind::ExtensionPermissionAccess)
+    );
 }
 
 #[test]
@@ -669,5 +688,30 @@ fn session_configs_redact_sandbox_config_in_debug() {
         .with_permissions(|group| group.with_sandbox(sandbox));
     for debug in [format!("{create:?}"), format!("{resume:?}")] {
         assert!(!debug.contains("proxy-secret"), "{debug}");
+    }
+}
+
+#[test]
+fn elicitation_companions_redact_form_and_image_content_in_debug() {
+    let metadata = json!({
+        "github.com/copilot/ask-user-images": {
+            "version": 1,
+            "attachments": {"screenshot": [{
+                "type": "image", "data": "private-image-bytes", "mimeType": "image/png",
+            }]},
+        },
+    });
+    let request: super::ElicitationRequestWithMetadata = serde_json::from_value(json!({
+        "message": "private-question", "_meta": metadata,
+    }))
+    .unwrap();
+    let result: super::ElicitationResultWithMetadata = serde_json::from_value(json!({
+        "action": "accept", "content": {"screenshot": "private-answer"}, "_meta": metadata,
+    }))
+    .unwrap();
+    for debug in [format!("{request:?}"), format!("{result:?}")] {
+        for secret in ["private-question", "private-answer", "private-image-bytes"] {
+            assert!(!debug.contains(secret), "{debug}");
+        }
     }
 }
