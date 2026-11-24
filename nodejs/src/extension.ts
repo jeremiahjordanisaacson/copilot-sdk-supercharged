@@ -9,6 +9,7 @@ import {
     defaultJoinSessionPermissionHandler,
     type ResumeSessionOptions,
     type SessionExtensionOptions,
+    type SessionPermissionOptions,
     type SessionSkillOptions,
     type SessionToolOptions,
 } from "./types.js";
@@ -25,10 +26,14 @@ export {
     type CanvasOptions,
 } from "./canvas.js";
 
-export type JoinSessionOptions = Omit<ResumeSessionOptions, "extensions" | "skills" | "tools"> & {
+export type JoinSessionOptions = Omit<
+    ResumeSessionOptions,
+    "extensions" | "skills" | "tools" | "permissions"
+> & {
     extensions?: Omit<SessionExtensionOptions, "sdkPath">;
     skills?: Omit<SessionSkillOptions, "provider">;
     tools?: Omit<SessionToolOptions, "imageGeneration">;
+    permissions?: Omit<SessionPermissionOptions, "hostPolicyPreCheck">;
     /**
      * Names of sensitive environment variables this extension needs, such as
      * `"GITHUB_TOKEN"`.
@@ -155,10 +160,14 @@ export async function joinSession(config: JoinSessionOptions = {}): Promise<Join
         {}) as SessionSkillOptions;
     const { imageGeneration: _strippedImageGeneration, ...tools } = (config.tools ??
         {}) as SessionToolOptions;
+    const { hostPolicyPreCheck: _strippedHostPolicyPreCheck, ...permissions } =
+        (config.permissions ?? {}) as SessionPermissionOptions;
     void _stripped;
     void _strippedSkillProvider;
     // Image generation consent belongs to the session owner, not joining extensions.
     void _strippedImageGeneration;
+    // Only the session's owning connection may declare a host-policy pre-check.
+    void _strippedHostPolicyPreCheck;
 
     const session = await client.resumeSessionForExtension(
         sessionId,
@@ -168,7 +177,7 @@ export async function joinSession(config: JoinSessionOptions = {}): Promise<Join
             skills,
             tools,
             permissions: {
-                ...rest.permissions,
+                ...permissions,
                 onRequest: config.permissions?.onRequest ?? defaultJoinSessionPermissionHandler,
             },
             suppressResumeEvent: config.suppressResumeEvent ?? true,

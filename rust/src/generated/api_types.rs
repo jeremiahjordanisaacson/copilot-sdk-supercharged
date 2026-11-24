@@ -1954,6 +1954,8 @@ pub mod rpc_methods {
     pub(crate) const SESSIONMANAGEMENT_CREATE: &str = "sessionManagement.create";
     /// `memoryStore.store`
     pub(crate) const MEMORYSTORE_STORE: &str = "memoryStore.store";
+    /// `hostPolicy.preCheck`
+    pub(crate) const HOSTPOLICY_PRECHECK: &str = "hostPolicy.preCheck";
     /// `providerToken.getToken`
     pub const PROVIDERTOKEN_GETTOKEN: &str = "providerToken.getToken";
     /// `workflow.execute`
@@ -2252,8 +2254,8 @@ pub use sdk_api_session::{
     PermissionsConfigureAdditionalContentExclusionPolicyRule,
     PermissionsConfigureAdditionalContentExclusionPolicyRuleSource,
     PermissionsConfigureAdditionalContentExclusionPolicyScope,
-    PermissionsConfigureAssistedApprovalContext, PermissionsConfigureParams,
-    PermissionsConfigureResult, PermissionsEvaluateManagedPolicyResult,
+    PermissionsConfigureAssistedApprovalContext, PermissionsConfigureHostPolicyPreCheck,
+    PermissionsConfigureParams, PermissionsConfigureResult, PermissionsEvaluateManagedPolicyResult,
     PermissionsExtensionApproval, PermissionsExtensionApprovalsGrantRequest,
     PermissionsExtensionApprovalsGrantResult, PermissionsExtensionApprovalsListRequest,
     PermissionsExtensionApprovalsListResult, PermissionsExtensionApprovalsRevokeRequest,
@@ -3431,7 +3433,8 @@ pub use sdk_api_services::{
     HostGetAuthenticationCredentialsResult, HostGetConfigurationResult,
     HostGetEnvironmentCredentialsResult, HostGetOrCreateComputeIdResult,
     HostGitHubEnvironmentOptions, HostListSessionsRequest, HostListSessionsResult,
-    HostLocalServerConfiguration, HostLocalServerOptions, HostPublishSessionRequest,
+    HostLocalServerConfiguration, HostLocalServerOptions, HostPolicyPreCheckDecision,
+    HostPolicyPreCheckRequest, HostPolicyPreCheckResult, HostPublishSessionRequest,
     HostPublishSessionResult, HostReadyRequest, HostReadyResult, HostRegisterSessionRequest,
     HostReleaseSessionResult, HostSessionCreateCallback, HostSessionCreateRequest,
     HostSessionCreateResult, HostSessionReleaseRequest, HostSessionReleasedNotification,

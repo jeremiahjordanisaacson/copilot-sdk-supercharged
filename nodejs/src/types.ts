@@ -35,6 +35,8 @@ import type {
     GitHubTokenAcquireResult,
     GitHubTelemetryNotification,
     HostDiagnostics,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
     Model,
     ModelCapabilitiesOverride,
     DiagnosticsConfiguration,
@@ -125,6 +127,8 @@ export type {
     GitHubTelemetryEvent,
     GitHubTelemetryClientInfo,
     HostDiagnostics,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
     HostErrorReportingStatus,
     InstallationConfirmationRequest,
     InstallationConfirmationResponse,
@@ -4414,6 +4418,14 @@ export interface SessionPermissionOptions {
      */
     onRequest?: PermissionHandler;
     /**
+     * Optional non-prompting host-policy callback invoked before the Assisted
+     * Permissions judge for eligible path, read, and custom-tool requests.
+     * Re-supply it on resume. Unsupported and remote runtimes ignore it.
+     *
+     * @experimental
+     */
+    hostPolicyPreCheck?: HostPolicyPreCheckOptions;
+    /**
      * Sandbox configuration applied before MCP servers or session tools start.
      * Uses the same direct-host semantics and managed-policy validation as
      * `session.rpc.options.update({ sandboxConfig })`. A policy conflict fails
@@ -4431,6 +4443,17 @@ export interface SessionPermissionOptions {
      * restored mode on resume. Not supported for cloud sessions.
      */
     mode?: PermissionMode;
+}
+
+/** @experimental */
+export interface HostPolicyPreCheckOptions {
+    /** Host policy revision from 0 through 2^53 - 1. */
+    policyRevision: number;
+    /** Decide without prompting or side effects. */
+    onRequest: (
+        request: HostPolicyPreCheckRequest,
+        options: { signal: AbortSignal }
+    ) => HostPolicyPreCheckResult | Promise<HostPolicyPreCheckResult>;
 }
 
 /** General MCP servers, OAuth, and renderer opt-in; built-in GitHub MCP tuning is under github.mcp. */

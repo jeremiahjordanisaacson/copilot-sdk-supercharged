@@ -61,6 +61,8 @@ import type {
     SessionsFindByPrefixResult,
     SessionUpdateOptionsParams,
     TaskKind,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
 } from "./generated/rpc.js";
 import { CopilotDecisions } from "./decisions.js";
 import { normalizeClientOptions, normalizeSessionOptions } from "./optionsCompatibility.js";
@@ -133,6 +135,7 @@ import type {
     TypedSessionLifecycleHandler,
     UserInputRequest,
     UserInputResponse,
+    HostPolicyPreCheckOptions,
 } from "./types.js";
 import { defaultJoinSessionPermissionHandler, RuntimeConnection } from "./types.js";
 import { getWorkflowRegistration, type WorkflowHandle } from "./workflow.js";
@@ -1025,6 +1028,8 @@ export class CopilotClient {
             session: CopilotSession;
             connection: MessageConnection;
             skillProviderSession?: CopilotSession;
+            hostPolicyPreCheckSession?: CopilotSession;
+            hostPolicyPreCheckRevision?: number;
             gitHubTokenProviderRegistrationId?: string;
             resolveAliases: boolean;
         }
@@ -2608,6 +2613,9 @@ export class CopilotClient {
                 s.registerBearerTokenProviders(bearerTokenCallbacks);
             }
             s.registerPermissionHandler(config.permissions?.onRequest);
+            if (config.permissions?.hostPolicyPreCheck) {
+                s._registerHostPolicyPreCheck(config.permissions.hostPolicyPreCheck.onRequest);
+            }
             if (config.interaction?.onUserInputRequest) {
                 s.registerUserInputHandler(config.interaction?.onUserInputRequest);
             }
@@ -2902,6 +2910,7 @@ export class CopilotClient {
             }
             this.assignGitHubTokenProvider(gitHubTokenProviderRegistrationId, returnedSessionId);
             session.setCapabilities(capabilities);
+            await this.configureHostPolicyPreCheck(session, config.permissions?.hostPolicyPreCheck);
             if (config.interaction?.autoModeRecovery) {
                 await this.requireAutoModeRecovery(session, connection);
             }
@@ -3119,6 +3128,9 @@ export class CopilotClient {
             session.registerBearerTokenProviders(bearerTokenCallbacks);
         }
         session.registerPermissionHandler(config.permissions?.onRequest);
+        if (config.permissions?.hostPolicyPreCheck) {
+            session._registerHostPolicyPreCheck(config.permissions.hostPolicyPreCheck.onRequest);
+        }
         if (config.interaction?.onUserInputRequest) {
             session.registerUserInputHandler(config.interaction?.onUserInputRequest);
         }
@@ -3189,6 +3201,10 @@ export class CopilotClient {
                 session,
                 connection,
                 skillProviderSession: config.skills?.provider ? session : replacedRequestedSession,
+                // Until the resume settles, the runtime may still hold the
+                // resident's pre-check declaration.
+                hostPolicyPreCheckSession: replacedRequestedSession,
+                hostPolicyPreCheckRevision: config.permissions?.hostPolicyPreCheck?.policyRevision,
                 gitHubTokenProviderRegistrationId,
                 resolveAliases,
             });
@@ -3450,6 +3466,7 @@ export class CopilotClient {
             };
             session["_workspacePath"] = workspacePath;
             session.setCapabilities(capabilities);
+            await this.configureHostPolicyPreCheck(session, config.permissions?.hostPolicyPreCheck);
             if (config.interaction?.autoModeRecovery) {
                 keepResumedSessionOnRecoveryRejection =
                     replacedSession !== undefined &&
@@ -4246,6 +4263,21 @@ export class CopilotClient {
         if (this.sessions.get(session.sessionId) === session) {
             this.unrouteSession(session.sessionId);
         }
+    }
+
+    private async configureHostPolicyPreCheck(
+        session: CopilotSession,
+        options: HostPolicyPreCheckOptions | undefined
+    ): Promise<void> {
+        if (!options) return;
+        const capabilities = await session.rpc.permissions.getCapabilities();
+        if (capabilities.hostPolicyPreCheck !== true) return;
+        await session.rpc.permissions.configure({
+            hostPolicyPreCheck: {
+                enabled: true,
+                policyRevision: options.policyRevision,
+            },
+        });
     }
 
     /**
@@ -5262,6 +5294,39 @@ export class CopilotClient {
                     subscription.dispose();
                 }
                 return null;
+            }
+        );
+        // Internal experimental callback backing `SessionPermissionOptions.hostPolicyPreCheck`.
+        this.connection.onRequest(
+            "hostPolicy.preCheck",
+            async (
+                params: HostPolicyPreCheckRequest,
+                token: CancellationToken
+            ): Promise<HostPolicyPreCheckResult> => {
+                let session = this.sessions.get(params?.sessionId);
+                // Until a resume settles, a request for any revision other than
+                // the one the resume declares belongs to the resident session.
+                for (const pending of this.pendingSessionResumes.values()) {
+                    if (
+                        pending.connection === connection &&
+                        pending.session === session &&
+                        params.policyRevision !== pending.hostPolicyPreCheckRevision
+                    ) {
+                        session = pending.hostPolicyPreCheckSession ?? session;
+                    }
+                }
+                if (!session) {
+                    throw new ResponseError(
+                        ErrorCodes.InvalidRequest,
+                        "Host policy pre-check owner is unavailable"
+                    );
+                }
+                return await runCancellableCallback(
+                    connection,
+                    "Host policy pre-check",
+                    token,
+                    (signal) => session._handleHostPolicyPreCheck(params, signal)
+                );
             }
         );
         this.connection.onRequest(

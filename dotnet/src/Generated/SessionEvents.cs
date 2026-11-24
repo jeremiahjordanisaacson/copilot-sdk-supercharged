@@ -5917,13 +5917,13 @@ public sealed partial class AssistantUsageData
     [JsonPropertyName("inputTokens")]
     public long? InputTokens { get; set; }
 
-    /// <summary>Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateDeliveryId")]
     internal string? InstructionUpdateDeliveryId { get; set; }
 
-    /// <summary>Event identifier of the latest canonical instruction update included in this model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateLatestEventId")]
@@ -6398,13 +6398,13 @@ public sealed partial class ModelCallFailureData
     [JsonPropertyName("initiator")]
     public string? Initiator { get; set; }
 
-    /// <summary>Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateDeliveryId")]
     internal string? InstructionUpdateDeliveryId { get; set; }
 
-    /// <summary>Event identifier of the latest canonical instruction update included in this failed model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateLatestEventId")]
@@ -7600,7 +7600,7 @@ public sealed partial class InstructionUpdateData
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
-    /// <summary>Whether this update was recorded after the conversation's initial user message.</summary>
+    /// <summary>No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("postInitial")]

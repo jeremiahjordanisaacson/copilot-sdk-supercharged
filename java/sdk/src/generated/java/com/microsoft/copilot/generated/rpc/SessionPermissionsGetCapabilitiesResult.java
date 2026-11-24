@@ -28,7 +28,10 @@ public record SessionPermissionsGetCapabilitiesResult(
     @JsonProperty("assistedApproval") Boolean assistedApproval,
     /** Whether managed policy currently permits unconditional approval.
 Stays true while managed policy is still resolving. */
-    @JsonProperty("bypassPermissions") Boolean bypassPermissions
+    @JsonProperty("bypassPermissions") Boolean bypassPermissions,
+    /** Whether this local session supports the owner-authenticated
+`hostPolicy.preCheck` capability. */
+    @JsonProperty("hostPolicyPreCheck") Boolean hostPolicyPreCheck
 ) {
 
     /**
@@ -54,6 +57,7 @@ Stays true while managed policy is still resolving. */
         private Builder() {}
         private Boolean assistedApproval;
         private Boolean bypassPermissions;
+        private Boolean hostPolicyPreCheck;
 
         /**
          * Sets the {@code assistedApproval} property.
@@ -80,6 +84,18 @@ Stays true while managed policy is still resolving. */
         }
 
         /**
+         * Sets the {@code hostPolicyPreCheck} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder hostPolicyPreCheck(Boolean value) {
+            this.hostPolicyPreCheck = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
@@ -88,7 +104,7 @@ Stays true while managed policy is still resolving. */
         public SessionPermissionsGetCapabilitiesResult build() {
             if (assistedApproval == null) throw new IllegalStateException("Missing required property: assistedApproval");
             if (bypassPermissions == null) throw new IllegalStateException("Missing required property: bypassPermissions");
-            return new SessionPermissionsGetCapabilitiesResult(assistedApproval, bypassPermissions);
+            return new SessionPermissionsGetCapabilitiesResult(assistedApproval, bypassPermissions, hostPolicyPreCheck);
         }
     }
 }

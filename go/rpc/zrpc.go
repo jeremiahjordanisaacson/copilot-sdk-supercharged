@@ -12123,6 +12123,37 @@ type HostMaterializeSessionResult struct {
 	SessionID string `json:"sessionId"`
 }
 
+// One non-prompting host-policy decision requested before the runtime invokes the Assisted
+// Permissions judge.
+// Experimental: HostPolicyPreCheckRequest is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckRequest struct {
+	// Agent mode captured for the request, when available.
+	AgentMode *SessionMode `json:"agentMode,omitempty"`
+	// Exact permission request being evaluated, with the same shape as
+	// `permission.requested.data.permissionRequest`.
+	PermissionRequest any `json:"permissionRequest"`
+	// Live host policy revision whose decision the runtime will accept.
+	PolicyRevision int64 `json:"policyRevision"`
+	// Exact user-facing gate the host may settle without prompting, with the same shape as
+	// `permission.requested.data.promptRequest`.
+	PromptRequest any `json:"promptRequest"`
+	// Runtime-generated correlation identifier for this permission request.
+	RequestID string `json:"requestId"`
+	// Session whose owning connection declared the host-policy pre-check.
+	SessionID string `json:"sessionId"`
+}
+
+// Host policy decision and the exact policy revision used to make it.
+// Experimental: HostPolicyPreCheckResult is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckResult struct {
+	// Whether host policy approves or defers this request.
+	Decision HostPolicyPreCheckDecision `json:"decision"`
+	// Policy revision used for the decision.
+	PolicyRevision int64 `json:"policyRevision"`
+}
+
 // Publishes a resident session attached to the listener's owning connection.
 // Experimental: HostPublishSessionRequest is part of an experimental API and may change or
 // be removed.
@@ -22766,6 +22797,9 @@ type PermissionsCapabilities struct {
 	// Whether managed policy currently permits unconditional approval.
 	// Stays true while managed policy is still resolving.
 	BypassPermissions bool `json:"bypassPermissions"`
+	// Whether this local session supports the owner-authenticated
+	// `hostPolicy.preCheck` capability.
+	HostPolicyPreCheck *bool `json:"hostPolicyPreCheck,omitempty"`
 }
 
 // No parameters.
@@ -22837,6 +22871,17 @@ type PermissionsConfigureAssistedApprovalContext struct {
 	Value any `json:"value"`
 }
 
+// Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime
+// accepts a decision only for the declared revision, which every SDK represents exactly.
+// Experimental: PermissionsConfigureHostPolicyPreCheck is part of an experimental API and
+// may change or be removed.
+type PermissionsConfigureHostPolicyPreCheck struct {
+	// Whether this connection declares the host-policy pre-check.
+	Enabled bool `json:"enabled"`
+	// Host policy revision from 0 through 2^53 - 1.
+	PolicyRevision int64 `json:"policyRevision"`
+}
+
 // Patch of permission policy fields to apply (omit a field to leave it unchanged).
 // Experimental: PermissionsConfigureParams is part of an experimental API and may change or
 // be removed.
@@ -22884,6 +22929,11 @@ type PermissionsConfigureParams struct {
 	// unchanged; false clears it. Without a declaration, registered handlers are not consulted
 	// during unattended Assisted Autopilot. Remote sessions are not supported.
 	HostPolicyPermissionHandler *bool `json:"hostPolicyPermissionHandler,omitempty"`
+	// Declares a non-prompting host-policy callback that the runtime may call before the
+	// Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the
+	// owning non-extension connection may set it. False disables the declaration. Hosts must
+	// reapply after resume. Remote sessions are not supported.
+	HostPolicyPreCheck *PermissionsConfigureHostPolicyPreCheck `json:"hostPolicyPreCheck,omitempty"`
 	// If specified, replaces the session's path-permission policy. The runtime constructs the
 	// appropriate PathManager based on these inputs (rooted at the session's working
 	// directory). Omit to leave the current path policy unchanged.
@@ -43934,6 +43984,19 @@ const (
 	HostExitReasonOwnerDisconnected HostExitReason = "ownerDisconnected"
 	// The runtime is shutting down.
 	HostExitReasonRuntimeShutdown HostExitReason = "runtimeShutdown"
+)
+
+// Non-prompting host-policy decision. Defer preserves the runtime's existing judge and
+// permission-handler path.
+// Experimental: HostPolicyPreCheckDecision is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckDecision string
+
+const (
+	// Host policy settles the request as approved without prompting.
+	HostPolicyPreCheckDecisionApprove HostPolicyPreCheckDecision = "approve"
+	// The runtime continues through its existing judge and permission-handler path.
+	HostPolicyPreCheckDecisionDefer HostPolicyPreCheckDecision = "defer"
 )
 
 // Mode discriminator for HostSessionAuthentication.
@@ -65473,6 +65536,9 @@ func (a *PermissionsAPI) Configure(ctx context.Context, params *PermissionsConfi
 		}
 		if params.HostPolicyPermissionHandler != nil {
 			req["hostPolicyPermissionHandler"] = *params.HostPolicyPermissionHandler
+		}
+		if params.HostPolicyPreCheck != nil {
+			req["hostPolicyPreCheck"] = *params.HostPolicyPreCheck
 		}
 		if params.Paths != nil {
 			req["paths"] = *params.Paths

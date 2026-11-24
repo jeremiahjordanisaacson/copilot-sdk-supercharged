@@ -46,7 +46,9 @@ public record SessionPermissionsConfigureParams(
     /** Optional owner-authenticated per-source update to lifecycle-fenced session authority. Active grants from all sources are rendered together, in source order, to the Assisted Permissions judge, which alone interprets their statements and scope. Only the owning non-extension session connection, bound to the current session generation, may replace or revoke authority. Omit to leave unchanged. Hard runtime controls, mandatory policy, and later human restrictions still take precedence. Session-scoped only; hosts must reapply after resume. */
     @JsonProperty("authenticatedAuthority") AuthenticatedAuthorityUpdate authenticatedAuthority,
     /** Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported. */
-    @JsonProperty("hostPolicyPermissionHandler") Boolean hostPolicyPermissionHandler
+    @JsonProperty("hostPolicyPermissionHandler") Boolean hostPolicyPermissionHandler,
+    /** Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported. */
+    @JsonProperty("hostPolicyPreCheck") PermissionsConfigureHostPolicyPreCheck hostPolicyPreCheck
 ) {
 
     /**
@@ -81,6 +83,7 @@ public record SessionPermissionsConfigureParams(
         private PermissionsConfigureAssistedApprovalContext assistedApprovalContext;
         private AuthenticatedAuthorityUpdate authenticatedAuthority;
         private Boolean hostPolicyPermissionHandler;
+        private PermissionsConfigureHostPolicyPreCheck hostPolicyPreCheck;
 
         /**
          * Sets the {@code sessionId} property.
@@ -215,13 +218,25 @@ public record SessionPermissionsConfigureParams(
         }
 
         /**
+         * Sets the {@code hostPolicyPreCheck} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        @com.microsoft.copilot.CopilotExperimental
+        public Builder hostPolicyPreCheck(PermissionsConfigureHostPolicyPreCheck value) {
+            this.hostPolicyPreCheck = value;
+            return this;
+        }
+
+        /**
          * Builds a record after checking required property presence.
          * @return a new record
          * @throws IllegalStateException if a required property is missing
          * @since 2.0.0
          */
         public SessionPermissionsConfigureParams build() {
-            return new SessionPermissionsConfigureParams(sessionId, approveAllToolPermissionRequests, approveAllReadPermissionRequests, rules, paths, urls, additionalContentExclusionPolicies, assistedApprovalInstructions, assistedApprovalContext, authenticatedAuthority, hostPolicyPermissionHandler);
+            return new SessionPermissionsConfigureParams(sessionId, approveAllToolPermissionRequests, approveAllReadPermissionRequests, rules, paths, urls, additionalContentExclusionPolicies, assistedApprovalInstructions, assistedApprovalContext, authenticatedAuthority, hostPolicyPermissionHandler, hostPolicyPreCheck);
         }
     }
 }

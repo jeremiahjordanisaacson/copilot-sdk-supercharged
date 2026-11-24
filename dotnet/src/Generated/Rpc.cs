@@ -45446,6 +45446,19 @@ public sealed class AuthenticatedAuthorityUpdate
     public string Source { get; set; } = string.Empty;
 }
 
+/// <summary>Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime accepts a decision only for the declared revision, which every SDK represents exactly.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsConfigureHostPolicyPreCheck
+{
+    /// <summary>Whether this connection declares the host-policy pre-check.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    /// <summary>Host policy revision from 0 through 2^53 - 1.</summary>
+    [JsonPropertyName("policyRevision")]
+    public long PolicyRevision { get; set; }
+}
+
 /// <summary>If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class PermissionPathsConfig
@@ -45537,6 +45550,11 @@ internal sealed class PermissionsConfigureParams
     [JsonPropertyName("hostPolicyPermissionHandler")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? HostPolicyPermissionHandler { get; set; }
+
+    /// <summary>Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.</summary>
+    [JsonPropertyName("hostPolicyPreCheck")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PermissionsConfigureHostPolicyPreCheck? HostPolicyPreCheck { get; set; }
 
     /// <summary>If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.</summary>
     [JsonPropertyName("paths")]
@@ -46387,6 +46405,14 @@ public sealed class PermissionsCapabilities
     /// </summary>
     [JsonPropertyName("bypassPermissions")]
     public bool BypassPermissions { get; set; }
+
+    /// <summary>
+    /// Whether this local session supports the owner-authenticated
+    /// `hostPolicy.preCheck` capability.
+    /// </summary>
+    [JsonPropertyName("hostPolicyPreCheck")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HostPolicyPreCheck { get; set; }
 }
 
 /// <summary>Identifies the target session.</summary>
@@ -88694,13 +88720,14 @@ public sealed class PermissionsApi
     /// <param name="assistedApprovalContext">SDK-host advisory JSON for future Assisted Permissions judge requests. The value replaces only its named source; null clears that source. Omit to leave all sources unchanged. The runtime applies strict structural and size limits, renders the source in a runtime-controlled advisory frame, and never treats the value as instructions or authorization. Session-scoped only; hosts must reapply after resume.</param>
     /// <param name="authenticatedAuthority">Optional owner-authenticated per-source update to lifecycle-fenced session authority. Active grants from all sources are rendered together, in source order, to the Assisted Permissions judge, which alone interprets their statements and scope. Only the owning non-extension session connection, bound to the current session generation, may replace or revoke authority. Omit to leave unchanged. Hard runtime controls, mandatory policy, and later human restrictions still take precedence. Session-scoped only; hosts must reapply after resume.</param>
     /// <param name="hostPolicyPermissionHandler">Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.</param>
+    /// <param name="hostPolicyPreCheck">Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Indicates whether the operation succeeded.</returns>
-    public async Task<PermissionsConfigureResult> ConfigureAsync(bool? approveAllToolPermissionRequests = null, bool? approveAllReadPermissionRequests = null, PermissionRulesSet? rules = null, PermissionPathsConfig? paths = null, PermissionUrlsConfig? urls = null, IList<PermissionsConfigureAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, string? assistedApprovalInstructions = null, PermissionsConfigureAssistedApprovalContext? assistedApprovalContext = null, AuthenticatedAuthorityUpdate? authenticatedAuthority = null, bool? hostPolicyPermissionHandler = null, CancellationToken cancellationToken = default)
+    public async Task<PermissionsConfigureResult> ConfigureAsync(bool? approveAllToolPermissionRequests = null, bool? approveAllReadPermissionRequests = null, PermissionRulesSet? rules = null, PermissionPathsConfig? paths = null, PermissionUrlsConfig? urls = null, IList<PermissionsConfigureAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, string? assistedApprovalInstructions = null, PermissionsConfigureAssistedApprovalContext? assistedApprovalContext = null, AuthenticatedAuthorityUpdate? authenticatedAuthority = null, bool? hostPolicyPermissionHandler = null, PermissionsConfigureHostPolicyPreCheck? hostPolicyPreCheck = null, CancellationToken cancellationToken = default)
     {
         _session.ThrowIfDisposed();
 
-        var request = new PermissionsConfigureParams { SessionId = _session.SessionId, ApproveAllToolPermissionRequests = approveAllToolPermissionRequests, ApproveAllReadPermissionRequests = approveAllReadPermissionRequests, Rules = rules, Paths = paths, Urls = urls, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, AssistedApprovalInstructions = assistedApprovalInstructions, AssistedApprovalContext = assistedApprovalContext, AuthenticatedAuthority = authenticatedAuthority, HostPolicyPermissionHandler = hostPolicyPermissionHandler };
+        var request = new PermissionsConfigureParams { SessionId = _session.SessionId, ApproveAllToolPermissionRequests = approveAllToolPermissionRequests, ApproveAllReadPermissionRequests = approveAllReadPermissionRequests, Rules = rules, Paths = paths, Urls = urls, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, AssistedApprovalInstructions = assistedApprovalInstructions, AssistedApprovalContext = assistedApprovalContext, AuthenticatedAuthority = authenticatedAuthority, HostPolicyPermissionHandler = hostPolicyPermissionHandler, HostPolicyPreCheck = hostPolicyPreCheck };
         return await CopilotClient.InvokeRpcAsync<PermissionsConfigureResult>(_session.Rpc, "session.permissions.configure", [request], cancellationToken);
     }
 
@@ -92399,6 +92426,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(PermissionsConfigureAdditionalContentExclusionPolicyRule))]
 [JsonSerializable(typeof(PermissionsConfigureAdditionalContentExclusionPolicyRuleSource))]
 [JsonSerializable(typeof(PermissionsConfigureAssistedApprovalContext))]
+[JsonSerializable(typeof(PermissionsConfigureHostPolicyPreCheck))]
 [JsonSerializable(typeof(PermissionsConfigureParams))]
 [JsonSerializable(typeof(PermissionsConfigureResult))]
 [JsonSerializable(typeof(PermissionsEvaluateManagedPolicyParams))]

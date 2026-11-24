@@ -48,9 +48,9 @@ public final class ModelCallFailureEvent extends SessionEvent {
         @JsonProperty("providerCallId") String providerCallId,
         /** Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation */
         @JsonProperty("serviceRequestId") String serviceRequestId,
-        /** Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request. */
+        /** No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request. */
         @JsonProperty("instructionUpdateDeliveryId") String instructionUpdateDeliveryId,
-        /** Event identifier of the latest canonical instruction update included in this failed model request. */
+        /** No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request. */
         @JsonProperty("instructionUpdateLatestEventId") String instructionUpdateLatestEventId,
         /** Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable. */
         @JsonProperty("rte") Boolean rte,

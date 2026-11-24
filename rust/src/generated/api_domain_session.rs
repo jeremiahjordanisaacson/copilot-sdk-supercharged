@@ -1844,11 +1844,11 @@ pub struct PermissionsCapabilities {
     /// Whether managed policy currently permits unconditional approval.
     /// Stays true while managed policy is still resolving.
     pub bypass_permissions: bool,
+    /// Whether this local session supports the owner-authenticated
+    /// `hostPolicy.preCheck` capability.
+    pub host_policy_pre_check: Option<bool>,
 }
-crate::record_serde::wire_record!(PermissionsCapabilities {
-    assisted_approval: "assistedApproval",
-    bypass_permissions: "bypassPermissions"
-});
+crate::record_serde::wire_record!(PermissionsCapabilities { assisted_approval: "assistedApproval", bypass_permissions: "bypassPermissions", host_policy_pre_check: "hostPolicyPreCheck" if is_none });
 
 /// No parameters.
 ///
@@ -1963,6 +1963,26 @@ crate::record_serde::wire_record!(PermissionsConfigureAssistedApprovalContext {
     value: "value"
 });
 
+/// Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime accepts a decision only for the declared revision, which every SDK represents exactly.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct PermissionsConfigureHostPolicyPreCheck {
+    /// Whether this connection declares the host-policy pre-check.
+    pub enabled: bool,
+    /// Host policy revision from 0 through 2^53 - 1.
+    pub policy_revision: i64,
+}
+crate::record_serde::wire_record!(PermissionsConfigureHostPolicyPreCheck {
+    enabled: "enabled",
+    policy_revision: "policyRevision"
+});
+
 /// If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.
 ///
 /// <div class="warning">
@@ -2005,6 +2025,8 @@ pub struct PermissionsConfigureParams {
     pub authenticated_authority: Option<AuthenticatedAuthorityUpdate>,
     /// Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.
     pub host_policy_permission_handler: Option<bool>,
+    /// Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.
+    pub host_policy_pre_check: Option<PermissionsConfigureHostPolicyPreCheck>,
     /// If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.
     pub paths: Option<PermissionPathsConfig>,
     /// If specified, replaces the session's approved/denied permission rules. Omit to leave the current rules unchanged.
@@ -2012,7 +2034,7 @@ pub struct PermissionsConfigureParams {
     /// If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.
     pub urls: Option<PermissionUrlsConfig>,
 }
-crate::record_serde::wire_record!(PermissionsConfigureParams { additional_content_exclusion_policies: "additionalContentExclusionPolicies" if is_none, approve_all_read_permission_requests: "approveAllReadPermissionRequests" if is_none, approve_all_tool_permission_requests: "approveAllToolPermissionRequests" if is_none, assisted_approval_context: "assistedApprovalContext" if is_none, assisted_approval_instructions: "assistedApprovalInstructions" if is_none, authenticated_authority: "authenticatedAuthority" if is_none, host_policy_permission_handler: "hostPolicyPermissionHandler" if is_none, paths: "paths" if is_none, rules: "rules" if is_none, urls: "urls" if is_none });
+crate::record_serde::wire_record!(PermissionsConfigureParams { additional_content_exclusion_policies: "additionalContentExclusionPolicies" if is_none, approve_all_read_permission_requests: "approveAllReadPermissionRequests" if is_none, approve_all_tool_permission_requests: "approveAllToolPermissionRequests" if is_none, assisted_approval_context: "assistedApprovalContext" if is_none, assisted_approval_instructions: "assistedApprovalInstructions" if is_none, authenticated_authority: "authenticatedAuthority" if is_none, host_policy_permission_handler: "hostPolicyPermissionHandler" if is_none, host_policy_pre_check: "hostPolicyPreCheck" if is_none, paths: "paths" if is_none, rules: "rules" if is_none, urls: "urls" if is_none });
 
 /// Indicates whether the operation succeeded.
 ///
@@ -17309,11 +17331,11 @@ pub struct SessionPermissionsGetCapabilitiesResult {
     /// Whether managed policy currently permits unconditional approval.
     /// Stays true while managed policy is still resolving.
     pub bypass_permissions: bool,
+    /// Whether this local session supports the owner-authenticated
+    /// `hostPolicy.preCheck` capability.
+    pub host_policy_pre_check: Option<bool>,
 }
-crate::record_serde::wire_record!(SessionPermissionsGetCapabilitiesResult {
-    assisted_approval: "assistedApproval",
-    bypass_permissions: "bypassPermissions"
-});
+crate::record_serde::wire_record!(SessionPermissionsGetCapabilitiesResult { assisted_approval: "assistedApproval", bypass_permissions: "bypassPermissions", host_policy_pre_check: "hostPolicyPreCheck" if is_none });
 
 /// Indicates whether the operation succeeded.
 ///

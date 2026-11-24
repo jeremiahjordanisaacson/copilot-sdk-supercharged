@@ -509,7 +509,7 @@ type InstructionUpdateData struct {
 	Lifetime InstructionUpdateLifetime `json:"lifetime"`
 	// Optional stable source name for diagnostics and future host-authored updates.
 	Name *string `json:"name,omitempty"`
-	// Whether this update was recorded after the conversation's initial user message.
+	// No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.
 	// Internal: PostInitial is part of the SDK's internal API surface and is not intended for external use.
 	PostInitial *bool `json:"postInitial,omitempty"`
 }
@@ -1661,10 +1661,10 @@ type ModelCallFailureData struct {
 	InferenceGateway *bool `json:"inferenceGateway,omitempty"`
 	// What initiated this failed API call, when reported (e.g., "sub-agent", "mcp-sampling"); absent for main-loop failures, whether user- or agent-initiated
 	Initiator *string `json:"initiator,omitempty"`
-	// Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+	// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
 	// Internal: InstructionUpdateDeliveryID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateDeliveryID *string `json:"instructionUpdateDeliveryId,omitempty"`
-	// Event identifier of the latest canonical instruction update included in this failed model request.
+	// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.
 	// Internal: InstructionUpdateLatestEventID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateLatestEventID *string `json:"instructionUpdateLatestEventId,omitempty"`
 	// Authoritative interaction classification for the failed call, matching `assistant.usage.interactionType` (for example `conversation-agent`, `conversation-subagent`, or `conversation-sampling`). Absent when the producer cannot classify the interaction.
@@ -2084,10 +2084,10 @@ type AssistantUsageData struct {
 	Initiator *string `json:"initiator,omitempty"`
 	// Number of input tokens consumed
 	InputTokens *int64 `json:"inputTokens,omitempty"`
-	// Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+	// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
 	// Internal: InstructionUpdateDeliveryID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateDeliveryID *string `json:"instructionUpdateDeliveryId,omitempty"`
-	// Event identifier of the latest canonical instruction update included in this model request.
+	// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.
 	// Internal: InstructionUpdateLatestEventID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateLatestEventID *string `json:"instructionUpdateLatestEventId,omitempty"`
 	// Coarse classification of the interaction that produced this call, mirroring the session's per-request agent context (e.g. `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, `conversation-user`). Non-billing; lets consumers attribute a model call to a call class (e.g. sub-agent/sidekick) independently of the billing initiator. Absent when the runtime did not classify the request.

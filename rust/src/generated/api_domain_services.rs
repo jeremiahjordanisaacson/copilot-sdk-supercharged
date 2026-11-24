@@ -8799,6 +8799,51 @@ pub struct HostLocalServerOptions {
 }
 crate::record_serde::wire_record!(HostLocalServerOptions { hostname: "hostname" if is_none, port: "port" if is_none, require_connection_token: "requireConnectionToken" if is_none, token: "token" if is_none });
 
+/// One non-prompting host-policy decision requested before the runtime invokes the Assisted Permissions judge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostPolicyPreCheckRequest {
+    /// Agent mode captured for the request, when available.
+    pub agent_mode: Option<SessionMode>,
+    /// Exact permission request being evaluated, with the same shape as `permission.requested.data.permissionRequest`.
+    pub permission_request: serde_json::Value,
+    /// Live host policy revision whose decision the runtime will accept.
+    pub policy_revision: i64,
+    /// Exact user-facing gate the host may settle without prompting, with the same shape as `permission.requested.data.promptRequest`.
+    pub prompt_request: serde_json::Value,
+    /// Runtime-generated correlation identifier for this permission request.
+    pub request_id: RequestId,
+    /// Session whose owning connection declared the host-policy pre-check.
+    pub session_id: SessionId,
+}
+crate::record_serde::wire_record!(HostPolicyPreCheckRequest { agent_mode: "agentMode" if is_none, permission_request: "permissionRequest", policy_revision: "policyRevision", prompt_request: "promptRequest", request_id: "requestId", session_id: "sessionId" });
+
+/// Host policy decision and the exact policy revision used to make it.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct HostPolicyPreCheckResult {
+    /// Whether host policy approves or defers this request.
+    pub decision: HostPolicyPreCheckDecision,
+    /// Policy revision used for the decision.
+    pub policy_revision: i64,
+}
+crate::record_serde::wire_record!(HostPolicyPreCheckResult {
+    decision: "decision",
+    policy_revision: "policyRevision"
+});
+
 /// Publishes a resident session attached to the listener's owning connection.
 ///
 /// <div class="warning">
@@ -22166,6 +22211,43 @@ impl<'de> Deserialize<'de> for HostExitReason {
             1 => Self::Exited,
             2 => Self::OwnerDisconnected,
             3 => Self::RuntimeShutdown,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Non-prompting host-policy decision. Defer preserves the runtime's existing judge and permission-handler path.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub enum HostPolicyPreCheckDecision {
+    /// Host policy settles the request as approved without prompting.
+    #[serde(rename = "approve")]
+    Approve,
+    /// The runtime continues through its existing judge and permission-handler path.
+    #[serde(rename = "defer")]
+    Defer,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl<'de> Deserialize<'de> for HostPolicyPreCheckDecision {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = crate::enum_serde::deserialize_variant(
+            deserializer,
+            "HostPolicyPreCheckDecision",
+            &["approve", "defer", "Unknown"],
+            Some(2),
+        )?;
+        Ok(match index {
+            0 => Self::Approve,
+            1 => Self::Defer,
             _ => Self::Unknown,
         })
     }

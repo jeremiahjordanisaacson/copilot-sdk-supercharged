@@ -4706,6 +4706,18 @@ export type HostExitReason =
   /** The runtime is shutting down. */
   | "runtimeShutdown";
 /**
+ * Non-prompting host-policy decision. Defer preserves the runtime's existing judge and permission-handler path.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckDecision".
+ */
+/** @experimental */
+export type HostPolicyPreCheckDecision =
+  /** Host policy settles the request as approved without prompting. */
+  | "approve"
+  /** The runtime continues through its existing judge and permission-handler path. */
+  | "defer";
+/**
  * Trusted admission context, not inference authentication or session configuration.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -26828,6 +26840,56 @@ export interface HostLocalServerOptions {
   requireConnectionToken?: boolean;
 }
 /**
+ * One non-prompting host-policy decision requested before the runtime invokes the Assisted Permissions judge.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckRequest".
+ */
+/** @experimental */
+export interface HostPolicyPreCheckRequest {
+  /**
+   * Session whose owning connection declared the host-policy pre-check.
+   */
+  sessionId: string;
+  /**
+   * Runtime-generated correlation identifier for this permission request.
+   */
+  requestId: string;
+  /**
+   * Exact permission request being evaluated, with the same shape as `permission.requested.data.permissionRequest`.
+   */
+  permissionRequest: JsonValue;
+  /**
+   * Exact user-facing gate the host may settle without prompting, with the same shape as `permission.requested.data.promptRequest`.
+   */
+  promptRequest: JsonValue;
+  /**
+   * Agent mode captured for the request, when available.
+   */
+  agentMode?: SessionMode;
+  /**
+   * Live host policy revision whose decision the runtime will accept.
+   */
+  policyRevision: number;
+}
+/**
+ * Host policy decision and the exact policy revision used to make it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckResult".
+ */
+/** @experimental */
+export interface HostPolicyPreCheckResult {
+  /**
+   * Whether host policy approves or defers this request.
+   */
+  decision: HostPolicyPreCheckDecision;
+  /**
+   * Policy revision used for the decision.
+   */
+  policyRevision: number;
+}
+/**
  * Publishes a resident session attached to the listener's owning connection.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -38533,6 +38595,11 @@ export interface PermissionsCapabilities {
    * Stays true while managed policy is still resolving.
    */
   bypassPermissions: boolean;
+  /**
+   * Whether this local session supports the owner-authenticated
+   * `hostPolicy.preCheck` capability.
+   */
+  hostPolicyPreCheck?: boolean;
 }
 /**
  * No parameters.
@@ -38636,6 +38703,23 @@ export interface PermissionsConfigureAssistedApprovalContext {
   value: JsonValue;
 }
 /**
+ * Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime accepts a decision only for the declared revision, which every SDK represents exactly.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsConfigureHostPolicyPreCheck".
+ */
+/** @experimental */
+export interface PermissionsConfigureHostPolicyPreCheck {
+  /**
+   * Whether this connection declares the host-policy pre-check.
+   */
+  enabled: boolean;
+  /**
+   * Host policy revision from 0 through 2^53 - 1.
+   */
+  policyRevision: number;
+}
+/**
  * Patch of permission policy fields to apply (omit a field to leave it unchanged).
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -38683,6 +38767,10 @@ export interface PermissionsConfigureParams {
    * Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.
    */
   hostPolicyPermissionHandler?: boolean;
+  /**
+   * Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.
+   */
+  hostPolicyPreCheck?: PermissionsConfigureHostPolicyPreCheck;
 }
 /**
  * If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.

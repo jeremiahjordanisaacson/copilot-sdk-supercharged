@@ -9504,13 +9504,13 @@ export interface AssistantUsageData {
    */
   inputTokens?: number;
   /**
-   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+   * No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
    *
    * @internal
    */
   instructionUpdateDeliveryId?: string;
   /**
-   * Event identifier of the latest canonical instruction update included in this model request.
+   * No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.
    *
    * @internal
    */
@@ -9973,13 +9973,13 @@ export interface ModelCallFailureData {
    */
   initiator?: string;
   /**
-   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+   * No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
    *
    * @internal
    */
   instructionUpdateDeliveryId?: string;
   /**
-   * Event identifier of the latest canonical instruction update included in this failed model request.
+   * No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.
    *
    * @internal
    */
@@ -12440,7 +12440,7 @@ export interface InstructionUpdateData {
    */
   name?: string;
   /**
-   * Whether this update was recorded after the conversation's initial user message.
+   * No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.
    *
    * @internal
    */

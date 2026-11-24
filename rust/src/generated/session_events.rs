@@ -4655,11 +4655,11 @@ pub struct AssistantUsageData {
     /// Number of input tokens consumed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<i64>,
-    /// Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+    /// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instruction_update_delivery_id: Option<String>,
-    /// Event identifier of the latest canonical instruction update included in this model request.
+    /// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instruction_update_latest_event_id: Option<String>,
@@ -4967,11 +4967,11 @@ pub struct ModelCallFailureData {
     /// What initiated this failed API call, when reported (e.g., "sub-agent", "mcp-sampling"); absent for main-loop failures, whether user- or agent-initiated
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initiator: Option<String>,
-    /// Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+    /// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instruction_update_delivery_id: Option<String>,
-    /// Event identifier of the latest canonical instruction update included in this failed model request.
+    /// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) instruction_update_latest_event_id: Option<String>,
@@ -6508,7 +6508,7 @@ pub struct InstructionUpdateData {
     pub lifetime: InstructionUpdateLifetime,
     /// Optional stable source name for diagnostics and future host-authored updates.
     pub name: Option<String>,
-    /// Whether this update was recorded after the conversation's initial user message.
+    /// No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.
     #[doc(hidden)]
     pub(crate) post_initial: Option<bool>,
 }
