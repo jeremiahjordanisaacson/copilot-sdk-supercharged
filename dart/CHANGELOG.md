@@ -1,3 +1,10 @@
+## 3.1.0
+- Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0. New: MCP secret
+  store (`mcpSecretsSave`, `mcpSecretsDelete`, `mcpSecretsDeleteServer`) and
+  plugin extension approvals (`extensionApprovalsGrant`, `extensionApprovalsList`,
+  `extensionApprovalsRevoke`), both experimental and requiring Copilot CLI
+  1.0.116 or newer; and ask-user image answers (`imageAttachmentConstraints`
+  on requests, image `attachments` on responses).
 ## 3.0.0
 - SDK protocol 4: requires Copilot CLI 1.0.113 or newer. Session create and
   resume now send protocol 4 grouped options; existing Dart options keep

@@ -4,7 +4,7 @@
         "type": "git",
         "url": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git"
     },
-    "version": "3.0.0",
+    "version": "3.1.0",
     "copilotCliVersion": "1.0.113",
     "description": "GitHub Copilot SDK Supercharged - TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC. Supports 40 languages.",
     "main": "./dist/cjs/index.js",
