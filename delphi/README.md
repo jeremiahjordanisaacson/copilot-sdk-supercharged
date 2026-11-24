@@ -92,6 +92,89 @@ begin
 end.
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `TCopilotClient`
+methods below are server-scoped requests that need **Copilot CLI 1.0.116 or
+newer**; older CLIs answer method-not-found, raised as `EJsonRpcError`
+(`Code = -32601`) like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store (`mcp.secrets.save`, `mcp.secrets.delete`,
+`mcp.secrets.deleteServer`). Each method also takes an optional `ConfigDir`.
+The secret value is never logged.
+
+```pascal
+var Saved := Client.McpSecretsSave('my-server-token',
+  GetEnvironmentVariable('MY_SERVER_TOKEN'));
+if Saved.UsedKeychain then
+  WriteLn('Stored in the OS keychain')
+else
+  WriteLn('Stored in the file backend');
+
+Client.McpSecretsDelete('my-server-token');
+Client.McpSecretsDeleteServer('my-server'); // every credential of the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `.list`, `.revoke`).
+`ExtensionApprovalsList` and `ExtensionApprovalsRevoke` take an optional
+`ASessionId` to use an attached session's configuration profile.
+
+```pascal
+// Persist a pending extension permission request before answering it.
+var Grant := Client.ExtensionApprovalsGrant(Session.SessionId, PendingRequestId);
+if Grant.Granted and Grant.HasApproval then
+  WriteLn('Approved ', Grant.Approval.ExtensionName);
+
+for var Approval in Client.ExtensionApprovalsList do
+  // ExtensionName, PluginName, Capabilities, GrantedAt, InstallationKey,
+  // InstallationLabel
+  if Client.ExtensionApprovalsRevoke(Approval.ExtensionName,
+    Approval.InstallationKey).Revoked then
+    WriteLn('Revoked ', Approval.ExtensionName);
+```
+
+### Ask-user image attachments
+
+`TSessionConfig.OnUserInputRequest` answers the runtime's `userInput.request`
+(the ask_user tool); setting it now also sends `requestUserInput`, so the
+runtime offers the tool. `TUserInputRequest` carries `Choices`,
+`AllowFreeform`, `RequestId`, `MetaJson` (the opaque `_meta` object) and
+`ImageAttachmentConstraints` (`Present`, `AllowedMimeTypes`,
+`MaxBytesPerImage`, `MaxCount`); `Present` is False when the runtime does not
+accept images. Answer with `Attachments`, an array of
+`TUserInputImageAttachment` (base64 `Data`, `MimeType`, optional `Description`
+and `DisplayName`; the wire `type` is always `'image'`). They are sent only
+when the array is not empty. The reply also carries `wasFreeform`, True unless
+`Answer` is one of the offered `Choices`, so an image-only answer simply uses
+an empty `Answer`. The runtime enforces the limits.
+
+```pascal
+Config.OnUserInputRequest :=
+  function(const Req: TUserInputRequest): TUserInputResponse
+  var
+    Image: TUserInputImageAttachment;
+  begin
+    Result := Default(TUserInputResponse);
+    if Req.ImageAttachmentConstraints.Present and
+      MatchStr('image/png', Req.ImageAttachmentConstraints.AllowedMimeTypes) then
+    begin
+      Image := Default(TUserInputImageAttachment);
+      Image.Data := ScreenshotBase64; // base64 image bytes, no line breaks
+      Image.MimeType := 'image/png';
+      Image.DisplayName := 'screenshot.png';
+      Result.Attachments := [Image]; // image-only answer: Answer stays ''
+    end
+    else
+      Result.Answer := 'No screenshot available';
+  end;
+```
+
 ## What's New in v3.0.0
 
 The Delphi SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
@@ -345,6 +428,8 @@ Content-Length: <byte-count>\r\n
 - `session.managedSettings.recheckPolicyHelper` - Re-run the Policy Helper
 - `session.permissions.setMode` - Change the permission mode
 - `managedSettings.clearCache` - Clear cached managed settings
+- `mcp.secrets.save` / `mcp.secrets.delete` / `mcp.secrets.deleteServer` - MCP secret store
+- `permissions.extensionApprovals.grant` / `.list` / `.revoke` - Plugin extension approvals
 - `network.setProvider` - Register network callbacks
 
 **Server -> Client (notifications):**
@@ -403,6 +488,12 @@ end;
 | `DeleteSession(Id)` | Permanently delete a session |
 | `OnLifecycle(Handler)` | Subscribe to lifecycle events |
 | `ClearManagedSettingsCache` | Clear cached enterprise managed settings |
+| `McpSecretsSave(SecretId, Value, ConfigDir)` | Save an MCP credential, returns `TMcpSecretsSaveResult` |
+| `McpSecretsDelete(SecretId, ConfigDir)` | Delete an MCP credential |
+| `McpSecretsDeleteServer(ServerName, ConfigDir)` | Delete the MCP credentials indexed for a server |
+| `ExtensionApprovalsGrant(SessionId, RequestId)` | Persist a pending plugin extension approval |
+| `ExtensionApprovalsList(SessionId)` | List plugin extension approvals |
+| `ExtensionApprovalsRevoke(ExtensionName, InstallationKey, SessionId)` | Revoke a plugin extension approval |
 | `LastPolicyHelperFailure` | Policy Helper failure of the last failed create/resume |
 
 ### TCopilotSession

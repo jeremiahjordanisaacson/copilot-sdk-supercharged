@@ -815,6 +815,95 @@ CopilotClient <- R6::R6Class(
       private$client$request("managedSettings.clearCache", empty_json_object())
     },
 
+    #' @description Save an MCP configuration credential in the runtime-owned secret store.
+    #'   Requires Copilot CLI 1.0.116 or newer. The value is a credential: it is sent to the
+    #'   runtime and never logged.
+    #' @param secret_id Character. Secret reference used by an MCP server configuration.
+    #' @param value Character. Credential value to persist.
+    #' @param config_dir Character or NULL. Expected mcp-secrets directory (NULL uses the
+    #'   runtime configuration root).
+    #' @return An McpSecretsSaveResult (\code{used_keychain} is TRUE when the OS keychain
+    #'   stored the credential, FALSE for the file backend).
+    mcp_secrets_save = function(secret_id, value, config_dir = NULL) {
+      if (is.null(private$client)) stop("Client not connected")
+      params <- list(secretId = secret_id, value = value)
+      if (!is.null(config_dir)) params$configDir <- config_dir
+      result <- private$client$request("mcp.secrets.save", params)
+      McpSecretsSaveResult$new(used_keychain = result$usedKeychain)
+    },
+
+    #' @description Delete an MCP configuration credential from the runtime-owned secret
+    #'   store. Requires Copilot CLI 1.0.116 or newer.
+    #' @param secret_id Character. Secret reference to remove.
+    #' @param config_dir Character or NULL. Expected mcp-secrets directory.
+    mcp_secrets_delete = function(secret_id, config_dir = NULL) {
+      if (is.null(private$client)) stop("Client not connected")
+      params <- list(secretId = secret_id)
+      if (!is.null(config_dir)) params$configDir <- config_dir
+      private$client$request("mcp.secrets.delete", params)
+      invisible(NULL)
+    },
+
+    #' @description Delete the credentials indexed for an MCP server. Requires Copilot CLI
+    #'   1.0.116 or newer.
+    #' @param server_name Character. MCP server name.
+    #' @param config_dir Character or NULL. Expected mcp-secrets directory.
+    mcp_secrets_delete_server = function(server_name, config_dir = NULL) {
+      if (is.null(private$client)) stop("Client not connected")
+      params <- list(serverName = server_name)
+      if (!is.null(config_dir)) params$configDir <- config_dir
+      private$client$request("mcp.secrets.deleteServer", params)
+      invisible(NULL)
+    },
+
+    #' @description Persist a pending plugin extension permission request as a user-scoped
+    #'   approval, before answering that request normally. Requires Copilot CLI 1.0.116 or
+    #'   newer.
+    #' @param session_id Character. Session that owns the pending request.
+    #' @param request_id Character. Identifier of the pending extension permission request.
+    #' @return A PermissionsExtensionApprovalsGrantResult (\code{granted}, plus the persisted
+    #'   \code{approval} when granted).
+    extension_approvals_grant = function(session_id, request_id) {
+      if (is.null(private$client)) stop("Client not connected")
+      result <- private$client$request(
+        "permissions.extensionApprovals.grant",
+        list(sessionId = session_id, requestId = request_id)
+      )
+      PermissionsExtensionApprovalsGrantResult$new(
+        granted = result$granted,
+        approval = permissions_extension_approval_from_list(result$approval)
+      )
+    },
+
+    #' @description List the user-scoped plugin extension approvals. Requires Copilot CLI
+    #'   1.0.116 or newer.
+    #' @param session_id Character or NULL. Attached session whose configuration profile to
+    #'   list (NULL lists the server profile).
+    #' @return A list of PermissionsExtensionApproval objects.
+    extension_approvals_list = function(session_id = NULL) {
+      if (is.null(private$client)) stop("Client not connected")
+      params <- empty_json_object()
+      if (!is.null(session_id)) params$sessionId <- session_id
+      result <- private$client$request("permissions.extensionApprovals.list", params)
+      lapply(result$approvals %||% list(), permissions_extension_approval_from_list)
+    },
+
+    #' @description Revoke one user-scoped plugin extension approval. Requires Copilot CLI
+    #'   1.0.116 or newer.
+    #' @param extension_name Character. Extension identity of the approval to revoke.
+    #' @param installation_key Character. Opaque installation key from a grant or list result,
+    #'   passed back unchanged.
+    #' @param session_id Character or NULL. Attached session whose configuration profile holds
+    #'   the approval.
+    #' @return A PermissionsExtensionApprovalsRevokeResult (\code{revoked}).
+    extension_approvals_revoke = function(extension_name, installation_key, session_id = NULL) {
+      if (is.null(private$client)) stop("Client not connected")
+      params <- list(extensionName = extension_name, installationKey = installation_key)
+      if (!is.null(session_id)) params$sessionId <- session_id
+      result <- private$client$request("permissions.extensionApprovals.revoke", params)
+      PermissionsExtensionApprovalsRevokeResult$new(revoked = result$revoked)
+    },
+
     #' @description Get the last session ID.
     #' @return Character or NULL if no previous session.
     get_last_session_id = function() {
@@ -1301,7 +1390,10 @@ CopilotClient <- R6::R6Class(
 
       session <- get(session_id, envir = private$sessions)
       result <- session$handle_user_input_request(params)
-      list(answer = result$answer, wasFreeform = result$was_freeform)
+      reply <- list(answer = result$answer, wasFreeform = result$was_freeform)
+      attachments <- user_input_attachments_to_wire(result$attachments)
+      if (!is.null(attachments)) reply$attachments <- attachments
+      reply
     },
 
     handle_hooks_invoke = function(params) {
@@ -2718,6 +2810,126 @@ PermissionModeSetResult <- R6::R6Class(
       self$success <- isTRUE(success)
       self$mode <- mode
       self$reason <- reason
+    }
+  )
+)
+
+#' McpSecretsSaveResult
+#'
+#' Result of \code{client$mcp_secrets_save()}.
+#'
+#' @field used_keychain Logical. TRUE when the OS keychain stored the credential, FALSE for the
+#'   file backend.
+#' @export
+McpSecretsSaveResult <- R6::R6Class(
+  "McpSecretsSaveResult",
+  public = list(
+    used_keychain = FALSE,
+
+    #' @description Create a new McpSecretsSaveResult.
+    #' @param used_keychain Logical.
+    initialize = function(used_keychain = FALSE) {
+      self$used_keychain <- isTRUE(used_keychain)
+    }
+  )
+)
+
+#' PermissionsExtensionApproval
+#'
+#' A user-scoped approval for one installed plugin extension.
+#'
+#' @field extension_name Character. Stable extension identity (for example
+#'   "plugin:plugin-name:extension-name").
+#' @field plugin_name Character. Plugin that contributed the extension.
+#' @field capabilities Character vector. Exact privileged capabilities the user approved.
+#' @field granted_at Character. RFC 3339 timestamp of the grant.
+#' @field installation_key Character. Opaque installation identity; pass it back unchanged to
+#'   \code{client$extension_approvals_revoke()}.
+#' @field installation_label Character or NULL. Human-readable installation source label.
+#' @export
+PermissionsExtensionApproval <- R6::R6Class(
+  "PermissionsExtensionApproval",
+  public = list(
+    extension_name = NULL,
+    plugin_name = NULL,
+    capabilities = NULL,
+    granted_at = NULL,
+    installation_key = NULL,
+    installation_label = NULL,
+
+    #' @description Create a new PermissionsExtensionApproval.
+    #' @param extension_name Character.
+    #' @param plugin_name Character.
+    #' @param capabilities Character vector.
+    #' @param granted_at Character.
+    #' @param installation_key Character.
+    #' @param installation_label Character or NULL.
+    initialize = function(extension_name = NULL, plugin_name = NULL, capabilities = character(0),
+                          granted_at = NULL, installation_key = NULL, installation_label = NULL) {
+      self$extension_name <- extension_name
+      self$plugin_name <- plugin_name
+      self$capabilities <- capabilities
+      self$granted_at <- granted_at
+      self$installation_key <- installation_key
+      self$installation_label <- installation_label
+    }
+  )
+)
+
+#' Parse a \code{PermissionsExtensionApproval} wire object.
+#' @param obj Named list (parsed JSON) or NULL.
+#' @return A PermissionsExtensionApproval, or NULL when \code{obj} is not an object.
+#' @keywords internal
+permissions_extension_approval_from_list <- function(obj) {
+  if (!is.list(obj) || is.null(names(obj))) return(NULL)
+  PermissionsExtensionApproval$new(
+    extension_name = obj[["extensionName"]],
+    plugin_name = obj[["pluginName"]],
+    capabilities = as.character(unlist(obj[["capabilities"]])),
+    granted_at = obj[["grantedAt"]],
+    installation_key = obj[["installationKey"]],
+    installation_label = obj[["installationLabel"]]
+  )
+}
+
+#' PermissionsExtensionApprovalsGrantResult
+#'
+#' Result of \code{client$extension_approvals_grant()}.
+#'
+#' @field granted Logical. Whether the pending request was eligible and its approval persisted.
+#' @field approval PermissionsExtensionApproval or NULL. The persisted approval when granted.
+#' @export
+PermissionsExtensionApprovalsGrantResult <- R6::R6Class(
+  "PermissionsExtensionApprovalsGrantResult",
+  public = list(
+    granted = FALSE,
+    approval = NULL,
+
+    #' @description Create a new PermissionsExtensionApprovalsGrantResult.
+    #' @param granted Logical.
+    #' @param approval PermissionsExtensionApproval or NULL.
+    initialize = function(granted = FALSE, approval = NULL) {
+      self$granted <- isTRUE(granted)
+      self$approval <- approval
+    }
+  )
+)
+
+#' PermissionsExtensionApprovalsRevokeResult
+#'
+#' Result of \code{client$extension_approvals_revoke()}.
+#'
+#' @field revoked Logical. Whether a matching approval existed and was removed.
+#' @export
+PermissionsExtensionApprovalsRevokeResult <- R6::R6Class(
+  "PermissionsExtensionApprovalsRevokeResult",
+  public = list(
+    revoked = FALSE,
+
+    #' @description Create a new PermissionsExtensionApprovalsRevokeResult.
+    #' @param revoked Logical.
+    initialize = function(revoked = FALSE) {
+      self$revoked <- isTRUE(revoked)
     }
   )
 )

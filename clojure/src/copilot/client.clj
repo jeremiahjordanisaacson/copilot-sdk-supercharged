@@ -643,9 +643,14 @@
          (throw (ex-info "Session not found" {:session-id session-id}))
          (session/handle-user-input-request!
           session-atom
-          {:question      (:question params)
-           :choices       (:choices params)
-           :allowFreeform (:allowFreeform params)})))))
+          (cond-> {:question      (:question params)
+                   :choices       (:choices params)
+                   :allowFreeform (:allowFreeform params)}
+            ;; Image support advertised by the runtime; absent when images are not accepted.
+            (:imageAttachmentConstraints params)
+            (assoc :imageAttachmentConstraints (:imageAttachmentConstraints params))
+            (:requestId params) (assoc :requestId (:requestId params))
+            (:_meta params)     (assoc :_meta (:_meta params))))))))
 
   ;; Hooks invoke requests from server
   (rpc/set-request-handler!
@@ -1163,6 +1168,79 @@
   (ensure-connected! client-atom)
   (rpc/request! (:rpc-client @client-atom) "managedSettings.clearCache" {})
   nil)
+
+(defn mcp-secrets-save!
+  "Store an MCP server secret in the runtime's secret store
+  (`mcp.secrets.save`).  `value` is a credential: it is sent to the runtime
+  and never logged.  Optional :config-dir selects the config directory.
+  Returns {:used-keychain bool}: true when the OS keychain stored the secret,
+  false for the file backend.  Requires Copilot CLI 1.0.116 or newer."
+  [client-atom secret-id value & {:keys [config-dir]}]
+  (ensure-connected! client-atom)
+  (types/mcp-secrets-save-result
+   (rpc/request! (:rpc-client @client-atom) "mcp.secrets.save"
+                 (cond-> {:secretId secret-id :value value}
+                   config-dir (assoc :configDir config-dir)))))
+
+(defn mcp-secrets-delete!
+  "Delete one secret from the runtime's MCP secret store
+  (`mcp.secrets.delete`).  Optional :config-dir selects the config directory.
+  Requires Copilot CLI 1.0.116 or newer."
+  [client-atom secret-id & {:keys [config-dir]}]
+  (ensure-connected! client-atom)
+  (rpc/request! (:rpc-client @client-atom) "mcp.secrets.delete"
+                (cond-> {:secretId secret-id}
+                  config-dir (assoc :configDir config-dir)))
+  nil)
+
+(defn mcp-secrets-delete-server!
+  "Delete every stored secret of one MCP server (`mcp.secrets.deleteServer`).
+  Optional :config-dir selects the config directory.  Requires Copilot CLI
+  1.0.116 or newer."
+  [client-atom server-name & {:keys [config-dir]}]
+  (ensure-connected! client-atom)
+  (rpc/request! (:rpc-client @client-atom) "mcp.secrets.deleteServer"
+                (cond-> {:serverName server-name}
+                  config-dir (assoc :configDir config-dir)))
+  nil)
+
+(defn extension-approvals-grant!
+  "Persist the user-scoped approval of a pending plugin extension permission
+  request before answering it (`permissions.extensionApprovals.grant`).
+  Returns {:granted bool :approval approval-or-nil} (see
+  `copilot.types/extension-approval`).  Requires Copilot CLI 1.0.116 or newer."
+  [client-atom session-id request-id]
+  (ensure-connected! client-atom)
+  (types/extension-approvals-grant-result
+   (rpc/request! (:rpc-client @client-atom) "permissions.extensionApprovals.grant"
+                 {:sessionId session-id :requestId request-id})))
+
+(defn extension-approvals-list!
+  "List the persisted plugin extension approvals
+  (`permissions.extensionApprovals.list`).  Optional :session-id lists the
+  config profile of that attached session.  Returns {:approvals [approval ...]}
+  (see `copilot.types/extension-approval`).  Requires Copilot CLI 1.0.116 or
+  newer."
+  [client-atom & {:keys [session-id]}]
+  (ensure-connected! client-atom)
+  (types/extension-approvals-list-result
+   (rpc/request! (:rpc-client @client-atom) "permissions.extensionApprovals.list"
+                 (cond-> {}
+                   session-id (assoc :sessionId session-id)))))
+
+(defn extension-approvals-revoke!
+  "Revoke a persisted plugin extension approval
+  (`permissions.extensionApprovals.revoke`).  Pass the approval's
+  :extension-name and :installation-key unchanged.  Optional :session-id
+  selects the attached session's config profile.  Returns {:revoked bool}.
+  Requires Copilot CLI 1.0.116 or newer."
+  [client-atom extension-name installation-key & {:keys [session-id]}]
+  (ensure-connected! client-atom)
+  (types/extension-approvals-revoke-result
+   (rpc/request! (:rpc-client @client-atom) "permissions.extensionApprovals.revoke"
+                 (cond-> {:extensionName   extension-name
+                          :installationKey installation-key}
+                   session-id (assoc :sessionId session-id)))))
 
 (defn get-mode
   "Get the client mode: \"coding-agent\" or \"empty\"."

@@ -55,6 +55,85 @@ session.disconnect();
 client.stop();
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods
+below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**;
+older CLIs answer with a JSON-RPC method-not-found error, raised as
+`copilot:rpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store. The secret value is never logged. Each method takes an optional
+trailing `configDir` (the runtime's default when omitted).
+
+```matlab
+result = client.mcpSecretsSave('my-server-token', getenv('MY_SERVER_TOKEN'));  % mcp.secrets.save
+if result.UsedKeychain
+    disp('Stored in the OS keychain');          % false: the file backend
+end
+client.mcpSecretsDelete('my-server-token');     % mcp.secrets.delete
+client.mcpSecretsDeleteServer('my-server');     % every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions.
+`extensionApprovalsList` and `extensionApprovalsRevoke` take an optional
+trailing session id to use an attached session's configuration profile.
+
+```matlab
+% Persist a pending extension permission request before answering it normally
+grant = client.extensionApprovalsGrant(session.SessionId, requestId);
+if grant.Granted
+    fprintf('Approved %s\n', grant.Approval.ExtensionName);
+end
+
+list = client.extensionApprovalsList();
+for i = 1:numel(list.Approvals)
+    approval = list.Approvals{i};   % copilot.PermissionsExtensionApproval
+    % ExtensionName, PluginName, Capabilities, GrantedAt, InstallationKey, InstallationLabel
+    client.extensionApprovalsRevoke(approval.ExtensionName, approval.InstallationKey);
+end
+```
+
+### Ask-user image attachments
+
+Set `'OnUserInputRequest'` on `copilot.SessionConfig` to answer the agent's
+ask_user questions (this sends `requestUserInput`). The handler receives a
+`copilot.UserInputRequest`. When the runtime accepts images in the answer, its
+`ImageAttachmentConstraints` is a `copilot.UserInputImageAttachmentConstraints`
+(`AllowedMimeTypes`, `MaxBytesPerImage`, `MaxCount`); it is `[]` otherwise.
+The request also carries `RequestId` and `Meta` (the decoded `_meta` object)
+when the runtime sends them. Return a `copilot.UserInputResponse` whose
+`'Attachments'` is a cell of `copilot.UserInputImageAttachment` (base64 `Data`,
+`MimeType`, optional `Description` and `DisplayName`; the wire `type` is always
+`"image"`). Attachments are sent only when set. Image-only answers use
+`'Answer', ''` and `'WasFreeform', true`; the runtime enforces the limits.
+
+```matlab
+config = copilot.SessionConfig('OnUserInputRequest', @answerUser);
+session = client.createSession(config);
+
+function response = answerUser(request)
+    constraints = request.ImageAttachmentConstraints;
+    if ~isempty(constraints) && any(strcmp(constraints.AllowedMimeTypes, 'image/png'))
+        fid = fopen('screenshot.png', 'r');
+        bytes = fread(fid, Inf, '*uint8')';
+        fclose(fid);
+        image = copilot.UserInputImageAttachment( ...
+            'Data', matlab.net.base64encode(bytes), ...   % base64
+            'MimeType', 'image/png', 'DisplayName', 'screenshot.png');
+        response = copilot.UserInputResponse('Answer', '', 'WasFreeform', true, ...
+            'Attachments', {image});
+    else
+        response = copilot.UserInputResponse('Answer', 'No screenshot available', ...
+            'WasFreeform', true);
+    end
+end
+```
+
 ## What's New in v3.0.0
 
 The MATLAB SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
@@ -255,6 +334,12 @@ and stream JSON-RPC messages through `java.io.BufferedReader` /
 | `listModels()` | Return available models. |
 | `getLastSessionId()` | Return the last-used session ID. |
 | `clearManagedSettingsCache()` | Clear cached enterprise managed settings. |
+| `mcpSecretsSave(secretId, value, configDir)` | Save an MCP credential (returns `McpSecretsSaveResult`). |
+| `mcpSecretsDelete(secretId, configDir)` | Delete an MCP credential. |
+| `mcpSecretsDeleteServer(serverName, configDir)` | Delete the MCP credentials indexed for a server. |
+| `extensionApprovalsGrant(sessionId, requestId)` | Persist a pending plugin extension approval. |
+| `extensionApprovalsList(sessionId)` | List plugin extension approvals. |
+| `extensionApprovalsRevoke(extensionName, installationKey, sessionId)` | Revoke a plugin extension approval. |
 | `LastPolicyHelperFailure` | Policy Helper failure of the last failed create/resume. |
 
 ### copilot.CopilotClientOptions
@@ -287,6 +372,7 @@ and stream JSON-RPC messages through `java.io.BufferedReader` /
 | `Metadata` | containers.Map | empty | Arbitrary key-value metadata. |
 | `RequestHeaders` | containers.Map | empty | Custom HTTP headers. |
 | `ModelCapabilities` | struct | `struct()` | Model capability overrides. |
+| `OnUserInputRequest` | function_handle | `[]` | ask_user handler: receives a `UserInputRequest`, returns a `UserInputResponse`. |
 
 ### copilot.CopilotSession
 

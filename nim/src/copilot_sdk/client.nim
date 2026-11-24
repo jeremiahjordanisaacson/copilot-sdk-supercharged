@@ -196,16 +196,21 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
     client.writeMessage(resp)
 
   of "userInput.request":
-    var answer = ""
-    if not client.userInputHandler.isNil:
-      let req = UserInputRequest(
-        id: params{"id"}.getStr(),
-        prompt: params{"prompt"}.getStr(),
-      )
-      answer = client.userInputHandler(req)
+    let req = parseUserInputRequest(params)
+    if not owner.isNil and not owner.config.onUserInputRequest.isNil:
+      try:
+        let answer = owner.config.onUserInputRequest(req)
+        client.writeMessage(buildResponse(id, answer.toWireJson()))
+      except CatchableError as e:
+        client.writeMessage(buildErrorResponse(id, -32603,
+          "User input handler failed: " & e.msg))
+    else:
+      var answer = ""
+      if not client.userInputHandler.isNil:
+        answer = client.userInputHandler(req)
 
-    let resp = buildResponse(id, %*{"response": answer})
-    client.writeMessage(resp)
+      let resp = buildResponse(id, %*{"response": answer})
+      client.writeMessage(resp)
 
   of "elicitation.request":
     var answer = ""
@@ -218,6 +223,8 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
         id: params{"id"}.getStr(),
         message: params{"message"}.getStr(),
         options: opts,
+        requestId: params{"requestId"}.getStr(),
+        meta: params{"_meta"},
       )
       answer = client.elicitationHandler(req)
 
@@ -659,6 +666,8 @@ proc buildSessionParams(config: SessionConfig): JsonNode =
     params["requestShellAuthentication"] = %true
   if not config.onStoreMemory.isNil:
     params["hasMemoryStore"] = %true
+  if not config.onUserInputRequest.isNil:
+    params["requestUserInput"] = %true
   result = params
 
 proc prepareTokenProvider(client: CopilotClient; config: SessionConfig;
@@ -777,6 +786,70 @@ proc deleteSession*(client: CopilotClient; sessionId: string) {.async.} =
 proc clearManagedSettingsCache*(client: CopilotClient) {.async.} =
   ## Clear the runtime's cached managed settings (`managedSettings.clearCache`).
   discard await client.sendRpcRequest("managedSettings.clearCache", newJObject())
+
+proc mcpSecretsSave*(client: CopilotClient; secretId, value: string;
+                     configDir = ""): Future[McpSecretsSaveResult] {.async.} =
+  ## Save a legacy MCP configuration credential in the runtime-owned secret
+  ## store (`mcp.secrets.save`). `value` is a credential and is never logged.
+  ## An empty `configDir` uses the runtime's configuration directory.
+  ## `usedKeychain` is true when the OS keychain stored the credential and
+  ## false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+  let params = %*{"secretId": secretId, "value": value}
+  if configDir.len > 0:
+    params["configDir"] = %configDir
+  let res = await client.sendRpcRequest("mcp.secrets.save", params)
+  result = parseMcpSecretsSaveResult(res)
+
+proc mcpSecretsDelete*(client: CopilotClient; secretId: string;
+                       configDir = "") {.async.} =
+  ## Delete a legacy MCP configuration credential from the runtime-owned
+  ## secret store (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+  let params = %*{"secretId": secretId}
+  if configDir.len > 0:
+    params["configDir"] = %configDir
+  discard await client.sendRpcRequest("mcp.secrets.delete", params)
+
+proc mcpSecretsDeleteServer*(client: CopilotClient; serverName: string;
+                             configDir = "") {.async.} =
+  ## Delete every legacy credential indexed for an MCP server
+  ## (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+  let params = %*{"serverName": serverName}
+  if configDir.len > 0:
+    params["configDir"] = %configDir
+  discard await client.sendRpcRequest("mcp.secrets.deleteServer", params)
+
+proc extensionApprovalsGrant*(client: CopilotClient;
+                              sessionId, requestId: string): Future[PermissionsExtensionApprovalsGrantResult] {.async.} =
+  ## Persist a pending plugin extension permission request as a user-scoped
+  ## approval, before answering that request normally
+  ## (`permissions.extensionApprovals.grant`). Requires Copilot CLI 1.0.116 or newer.
+  let res = await client.sendRpcRequest("permissions.extensionApprovals.grant",
+    %*{"sessionId": sessionId, "requestId": requestId})
+  result = parsePermissionsExtensionApprovalsGrantResult(res)
+
+proc extensionApprovalsList*(client: CopilotClient;
+                             sessionId = ""): Future[PermissionsExtensionApprovalsListResult] {.async.} =
+  ## List the user-scoped plugin extension approvals
+  ## (`permissions.extensionApprovals.list`). A non-empty `sessionId` selects
+  ## an attached session's configuration profile. Requires Copilot CLI 1.0.116
+  ## or newer.
+  let params = newJObject()
+  if sessionId.len > 0:
+    params["sessionId"] = %sessionId
+  let res = await client.sendRpcRequest("permissions.extensionApprovals.list", params)
+  result = parsePermissionsExtensionApprovalsListResult(res)
+
+proc extensionApprovalsRevoke*(client: CopilotClient;
+                               extensionName, installationKey: string;
+                               sessionId = ""): Future[PermissionsExtensionApprovalsRevokeResult] {.async.} =
+  ## Revoke one user-scoped plugin extension approval
+  ## (`permissions.extensionApprovals.revoke`). Pass the approval's
+  ## `installationKey` back unchanged. Requires Copilot CLI 1.0.116 or newer.
+  let params = %*{"extensionName": extensionName, "installationKey": installationKey}
+  if sessionId.len > 0:
+    params["sessionId"] = %sessionId
+  let res = await client.sendRpcRequest("permissions.extensionApprovals.revoke", params)
+  result = parsePermissionsExtensionApprovalsRevokeResult(res)
 
 proc listSessions*(client: CopilotClient): Future[JsonNode] {.async.} =
   ## List all sessions known to the server.

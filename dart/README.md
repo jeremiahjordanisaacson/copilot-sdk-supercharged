@@ -77,6 +77,88 @@ void main() async {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods
+below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**;
+older CLIs answer with a JSON-RPC method-not-found error, thrown as a
+`JsonRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store (`mcp.secrets.save`, `mcp.secrets.delete`,
+`mcp.secrets.deleteServer`). Each method takes an optional `configDir:`. The
+secret value is never logged.
+
+```dart
+final saved = await client.mcpSecretsSave(
+  'my-server-token',
+  Platform.environment['MY_SERVER_TOKEN']!,
+);
+print(saved.usedKeychain ? 'Stored in the OS keychain' : 'Stored in the file backend');
+
+await client.mcpSecretsDelete('my-server-token');
+await client.mcpSecretsDeleteServer('my-server'); // every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant` / `.list` / `.revoke`).
+`extensionApprovalsList` and `extensionApprovalsRevoke` take an optional
+`sessionId:` to use an attached session's configuration profile.
+
+```dart
+// Persist a pending extension permission request before answering it normally.
+final grant = await client.extensionApprovalsGrant(session.sessionId, requestId);
+if (grant.granted) print('Approved ${grant.approval?.extensionName}');
+
+final list = await client.extensionApprovalsList();
+for (final approval in list.approvals) {
+  // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+  await client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey);
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the `UserInputRequest` carries
+`imageAttachmentConstraints` (`UserInputImageAttachmentConstraints` with
+`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is null otherwise. The
+request also exposes `requestId` and `meta` (the opaque `_meta` object) when
+sent. Answer with `UserInputResponse.attachments`, a list of
+`UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description`
+and `displayName`; the wire `type` is always `"image"`). `attachments` is sent
+only when set. Image-only answers use `answer: ''` and `wasFreeform: true`;
+the runtime enforces the limits.
+
+```dart
+import 'dart:convert';
+import 'dart:io';
+
+final session = await client.createSession(SessionConfig(
+  onUserInputRequest: (request, context) async {
+    final constraints = request.imageAttachmentConstraints;
+    if (constraints != null && constraints.allowedMimeTypes.contains('image/png')) {
+      final bytes = await File('screenshot.png').readAsBytes();
+      return UserInputResponse(
+        answer: '',
+        wasFreeform: true,
+        attachments: [
+          UserInputImageAttachment(
+            data: base64Encode(bytes),
+            mimeType: 'image/png',
+            displayName: 'screenshot.png',
+          ),
+        ],
+      );
+    }
+    return const UserInputResponse(answer: 'No screenshot available', wasFreeform: true);
+  },
+));
+```
+
 ## What's New in v3.0.0
 
 SDK protocol 4 support (the upstream SDK 2.0 wire format). **Requires Copilot
@@ -568,6 +650,12 @@ Copilot CLI 1.0.113 or newer is required.
 | `getAuthStatus()` | Get auth status |
 | `listModels()` | List available models |
 | `clearManagedSettingsCache()` | Re-fetch enterprise managed settings (`managedSettings.clearCache`) |
+| `mcpSecretsSave(secretId, value, {configDir})` | Save an MCP credential (`mcp.secrets.save`, CLI 1.0.116+); returns `McpSecretsSaveResult` |
+| `mcpSecretsDelete(secretId, {configDir})` | Delete an MCP credential (`mcp.secrets.delete`, CLI 1.0.116+) |
+| `mcpSecretsDeleteServer(serverName, {configDir})` | Delete an MCP server's credentials (`mcp.secrets.deleteServer`, CLI 1.0.116+) |
+| `extensionApprovalsGrant(sessionId, requestId)` | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`, CLI 1.0.116+) |
+| `extensionApprovalsList({sessionId})` | List plugin extension approvals (`permissions.extensionApprovals.list`, CLI 1.0.116+) |
+| `extensionApprovalsRevoke(extensionName, installationKey, {sessionId})` | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`, CLI 1.0.116+) |
 | `onLifecycle(handler)` | Subscribe to lifecycle events |
 
 ### CopilotSession

@@ -157,6 +157,10 @@ PermissionRequestResult <- R6::R6Class(
 #' @field question Character. The question to ask.
 #' @field choices Character vector or NULL. Optional list of choices.
 #' @field allow_freeform Logical. Whether freeform input is allowed.
+#' @field image_attachment_constraints UserInputImageAttachmentConstraints or NULL. Image support
+#'   advertised by the runtime; NULL when the runtime does not accept images.
+#' @field request_id Character or NULL. Pending request ID, when the runtime sends one.
+#' @field meta Named list or NULL. Opaque request metadata (wire \code{_meta}).
 #' @export
 UserInputRequest <- R6::R6Class(
   "UserInputRequest",
@@ -164,21 +168,37 @@ UserInputRequest <- R6::R6Class(
     question = NULL,
     choices = NULL,
     allow_freeform = TRUE,
+    image_attachment_constraints = NULL,
+    request_id = NULL,
+    meta = NULL,
 
     #' @description Create a new UserInputRequest.
     #' @param question The question string.
     #' @param choices Character vector or NULL.
     #' @param allow_freeform Logical, default TRUE.
-    initialize = function(question = "", choices = NULL, allow_freeform = TRUE) {
+    #' @param image_attachment_constraints UserInputImageAttachmentConstraints or NULL.
+    #' @param request_id Character or NULL.
+    #' @param meta Named list or NULL.
+    initialize = function(question = "", choices = NULL, allow_freeform = TRUE,
+                          image_attachment_constraints = NULL, request_id = NULL,
+                          meta = NULL) {
       self$question <- question
       self$choices <- choices
       self$allow_freeform <- allow_freeform
+      self$image_attachment_constraints <- image_attachment_constraints
+      self$request_id <- request_id
+      self$meta <- meta
     },
 
     #' @description Convert to list.
     to_list = function() {
       result <- list(question = self$question, allowFreeform = self$allow_freeform)
       if (!is.null(self$choices)) result$choices <- self$choices
+      if (!is.null(self$image_attachment_constraints)) {
+        result$imageAttachmentConstraints <- config_to_wire(self$image_attachment_constraints)
+      }
+      if (!is.null(self$request_id)) result$requestId <- self$request_id
+      if (!is.null(self$meta)) result[["_meta"]] <- self$meta
       result
     }
   )
@@ -190,27 +210,152 @@ UserInputRequest <- R6::R6Class(
 #'
 #' @field answer Character. The answer text.
 #' @field was_freeform Logical. Whether the answer was freeform.
+#' @field attachments List of UserInputImageAttachment or NULL. Optional images; only valid when
+#'   the request advertised \code{image_attachment_constraints}.
 #' @export
 UserInputResponse <- R6::R6Class(
   "UserInputResponse",
   public = list(
     answer = NULL,
     was_freeform = FALSE,
+    attachments = NULL,
 
     #' @description Create a new UserInputResponse.
     #' @param answer Answer string.
     #' @param was_freeform Logical.
-    initialize = function(answer, was_freeform = FALSE) {
+    #' @param attachments List of UserInputImageAttachment or NULL.
+    initialize = function(answer, was_freeform = FALSE, attachments = NULL) {
       self$answer <- answer
       self$was_freeform <- was_freeform
+      self$attachments <- attachments
     },
 
     #' @description Convert to list.
     to_list = function() {
-      list(answer = self$answer, wasFreeform = self$was_freeform)
+      result <- list(answer = self$answer, wasFreeform = self$was_freeform)
+      attachments <- user_input_attachments_to_wire(self$attachments)
+      if (!is.null(attachments)) result$attachments <- attachments
+      result
     }
   )
 )
+
+#' UserInputImageAttachmentConstraints
+#'
+#' Image support the runtime advertises on a user input request (wire
+#' \code{imageAttachmentConstraints}). Absent when the runtime does not accept images.
+#'
+#' @field allowed_mime_types Character vector. Accepted image MIME types.
+#' @field max_bytes_per_image Integer. Maximum size of one image, in bytes.
+#' @field max_count Integer. Maximum number of images in one response.
+#' @export
+UserInputImageAttachmentConstraints <- R6::R6Class(
+  "UserInputImageAttachmentConstraints",
+  public = list(
+    allowed_mime_types = NULL,
+    max_bytes_per_image = NULL,
+    max_count = NULL,
+
+    #' @description Create a new UserInputImageAttachmentConstraints.
+    #' @param allowed_mime_types Character vector.
+    #' @param max_bytes_per_image Integer.
+    #' @param max_count Integer.
+    initialize = function(allowed_mime_types = character(0), max_bytes_per_image = NULL,
+                          max_count = NULL) {
+      self$allowed_mime_types <- allowed_mime_types
+      self$max_bytes_per_image <- max_bytes_per_image
+      self$max_count <- max_count
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(allowedMimeTypes = as.list(self$allowed_mime_types))
+      if (!is.null(self$max_bytes_per_image)) result$maxBytesPerImage <- self$max_bytes_per_image
+      if (!is.null(self$max_count)) result$maxCount <- self$max_count
+      result
+    }
+  )
+)
+
+#' Parse an \code{imageAttachmentConstraints} wire object.
+#' @param obj Named list (parsed JSON) or NULL.
+#' @return A UserInputImageAttachmentConstraints, or NULL when \code{obj} is not an object.
+#' @keywords internal
+user_input_image_attachment_constraints_from_list <- function(obj) {
+  if (!is.list(obj) || is.null(names(obj))) return(NULL)
+  UserInputImageAttachmentConstraints$new(
+    allowed_mime_types = as.character(unlist(obj[["allowedMimeTypes"]])),
+    max_bytes_per_image = obj[["maxBytesPerImage"]],
+    max_count = obj[["maxCount"]]
+  )
+}
+
+#' UserInputImageAttachment
+#'
+#' An image sent with a user input response. Only valid when the request advertised
+#' \code{image_attachment_constraints}; the runtime validates types and sizes.
+#'
+#' @field type Character. Always "image".
+#' @field data Character. Base64-encoded image bytes.
+#' @field mime_type Character. Image MIME type (for example "image/png").
+#' @field description Character or NULL. Optional description of the image.
+#' @field display_name Character or NULL. Optional display name.
+#' @export
+UserInputImageAttachment <- R6::R6Class(
+  "UserInputImageAttachment",
+  public = list(
+    type = "image",
+    data = NULL,
+    mime_type = NULL,
+    description = NULL,
+    display_name = NULL,
+
+    #' @description Create a new UserInputImageAttachment.
+    #' @param data Character. Base64-encoded image bytes.
+    #' @param mime_type Character.
+    #' @param description Character or NULL.
+    #' @param display_name Character or NULL.
+    initialize = function(data, mime_type, description = NULL, display_name = NULL) {
+      self$data <- data
+      self$mime_type <- mime_type
+      self$description <- description
+      self$display_name <- display_name
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(type = "image", data = self$data, mimeType = self$mime_type)
+      if (!is.null(self$description)) result$description <- self$description
+      if (!is.null(self$display_name)) result$displayName <- self$display_name
+      result
+    }
+  )
+)
+
+#' Map user input image attachments (UserInputImageAttachment objects or named lists with
+#' \code{data} and \code{mime_type} / \code{mimeType}) to the wire shape. Returns NULL when
+#' there are none, so the field is left off the response.
+#' @keywords internal
+user_input_attachments_to_wire <- function(attachments) {
+  if (is.null(attachments) || length(attachments) == 0) return(NULL)
+  if (inherits(attachments, "UserInputImageAttachment") ||
+      (is.list(attachments) && !is.null(attachments[["data"]]))) {
+    attachments <- list(attachments)
+  }
+  lapply(attachments, function(attachment) {
+    if (inherits(attachment, "UserInputImageAttachment")) return(attachment$to_list())
+    wire <- list(
+      type = "image",
+      data = attachment[["data"]],
+      mimeType = attachment[["mimeType"]] %||% attachment[["mime_type"]]
+    )
+    description <- attachment[["description"]]
+    display_name <- attachment[["displayName"]] %||% attachment[["display_name"]]
+    if (!is.null(description)) wire$description <- description
+    if (!is.null(display_name)) wire$displayName <- display_name
+    wire
+  })
+}
 
 
 # ---------------------------------------------------------------------------
@@ -2241,6 +2386,8 @@ CommandDefinition <- R6::R6Class(
 #' @field mode Character or NULL.
 #' @field elicitation_source Character or NULL.
 #' @field url Character or NULL.
+#' @field request_id Character or NULL. Pending request ID.
+#' @field meta Named list or NULL. Opaque request metadata (wire \code{_meta}).
 #' @export
 ElicitationContext <- R6::R6Class(
   "ElicitationContext",
@@ -2251,6 +2398,8 @@ ElicitationContext <- R6::R6Class(
     mode = NULL,
     elicitation_source = NULL,
     url = NULL,
+    request_id = NULL,
+    meta = NULL,
 
     #' @description Create a new ElicitationContext.
     #' @param session_id Character.
@@ -2259,14 +2408,19 @@ ElicitationContext <- R6::R6Class(
     #' @param mode Character or NULL.
     #' @param elicitation_source Character or NULL.
     #' @param url Character or NULL.
+    #' @param request_id Character or NULL.
+    #' @param meta Named list or NULL.
     initialize = function(session_id, message, requested_schema = NULL,
-                          mode = NULL, elicitation_source = NULL, url = NULL) {
+                          mode = NULL, elicitation_source = NULL, url = NULL,
+                          request_id = NULL, meta = NULL) {
       self$session_id <- session_id
       self$message <- message
       self$requested_schema <- requested_schema
       self$mode <- mode
       self$elicitation_source <- elicitation_source
       self$url <- url
+      self$request_id <- request_id
+      self$meta <- meta
     }
   )
 )
@@ -2281,22 +2435,46 @@ ElicitationContext <- R6::R6Class(
 #'
 #' @field action Character. "accept", "decline", or "cancel".
 #' @field content Named list or NULL.
+#' @field meta Named list or NULL. Opaque metadata sent back as \code{_meta}.
 #' @export
 ElicitationResult <- R6::R6Class(
   "ElicitationResult",
   public = list(
     action = NULL,
     content = NULL,
+    meta = NULL,
 
     #' @description Create a new ElicitationResult.
     #' @param action Character.
     #' @param content Named list or NULL.
-    initialize = function(action, content = NULL) {
+    #' @param meta Named list or NULL.
+    initialize = function(action, content = NULL, meta = NULL) {
       self$action <- action
       self$content <- content
+      self$meta <- meta
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(action = self$action)
+      if (!is.null(self$content)) result$content <- self$content
+      if (!is.null(self$meta)) result[["_meta"]] <- self$meta
+      result
     }
   )
 )
+
+#' Map an elicitation handler result (ElicitationResult or named list) to the wire shape. A
+#' \code{meta} member is sent as \code{_meta}; \code{_meta} is forwarded unchanged.
+#' @keywords internal
+elicitation_result_to_wire <- function(result) {
+  result <- config_to_wire(result)
+  if (is.list(result) && is.null(result[["_meta"]]) && !is.null(result[["meta"]])) {
+    result[["_meta"]] <- result[["meta"]]
+    result[["meta"]] <- NULL
+  }
+  result
+}
 
 # ---------------------------------------------------------------------------
 # SessionConfig

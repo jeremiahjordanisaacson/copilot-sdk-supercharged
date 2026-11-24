@@ -65,6 +65,75 @@ int main(void)
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client functions below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned as `COPILOT_ERROR_RPC` like any other RPC error. Each call blocks until the runtime answers, and SDK callbacks run on the reader thread, so call these functions from your own thread rather than from inside an SDK callback.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store (`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). Pass a configuration directory as `config_dir`, or `NULL` for the runtime's default. The secret value is never logged:
+
+```c
+copilot_mcp_secrets_save_result_t saved;
+if (copilot_client_mcp_secrets_save(client, "my-server-token", token, NULL, &saved) == COPILOT_OK) {
+    printf("%s\n", saved.used_keychain ? "Stored in the OS keychain" : "Stored in the file backend");
+}
+
+copilot_client_mcp_secrets_delete(client, "my-server-token", NULL);
+copilot_client_mcp_secrets_delete_server(client, "my-server", NULL);  /* every legacy credential indexed for the server */
+```
+
+### Plugin extension approvals
+
+Persist, list, and revoke user-scoped approvals for installed plugin extensions (`permissions.extensionApprovals.grant`, `.list`, `.revoke`). `copilot_client_extension_approvals_grant()` persists a pending extension permission request before the host answers it normally. The list and revoke functions take an optional `session_id` (or `NULL`) to use an attached session's configuration profile. Free grant and list results with their `*_free()` functions:
+
+```c
+copilot_permissions_extension_approvals_grant_result_t grant;
+if (copilot_client_extension_approvals_grant(client, session_id, request_id, &grant) == COPILOT_OK &&
+    grant.granted && grant.approval) {
+    printf("Approved %s\n", grant.approval->extension_name);
+}
+copilot_permissions_extension_approvals_grant_result_free(&grant);
+
+copilot_permissions_extension_approvals_list_result_t list;
+if (copilot_client_extension_approvals_list(client, NULL, &list) == COPILOT_OK) {
+    for (size_t i = 0; i < list.count; i++) {
+        /* extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label */
+        copilot_permissions_extension_approval_t *approval = &list.approvals[i];
+        copilot_client_extension_approvals_revoke(client, approval->extension_name,
+                                                  approval->installation_key, NULL, NULL);
+    }
+    copilot_permissions_extension_approvals_list_result_free(&list);
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, `request->image_attachment_constraints` points to the limits (`allowed_mime_types`, a NULL-terminated array with `allowed_mime_types_count` entries, `max_bytes_per_image`, and `max_count`); it is `NULL` otherwise. The request also carries `request_id` and `meta_json` (the opaque `_meta` object as JSON) when the runtime sends them; all of these are valid only during the callback. Answer with `attachments`, a `malloc`'d array of `copilot_user_input_image_attachment_t` (base64 `data`, `mime_type`, optional `description` and `display_name`, all heap strings; the wire `type` is always `"image"`) and set `attachments_count`. The SDK sends attachments only when set and frees the array and its strings. Image-only answers use `answer = strdup("")` and `was_freeform = true`; the runtime enforces the limits:
+
+```c
+static copilot_error_t on_user_input(const copilot_user_input_request_t *request, const char *session_id,
+                                     void *user_data, copilot_user_input_response_t *out)
+{
+    (void)session_id;
+    (void)user_data;
+    out->was_freeform = true;
+    if (!request->image_attachment_constraints) {
+        out->answer = strdup("No screenshot available");
+        return COPILOT_OK;
+    }
+    out->answer = strdup("");
+    out->attachments = calloc(1, sizeof(copilot_user_input_image_attachment_t));
+    out->attachments[0].data = read_file_base64("screenshot.png");  /* heap string */
+    out->attachments[0].mime_type = strdup("image/png");
+    out->attachments[0].display_name = strdup("screenshot.png");
+    out->attachments_count = 1;
+    return COPILOT_OK;
+}
+
+config.on_user_input_request = on_user_input;
+```
+
 ## What's New in v3.0.0
 
 The SDK now speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected by `copilot_client_start()` with `COPILOT_ERROR_PROTOCOL_MISMATCH`.
@@ -292,6 +361,7 @@ copilot_session_destroy(session);  /* session.detach: the session can be resumed
 * The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not implemented. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
 * In-process native runtime hosting is not the default connection. The C SDK keeps spawning the CLI over stdio.
 * Server callbacks (tools, permissions, shell authentication, memory store, network) run synchronously on the SDK's reader thread. A `shellAuthentication.cancel` therefore always arrives after its request was answered, and the SDK acknowledges it without further action.
+* Elicitation requests are not dispatched to `on_elicitation_request`, so the elicitation `requestId` / `_meta` passthrough added upstream in 2.0.3-preview.0 does not apply to this SDK.
 
 ## Architecture
 
@@ -336,6 +406,12 @@ copilot_client_stop() + copilot_client_free()
 | `copilot_client_create_session(client, cfg, out)` | Creates a session |
 | `copilot_client_resume_session(client, id, cfg, out)` | Resumes a session |
 | `copilot_client_clear_managed_settings_cache(client)` | Clears the managed-settings cache |
+| `copilot_client_mcp_secrets_save(client, id, value, dir, out)` | Saves an MCP credential (`mcp.secrets.save`) |
+| `copilot_client_mcp_secrets_delete(client, id, dir)` | Deletes an MCP credential |
+| `copilot_client_mcp_secrets_delete_server(client, server, dir)` | Deletes the MCP credentials indexed for a server |
+| `copilot_client_extension_approvals_grant(client, sid, rid, out)` | Persists a pending plugin extension approval |
+| `copilot_client_extension_approvals_list(client, sid, out)` | Lists plugin extension approvals |
+| `copilot_client_extension_approvals_revoke(client, name, key, sid, out)` | Revokes a plugin extension approval |
 | `copilot_client_get_last_policy_helper_failure(client, out)` | Policy Helper failure of the last failed create/resume |
 | `copilot_policy_helper_failure_parse(json, out)` | Parses a Policy Helper failure from JSON |
 
@@ -536,6 +612,7 @@ The SDK uses a create/destroy/free pattern:
 - Always call `destroy` before `free`
 - Strings returned via output parameters must be freed with `free()`
 - List results (models, sessions) must be freed with their respective `*_free()` functions
+- Extension approval grant and list results must be freed with `copilot_permissions_extension_approvals_grant_result_free()` and `copilot_permissions_extension_approvals_list_result_free()`
 
 ## Thread Safety
 

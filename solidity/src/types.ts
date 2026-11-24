@@ -58,6 +58,16 @@ import type {
     SystemMessageReplaceConfig,
     TraceContext,
     TraceContextProvider,
+    McpSecretsSaveResult,
+    PermissionsExtensionApproval,
+    PermissionsExtensionApprovalsGrantResult,
+    PermissionsExtensionApprovalsListResult,
+    PermissionsExtensionApprovalsRevokeResult,
+    UserInputHandler,
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
+    UserInputRequest,
+    UserInputResponse,
 } from "copilot-sdk-supercharged";
 
 export type {
@@ -104,6 +114,16 @@ export type {
     SystemMessageReplaceConfig,
     TraceContext,
     TraceContextProvider,
+    McpSecretsSaveResult,
+    PermissionsExtensionApproval,
+    PermissionsExtensionApprovalsGrantResult,
+    PermissionsExtensionApprovalsListResult,
+    PermissionsExtensionApprovalsRevokeResult,
+    UserInputHandler,
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
+    UserInputRequest,
+    UserInputResponse,
 };
 
 /** Type of `member` in the base SDK's grouped session option `group`. */
@@ -369,7 +389,15 @@ export interface SoliditySessionConfig
     permissionMode?: SessionGroupMember<"permissions", "mode">;
     /** Slash commands (`interaction.commands`). */
     commands?: SessionGroupMember<"interaction", "commands">;
-    /** User input handler (`interaction.onUserInputRequest`). */
+    /**
+     * User input handler for the ask_user tool (`interaction.onUserInputRequest`).
+     * The {@link UserInputRequest} carries `imageAttachmentConstraints`
+     * (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`) when the runtime
+     * accepts images in the answer, and `requestId` when sent. The
+     * {@link UserInputResponse} may add `attachments`
+     * ({@link UserInputImageAttachment}: `type: "image"`, base64 `data`,
+     * `mimeType`), sent only when set.
+     */
     onUserInputRequest?: SessionGroupMember<"interaction", "onUserInputRequest">;
     /** Elicitation handler (`interaction.onElicitationRequest`). */
     onElicitationRequest?: SessionGroupMember<"interaction", "onElicitationRequest">;

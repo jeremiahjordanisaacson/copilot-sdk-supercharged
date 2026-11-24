@@ -251,6 +251,7 @@ package body Copilot.Session is
    is
    begin
       Self.Input_Handler := Handler;
+      Copilot.Callbacks.Set_User_Input_Handler (To_String (Self.Sid), Handler);
    end Register_User_Input_Handler;
 
    procedure Register_Exit_Plan_Mode_Handler

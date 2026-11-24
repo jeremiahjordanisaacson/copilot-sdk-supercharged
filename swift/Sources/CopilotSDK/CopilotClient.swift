@@ -703,6 +703,132 @@ public actor CopilotClient {
         _ = try await rpc.sendRequest(method: "managedSettings.clearCache", params: [:])
     }
 
+    // MARK: - MCP Secrets
+
+    /// Saves a legacy MCP configuration credential in the runtime-owned secret store
+    /// (`mcp.secrets.save`). Requires Copilot CLI 1.0.116 or newer; older runtimes fail with
+    /// a method-not-found `JsonRpcError`.
+    ///
+    /// - Parameters:
+    ///   - secretId: Identifier of the credential.
+    ///   - value: The credential. It is sent to the runtime and never logged.
+    ///   - configDir: Configuration directory, or nil for the runtime's default.
+    /// - Returns: `usedKeychain` is true when the OS keychain stored the credential and false
+    ///   for the file backend.
+    @discardableResult
+    public func mcpSecretsSave(
+        secretId: String, value: String, configDir: String? = nil
+    ) async throws -> McpSecretsSaveResult {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        var params: [String: Any] = ["secretId": secretId, "value": value]
+        if let configDir = configDir { params["configDir"] = configDir }
+        let result = try await rpc.sendRequest(method: "mcp.secrets.save", params: params)
+        return McpSecretsSaveResult(usedKeychain: result["usedKeychain"] as? Bool ?? false)
+    }
+
+    /// Deletes a legacy MCP configuration credential from the runtime-owned secret store
+    /// (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// - Parameters:
+    ///   - secretId: Identifier of the credential.
+    ///   - configDir: Configuration directory, or nil for the runtime's default.
+    public func mcpSecretsDelete(secretId: String, configDir: String? = nil) async throws {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        var params: [String: Any] = ["secretId": secretId]
+        if let configDir = configDir { params["configDir"] = configDir }
+        _ = try await rpc.sendRequest(method: "mcp.secrets.delete", params: params)
+    }
+
+    /// Deletes every legacy credential indexed for an MCP server
+    /// (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// - Parameters:
+    ///   - serverName: The MCP server name.
+    ///   - configDir: Configuration directory, or nil for the runtime's default.
+    public func mcpSecretsDeleteServer(serverName: String, configDir: String? = nil) async throws {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        var params: [String: Any] = ["serverName": serverName]
+        if let configDir = configDir { params["configDir"] = configDir }
+        _ = try await rpc.sendRequest(method: "mcp.secrets.deleteServer", params: params)
+    }
+
+    // MARK: - Plugin Extension Approvals
+
+    /// Persists a pending plugin extension permission request as a user-scoped approval,
+    /// before the host answers that request normally (`permissions.extensionApprovals.grant`).
+    /// Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// - Parameters:
+    ///   - sessionId: Session that owns the pending request.
+    ///   - requestId: ID of the pending extension permission request.
+    /// - Returns: Whether the request was eligible and persisted, and the stored approval.
+    @discardableResult
+    public func extensionApprovalsGrant(
+        sessionId: String, requestId: String
+    ) async throws -> PermissionsExtensionApprovalsGrantResult {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        let result = try await rpc.sendRequest(
+            method: "permissions.extensionApprovals.grant",
+            params: ["sessionId": sessionId, "requestId": requestId])
+        return PermissionsExtensionApprovalsGrantResult(
+            granted: result["granted"] as? Bool ?? false,
+            approval: (result["approval"] as? [String: Any]).map { PermissionsExtensionApproval.from($0) }
+        )
+    }
+
+    /// Lists the user-scoped plugin extension approvals
+    /// (`permissions.extensionApprovals.list`). Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// - Parameter sessionId: Attached session whose configuration profile to list, or nil
+    ///   for the server's profile.
+    public func extensionApprovalsList(
+        sessionId: String? = nil
+    ) async throws -> PermissionsExtensionApprovalsListResult {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        var params: [String: Any] = [:]
+        if let sessionId = sessionId { params["sessionId"] = sessionId }
+        let result = try await rpc.sendRequest(
+            method: "permissions.extensionApprovals.list", params: params)
+        let approvals = (result["approvals"] as? [[String: Any]] ?? []).map {
+            PermissionsExtensionApproval.from($0)
+        }
+        return PermissionsExtensionApprovalsListResult(approvals: approvals)
+    }
+
+    /// Revokes one user-scoped plugin extension approval
+    /// (`permissions.extensionApprovals.revoke`). Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// - Parameters:
+    ///   - extensionName: The approval's `extensionName`.
+    ///   - installationKey: The approval's `installationKey`, unchanged.
+    ///   - sessionId: Attached session whose configuration profile to use, or nil.
+    /// - Returns: Whether a matching approval was revoked.
+    @discardableResult
+    public func extensionApprovalsRevoke(
+        extensionName: String, installationKey: String, sessionId: String? = nil
+    ) async throws -> PermissionsExtensionApprovalsRevokeResult {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        var params: [String: Any] = [
+            "extensionName": extensionName, "installationKey": installationKey,
+        ]
+        if let sessionId = sessionId { params["sessionId"] = sessionId }
+        let result = try await rpc.sendRequest(
+            method: "permissions.extensionApprovals.revoke", params: params)
+        return PermissionsExtensionApprovalsRevokeResult(revoked: result["revoked"] as? Bool ?? false)
+    }
+
     // MARK: - Session Filesystem Provider
 
     /// Sets the session filesystem provider configuration.
@@ -1253,11 +1379,15 @@ public actor CopilotClient {
         let request = UserInputRequest(
             question: question,
             choices: params["choices"] as? [String],
-            allowFreeform: params["allowFreeform"] as? Bool
+            allowFreeform: params["allowFreeform"] as? Bool,
+            requestId: params["requestId"] as? String,
+            imageAttachmentConstraints: (params["imageAttachmentConstraints"] as? [String: Any])
+                .map { UserInputImageAttachmentConstraints.from($0) },
+            meta: (params["_meta"] as? [String: Any])?.mapValues { AnyCodable($0) }
         )
 
         let result = try await session.handleUserInputRequest(request)
-        return ["answer": result.answer, "wasFreeform": result.wasFreeform]
+        return result.toWireFormat()
     }
 
     private func handleHooksInvoke(_ params: [String: Any]) async throws -> [String: Any]? {

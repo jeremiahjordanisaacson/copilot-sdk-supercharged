@@ -50,7 +50,9 @@
     test_subagent_hook_types/1,
     test_group_session_params/1,
     test_legacy_provider_and_empty_mode/1,
-    test_v3_wire_helpers/1
+    test_v3_wire_helpers/1,
+    test_v3_1_wire_helpers/1,
+    test_session_elicitation_meta_passthrough/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -76,7 +78,8 @@ groups() ->
             test_subagent_hook_types,
             test_group_session_params,
             test_legacy_provider_and_empty_mode,
-            test_v3_wire_helpers
+            test_v3_wire_helpers,
+            test_v3_1_wire_helpers
         ]},
         {tools, [parallel], [
             test_define_tool_basic,
@@ -93,7 +96,8 @@ groups() ->
             test_client_state_disconnected
         ]},
         {session, [sequence], [
-            test_session_subscribe_unsubscribe
+            test_session_subscribe_unsubscribe,
+            test_session_elicitation_meta_passthrough
         ]},
         {jsonrpc, [sequence], [
             test_jsonrpc_content_length_framing
@@ -327,6 +331,31 @@ test_v3_wire_helpers(_Config) ->
     <<"managed_policy">> = copilot_types:permission_mode_refusal(managed_policy),
     ok.
 
+test_v3_1_wire_helpers(_Config) ->
+    %% Ask-user image attachments are sent only when set.
+    Plain = copilot_types:user_input_response(<<"ok">>, false, undefined),
+    false = maps:is_key(<<"attachments">>, Plain),
+    Image = copilot_types:user_input_image_attachment(<<"aGk=">>, <<"image/png">>),
+    #{<<"answer">> := <<>>, <<"wasFreeform">> := true,
+      <<"attachments">> := [#{<<"type">> := <<"image">>, <<"data">> := <<"aGk=">>,
+                              <<"mimeType">> := <<"image/png">>} = Wire]} =
+        copilot_types:user_input_response(<<>>, true, [Image]),
+    false = maps:is_key(<<"description">>, Wire),
+    #{<<"type">> := <<"image">>, <<"displayName">> := <<"shot.png">>} =
+        copilot_types:user_input_image_attachment(#{data => <<"aGk=">>,
+                                                    mime_type => <<"image/png">>,
+                                                    display_name => <<"shot.png">>}),
+    #{allowed_mime_types := [<<"image/png">>], max_bytes_per_image := 1024, max_count := 2} =
+        copilot_types:image_attachment_constraints(#{
+            <<"question">> => <<"Attach a screenshot?">>,
+            <<"imageAttachmentConstraints">> => #{<<"allowedMimeTypes">> => [<<"image/png">>],
+                                                   <<"maxBytesPerImage">> => 1024,
+                                                   <<"maxCount">> => 2}}),
+    undefined = copilot_types:image_attachment_constraints(#{<<"question">> => <<"q">>}),
+    #{<<"action">> := <<"accept">>, <<"_meta">> := #{<<"ext">> := 1}} =
+        copilot_types:elicitation_result(<<"accept">>, #{}, #{<<"ext">> => 1}),
+    ok.
+
 %% ---------------------------------------------------------------------------
 %% Tool tests
 %% ---------------------------------------------------------------------------
@@ -462,6 +491,38 @@ test_session_subscribe_unsubscribe(_Config) ->
             ct:fail("Should not receive event after unsubscribe")
     after 200 ->
         ok
+    end,
+    copilot_session:stop(Session),
+    ok.
+
+test_session_elicitation_meta_passthrough(_Config) ->
+    Self = self(),
+    Meta = #{<<"ext">> => #{<<"k">> => 1}},
+    Handler = fun(Context) ->
+        Self ! {elicitation_context, Context},
+        copilot_types:elicitation_result(<<"accept">>, #{<<"ok">> => true},
+                                         maps:get(meta, Context))
+    end,
+    %% This process stands in for the JSON-RPC client.
+    {ok, Session} = copilot_session:start_link(<<"test-session">>, self(), <<>>,
+                                               #{on_elicitation_request => Handler}),
+    copilot_session:handle_event(Session, <<"elicitation.requested">>, #{
+        <<"requestId">> => <<"req-1">>,
+        <<"message">>   => <<"Pick one">>,
+        <<"_meta">>     => Meta
+    }),
+    receive
+        {elicitation_context, #{request_id := <<"req-1">>, meta := Meta}} -> ok
+    after 1000 ->
+        ct:fail("Elicitation handler did not receive request_id and meta")
+    end,
+    receive
+        {'$gen_call', From, {request, <<"ui.handlePendingElicitation">>,
+                             #{<<"requestId">> := <<"req-1">>,
+                               <<"result">> := #{<<"_meta">> := Meta}}}} ->
+            gen_server:reply(From, {ok, #{}})
+    after 1000 ->
+        ct:fail("Elicitation result _meta was not forwarded")
     end,
     copilot_session:stop(Session),
     ok.

@@ -612,7 +612,7 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 
 ---
 
-## Known SDK-Specific Gotchas (Updated 2026-11-23)
+## Known SDK-Specific Gotchas (Updated 2026-11-24)
 
 These are hard-won lessons from past maintenance cycles. **Consult this before debugging failures.**
 
@@ -630,6 +630,14 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 - **gh auth:** the default `jeisaacs_microsoft` account lacks security scopes. Use `$env:GH_TOKEN = gh auth token -u jeremiahjordanisaacson` for Dependabot/CodeQL/PR APIs. Fast job logs: `gh api --allow-escape-sequences repos/<repo>/actions/jobs/<id>/logs`.
 - **Rust SDK Tests on main are skipped by design** (`if: github.event.repository.fork == false`; this repo is a fork).
 - **Validate publish packaging before tagging:** PR CI mirrors `dotnet pack` (including the runtime bundle download), the Maven source/javadoc jars, and the CRAN `R CMD check`. Locally: `cargo package --allow-dirty --no-default-features`, `gem build`, `python -m build`.
+
+### v3.1.0 sync (MCP secret store, extension approvals, ask-user images)
+- **Check which CLI implements new RPCs before promising them.** Upstream snapshots can target a prerelease runtime (2.0.3-preview.0 pinned 1.0.116-0). Scan the stable runtime's bundled JS for the wire names (`mcp.secrets.save`, `permissions.extensionApprovals.list`); if they're missing, port the API anyway but document the minimum CLI version and keep the runtime bump as a separate change.
+- **Upstream marks some RPCs private (host-only).** Don't port `_Internal*` APIs (for example `permissions.folderTrust.checkTrust`, `permissions.evaluateManagedPolicy`, `permissions.locations.cleanupOrphaned`, `secrets.filterForHost`); say so in the CHANGELOG.
+- **Porting agents can all fail at once** ("Failed to get response from the AI model" after about 2 hours). Give each agent at most 3 SDKs, have it finish one SDK completely (code, tests, README) before starting the next, and point it at an already-ported SDK's `git diff` as the reference. Check `verify-sdk-coverage.mjs` every 10 to 15 minutes; finish stragglers directly.
+- **Prove core README examples compile.** Extract each new snippet from the README and check it: Node via a temporary `nodejs/src/*.ts` plus `npx tsc --noEmit` (never `npm test`), Python by running it against `ServerRpc` with a fake `request()`, Go via a temporary `_test.go` plus `go vet .`, and .NET via a temporary file in `dotnet/test` plus `dotnet build --no-restore`. Delete the temporary files afterwards.
+- **Agents on Windows write CRLF.** `.gitattributes` (`* text=auto eol=lf`) normalizes on `git add`, so "CRLF will be replaced by LF" warnings are harmless.
+- **Version bump:** script it with one line-anchored regex per file, an expected match count, and a dry-run mode, following the file list of the previous release commit; `java/pom.xml` and `nodejs/package-lock.json` contain other `X.Y.Z` strings, so plain search and replace is unsafe.
 
 ### Type Mapping: PingResponse.timestamp
 - **CANONICAL TYPE**: `string` (ISO 8601 format like `"2025-01-01T00:00:00Z"`)

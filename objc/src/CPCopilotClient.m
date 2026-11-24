@@ -395,6 +395,13 @@ static NSError *CPErrorWithPolicyHelperFailure(NSError *error) {
         [weakSelf handleExitPlanModeRequest:params respond:respond];
     }];
 
+    // ask_user questions (CPSessionConfig.userInputHandler)
+    [self.rpcClient registerRequestHandler:@"userInput.request"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleUserInputRequest:params respond:respond];
+    }];
+
     // GitHub token providers (CPSessionConfig.gitHubTokenProvider)
     [self.rpcClient registerRequestHandler:@"gitHubToken.getToken"
                                    handler:^(NSDictionary<NSString *, id> *params,
@@ -500,6 +507,36 @@ static NSError *CPErrorWithPolicyHelperFailure(NSError *error) {
         if (token.tokenType) reply[@"tokenType"] = token.tokenType;
         reply[@"expiresIn"] = @(token.expiresIn);
         respond(reply, nil);
+    });
+}
+
+#pragma mark - User Input
+
+/// `userInput.request` {sessionId, question, choices?, allowFreeform?, requestId?,
+/// imageAttachmentConstraints?, _meta?} -> {answer, wasFreeform, attachments?}.
+- (void)handleUserInputRequest:(NSDictionary *)params respond:(CPRpcResponder)respond {
+    NSString *sessionId = CPStringOrNil(params[@"sessionId"]);
+    if (!sessionId || !CPStringOrNil(params[@"question"])) {
+        respond(nil, CPRpcError(@"Invalid user input request payload"));
+        return;
+    }
+    CPCopilotSession *session = [self sessionWithId:sessionId];
+    if (!session) {
+        respond(nil, CPRpcError([NSString stringWithFormat:@"Session not found: %@", sessionId]));
+        return;
+    }
+    CPUserInputHandler handler = session.config.userInputHandler;
+    if (!handler) {
+        respond(nil, CPRpcError(@"User input requested but no handler registered"));
+        return;
+    }
+    CPUserInputRequest *request = [[CPUserInputRequest alloc] initWithDictionary:params];
+    handler(request, sessionId, ^(CPUserInputResponse * _Nullable response) {
+        if (!response) {
+            respond(nil, CPRpcError(@"User input handler returned no response"));
+            return;
+        }
+        respond([response toDictionary], nil);
     });
 }
 
@@ -977,6 +1014,105 @@ static NSError *CPErrorWithPolicyHelperFailure(NSError *error) {
                          params:@{}
                      completion:^(NSDictionary *result, NSError *error) {
         completion(error);
+    }];
+}
+
+#pragma mark - MCP Secrets / Plugin Extension Approvals
+
+- (void)mcpSecretsSave:(NSString *)secretId
+                 value:(NSString *)value
+             configDir:(nullable NSString *)configDir
+            completion:(void (^)(CPMcpSecretsSaveResult * _Nullable, NSError * _Nullable))completion {
+    // `value` is a credential: it goes only to the runtime and is never logged.
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"secretId"] = secretId;
+    params[@"value"] = value;
+    if (configDir) params[@"configDir"] = configDir;
+    [self.rpcClient sendRequest:@"mcp.secrets.save"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        completion([[CPMcpSecretsSaveResult alloc] initWithDictionary:result ?: @{}], nil);
+    }];
+}
+
+- (void)mcpSecretsDelete:(NSString *)secretId
+               configDir:(nullable NSString *)configDir
+              completion:(void (^)(NSError * _Nullable))completion {
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"secretId"] = secretId;
+    if (configDir) params[@"configDir"] = configDir;
+    [self.rpcClient sendRequest:@"mcp.secrets.delete"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        completion(error);
+    }];
+}
+
+- (void)mcpSecretsDeleteServer:(NSString *)serverName
+                     configDir:(nullable NSString *)configDir
+                    completion:(void (^)(NSError * _Nullable))completion {
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"serverName"] = serverName;
+    if (configDir) params[@"configDir"] = configDir;
+    [self.rpcClient sendRequest:@"mcp.secrets.deleteServer"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        completion(error);
+    }];
+}
+
+- (void)extensionApprovalsGrantForSession:(NSString *)sessionId
+                                requestId:(NSString *)requestId
+                               completion:(void (^)(CPPermissionsExtensionApprovalsGrantResult * _Nullable,
+                                                    NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"permissions.extensionApprovals.grant"
+                         params:@{@"sessionId": sessionId, @"requestId": requestId}
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        completion([[CPPermissionsExtensionApprovalsGrantResult alloc] initWithDictionary:result ?: @{}], nil);
+    }];
+}
+
+- (void)extensionApprovalsListForSession:(nullable NSString *)sessionId
+                              completion:(void (^)(CPPermissionsExtensionApprovalsListResult * _Nullable,
+                                                   NSError * _Nullable))completion {
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    if (sessionId) params[@"sessionId"] = sessionId;
+    [self.rpcClient sendRequest:@"permissions.extensionApprovals.list"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        completion([[CPPermissionsExtensionApprovalsListResult alloc] initWithDictionary:result ?: @{}], nil);
+    }];
+}
+
+- (void)extensionApprovalsRevoke:(NSString *)extensionName
+                 installationKey:(NSString *)installationKey
+                       sessionId:(nullable NSString *)sessionId
+                      completion:(void (^)(CPPermissionsExtensionApprovalsRevokeResult * _Nullable,
+                                           NSError * _Nullable))completion {
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"extensionName"] = extensionName;
+    params[@"installationKey"] = installationKey;
+    if (sessionId) params[@"sessionId"] = sessionId;
+    [self.rpcClient sendRequest:@"permissions.extensionApprovals.revoke"
+                         params:params
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        completion([[CPPermissionsExtensionApprovalsRevokeResult alloc] initWithDictionary:result ?: @{}], nil);
     }];
 }
 

@@ -144,16 +144,55 @@ public final class Types {
         public String question;
         public List<String> choices;
         public Boolean allowFreeform;
+        /** ID of the pending user input request, when the runtime sends one; null otherwise. */
+        public String requestId;
+        /**
+         * Image support advertised by the runtime; null when the runtime does not accept images in
+         * the answer. When set, the answer may carry {@link UserInputResponse#attachments}.
+         */
+        public UserInputImageAttachmentConstraints imageAttachmentConstraints;
+        /** The request's opaque {@code _meta} object, when the runtime sends one; null otherwise. */
+        @JsonProperty("_meta") public Map<String, Object> meta;
     }
 
-    /** User input response. */
+    /**
+     * User input response. {@link #attachments} is only valid when the request advertised
+     * {@link UserInputRequest#imageAttachmentConstraints}; for an image-only answer use an empty
+     * {@code answer} and {@code wasFreeform = true}. The runtime enforces the advertised limits.
+     */
     public static class UserInputResponse {
         public String answer;
         public boolean wasFreeform;
+        /** Images attached to the answer; sent only when set. */
+        public List<UserInputImageAttachment> attachments;
 
         public UserInputResponse(String answer, boolean wasFreeform) {
             this.answer = answer;
             this.wasFreeform = wasFreeform;
+        }
+
+        public UserInputResponse(String answer, boolean wasFreeform, List<UserInputImageAttachment> attachments) {
+            this(answer, wasFreeform);
+            this.attachments = attachments;
+        }
+
+        /**
+         * Converts this response to its wire shape, including {@code attachments} only when set.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toMap() {
+            Map<String, Object> wire = new HashMap<>();
+            wire.put("answer", answer);
+            wire.put("wasFreeform", wasFreeform);
+            if (attachments != null) {
+                List<Map<String, Object>> images = new ArrayList<>();
+                for (UserInputImageAttachment attachment : attachments) {
+                    if (attachment != null) images.add(attachment.toWire());
+                }
+                wire.put("attachments", images);
+            }
+            return wire;
         }
     }
 
@@ -1416,6 +1455,233 @@ public final class Types {
             Object reason = map.get("reason");
             result.mode = mode instanceof String ? (String) mode : null;
             result.reason = reason instanceof String ? (String) reason : null;
+            return result;
+        }
+    }
+
+    // --- v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0) ---
+
+    /**
+     * Image support advertised by a {@code userInput.request}
+     * ({@link UserInputRequest#imageAttachmentConstraints}). Absent (null) when the runtime does not
+     * accept images in the answer.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class UserInputImageAttachmentConstraints {
+        /** MIME types accepted by the request. */
+        public List<String> allowedMimeTypes = new ArrayList<>();
+        /** Maximum decoded byte length of each image. */
+        public long maxBytesPerImage;
+        /** Maximum number of images accepted in one answer. */
+        public int maxCount;
+
+        public UserInputImageAttachmentConstraints() {}
+
+        /**
+         * Parses image attachment constraints from their wire shape.
+         *
+         * @param value the wire value
+         * @return the constraints, or null when {@code value} is not an object
+         */
+        @SuppressWarnings("unchecked")
+        public static UserInputImageAttachmentConstraints fromMap(Object value) {
+            if (!(value instanceof Map)) return null;
+            Map<String, Object> map = (Map<String, Object>) value;
+            UserInputImageAttachmentConstraints constraints = new UserInputImageAttachmentConstraints();
+            if (map.get("allowedMimeTypes") instanceof List) {
+                for (Object mimeType : (List<Object>) map.get("allowedMimeTypes")) {
+                    if (mimeType instanceof String) constraints.allowedMimeTypes.add((String) mimeType);
+                }
+            }
+            Object maxBytesPerImage = map.get("maxBytesPerImage");
+            Object maxCount = map.get("maxCount");
+            constraints.maxBytesPerImage = maxBytesPerImage instanceof Number ? ((Number) maxBytesPerImage).longValue() : 0L;
+            constraints.maxCount = maxCount instanceof Number ? ((Number) maxCount).intValue() : 0;
+            return constraints;
+        }
+    }
+
+    /**
+     * An inline image attached to an ask_user answer ({@link UserInputResponse#attachments}). The
+     * wire {@code type} is always {@code "image"}; the runtime enforces the advertised MIME types,
+     * size and count limits.
+     */
+    public static class UserInputImageAttachment {
+        /** The attachment's wire {@code type}, always {@code "image"}. */
+        public static final String TYPE = "image";
+
+        /** Image bytes encoded as standard padded base64, without a data URL prefix. */
+        public String data;
+        /** MIME type of the image, matching an advertised allowed MIME type. */
+        public String mimeType;
+        /** Optional description of the image; omitted when null. */
+        public String description;
+        /** Optional client-facing name of the image; omitted when null. */
+        public String displayName;
+
+        public UserInputImageAttachment() {}
+
+        public UserInputImageAttachment(String data, String mimeType) {
+            this.data = data;
+            this.mimeType = mimeType;
+        }
+
+        public UserInputImageAttachment description(String description) { this.description = description; return this; }
+        public UserInputImageAttachment displayName(String displayName) { this.displayName = displayName; return this; }
+
+        /**
+         * Maps this attachment onto its wire shape, omitting unset optional fields.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toWire() {
+            Map<String, Object> wire = new HashMap<>();
+            wire.put("type", TYPE);
+            wire.put("data", data);
+            wire.put("mimeType", mimeType);
+            if (description != null) wire.put("description", description);
+            if (displayName != null) wire.put("displayName", displayName);
+            return wire;
+        }
+    }
+
+    /**
+     * Result of {@code CopilotClient.mcpSecretsSave}: {@link #usedKeychain} is true when the OS
+     * keychain stored the credential and false when the runtime used its file backend.
+     */
+    public static class McpSecretsSaveResult {
+        public boolean usedKeychain;
+
+        public McpSecretsSaveResult() {}
+
+        /**
+         * Parses an {@code mcp.secrets.save} result from its wire shape.
+         *
+         * @param map the wire map
+         * @return the result
+         */
+        public static McpSecretsSaveResult fromMap(Map<String, Object> map) {
+            McpSecretsSaveResult result = new McpSecretsSaveResult();
+            if (map == null) return result;
+            result.usedKeychain = Boolean.TRUE.equals(map.get("usedKeychain"));
+            return result;
+        }
+    }
+
+    /**
+     * A user-scoped approval for one installed plugin extension. Pass {@link #installationKey}
+     * back unchanged to {@code CopilotClient.extensionApprovalsRevoke}.
+     */
+    public static class PermissionsExtensionApproval {
+        /** Stable extension identity, for example {@code "plugin:plugin-name:extension-name"}. */
+        public String extensionName;
+        /** Name of the plugin that provides the extension. */
+        public String pluginName;
+        /** Exact privileged capabilities the user approved. */
+        public List<String> capabilities = new ArrayList<>();
+        /** When the approval was granted (RFC 3339 timestamp). */
+        public String grantedAt;
+        /** Opaque installation identity; pass it back unchanged to revoke. */
+        public String installationKey;
+        /** Human-readable installation label, or null. */
+        public String installationLabel;
+
+        public PermissionsExtensionApproval() {}
+
+        /**
+         * Parses an extension approval from its wire shape.
+         *
+         * @param value the wire value
+         * @return the approval, or null when {@code value} is not an object
+         */
+        @SuppressWarnings("unchecked")
+        public static PermissionsExtensionApproval fromMap(Object value) {
+            if (!(value instanceof Map)) return null;
+            Map<String, Object> map = (Map<String, Object>) value;
+            PermissionsExtensionApproval approval = new PermissionsExtensionApproval();
+            approval.extensionName = stringOrNull(map.get("extensionName"));
+            approval.pluginName = stringOrNull(map.get("pluginName"));
+            if (map.get("capabilities") instanceof List) {
+                for (Object capability : (List<Object>) map.get("capabilities")) {
+                    if (capability instanceof String) approval.capabilities.add((String) capability);
+                }
+            }
+            approval.grantedAt = stringOrNull(map.get("grantedAt"));
+            approval.installationKey = stringOrNull(map.get("installationKey"));
+            approval.installationLabel = stringOrNull(map.get("installationLabel"));
+            return approval;
+        }
+
+        private static String stringOrNull(Object value) {
+            return value instanceof String ? (String) value : null;
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsGrant}. */
+    public static class PermissionsExtensionApprovalsGrantResult {
+        /** Whether the pending request was eligible and persisted. */
+        public boolean granted;
+        /** The stored approval when it was persisted, or null. */
+        public PermissionsExtensionApproval approval;
+
+        public PermissionsExtensionApprovalsGrantResult() {}
+
+        /**
+         * Parses a {@code permissions.extensionApprovals.grant} result from its wire shape.
+         *
+         * @param map the wire map
+         * @return the result
+         */
+        public static PermissionsExtensionApprovalsGrantResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsGrantResult result = new PermissionsExtensionApprovalsGrantResult();
+            if (map == null) return result;
+            result.granted = Boolean.TRUE.equals(map.get("granted"));
+            result.approval = PermissionsExtensionApproval.fromMap(map.get("approval"));
+            return result;
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsList}: every user-scoped plugin extension approval. */
+    public static class PermissionsExtensionApprovalsListResult {
+        public List<PermissionsExtensionApproval> approvals = new ArrayList<>();
+
+        public PermissionsExtensionApprovalsListResult() {}
+
+        /**
+         * Parses a {@code permissions.extensionApprovals.list} result from its wire shape.
+         *
+         * @param map the wire map
+         * @return the result
+         */
+        @SuppressWarnings("unchecked")
+        public static PermissionsExtensionApprovalsListResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsListResult result = new PermissionsExtensionApprovalsListResult();
+            if (map == null || !(map.get("approvals") instanceof List)) return result;
+            for (Object value : (List<Object>) map.get("approvals")) {
+                PermissionsExtensionApproval approval = PermissionsExtensionApproval.fromMap(value);
+                if (approval != null) result.approvals.add(approval);
+            }
+            return result;
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsRevoke}. */
+    public static class PermissionsExtensionApprovalsRevokeResult {
+        /** Whether a matching approval was revoked. */
+        public boolean revoked;
+
+        public PermissionsExtensionApprovalsRevokeResult() {}
+
+        /**
+         * Parses a {@code permissions.extensionApprovals.revoke} result from its wire shape.
+         *
+         * @param map the wire map
+         * @return the result
+         */
+        public static PermissionsExtensionApprovalsRevokeResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsRevokeResult result = new PermissionsExtensionApprovalsRevokeResult();
+            if (map == null) return result;
+            result.revoked = Boolean.TRUE.equals(map.get("revoked"));
             return result;
         }
     }

@@ -489,6 +489,171 @@ proc parsePermissionModeResult*(node: JsonNode): PermissionModeResult =
   )
 
 # ---------------------------------------------------------------------------
+# v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+# ---------------------------------------------------------------------------
+
+type
+  UserInputImageAttachmentConstraints* = object
+    ## Image limits a `userInput.request` advertises (`imageAttachmentConstraints`)
+    ## when the runtime accepts images in the answer.
+    allowedMimeTypes*: seq[string]
+      ## Accepted MIME types, for example "image/png".
+    maxBytesPerImage*: int
+    maxCount*: int
+      ## Most images accepted in one answer.
+
+  UserInputRequest* = object
+    ## A question from the agent's ask_user tool (`userInput.request`).
+    id*: string
+    prompt*: string
+    sessionId*: string
+    question*: string
+    choices*: seq[string]
+    allowFreeform*: bool
+      ## Whether a freeform answer is allowed in addition to the choices.
+    requestId*: string
+      ## Runtime id of the pending request, when the runtime sends it.
+    imageAttachmentConstraints*: Option[UserInputImageAttachmentConstraints]
+      ## Image limits; none when the runtime does not accept image answers.
+    meta*: JsonNode
+      ## Opaque request metadata (`_meta`), nil when absent.
+
+  UserInputImageAttachment* = object
+    ## An image sent with a `UserInputResponse` (the wire `type` is always
+    ## "image"). Only valid when the request advertised
+    ## `imageAttachmentConstraints`; the runtime enforces the limits.
+    data*: string
+      ## Base64-encoded image bytes.
+    mimeType*: string
+    description*: string
+    displayName*: string
+
+  UserInputResponse* = object
+    ## Answer to a `UserInputRequest`. For an image-only answer, use an empty
+    ## `answer` with `wasFreeform` true.
+    answer*: string
+    wasFreeform*: bool
+      ## True when the user typed the answer instead of picking a choice.
+    attachments*: seq[UserInputImageAttachment]
+      ## Images sent with the answer (`attachments`); omitted when empty.
+
+  UserInputRequestHandler* = proc(req: UserInputRequest): UserInputResponse {.closure.}
+    ## Answers the agent's ask_user questions for one session
+    ## (`SessionConfig.onUserInputRequest`).
+
+  McpSecretsSaveResult* = object
+    ## Result of `CopilotClient.mcpSecretsSave` (`mcp.secrets.save`).
+    usedKeychain*: bool
+      ## True when the OS keychain stored the credential, false for the file backend.
+
+  PermissionsExtensionApproval* = object
+    ## A user-scoped approval for one installed plugin extension
+    ## (`permissions.extensionApprovals.*`).
+    extensionName*: string
+      ## Stable identity, for example "plugin:plugin-name:extension-name".
+    pluginName*: string
+    capabilities*: seq[string]
+      ## Exact privileged capabilities the user approved.
+    grantedAt*: string
+      ## RFC 3339 timestamp of the grant.
+    installationKey*: string
+      ## Opaque installation identity; pass it back unchanged to revoke.
+    installationLabel*: string
+
+  PermissionsExtensionApprovalsGrantResult* = object
+    ## Result of `CopilotClient.extensionApprovalsGrant`.
+    granted*: bool
+      ## Whether the pending request was eligible and persisted.
+    approval*: Option[PermissionsExtensionApproval]
+      ## The persisted approval, when granted.
+
+  PermissionsExtensionApprovalsListResult* = object
+    ## Result of `CopilotClient.extensionApprovalsList`.
+    approvals*: seq[PermissionsExtensionApproval]
+
+  PermissionsExtensionApprovalsRevokeResult* = object
+    ## Result of `CopilotClient.extensionApprovalsRevoke`.
+    revoked*: bool
+      ## Whether a matching approval was revoked.
+
+proc parseUserInputRequest*(params: JsonNode): UserInputRequest =
+  ## Decodes `userInput.request` params, passing `imageAttachmentConstraints`,
+  ## `requestId` and `_meta` through.
+  if params.isNil or params.kind != JObject:
+    return UserInputRequest(allowFreeform: true)
+  result = UserInputRequest(
+    id: params{"id"}.getStr(),
+    prompt: params{"prompt"}.getStr(),
+    sessionId: params{"sessionId"}.getStr(),
+    question: params{"question"}.getStr(),
+    allowFreeform: params{"allowFreeform"}.getBool(true),
+    requestId: params{"requestId"}.getStr(),
+    meta: params{"_meta"},
+  )
+  for choice in params{"choices"}.getElems():
+    result.choices.add(choice.getStr())
+  let constraints = params{"imageAttachmentConstraints"}
+  if not constraints.isNil and constraints.kind == JObject:
+    var parsed = UserInputImageAttachmentConstraints(
+      maxBytesPerImage: constraints{"maxBytesPerImage"}.getInt(),
+      maxCount: constraints{"maxCount"}.getInt(),
+    )
+    for mimeType in constraints{"allowedMimeTypes"}.getElems():
+      parsed.allowedMimeTypes.add(mimeType.getStr())
+    result.imageAttachmentConstraints = some(parsed)
+
+proc toWireJson*(attachment: UserInputImageAttachment): JsonNode =
+  ## Wire form of an ask_user image attachment.
+  result = %*{"type": "image", "data": attachment.data,
+              "mimeType": attachment.mimeType}
+  if attachment.description.len > 0:
+    result["description"] = %attachment.description
+  if attachment.displayName.len > 0:
+    result["displayName"] = %attachment.displayName
+
+proc toWireJson*(res: UserInputResponse): JsonNode =
+  ## Wire answer for `userInput.request`; `attachments` is sent only when set.
+  result = %*{"answer": res.answer, "wasFreeform": res.wasFreeform}
+  if res.attachments.len > 0:
+    let attachments = newJArray()
+    for attachment in res.attachments:
+      attachments.add(attachment.toWireJson())
+    result["attachments"] = attachments
+
+proc parseMcpSecretsSaveResult*(node: JsonNode): McpSecretsSaveResult =
+  ## Decodes a `mcp.secrets.save` result.
+  McpSecretsSaveResult(usedKeychain: node{"usedKeychain"}.getBool())
+
+proc parsePermissionsExtensionApproval*(node: JsonNode): PermissionsExtensionApproval =
+  ## Decodes one `PermissionsExtensionApproval` object.
+  result = PermissionsExtensionApproval(
+    extensionName: node{"extensionName"}.getStr(),
+    pluginName: node{"pluginName"}.getStr(),
+    grantedAt: node{"grantedAt"}.getStr(),
+    installationKey: node{"installationKey"}.getStr(),
+    installationLabel: node{"installationLabel"}.getStr(),
+  )
+  for capability in node{"capabilities"}.getElems():
+    result.capabilities.add(capability.getStr())
+
+proc parsePermissionsExtensionApprovalsGrantResult*(node: JsonNode): PermissionsExtensionApprovalsGrantResult =
+  ## Decodes a `permissions.extensionApprovals.grant` result.
+  result.granted = node{"granted"}.getBool()
+  let approval = node{"approval"}
+  if not approval.isNil and approval.kind == JObject:
+    result.approval = some(parsePermissionsExtensionApproval(approval))
+
+proc parsePermissionsExtensionApprovalsListResult*(node: JsonNode): PermissionsExtensionApprovalsListResult =
+  ## Decodes a `permissions.extensionApprovals.list` result.
+  for approval in node{"approvals"}.getElems():
+    if approval.kind == JObject:
+      result.approvals.add(parsePermissionsExtensionApproval(approval))
+
+proc parsePermissionsExtensionApprovalsRevokeResult*(node: JsonNode): PermissionsExtensionApprovalsRevokeResult =
+  ## Decodes a `permissions.extensionApprovals.revoke` result.
+  PermissionsExtensionApprovalsRevokeResult(revoked: node{"revoked"}.getBool())
+
+# ---------------------------------------------------------------------------
 # Client configuration
 # ---------------------------------------------------------------------------
 
@@ -598,6 +763,9 @@ type
     capi*: Option[CapiConfig]
     onShellAuthenticationRequest*: ShellAuthenticationHandler
     onStoreMemory*: StoreMemoryHandler
+    onUserInputRequest*: UserInputRequestHandler
+      ## Answers the agent's ask_user questions, including image answers
+      ## (`userInput.request`; sends `interaction.requestUserInput`).
 
   ResumeSessionConfig* = object
     sessionId*: string
@@ -725,16 +893,19 @@ type
 
   PermissionHandler* = proc(req: PermissionRequest): PermissionDecision {.closure.}
 
-  UserInputRequest* = object
-    id*: string
-    prompt*: string
-
   UserInputHandler* = proc(req: UserInputRequest): string {.closure.}
+    ## Client-wide user input handler answered with a plain string. Prefer
+    ## `SessionConfig.onUserInputRequest`, which can also answer with images.
 
   ElicitationRequest* = object
     id*: string
     message*: string
     options*: seq[string]
+    requestId*: string
+      ## Runtime id of the pending elicitation, when the runtime sends it.
+    meta*: JsonNode
+      ## Opaque negotiated-extension metadata (`_meta`), forwarded unchanged;
+      ## nil when absent.
 
   ElicitationHandler* = proc(req: ElicitationRequest): string {.closure.}
 
@@ -826,7 +997,8 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        defaultProvider = "";
                        capi = none(CapiConfig);
                        onShellAuthenticationRequest: ShellAuthenticationHandler = nil;
-                       onStoreMemory: StoreMemoryHandler = nil): SessionConfig =
+                       onStoreMemory: StoreMemoryHandler = nil;
+                       onUserInputRequest: UserInputRequestHandler = nil): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -888,6 +1060,7 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     capi: capi,
     onShellAuthenticationRequest: onShellAuthenticationRequest,
     onStoreMemory: onStoreMemory,
+    onUserInputRequest: onUserInputRequest,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";

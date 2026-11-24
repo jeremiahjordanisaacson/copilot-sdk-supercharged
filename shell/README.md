@@ -45,6 +45,57 @@ copilot_session_destroy
 copilot_client_stop
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The MCP secret store and plugin extension
+approval functions call server-scoped RPCs that require Copilot CLI **1.0.116 or newer**; older
+CLIs answer with a JSON-RPC method-not-found error, which fails the function like any other RPC
+error (the error object is in `COPILOT_JSONRPC_LAST_ERROR`).
+
+- **MCP secret store**: `copilot_client_mcp_secrets_save <secret_id> <value> [config_dir]` sets `COPILOT_MCP_SECRETS_USED_KEYCHAIN` (`true` when the OS keychain stored the credential, `false` for the file backend). `copilot_client_mcp_secrets_delete <secret_id> [config_dir]` and `copilot_client_mcp_secrets_delete_server <server_name> [config_dir]` remove credentials. The value is a credential: the SDK never logs it.
+- **Plugin extension approvals**: `copilot_client_extension_approvals_grant <session_id> <request_id>` persists a pending extension permission request before you answer it and sets `COPILOT_EXTENSION_APPROVALS_GRANT_RESULT` (`{"granted","approval"?}`). `copilot_client_extension_approvals_list [session_id]` sets `COPILOT_EXTENSION_APPROVALS` to a JSON array of approvals (`extensionName`, `pluginName`, `capabilities`, `grantedAt`, `installationKey`, `installationLabel`). `copilot_client_extension_approvals_revoke <extension_name> <installation_key> [session_id]` sets `COPILOT_EXTENSION_APPROVAL_REVOKED`.
+- **Ask-user image attachments**: `COPILOT_USER_INPUT_HANDLER` answers `userInput.request` (create/resume then request user input). The handler receives the request JSON, which has `imageAttachmentConstraints` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`) only when the runtime accepts images, plus `requestId` and `_meta` when sent. It echoes a response built with `copilot_user_input_response <answer> [was_freeform] [attachments_json]`; build each image with `copilot_user_input_image_attachment <base64_data> <mime_type> [description] [display_name]` (the wire `type` is always `"image"`). `attachments` is sent only when non-empty, and the runtime enforces the limits.
+- **Elicitation metadata**: elicitation handler contexts include `requestId` and `_meta` when the runtime sends them, and a `_meta` member of the handler's result is sent back unchanged.
+
+### MCP secrets and extension approvals
+
+```bash
+copilot_client_mcp_secrets_save "my-server-token" "$MY_SERVER_TOKEN"
+echo "Stored in the OS keychain: $COPILOT_MCP_SECRETS_USED_KEYCHAIN"
+copilot_client_mcp_secrets_delete "my-server-token"
+copilot_client_mcp_secrets_delete_server "my-server"   # every credential indexed for the server
+
+# $request_id is the requestId of a pending extension permission request (from its
+# permission.requested event): persist it, then answer the request as usual.
+copilot_client_extension_approvals_grant "$COPILOT_SESSION_ID" "$request_id"
+echo "$COPILOT_EXTENSION_APPROVALS_GRANT_RESULT" | jq -r 'select(.granted) | .approval.extensionName'
+
+copilot_client_extension_approvals_list
+first=$(echo "$COPILOT_EXTENSION_APPROVALS" | jq -c '.[0] // empty')
+if [[ -n "$first" ]]; then
+    copilot_client_extension_approvals_revoke "$(echo "$first" | jq -r '.extensionName')" \
+        "$(echo "$first" | jq -r '.installationKey')"
+    echo "Revoked: $COPILOT_EXTENSION_APPROVAL_REVOKED"
+fi
+```
+
+### Ask-user image attachments
+
+```bash
+answer_with_screenshot() {
+    local request="$1"
+    if echo "$request" | jq -e 'any(.imageAttachmentConstraints.allowedMimeTypes[]?; . == "image/png")' > /dev/null; then
+        local image
+        image=$(copilot_user_input_image_attachment "$(base64 < screenshot.png)" "image/png" "" "screenshot.png")
+        copilot_user_input_response "" true "[$image]"   # image-only answer
+    else
+        copilot_user_input_response "No screenshot available" true
+    fi
+}
+COPILOT_USER_INPUT_HANDLER="answer_with_screenshot"
+copilot_client_create_session
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older

@@ -57,6 +57,73 @@ copilot_session:stop(Session),
 copilot_client:stop(Client).
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `copilot_client` functions below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned as `{error, Error}` like any other RPC error.
+
+### MCP secret store and plugin extension approvals
+
+```erlang
+%% MCP secret store. The value is a credential: it is sent to the runtime and never logged.
+{ok, #{used_keychain := InKeychain}} =
+    copilot_client:mcp_secrets_save(Client, <<"my-server/api-key">>,
+                                    list_to_binary(os:getenv("MY_API_KEY", "")),
+                                    #{config_dir => <<"/path/to/config">>}),
+io:format("stored in the ~s~n", [case InKeychain of true -> "OS keychain"; false -> "file backend" end]),
+ok = copilot_client:mcp_secrets_delete(Client, <<"my-server/api-key">>),
+ok = copilot_client:mcp_secrets_delete_server(Client, <<"my-server">>),
+
+%% Plugin extension approvals (user scoped). Grant persists a pending extension
+%% permission request before you answer it.
+{ok, #{granted := true, approval := #{extension_name := Name}}} =
+    copilot_client:extension_approvals_grant(Client, SessionId, RequestId),
+io:format("approved ~s~n", [Name]),
+{ok, #{approvals := Approvals}} = copilot_client:extension_approvals_list(Client),
+lists:foreach(fun(#{extension_name := ExtensionName, installation_key := Key}) ->
+    {ok, #{revoked := true}} =
+        copilot_client:extension_approvals_revoke(Client, ExtensionName, Key)
+end, Approvals).
+```
+
+| Function | Wire method | Returns |
+|---|---|---|
+| `mcp_secrets_save(Pid, SecretId, Value)`, `mcp_secrets_save(Pid, SecretId, Value, #{config_dir => Dir})` | `mcp.secrets.save` | `{ok, #{used_keychain}}` (`false` means the file backend stored it) |
+| `mcp_secrets_delete(Pid, SecretId)`, `mcp_secrets_delete(Pid, SecretId, #{config_dir => Dir})` | `mcp.secrets.delete` | `ok` |
+| `mcp_secrets_delete_server(Pid, ServerName)`, `mcp_secrets_delete_server(Pid, ServerName, #{config_dir => Dir})` | `mcp.secrets.deleteServer` | `ok` |
+| `extension_approvals_grant(Pid, SessionId, RequestId)` | `permissions.extensionApprovals.grant` | `{ok, #{granted, approval}}` |
+| `extension_approvals_list(Pid)`, `extension_approvals_list(Pid, #{session_id => Id})` | `permissions.extensionApprovals.list` | `{ok, #{approvals}}` |
+| `extension_approvals_revoke(Pid, ExtensionName, InstallationKey)`, `extension_approvals_revoke(Pid, ExtensionName, InstallationKey, #{session_id => Id})` | `permissions.extensionApprovals.revoke` | `{ok, #{revoked}}` |
+
+Each approval (`copilot_types:extension_approval/1`) is `#{extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label}`: `extension_name` is the stable identity (for example `<<"plugin:my-plugin:my-extension">>`), `granted_at` an RFC 3339 timestamp, and `installation_key` an opaque key to pass back unchanged to revoke.
+
+### Ask-user image attachments
+
+The `on_user_input_request` handler receives the request map unchanged. When the runtime accepts images it carries `<<"imageAttachmentConstraints">>` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`), which `copilot_types:image_attachment_constraints/1` decodes into `#{allowed_mime_types, max_bytes_per_image, max_count}` (`undefined` when images are not accepted); `<<"requestId">>` and `<<"_meta">>` are present when the runtime sends them. Answer with `copilot_types:user_input_response/3`, whose third argument is a list of attachments built with `copilot_types:user_input_image_attachment/1,2` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `<<"image">>`). Attachments are sent only when set and are only valid when the request advertised constraints; the runtime enforces the limits.
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    on_user_input_request => fun(Request) ->
+        Constraints = copilot_types:image_attachment_constraints(Request),
+        case Constraints =/= undefined andalso
+             lists:member(<<"image/png">>, maps:get(allowed_mime_types, Constraints)) of
+            true ->
+                {ok, Png} = file:read_file("screenshot.png"),
+                Image = copilot_types:user_input_image_attachment(#{
+                    data         => base64:encode(Png),
+                    mime_type    => <<"image/png">>,
+                    display_name => <<"screenshot.png">>
+                }),
+                %% Image-only answer: empty answer and WasFreeform = true
+                copilot_types:user_input_response(<<>>, true, [Image]);
+            false ->
+                copilot_types:user_input_response(<<"No screenshot available">>, true)
+        end
+    end
+}).
+```
+
+The `on_elicitation_request` context also carries `request_id` and `meta` (the request's opaque `_meta`); return `copilot_types:elicitation_result(Action, Content, Meta)` to send a `_meta` back unchanged.
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime, and requires **Copilot CLI 1.0.113 or newer**: older CLIs fail startup with `{error, {protocol_mismatch, Message}}`. Existing options keep working. You pass the same atom-keyed config maps as before, and `copilot_client` converts the flat payload into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, a hooks map becomes `hooks.hasHandlers`, and `allow_transcript_recovery` stays at the root). The legacy single `provider` map becomes a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) now runs under `node`.
@@ -657,6 +724,12 @@ rebar3 ct
 | `delete_session(Pid, Id)` | Delete a session |
 | `get_session_metadata(Pid, Id)` | Get session metadata |
 | `clear_managed_settings_cache(Pid)` | Clear the managed-settings cache |
+| `mcp_secrets_save(Pid, SecretId, Value[, Opts])` | Save an MCP secret; returns `#{used_keychain}` |
+| `mcp_secrets_delete(Pid, SecretId[, Opts])` | Delete an MCP secret |
+| `mcp_secrets_delete_server(Pid, ServerName[, Opts])` | Delete every stored secret of an MCP server |
+| `extension_approvals_grant(Pid, SessionId, RequestId)` | Persist a pending plugin extension approval |
+| `extension_approvals_list(Pid[, Opts])` | List plugin extension approvals |
+| `extension_approvals_revoke(Pid, ExtensionName, InstallationKey[, Opts])` | Revoke a plugin extension approval |
 | `state(Pid)` | Get connection state |
 
 ### copilot_session

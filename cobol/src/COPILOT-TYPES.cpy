@@ -269,20 +269,49 @@
            05 WS-SMC-CONTENT        PIC X(4096) VALUE SPACES.
 
       *----------------------------------------------------------------*
-      * User input request / response                                  *
+      * User input request / response (userInput.request, the ask_user *
+      * tool). COPILOT-SESSION CALLs the program named in              *
+      * WS-USER-INPUT-PGM (COPILOT-SESSION-OPTS.cpy) with both records.*
       *----------------------------------------------------------------*
        01  WS-USER-INPUT-REQ.
            05 WS-UIR-QUESTION       PIC X(1024) VALUE SPACES.
+      *    Choices as the raw JSON array (spaces when absent)
            05 WS-UIR-CHOICES        PIC X(2048) VALUE SPACES.
            05 WS-UIR-ALLOW-FREEFORM PIC 9      VALUE 0.
                88 UIR-ALLOW-FREEFORM-YES       VALUE 1.
                88 UIR-ALLOW-FREEFORM-NO        VALUE 0.
+      *    Session id and pending request id (requestId), when sent
+           05 WS-UIR-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-UIR-REQUEST-ID     PIC X(64)  VALUE SPACES.
+      *    Image attachment constraints (imageAttachmentConstraints):
+      *    UIR-IMAGES-ACCEPTED when the runtime accepts images in the
+      *    answer; allowedMimeTypes is the raw JSON array.
+           05 WS-UIR-IMAGES-FLAG    PIC 9      VALUE 0.
+               88 UIR-IMAGES-ACCEPTED          VALUE 1.
+               88 UIR-IMAGES-NOT-ACCEPTED      VALUE 0.
+           05 WS-UIR-ALLOWED-MIME-TYPES PIC X(512) VALUE SPACES.
+           05 WS-UIR-MAX-BYTES-PER-IMAGE PIC 9(10) VALUE 0.
+           05 WS-UIR-MAX-COUNT      PIC 9(4)   VALUE 0.
+      *    The request's opaque _meta object (raw JSON), when sent
+           05 WS-UIR-META           PIC X(1024) VALUE SPACES.
 
        01  WS-USER-INPUT-RESP.
            05 WS-UIRESP-ANSWER      PIC X(1024) VALUE SPACES.
            05 WS-UIRESP-WAS-FREEFORM PIC 9     VALUE 0.
                88 UIRESP-WAS-FREEFORM-YES      VALUE 1.
                88 UIRESP-WAS-FREEFORM-NO       VALUE 0.
+      *    Image attachments (attachments, UserInputImageAttachment),
+      *    sent only when WS-UIRESP-ATTACH-COUNT > 0 and only valid
+      *    when the request set UIR-IMAGES-ACCEPTED. The wire type is
+      *    always "image"; WS-UIA-DATA holds the base64 image bytes.
+      *    Image-only answers use a blank answer with
+      *    UIRESP-WAS-FREEFORM-YES. The runtime enforces the limits.
+           05 WS-UIRESP-ATTACH-COUNT PIC 9     VALUE 0.
+           05 WS-UIRESP-ATTACHMENT  OCCURS 4 TIMES.
+               10 WS-UIA-DATA       PIC X(3072) VALUE SPACES.
+               10 WS-UIA-MIME-TYPE  PIC X(64)  VALUE SPACES.
+               10 WS-UIA-DESCRIPTION PIC X(256) VALUE SPACES.
+               10 WS-UIA-DISPLAY-NAME PIC X(128) VALUE SPACES.
 
       *----------------------------------------------------------------*
       * Cloud session metadata                                          *
@@ -723,3 +752,55 @@
            88 AUTO-TIER-EFFICIENCY              VALUE "efficiency".
            88 AUTO-TIER-BALANCE                 VALUE "balance".
            88 AUTO-TIER-INTELLIGENCE            VALUE "intelligence".
+
+      *================================================================*
+      * v3.1.0 types (Microsoft Copilot SDK 2.0.3-preview.0). The      *
+      * COPILOT-CLIENT entries that take these records send            *
+      * server-scoped requests that require Copilot CLI 1.0.116 or     *
+      * newer; older CLIs answer with a JSON-RPC method-not-found      *
+      * error (return code -1, message in WS-LAST-ERROR).              *
+      *================================================================*
+
+      *----------------------------------------------------------------*
+      * MCP secret store: COPILOT-MCP-SECRETS-SAVE (mcp.secrets.save), *
+      * COPILOT-MCP-SECRETS-DELETE (mcp.secrets.delete) and            *
+      * COPILOT-MCP-SECRETS-DEL-SERVER (mcp.secrets.deleteServer).     *
+      * WS-MSQ-VALUE is a credential: it is never logged. A blank      *
+      * WS-MSQ-CONFIG-DIR is not sent (the runtime's configuration     *
+      * root). After a save, MSQ-USED-KEYCHAIN tells that the OS       *
+      * keychain stored the credential (usedKeychain); otherwise the   *
+      * runtime used its file backend.                                 *
+      *----------------------------------------------------------------*
+       01  WS-MCP-SECRETS-REQ.
+           05 WS-MSQ-SECRET-ID       PIC X(256)  VALUE SPACES.
+           05 WS-MSQ-VALUE           PIC X(2048) VALUE SPACES.
+           05 WS-MSQ-SERVER-NAME     PIC X(256)  VALUE SPACES.
+           05 WS-MSQ-CONFIG-DIR      PIC X(512)  VALUE SPACES.
+           05 WS-MSQ-USED-KEYCHAIN   PIC 9       VALUE 0.
+               88 MSQ-USED-KEYCHAIN             VALUE 1.
+               88 MSQ-USED-FILE-BACKEND         VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Plugin extension approvals (user-scoped approvals for          *
+      * installed plugin extensions). COPILOT-EXT-APPROVALS-GRANT      *
+      * (permissions.extensionApprovals.grant) persists the pending    *
+      * extension permission request WS-EAQ-REQUEST-ID of session      *
+      * WS-EAQ-SESSION-ID before the host answers it.                  *
+      * COPILOT-EXT-APPROVALS-LIST (permissions.extensionApprovals.    *
+      * list) and COPILOT-EXT-APPROVALS-REVOKE (permissions.           *
+      * extensionApprovals.revoke) send WS-EAQ-SESSION-ID only when    *
+      * set (an attached session's configuration profile). Revoke      *
+      * takes the approval's extensionName and installationKey         *
+      * unchanged. EAQ-GRANTED and EAQ-REVOKED report the outcome; the *
+      * approvals (extensionName, pluginName, capabilities, grantedAt, *
+      * installationKey, installationLabel) are in the raw response.   *
+      *----------------------------------------------------------------*
+       01  WS-EXT-APPROVALS-REQ.
+           05 WS-EAQ-SESSION-ID      PIC X(64)   VALUE SPACES.
+           05 WS-EAQ-REQUEST-ID      PIC X(64)   VALUE SPACES.
+           05 WS-EAQ-EXTENSION-NAME  PIC X(256)  VALUE SPACES.
+           05 WS-EAQ-INSTALL-KEY     PIC X(512)  VALUE SPACES.
+           05 WS-EAQ-GRANTED         PIC 9       VALUE 0.
+               88 EAQ-GRANTED                   VALUE 1.
+           05 WS-EAQ-REVOKED         PIC 9       VALUE 0.
+               88 EAQ-REVOKED                   VALUE 1.

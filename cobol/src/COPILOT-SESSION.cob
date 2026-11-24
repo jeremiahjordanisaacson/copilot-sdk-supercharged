@@ -857,6 +857,8 @@
            EVALUATE WS-EVENT-METHOD
                WHEN "gitHubToken.getToken"
                    PERFORM ANSWER-GITHUB-TOKEN
+               WHEN "userInput.request"
+                   PERFORM ANSWER-USER-INPUT
                WHEN "shellAuthentication.request"
                    PERFORM ANSWER-SHELL-AUTH
                WHEN "shellAuthentication.cancel"
@@ -988,6 +990,123 @@
                MOVE '{"action":"cancel"}' TO WS-PB-TEXT
                PERFORM PB-PUT-RAW
            END-IF
+           .
+
+      *    userInput.request {sessionId, question, choices?,
+      *    allowFreeform?, requestId?, imageAttachmentConstraints?,
+      *    _meta?} (the ask_user tool) -> {answer, wasFreeform,
+      *    attachments?}. Attachments are sent only when the program
+      *    sets WS-UIRESP-ATTACH-COUNT.
+       ANSWER-USER-INPUT.
+           INITIALIZE WS-USER-INPUT-REQ WS-USER-INPUT-RESP
+           MOVE 2 TO WS-JS-DEPTH
+           MOVE "sessionId" TO WS-JS-KEY
+           PERFORM JSON-STRING-VALUE
+           MOVE WS-JS-VALUE TO WS-UIR-SESSION-ID
+           MOVE "question" TO WS-JS-KEY
+           PERFORM JSON-STRING-VALUE
+           MOVE WS-JS-VALUE TO WS-UIR-QUESTION
+           MOVE "choices" TO WS-JS-KEY
+           PERFORM JSON-RAW-VALUE
+           MOVE WS-JS-VALUE TO WS-UIR-CHOICES
+           SET UIR-ALLOW-FREEFORM-YES TO TRUE
+           MOVE "allowFreeform" TO WS-JS-KEY
+           PERFORM JSON-RAW-VALUE
+           IF WS-JS-VALUE(1:5) = "false"
+               SET UIR-ALLOW-FREEFORM-NO TO TRUE
+           END-IF
+           MOVE "requestId" TO WS-JS-KEY
+           PERFORM JSON-STRING-VALUE
+           MOVE WS-JS-VALUE TO WS-UIR-REQUEST-ID
+           MOVE "_meta" TO WS-JS-KEY
+           PERFORM JSON-RAW-VALUE
+           MOVE WS-JS-VALUE TO WS-UIR-META
+           MOVE "imageAttachmentConstraints" TO WS-JS-KEY
+           PERFORM JSON-RAW-VALUE
+           IF WS-JS-VALUE(1:1) = "{"
+               SET UIR-IMAGES-ACCEPTED TO TRUE
+               MOVE 3 TO WS-JS-DEPTH
+               MOVE "allowedMimeTypes" TO WS-JS-KEY
+               PERFORM JSON-RAW-VALUE
+               MOVE WS-JS-VALUE TO WS-UIR-ALLOWED-MIME-TYPES
+               MOVE "maxBytesPerImage" TO WS-JS-KEY
+               PERFORM JSON-RAW-VALUE
+               IF WS-JS-VALUE-LEN > 0
+                   MOVE FUNCTION NUMVAL(WS-JS-VALUE(1:WS-JS-VALUE-LEN))
+                       TO WS-UIR-MAX-BYTES-PER-IMAGE
+               END-IF
+               MOVE "maxCount" TO WS-JS-KEY
+               PERFORM JSON-RAW-VALUE
+               IF WS-JS-VALUE-LEN > 0
+                   MOVE FUNCTION NUMVAL(WS-JS-VALUE(1:WS-JS-VALUE-LEN))
+                       TO WS-UIR-MAX-COUNT
+               END-IF
+           END-IF
+           IF WS-USER-INPUT-PGM = SPACES
+               MOVE 1 TO WS-REPLY-IS-ERROR
+               MOVE -32603 TO WS-REPLY-ERROR-CODE
+               MOVE "User input requested but no handler registered"
+                   TO WS-REPLY-ERROR-MSG
+               EXIT PARAGRAPH
+           END-IF
+           CALL WS-USER-INPUT-PGM USING WS-USER-INPUT-REQ
+               WS-USER-INPUT-RESP
+               ON EXCEPTION
+                   MOVE 1 TO WS-REPLY-IS-ERROR
+                   MOVE -32603 TO WS-REPLY-ERROR-CODE
+                   MOVE "User input program not found"
+                       TO WS-REPLY-ERROR-MSG
+           END-CALL
+           IF WS-REPLY-IS-ERROR = 1
+               EXIT PARAGRAPH
+           END-IF
+           MOVE "{" TO WS-PB-CHAR
+           PERFORM PB-PUT-CHAR
+           MOVE "answer" TO WS-PB-KEY
+           MOVE WS-UIRESP-ANSWER TO WS-PB-TEXT
+           PERFORM PB-ROOT-STRING
+           MOVE "wasFreeform" TO WS-PB-KEY
+           PERFORM PB-ROOT-KEY
+           IF UIRESP-WAS-FREEFORM-YES
+               PERFORM PB-PUT-TRUE
+           ELSE
+               PERFORM PB-PUT-FALSE
+           END-IF
+           IF WS-UIRESP-ATTACH-COUNT > 0
+               MOVE "attachments" TO WS-PB-KEY
+               PERFORM PB-ROOT-KEY
+               MOVE "[" TO WS-PB-CHAR
+               PERFORM PB-PUT-CHAR
+               PERFORM VARYING WS-PB-ENTRY FROM 1 BY 1
+                       UNTIL WS-PB-ENTRY > WS-UIRESP-ATTACH-COUNT
+                          OR WS-PB-ENTRY > 4
+                   IF WS-PB-ENTRY > 1
+                       MOVE "," TO WS-PB-CHAR
+                       PERFORM PB-PUT-CHAR
+                   END-IF
+                   PERFORM PB-OBJ-OPEN
+                   MOVE "type" TO WS-PB-KEY
+                   MOVE "image" TO WS-PB-TEXT
+                   PERFORM PB-OBJ-STRING
+                   MOVE "data" TO WS-PB-KEY
+                   MOVE WS-UIA-DATA(WS-PB-ENTRY) TO WS-PB-TEXT
+                   PERFORM PB-OBJ-STRING
+                   MOVE "mimeType" TO WS-PB-KEY
+                   MOVE WS-UIA-MIME-TYPE(WS-PB-ENTRY) TO WS-PB-TEXT
+                   PERFORM PB-OBJ-STRING
+                   MOVE "description" TO WS-PB-KEY
+                   MOVE WS-UIA-DESCRIPTION(WS-PB-ENTRY) TO WS-PB-TEXT
+                   PERFORM PB-OBJ-STRING
+                   MOVE "displayName" TO WS-PB-KEY
+                   MOVE WS-UIA-DISPLAY-NAME(WS-PB-ENTRY) TO WS-PB-TEXT
+                   PERFORM PB-OBJ-STRING
+                   PERFORM PB-OBJ-CLOSE
+               END-PERFORM
+               MOVE "]" TO WS-PB-CHAR
+               PERFORM PB-PUT-CHAR
+           END-IF
+           MOVE "}" TO WS-PB-CHAR
+           PERFORM PB-PUT-CHAR
            .
 
       *    memoryStore.store {sessionId, subject, fact, citations,

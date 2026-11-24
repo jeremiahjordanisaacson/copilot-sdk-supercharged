@@ -108,6 +108,74 @@ CPCopilotClient *client = [[CPCopilotClient alloc] initWithOptions:opts];
 }];
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, delivered to the completion block as an `NSError` in `CPJsonRpcErrorDomain` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store (`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). Pass `nil` for `configDir` to use the runtime's default configuration directory. The secret value is never logged.
+
+```objc
+NSString *token = NSProcessInfo.processInfo.environment[@"MY_SERVER_TOKEN"];
+[client mcpSecretsSave:@"my-server-token" value:token configDir:nil
+            completion:^(CPMcpSecretsSaveResult *result, NSError *error) {
+    if (result) NSLog(@"%@", result.usedKeychain ? @"Stored in the OS keychain" : @"Stored in the file backend");
+}];
+
+[client mcpSecretsDelete:@"my-server-token" configDir:nil completion:^(NSError *error) {}];
+// Every credential indexed for the server
+[client mcpSecretsDeleteServer:@"my-server" configDir:nil completion:^(NSError *error) {}];
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions (`permissions.extensionApprovals.grant` / `.list` / `.revoke`). The list and revoke methods take an optional `sessionId` to use an attached session's configuration profile.
+
+```objc
+// Persist a pending extension permission request before answering it normally
+[client extensionApprovalsGrantForSession:session.sessionId
+                                requestId:requestId
+                               completion:^(CPPermissionsExtensionApprovalsGrantResult *result, NSError *error) {
+    if (result.granted) NSLog(@"Approved %@", result.approval.extensionName);
+}];
+
+[client extensionApprovalsListForSession:nil
+                              completion:^(CPPermissionsExtensionApprovalsListResult *result, NSError *error) {
+    for (CPPermissionsExtensionApproval *approval in result.approvals) {
+        // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+        [client extensionApprovalsRevoke:approval.extensionName
+                         installationKey:approval.installationKey
+                               sessionId:nil
+                              completion:^(CPPermissionsExtensionApprovalsRevokeResult *revoke, NSError *revokeError) {}];
+    }
+}];
+```
+
+### Ask-user image attachments
+
+`CPSessionConfig.userInputHandler` answers the agent's ask_user questions (`userInput.request`); setting it enables the ask_user tool. When the runtime accepts images in an answer, the `CPUserInputRequest` carries `imageAttachmentConstraints` (`CPUserInputImageAttachmentConstraints` with `allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is nil otherwise. The request also exposes `requestId` and `meta` (the opaque `_meta` object) when sent. Answer with `CPUserInputResponse.attachments`, an array of `CPUserInputImageAttachment` (base64 `data`, `mimeType`, optional `imageDescription` and `displayName`; the wire `type` is always `"image"`). `attachments` is sent only when set. Image-only answers use an empty `answer` and `wasFreeform = YES`; the runtime enforces the limits.
+
+```objc
+config.userInputHandler = ^(CPUserInputRequest *request, NSString *sessionId,
+                            void (^completion)(CPUserInputResponse *response)) {
+    CPUserInputResponse *response = [[CPUserInputResponse alloc] init];
+    response.wasFreeform = YES;
+    NSData *png = [NSData dataWithContentsOfFile:@"screenshot.png"];
+    if (png && [request.imageAttachmentConstraints.allowedMimeTypes containsObject:@"image/png"]) {
+        CPUserInputImageAttachment *image =
+            [CPUserInputImageAttachment attachmentWithData:[png base64EncodedStringWithOptions:0]
+                                                  mimeType:@"image/png"];
+        image.displayName = @"screenshot.png";
+        response.answer = @"";
+        response.attachments = @[image];
+    } else {
+        response.answer = @"No screenshot available";
+    }
+    completion(response);
+};
+```
+
 ## What's New in v3.0.0
 
 The Objective-C SDK now speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected at start with an "SDK protocol version mismatch" error.
@@ -316,6 +384,12 @@ The main client manages the CLI process lifecycle and session creation.
 | `listSessionsWithCompletion:` | List all known sessions |
 | `deleteSession:completion:` | Delete a session |
 | `clearManagedSettingsCacheWithCompletion:` | Clear cached managed settings (`managedSettings.clearCache`) |
+| `mcpSecretsSave:value:configDir:completion:` | Save an MCP credential (`mcp.secrets.save`, CLI 1.0.116+); returns `CPMcpSecretsSaveResult` |
+| `mcpSecretsDelete:configDir:completion:` | Delete an MCP credential (`mcp.secrets.delete`, CLI 1.0.116+) |
+| `mcpSecretsDeleteServer:configDir:completion:` | Delete an MCP server's credentials (`mcp.secrets.deleteServer`, CLI 1.0.116+) |
+| `extensionApprovalsGrantForSession:requestId:completion:` | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`, CLI 1.0.116+) |
+| `extensionApprovalsListForSession:completion:` | List plugin extension approvals (`permissions.extensionApprovals.list`, CLI 1.0.116+) |
+| `extensionApprovalsRevoke:installationKey:sessionId:completion:` | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`, CLI 1.0.116+) |
 
 ### CPCopilotClientOptions
 
@@ -369,6 +443,7 @@ A conversation session created via the client.
 | `systemMessage` | `NSDictionary*` | `nil` | System message config |
 | `githubToken` | `NSString*` | `nil` | Session-level GitHub token |
 | `permissionHandler` | `CPPermissionHandler` | `nil` | Permission request handler |
+| `userInputHandler` | `CPUserInputHandler` | `nil` | ask_user handler (`userInput.request`); enables the ask_user tool |
 
 ### CPMessageOptions
 

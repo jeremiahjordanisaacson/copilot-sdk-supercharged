@@ -56,6 +56,75 @@ Session.destroy(session)
 Client.stop(client)
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The six new `Copilot.Client` functions below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned as `{:error, error}` like any other RPC error.
+
+### MCP secret store and plugin extension approvals
+
+```elixir
+alias Copilot.Client
+
+# MCP secret store. The value is a credential: it is sent to the runtime and never logged.
+{:ok, saved} =
+  Client.mcp_secrets_save(client, "my-server/api-key", System.fetch_env!("MY_API_KEY"),
+    config_dir: "/path/to/config"
+  )
+
+IO.puts(if saved.used_keychain, do: "Stored in the OS keychain", else: "Stored in the file backend")
+
+:ok = Client.mcp_secrets_delete(client, "my-server/api-key")
+:ok = Client.mcp_secrets_delete_server(client, "my-server")
+
+# Plugin extension approvals (user scoped). Grant persists a pending extension
+# permission request before you answer it.
+{:ok, grant} = Client.extension_approvals_grant(client, session_id, request_id)
+if grant.granted, do: IO.puts("Approved #{grant.approval.extension_name}")
+
+{:ok, %{approvals: approvals}} = Client.extension_approvals_list(client)
+
+for approval <- approvals do
+  {:ok, %{revoked: true}} =
+    Client.extension_approvals_revoke(client, approval.extension_name, approval.installation_key)
+end
+```
+
+| Function | Wire method | Returns |
+|---|---|---|
+| `Client.mcp_secrets_save/4` (option `config_dir:`) | `mcp.secrets.save` | `{:ok, %McpSecretsSaveResult{used_keychain: bool}}` (`false` means the file backend stored it) |
+| `Client.mcp_secrets_delete/3` (option `config_dir:`) | `mcp.secrets.delete` | `:ok` |
+| `Client.mcp_secrets_delete_server/3` (option `config_dir:`) | `mcp.secrets.deleteServer` | `:ok` |
+| `Client.extension_approvals_grant/3` | `permissions.extensionApprovals.grant` | `{:ok, %PermissionsExtensionApprovalsGrantResult{granted, approval}}` |
+| `Client.extension_approvals_list/2` (option `session_id:`) | `permissions.extensionApprovals.list` | `{:ok, %PermissionsExtensionApprovalsListResult{approvals}}` |
+| `Client.extension_approvals_revoke/4` (option `session_id:`) | `permissions.extensionApprovals.revoke` | `{:ok, %PermissionsExtensionApprovalsRevokeResult{revoked: bool}}` |
+
+Each `%PermissionsExtensionApproval{}` has `extension_name` (the stable identity, for example `"plugin:my-plugin:my-extension"`), `plugin_name`, `capabilities`, `granted_at` (RFC 3339), `installation_key` (opaque: pass it back unchanged to revoke), and `installation_label`.
+
+### Ask-user image attachments
+
+When the runtime accepts images, the `%UserInputRequest{}` passed to `on_user_input_request` carries `image_attachment_constraints` (`%UserInputImageAttachmentConstraints{allowed_mime_types, max_bytes_per_image, max_count}`); it is `nil` otherwise. The request also exposes `request_id` and `meta` (the opaque `_meta` map) when the runtime sends them. Answer with `attachments`, a list of `%UserInputImageAttachment{}` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). `attachments` is sent only when set and is only valid when the request advertised constraints; the runtime enforces the limits.
+
+```elixir
+alias Copilot.Types.{UserInputImageAttachment, UserInputRequest, UserInputResponse}
+
+config = %SessionConfig{
+  on_user_input_request: fn %UserInputRequest{image_attachment_constraints: constraints}, _ctx ->
+    if constraints && "image/png" in constraints.allowed_mime_types do
+      image = %UserInputImageAttachment{
+        data: Base.encode64(File.read!("screenshot.png")),
+        mime_type: "image/png",
+        display_name: "screenshot.png"
+      }
+
+      # Image-only answer: empty answer and was_freeform true
+      %UserInputResponse{answer: "", was_freeform: true, attachments: [image]}
+    else
+      %UserInputResponse{answer: "No screenshot available", was_freeform: true}
+    end
+  end
+}
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime, and requires **Copilot CLI 1.0.113 or newer**: older CLIs fail `Client.start/1` with a protocol mismatch error. Existing options keep working. You fill `%SessionConfig{}` and `%ResumeSessionConfig{}` exactly as before, and `Copilot.Client` converts the flat payload into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, `hooks` becomes `hooks.hasHandlers`, and `disable_resume` becomes `suppressResumeEvent`). The legacy single `provider` becomes a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) now runs under `node`.

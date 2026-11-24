@@ -111,3 +111,9 @@ val cancel_shell_authentication : t -> string -> unit
 
 val handle_memory_store : t -> Types.stored_memory -> unit Lwt.t
 (** Delivers a [memoryStore.store] request to the session's callback. *)
+
+val handle_user_input_request :
+  t -> Types.user_input_request -> Types.user_input_response Lwt.t
+(** Answers a [userInput.request] (ask_user) with the session's
+    [on_user_input_request] handler, passing through the request's
+    [imageAttachmentConstraints], [requestId], and [_meta]. Used by {!Client}. *)

@@ -440,6 +440,121 @@ type tool_shell_output = {
 
 val tool_shell_output_of_yojson : Yojson.Safe.t -> tool_shell_output option
 
+(** {1 v3.1.0 Feature Types} *)
+
+type user_input_image_attachment_constraints = {
+  uiac_allowed_mime_types : string list;
+  uiac_max_bytes_per_image : int;
+  uiac_max_count : int;
+}
+(** Image support advertised by a [userInput.request] ([imageAttachmentConstraints]);
+    absent when the runtime does not accept images in the answer. *)
+
+val user_input_image_attachment_constraints_of_yojson :
+  Yojson.Safe.t -> user_input_image_attachment_constraints option
+
+type user_input_request = {
+  uir_session_id : string;
+  uir_question : string;
+  uir_choices : string list option;
+  uir_allow_freeform : bool option;
+  uir_request_id : string option;  (** Pending request id, when the runtime sends it. *)
+  uir_image_attachment_constraints : user_input_image_attachment_constraints option;
+      (** Set when the runtime accepts image attachments in the answer. *)
+  uir_meta : Yojson.Safe.t option;  (** The request's opaque [_meta] object. *)
+}
+(** A [userInput.request] (the ask_user flow), passed to
+    [session_config.on_user_input_request]. *)
+
+val user_input_request_of_yojson : Yojson.Safe.t -> user_input_request option
+(** [None] when [sessionId] or [question] is missing. *)
+
+type user_input_image_attachment = {
+  uia_data : string;  (** Base64-encoded image bytes. *)
+  uia_mime_type : string;
+  uia_description : string option;
+  uia_display_name : string option;
+}
+(** An inline image attached to an ask_user answer; sent with [type = "image"]. *)
+
+val make_user_input_image_attachment :
+  ?description:string ->
+  ?display_name:string ->
+  mime_type:string ->
+  string ->
+  user_input_image_attachment
+(** [make_user_input_image_attachment ?description ?display_name ~mime_type data]
+    builds an attachment from base64 [data]. *)
+
+val user_input_image_attachment_to_yojson : user_input_image_attachment -> Yojson.Safe.t
+
+type user_input_response = {
+  answer : string;
+  was_freeform : bool;
+  attachments : user_input_image_attachment list option;
+      (** Only valid when the request advertised
+          [uir_image_attachment_constraints]; sent only when set. The runtime
+          enforces the MIME type, size, and count limits. *)
+}
+(** Answer to a [userInput.request]. An image-only answer uses an empty
+    [answer] and [was_freeform = true]. *)
+
+val make_user_input_response :
+  ?attachments:user_input_image_attachment list ->
+  was_freeform:bool ->
+  string ->
+  user_input_response
+
+val user_input_response_to_yojson : user_input_response -> Yojson.Safe.t
+(** Emits [attachments] only when set. *)
+
+type user_input_handler = user_input_request -> user_input_response Lwt.t
+(** Answers ask_user questions; setting one sends [requestUserInput]. *)
+
+type mcp_secrets_save_result = { mss_used_keychain : bool }
+(** Result of [mcp.secrets.save]: [mss_used_keychain] is [true] when the OS
+    keychain stored the credential and [false] for the file backend. *)
+
+val mcp_secrets_save_result_of_yojson : Yojson.Safe.t -> mcp_secrets_save_result
+
+type permissions_extension_approval = {
+  pea_extension_name : string;
+      (** Stable identity, for example ["plugin:plugin-name:extension-name"]. *)
+  pea_plugin_name : string;
+  pea_capabilities : string list;  (** Exact privileged capabilities the user approved. *)
+  pea_granted_at : string;  (** RFC 3339 timestamp. *)
+  pea_installation_key : string;  (** Opaque; pass it back unchanged to revoke. *)
+  pea_installation_label : string option;
+}
+(** A user-scoped approval for one installed plugin extension. *)
+
+val permissions_extension_approval_of_yojson :
+  Yojson.Safe.t -> permissions_extension_approval option
+
+type permissions_extension_approvals_grant_result = {
+  peag_granted : bool;  (** Whether the pending request was eligible and persisted. *)
+  peag_approval : permissions_extension_approval option;
+}
+(** Result of [permissions.extensionApprovals.grant]. *)
+
+val permissions_extension_approvals_grant_result_of_yojson :
+  Yojson.Safe.t -> permissions_extension_approvals_grant_result
+
+type permissions_extension_approvals_list_result = {
+  peal_approvals : permissions_extension_approval list;
+}
+(** Result of [permissions.extensionApprovals.list]. *)
+
+val permissions_extension_approvals_list_result_of_yojson :
+  Yojson.Safe.t -> permissions_extension_approvals_list_result
+
+type permissions_extension_approvals_revoke_result = { pear_revoked : bool }
+(** Result of [permissions.extensionApprovals.revoke]: whether a matching
+    approval existed and was removed. *)
+
+val permissions_extension_approvals_revoke_result_of_yojson :
+  Yojson.Safe.t -> permissions_extension_approvals_revoke_result
+
 type session_config = {
   model : string option;
   system_prompt : string option;
@@ -507,6 +622,7 @@ type session_config = {
   capi_enabled : bool option;
   on_shell_authentication_request : shell_authentication_handler option;
   on_store_memory : store_memory_handler option;
+  on_user_input_request : user_input_handler option;
 }
 
 val default_session_config : unit -> session_config

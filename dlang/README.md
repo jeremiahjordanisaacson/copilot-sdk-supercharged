@@ -55,6 +55,67 @@ void main()
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, thrown as `JsonRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged. The optional `configDir` argument defaults to the runtime's configuration directory.
+
+```d
+auto saved = client.mcpSecretsSave("my-server-token", environment["MY_SERVER_TOKEN"]);
+writeln(saved.usedKeychain ? "Stored in the OS keychain" : "Stored in the file backend");
+
+client.mcpSecretsDelete("my-server-token");
+client.mcpSecretsDeleteServer("my-server"); // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extensionApprovalsList` and `extensionApprovalsRevoke` take an optional `sessionId` to use an attached session's configuration profile.
+
+```d
+// Persist a pending extension permission request before answering it normally
+auto grant = client.extensionApprovalsGrant(session.sessionId, requestId);
+if (grant.granted && !grant.approval.isNull)
+    writeln("Approved ", grant.approval.get.extensionName);
+
+foreach (approval; client.extensionApprovalsList().approvals)
+{
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey);
+}
+```
+
+### Ask-user image attachments
+
+Set `onUserInputRequest` on `SessionConfig` or `ResumeSessionConfig` (it sends `requestUserInput`) to answer the agent's ask_user questions with a `UserInputResponse`. When the runtime accepts images in the answer, the `UserInputRequest` carries `imageAttachmentConstraints` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is null otherwise. The request also exposes `requestId` and `meta` (the opaque `_meta` object) when sent. Answer with `attachments`, an array of `UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`; the wire `type` is always `"image"`). Image-only answers use an empty `answer` with `wasFreeform` true (the default); the runtime enforces the limits.
+
+```d
+import std.algorithm.searching : canFind;
+import std.base64 : Base64;
+import std.file : read;
+
+config.onUserInputRequest = (UserInputRequest request) {
+    UserInputResponse response;
+    if (!request.imageAttachmentConstraints.isNull
+        && request.imageAttachmentConstraints.get.allowedMimeTypes.canFind("image/png"))
+    {
+        UserInputImageAttachment image;
+        image.data = Base64.encode(cast(ubyte[]) read("screenshot.png")).idup;
+        image.mimeType = "image/png";
+        image.displayName = "screenshot.png";
+        response.attachments = [image];
+    }
+    else
+    {
+        response.answer = "No screenshot available";
+    }
+    return response;
+};
+```
+
 ## What's New in v3.0.0
 
 **SDK protocol 4.** The SDK now speaks SDK protocol 4 (`SdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. `start()` checks the version reported by `connect` / `ping` and rejects older CLIs with an `SDK protocol version mismatch` error. Existing options keep working: `SessionConfig` and `ResumeSessionConfig` still produce the same flat options, and the client translates them into the grouped protocol 4 payload (`groupSessionParams`) right before `session.create` and `session.resume`. A legacy single `provider` is translated into a named `"default"` provider automatically. Session events now arrive through `session.event` notifications, and `send` / `abort` use the `session.send` / `session.abort` requests, so runtime refusals surface as `JsonRpcError`.
@@ -256,6 +317,12 @@ The SDK spawns the Copilot CLI as a child process and communicates over JSON-RPC
 | `listModels()` | List available LLM models |
 | `getAuthStatus()` | Check authentication status |
 | `clearManagedSettingsCache()` | Clear the runtime's managed-settings cache |
+| `mcpSecretsSave(secretId, value, configDir)` | Save an MCP credential; returns `McpSecretsSaveResult` (`usedKeychain`) |
+| `mcpSecretsDelete(secretId, configDir)` | Delete an MCP credential |
+| `mcpSecretsDeleteServer(serverName, configDir)` | Delete the MCP credentials indexed for a server |
+| `extensionApprovalsGrant(sessionId, requestId)` | Persist a pending plugin extension approval |
+| `extensionApprovalsList(sessionId)` | List plugin extension approvals |
+| `extensionApprovalsRevoke(extensionName, installationKey, sessionId)` | Revoke a plugin extension approval |
 
 ### CopilotClientOptions
 

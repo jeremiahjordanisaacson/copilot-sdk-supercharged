@@ -371,6 +371,10 @@ proc ::copilot::session::_session_flat_params {config is_resume} {
     if {[dict get $config on_permission_request] ne ""} {
         dict set p requestPermission true
     }
+    # ask_user questions arrive as userInput.request requests answered by the handler
+    if {[dict get $config on_user_input_request] ne ""} {
+        dict set p requestUserInput true
+    }
 
     # Upstream-sync session options (parity with @github/copilot-sdk)
     _put p enableCitations [dict get $config enable_citations] true
@@ -1314,6 +1318,9 @@ proc ::copilot::session::_server_request_result {method params write_ch id} {
             # handler for that request has returned; acknowledge it.
             return [::copilot::jsonrpc::json_raw "\{\}"]
         }
+        userInput.request {
+            return [::copilot::jsonrpc::json_raw [_user_input_reply $params]]
+        }
         memoryStore.store {
             set sid [_param $params sessionId]
             set handle [_handle_for_session $sid]
@@ -1461,6 +1468,37 @@ proc ::copilot::session::_shell_authentication_reply {params} {
         action [::copilot::jsonrpc::json_string "accept"] \
         value  [::copilot::jsonrpc::json_string [dict get $answer value]] \
     ]]
+}
+
+# Reply JSON for a userInput.request (the ask_user tool). The session's
+# on_user_input_request handler is called with a request dict (question, choices,
+# allow_freeform, request_id, image_attachment_constraints, and meta: the request's
+# opaque _meta) and a context dict (session_id), and returns a user input response
+# (see ::copilot::types::user_input_response_json). image_attachment_constraints
+# (from imageAttachmentConstraints, see
+# ::copilot::types::make_user_input_image_attachment_constraints) is "" unless the
+# runtime accepts images in the answer. A failing handler fails the request.
+proc ::copilot::session::_user_input_reply {params} {
+    set sid [_param $params sessionId]
+    set handle [_handle_for_session $sid]
+    if {$handle eq ""} {
+        error "Session not found: $sid"
+    }
+    set handler [dict get [_session_data $handle] config on_user_input_request]
+    if {$handler eq ""} {
+        error "No user input handler is registered"
+    }
+    set request [dict create \
+        question                     [_param $params question] \
+        choices                      [_param $params choices] \
+        allow_freeform               [expr {[_param $params allowFreeform] ne "false"}] \
+        request_id                   [_param $params requestId] \
+        image_attachment_constraints [::copilot::types::make_user_input_image_attachment_constraints \
+            [_param $params imageAttachmentConstraints]] \
+        meta                         [_param $params _meta] \
+    ]
+    set response [uplevel #0 [list {*}$handler $request [dict create session_id $sid]]]
+    return [::copilot::types::user_input_response_json $response]
 }
 
 # Normalize a GitHub token provider result (dict with kind/access_token/token_type/

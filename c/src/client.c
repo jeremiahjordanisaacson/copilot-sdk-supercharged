@@ -722,6 +722,19 @@ static cJSON *on_permission_request(const char *method, cJSON *params, void *use
  * Internal: user input request handler
  * ============================================================================ */
 
+/* Frees the attachments a user input handler returned (heap array of heap strings). */
+static void free_user_input_attachments(copilot_user_input_image_attachment_t *attachments, size_t count)
+{
+    if (!attachments) return;
+    for (size_t i = 0; i < count; i++) {
+        free(attachments[i].data);
+        free(attachments[i].mime_type);
+        free(attachments[i].description);
+        free(attachments[i].display_name);
+    }
+    free(attachments);
+}
+
 static cJSON *on_user_input_request(const char *method, cJSON *params, void *user_data,
                                     int *out_error_code, char **out_error_message)
 {
@@ -769,23 +782,75 @@ static cJSON *on_user_input_request(const char *method, cJSON *params, void *use
         request.has_allow_freeform = true;
     }
 
+    cJSON *request_id_item = cJSON_GetObjectItemCaseSensitive(params, "requestId");
+    if (request_id_item && cJSON_IsString(request_id_item)) {
+        request.request_id = request_id_item->valuestring;
+    }
+
+    /* imageAttachmentConstraints is absent when the runtime does not accept images */
+    copilot_user_input_image_attachment_constraints_t constraints;
+    const char *mime_types_arr[64];
+    cJSON *constraints_item = cJSON_GetObjectItemCaseSensitive(params, "imageAttachmentConstraints");
+    if (constraints_item && cJSON_IsObject(constraints_item)) {
+        memset(&constraints, 0, sizeof(constraints));
+        size_t mime_count = 0;
+        cJSON *mime_types_item = cJSON_GetObjectItemCaseSensitive(constraints_item, "allowedMimeTypes");
+        if (mime_types_item && cJSON_IsArray(mime_types_item)) {
+            int count = cJSON_GetArraySize(mime_types_item);
+            for (int i = 0; i < count && mime_count < 63; i++) {
+                cJSON *t = cJSON_GetArrayItem(mime_types_item, i);
+                if (cJSON_IsString(t)) mime_types_arr[mime_count++] = t->valuestring;
+            }
+        }
+        mime_types_arr[mime_count] = NULL;
+        constraints.allowed_mime_types = mime_types_arr;
+        constraints.allowed_mime_types_count = mime_count;
+        cJSON *max_bytes_item = cJSON_GetObjectItemCaseSensitive(constraints_item, "maxBytesPerImage");
+        constraints.max_bytes_per_image =
+            (max_bytes_item && cJSON_IsNumber(max_bytes_item)) ? (int64_t)max_bytes_item->valuedouble : 0;
+        cJSON *max_count_item = cJSON_GetObjectItemCaseSensitive(constraints_item, "maxCount");
+        constraints.max_count = (max_count_item && cJSON_IsNumber(max_count_item)) ? max_count_item->valueint : 0;
+        request.image_attachment_constraints = &constraints;
+    }
+
+    cJSON *meta_item = cJSON_GetObjectItemCaseSensitive(params, "_meta");
+    char *meta_json = (meta_item && cJSON_IsObject(meta_item)) ? cJSON_PrintUnformatted(meta_item) : NULL;
+    request.meta_json = meta_json;
+
     copilot_user_input_response_t response;
     memset(&response, 0, sizeof(response));
 
     copilot_error_t err = session->user_input_handler(
         &request, session->session_id, session->user_input_user_data, &response);
+    free(meta_json);
 
     if (err != COPILOT_OK || !response.answer) {
         *out_error_code = -32000;
         *out_error_message = strdup("User input handler failed");
         free(response.answer);
+        free_user_input_attachments(response.attachments, response.attachments_count);
         return NULL;
     }
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "answer", response.answer);
     cJSON_AddBoolToObject(result, "wasFreeform", response.was_freeform);
+    if (response.attachments && response.attachments_count > 0) {
+        cJSON *attachments = cJSON_CreateArray();
+        for (size_t i = 0; i < response.attachments_count; i++) {
+            const copilot_user_input_image_attachment_t *a = &response.attachments[i];
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "type", "image");
+            cJSON_AddStringToObject(item, "data", a->data ? a->data : "");
+            cJSON_AddStringToObject(item, "mimeType", a->mime_type ? a->mime_type : "");
+            if (a->description) cJSON_AddStringToObject(item, "description", a->description);
+            if (a->display_name) cJSON_AddStringToObject(item, "displayName", a->display_name);
+            cJSON_AddItemToArray(attachments, item);
+        }
+        cJSON_AddItemToObject(result, "attachments", attachments);
+    }
     free(response.answer);
+    free_user_input_attachments(response.attachments, response.attachments_count);
     return result;
 }
 
@@ -3224,6 +3289,241 @@ copilot_error_t copilot_client_clear_managed_settings_cache(copilot_client_t *cl
         return COPILOT_ERROR_RPC;
     }
 
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+/* ============================================================================
+ * Public API: MCP secret store and plugin extension approvals (CLI 1.0.116+)
+ * ============================================================================ */
+
+/* Sends a server-scoped request and deletes params. Returns the result (caller must
+ * cJSON_Delete; a JSON null result is a cJSON null item) or NULL when the request failed. */
+static cJSON *client_request_consume_params(copilot_client_t *client, const char *method, cJSON *params)
+{
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, method, params, 30000, &err_code, &err_msg);
+    cJSON_Delete(params);
+    free(err_msg);
+    return result;
+}
+
+/* Returns a heap copy of obj[key] when it is a string, else a heap copy of fallback (or NULL). */
+static char *dup_json_string_or(cJSON *obj, const char *key, const char *fallback)
+{
+    const char *value = json_string_or(obj, key, fallback);
+    return value ? strdup(value) : NULL;
+}
+
+/* Fills an approval from a PermissionsExtensionApproval object (heap copies). */
+static void parse_extension_approval(cJSON *obj, copilot_permissions_extension_approval_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->extension_name = dup_json_string_or(obj, "extensionName", "");
+    out->plugin_name = dup_json_string_or(obj, "pluginName", "");
+    out->granted_at = dup_json_string_or(obj, "grantedAt", "");
+    out->installation_key = dup_json_string_or(obj, "installationKey", "");
+    out->installation_label = dup_json_string_or(obj, "installationLabel", NULL);
+
+    cJSON *capabilities = cJSON_GetObjectItemCaseSensitive(obj, "capabilities");
+    int count = (capabilities && cJSON_IsArray(capabilities)) ? cJSON_GetArraySize(capabilities) : 0;
+    out->capabilities = calloc((size_t)count + 1, sizeof(char *));
+    if (!out->capabilities) return;
+    for (int i = 0; i < count; i++) {
+        cJSON *c = cJSON_GetArrayItem(capabilities, i);
+        if (cJSON_IsString(c)) out->capabilities[out->capabilities_count++] = strdup(c->valuestring);
+    }
+}
+
+static void free_extension_approval(copilot_permissions_extension_approval_t *approval)
+{
+    free(approval->extension_name);
+    free(approval->plugin_name);
+    for (size_t i = 0; i < approval->capabilities_count; i++) {
+        free(approval->capabilities[i]);
+    }
+    free(approval->capabilities);
+    free(approval->granted_at);
+    free(approval->installation_key);
+    free(approval->installation_label);
+    memset(approval, 0, sizeof(*approval));
+}
+
+copilot_error_t copilot_client_mcp_secrets_save(
+    copilot_client_t *client,
+    const char *secret_id,
+    const char *value,
+    const char *config_dir,
+    copilot_mcp_secrets_save_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (!client || !secret_id || !value) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "secretId", secret_id);
+    cJSON_AddStringToObject(params, "value", value);
+    if (config_dir) cJSON_AddStringToObject(params, "configDir", config_dir);
+
+    cJSON *result = client_request_consume_params(client, "mcp.secrets.save", params);
+    if (!result) return COPILOT_ERROR_RPC;
+
+    if (out) {
+        cJSON *used_keychain = cJSON_GetObjectItemCaseSensitive(result, "usedKeychain");
+        out->used_keychain = used_keychain && cJSON_IsTrue(used_keychain);
+    }
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_mcp_secrets_delete(
+    copilot_client_t *client,
+    const char *secret_id,
+    const char *config_dir)
+{
+    if (!client || !secret_id) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "secretId", secret_id);
+    if (config_dir) cJSON_AddStringToObject(params, "configDir", config_dir);
+
+    cJSON *result = client_request_consume_params(client, "mcp.secrets.delete", params);
+    if (!result) return COPILOT_ERROR_RPC;
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_mcp_secrets_delete_server(
+    copilot_client_t *client,
+    const char *server_name,
+    const char *config_dir)
+{
+    if (!client || !server_name) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "serverName", server_name);
+    if (config_dir) cJSON_AddStringToObject(params, "configDir", config_dir);
+
+    cJSON *result = client_request_consume_params(client, "mcp.secrets.deleteServer", params);
+    if (!result) return COPILOT_ERROR_RPC;
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_extension_approvals_grant(
+    copilot_client_t *client,
+    const char *session_id,
+    const char *request_id,
+    copilot_permissions_extension_approvals_grant_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (!client || !session_id || !request_id) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session_id);
+    cJSON_AddStringToObject(params, "requestId", request_id);
+
+    cJSON *result = client_request_consume_params(client, "permissions.extensionApprovals.grant", params);
+    if (!result) return COPILOT_ERROR_RPC;
+
+    if (out) {
+        cJSON *granted = cJSON_GetObjectItemCaseSensitive(result, "granted");
+        out->granted = granted && cJSON_IsTrue(granted);
+        cJSON *approval = cJSON_GetObjectItemCaseSensitive(result, "approval");
+        if (approval && cJSON_IsObject(approval)) {
+            out->approval = calloc(1, sizeof(copilot_permissions_extension_approval_t));
+            if (!out->approval) {
+                cJSON_Delete(result);
+                return COPILOT_ERROR_OUT_OF_MEMORY;
+            }
+            parse_extension_approval(approval, out->approval);
+        }
+    }
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+void copilot_permissions_extension_approvals_grant_result_free(
+    copilot_permissions_extension_approvals_grant_result_t *result)
+{
+    if (!result) return;
+    if (result->approval) {
+        free_extension_approval(result->approval);
+        free(result->approval);
+    }
+    memset(result, 0, sizeof(*result));
+}
+
+copilot_error_t copilot_client_extension_approvals_list(
+    copilot_client_t *client,
+    const char *session_id,
+    copilot_permissions_extension_approvals_list_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (!client || !out) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    if (session_id) cJSON_AddStringToObject(params, "sessionId", session_id);
+
+    cJSON *result = client_request_consume_params(client, "permissions.extensionApprovals.list", params);
+    if (!result) return COPILOT_ERROR_RPC;
+
+    cJSON *approvals = cJSON_GetObjectItemCaseSensitive(result, "approvals");
+    int count = (approvals && cJSON_IsArray(approvals)) ? cJSON_GetArraySize(approvals) : 0;
+    if (count > 0) {
+        out->approvals = calloc((size_t)count, sizeof(copilot_permissions_extension_approval_t));
+        if (!out->approvals) {
+            cJSON_Delete(result);
+            return COPILOT_ERROR_OUT_OF_MEMORY;
+        }
+        for (int i = 0; i < count; i++) {
+            cJSON *a = cJSON_GetArrayItem(approvals, i);
+            if (cJSON_IsObject(a)) parse_extension_approval(a, &out->approvals[out->count++]);
+        }
+    }
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+void copilot_permissions_extension_approvals_list_result_free(
+    copilot_permissions_extension_approvals_list_result_t *result)
+{
+    if (!result) return;
+    for (size_t i = 0; i < result->count; i++) {
+        free_extension_approval(&result->approvals[i]);
+    }
+    free(result->approvals);
+    memset(result, 0, sizeof(*result));
+}
+
+copilot_error_t copilot_client_extension_approvals_revoke(
+    copilot_client_t *client,
+    const char *extension_name,
+    const char *installation_key,
+    const char *session_id,
+    copilot_permissions_extension_approvals_revoke_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (!client || !extension_name || !installation_key) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "extensionName", extension_name);
+    cJSON_AddStringToObject(params, "installationKey", installation_key);
+    if (session_id) cJSON_AddStringToObject(params, "sessionId", session_id);
+
+    cJSON *result = client_request_consume_params(client, "permissions.extensionApprovals.revoke", params);
+    if (!result) return COPILOT_ERROR_RPC;
+
+    if (out) {
+        cJSON *revoked = cJSON_GetObjectItemCaseSensitive(result, "revoked");
+        out->revoked = revoked && cJSON_IsTrue(revoked);
+    }
     cJSON_Delete(result);
     return COPILOT_OK;
 }

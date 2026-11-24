@@ -43,6 +43,16 @@ module Copilot.Client
     -- * Managed settings
   , clearManagedSettingsCache
 
+    -- * MCP secret store
+  , mcpSecretsSave
+  , mcpSecretsDelete
+  , mcpSecretsDeleteServer
+
+    -- * Plugin extension approvals
+  , extensionApprovalsGrant
+  , extensionApprovalsList
+  , extensionApprovalsRevoke
+
     -- * Lifecycle events
   , onLifecycleEvent
   ) where
@@ -733,6 +743,112 @@ onLifecycleEvent client handler = do
   pure $ writeIORef aliveRef False
 
 -- ============================================================================
+-- MCP Secret Store & Plugin Extension Approvals
+-- ============================================================================
+
+-- | Save a legacy MCP configuration credential in the runtime-owned secret
+-- store (@mcp.secrets.save@). The value is a credential: it is sent to the
+-- runtime and never logged. Pass a configuration directory to override the
+-- runtime's default. 'mssrUsedKeychain' is 'True' when the OS keychain stored
+-- the credential and 'False' for the file backend. Requires Copilot CLI
+-- 1.0.116 or newer; a failed request throws 'RequestFailed'.
+mcpSecretsSave :: CopilotClient -> Text -> Text -> Maybe Text -> IO McpSecretsSaveResult
+mcpSecretsSave client secretId value mConfigDir = do
+  rpc <- ensureConnected client
+  let params = object $ catMaybes
+        [ Just ("secretId" .= secretId)
+        , Just ("value" .= value)
+        , ("configDir" .=) <$> mConfigDir
+        ]
+  result <- sendRequest rpc "mcp.secrets.save" params
+  case result of
+    Left err  -> throwIO $ RequestFailed "mcp.secrets.save" err
+    Right val -> case Aeson.fromJSON val of
+      Aeson.Success r -> pure r
+      Aeson.Error e   -> throwIO $ ServerError $ T.pack e
+
+-- | Delete a legacy MCP configuration credential from the runtime-owned
+-- secret store (@mcp.secrets.delete@). Pass a configuration directory to
+-- override the runtime's default. Requires Copilot CLI 1.0.116 or newer.
+mcpSecretsDelete :: CopilotClient -> Text -> Maybe Text -> IO ()
+mcpSecretsDelete client secretId mConfigDir = do
+  rpc <- ensureConnected client
+  let params = object $ catMaybes
+        [ Just ("secretId" .= secretId)
+        , ("configDir" .=) <$> mConfigDir
+        ]
+  result <- sendRequest rpc "mcp.secrets.delete" params
+  case result of
+    Left err -> throwIO $ RequestFailed "mcp.secrets.delete" err
+    Right _  -> pure ()
+
+-- | Delete the legacy credentials indexed for an MCP server
+-- (@mcp.secrets.deleteServer@). Pass a configuration directory to override
+-- the runtime's default. Requires Copilot CLI 1.0.116 or newer.
+mcpSecretsDeleteServer :: CopilotClient -> Text -> Maybe Text -> IO ()
+mcpSecretsDeleteServer client serverName mConfigDir = do
+  rpc <- ensureConnected client
+  let params = object $ catMaybes
+        [ Just ("serverName" .= serverName)
+        , ("configDir" .=) <$> mConfigDir
+        ]
+  result <- sendRequest rpc "mcp.secrets.deleteServer" params
+  case result of
+    Left err -> throwIO $ RequestFailed "mcp.secrets.deleteServer" err
+    Right _  -> pure ()
+
+-- | Persist a pending plugin extension permission request as a user-scoped
+-- approval, before answering that request normally
+-- (@permissions.extensionApprovals.grant@). Takes the ID of the session that
+-- owns the pending request and the request ID. Requires Copilot CLI 1.0.116
+-- or newer.
+extensionApprovalsGrant :: CopilotClient -> Text -> Text -> IO PermissionsExtensionApprovalsGrantResult
+extensionApprovalsGrant client sid reqId = do
+  rpc <- ensureConnected client
+  let params = object [ "sessionId" .= sid, "requestId" .= reqId ]
+  result <- sendRequest rpc "permissions.extensionApprovals.grant" params
+  case result of
+    Left err  -> throwIO $ RequestFailed "permissions.extensionApprovals.grant" err
+    Right val -> case Aeson.fromJSON val of
+      Aeson.Success r -> pure r
+      Aeson.Error e   -> throwIO $ ServerError $ T.pack e
+
+-- | List the user-scoped plugin extension approvals
+-- (@permissions.extensionApprovals.list@). Pass an attached session ID to
+-- list that session's configuration profile instead of the server's.
+-- Requires Copilot CLI 1.0.116 or newer.
+extensionApprovalsList :: CopilotClient -> Maybe Text -> IO PermissionsExtensionApprovalsListResult
+extensionApprovalsList client mSessionId = do
+  rpc <- ensureConnected client
+  let params = object $ catMaybes [ ("sessionId" .=) <$> mSessionId ]
+  result <- sendRequest rpc "permissions.extensionApprovals.list" params
+  case result of
+    Left err  -> throwIO $ RequestFailed "permissions.extensionApprovals.list" err
+    Right val -> case Aeson.fromJSON val of
+      Aeson.Success r -> pure r
+      Aeson.Error e   -> throwIO $ ServerError $ T.pack e
+
+-- | Revoke one user-scoped plugin extension approval
+-- (@permissions.extensionApprovals.revoke@). Pass the approval's
+-- 'peaExtensionName' and 'peaInstallationKey' unchanged, and optionally the
+-- attached session whose configuration profile holds it. Requires Copilot
+-- CLI 1.0.116 or newer.
+extensionApprovalsRevoke :: CopilotClient -> Text -> Text -> Maybe Text -> IO PermissionsExtensionApprovalsRevokeResult
+extensionApprovalsRevoke client extensionName installationKey mSessionId = do
+  rpc <- ensureConnected client
+  let params = object $ catMaybes
+        [ Just ("extensionName" .= extensionName)
+        , Just ("installationKey" .= installationKey)
+        , ("sessionId" .=) <$> mSessionId
+        ]
+  result <- sendRequest rpc "permissions.extensionApprovals.revoke" params
+  case result of
+    Left err  -> throwIO $ RequestFailed "permissions.extensionApprovals.revoke" err
+    Right val -> case Aeson.fromJSON val of
+      Aeson.Success r -> pure r
+      Aeson.Error e   -> throwIO $ ServerError $ T.pack e
+
+-- ============================================================================
 -- Internal
 -- ============================================================================
 
@@ -1020,6 +1136,11 @@ handleUserInputReq client params = do
       mQuestion  = parseMaybe (withObject "" $ \o -> o .: "question") params :: Maybe Text
       mChoices   = parseMaybe (withObject "" $ \o -> o .:? "choices") params :: Maybe (Maybe [Text])
       mAllow     = parseMaybe (withObject "" $ \o -> o .:? "allowFreeform") params :: Maybe (Maybe Bool)
+      mRequestId = parseMaybe (withObject "" $ \o -> o .:? "requestId") params :: Maybe (Maybe Text)
+      -- Image support advertised by the runtime; absent when images are not accepted.
+      mImages    = parseMaybe (withObject "" $ \o -> o .:? "imageAttachmentConstraints") params
+                     :: Maybe (Maybe UserInputImageAttachmentConstraints)
+      mMeta      = parseMaybe (withObject "" $ \o -> o .:? "_meta") params :: Maybe (Maybe Value)
   case (mSessionId, mQuestion) of
     (Just sid, Just question) -> do
       sessions <- readMVar (ccSessions client)
@@ -1030,6 +1151,9 @@ handleUserInputReq client params = do
                 { uirQuestion      = question
                 , uirChoices       = case mChoices of Just c -> c; Nothing -> Nothing
                 , uirAllowFreeform = case mAllow of Just a -> a; Nothing -> Nothing
+                , uirRequestId     = case mRequestId of Just r -> r; Nothing -> Nothing
+                , uirImageAttachmentConstraints = case mImages of Just i -> i; Nothing -> Nothing
+                , uirMeta          = case mMeta of Just m -> m; Nothing -> Nothing
                 }
           result <- try $ handleSessionUserInputRequest session req sid
           case result of

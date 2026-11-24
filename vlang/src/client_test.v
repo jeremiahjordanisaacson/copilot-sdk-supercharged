@@ -458,3 +458,47 @@ fn test_connection_state_enum() {
 		else { assert false, 'unexpected state' }
 	}
 }
+
+// --- v3.1.0: ask-user image attachments ---
+
+fn test_user_input_request_passes_constraints_and_sends_attachments() {
+	config := SessionConfig{
+		on_user_input_request: fn (req UserInputRequest) UserInputResponse {
+			if constraints := req.image_attachment_constraints {
+				assert constraints.allowed_mime_types == ['image/png']
+				assert constraints.max_bytes_per_image == 1024
+				assert constraints.max_count == 2
+				assert req.request_id == 'req-1'
+				assert req.meta == '{"ext":"on"}'
+				return UserInputResponse{
+					was_freeform: true
+					attachments:  [
+						UserInputImageAttachment{
+							data:      'aGVsbG8='
+							mime_type: 'image/png'
+						},
+					]
+				}
+			}
+			return UserInputResponse{
+				answer:       'no images'
+				was_freeform: true
+			}
+		}
+	}
+	flat := build_session_params(config)
+	assert flat['requestUserInput'] == 'true'
+
+	mut d := &Dispatcher{}
+	d.add_session(new_session(unsafe { nil }, config, SessionMetadata{
+		session_id: 's1'
+	}))
+	with_image := d.handle_request('userInput.request', '{"sessionId":"s1","question":"Attach a screenshot","requestId":"req-1","imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],"maxBytesPerImage":1024,"maxCount":2},"_meta":{"ext":"on"}}') or {
+		panic(err)
+	}
+	assert with_image.contains('"attachments":[{"type":"image","data":"aGVsbG8=","mimeType":"image/png"}]')
+	plain := d.handle_request('userInput.request', '{"sessionId":"s1","question":"Name?"}') or {
+		panic(err)
+	}
+	assert plain == '{"answer":"no images","wasFreeform":true}'
+}

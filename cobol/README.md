@@ -90,6 +90,116 @@ make check
            .
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `COPILOT-CLIENT`
+entries below send server-scoped requests that require **Copilot CLI 1.0.116 or
+newer**; older CLIs answer with a JSON-RPC method-not-found error, reported like
+any other RPC error (return code -1, message in `WS-LAST-ERROR`). Each entry
+takes its `COPILOT-TYPES.cpy` record, a PIC X(8192) item for the raw JSON-RPC
+response (`WS-RPC-RESPONSE` below) and the return code.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store (`WS-MCP-SECRETS-REQ`). The secret value is never logged; a blank
+`WS-MSQ-CONFIG-DIR` uses the runtime's configuration root.
+
+```cobol
+      *    mcp.secrets.save
+           MOVE "my-server-token" TO WS-MSQ-SECRET-ID
+           ACCEPT WS-MSQ-VALUE FROM ENVIRONMENT "MY_SERVER_TOKEN"
+           CALL "COPILOT-MCP-SECRETS-SAVE"
+               USING WS-MCP-SECRETS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+           IF MSQ-USED-KEYCHAIN
+               DISPLAY "Stored in the OS keychain"
+           ELSE
+               DISPLAY "Stored in the file backend"
+           END-IF
+      *    mcp.secrets.delete
+           CALL "COPILOT-MCP-SECRETS-DELETE"
+               USING WS-MCP-SECRETS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+      *    mcp.secrets.deleteServer: every credential indexed for it
+           MOVE "my-server" TO WS-MSQ-SERVER-NAME
+           CALL "COPILOT-MCP-SECRETS-DEL-SERVER"
+               USING WS-MCP-SECRETS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`WS-EXT-APPROVALS-REQ`). List and revoke send `WS-EAQ-SESSION-ID` only when it
+is set, to use an attached session's configuration profile. The approvals
+(`extensionName`, `pluginName`, `capabilities`, `grantedAt`, `installationKey`,
+`installationLabel`) are in the raw response.
+
+```cobol
+      *    Persist a pending extension permission request before
+      *    answering it normally
+           MOVE WS-SESSION-ID TO WS-EAQ-SESSION-ID
+           MOVE WS-PENDING-REQUEST-ID TO WS-EAQ-REQUEST-ID
+           CALL "COPILOT-EXT-APPROVALS-GRANT"
+               USING WS-EXT-APPROVALS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+           IF EAQ-GRANTED
+               DISPLAY FUNCTION TRIM(WS-RPC-RESPONSE)
+           END-IF
+      *    List (the approvals array is in WS-RPC-RESPONSE)
+           MOVE SPACES TO WS-EAQ-SESSION-ID
+           CALL "COPILOT-EXT-APPROVALS-LIST"
+               USING WS-EXT-APPROVALS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+      *    Revoke with the approval's extensionName and installationKey
+           MOVE "plugin:my-plugin:my-ext" TO WS-EAQ-EXTENSION-NAME
+           MOVE WS-SAVED-INSTALL-KEY TO WS-EAQ-INSTALL-KEY
+           CALL "COPILOT-EXT-APPROVALS-REVOKE"
+               USING WS-EXT-APPROVALS-REQ WS-RPC-RESPONSE WS-RETURN-CODE
+           IF EAQ-REVOKED
+               DISPLAY "Approval revoked"
+           END-IF
+```
+
+### Ask-user image attachments
+
+Name a program in `WS-USER-INPUT-PGM` to answer the agent's ask_user questions
+(`userInput.request`; the SDK then sends `interaction.requestUserInput`). It
+receives `WS-USER-INPUT-REQ` and fills `WS-USER-INPUT-RESP`. When the runtime
+accepts images in the answer, `UIR-IMAGES-ACCEPTED` is set and the request's
+`imageAttachmentConstraints` are in `WS-UIR-ALLOWED-MIME-TYPES` (raw JSON
+array), `WS-UIR-MAX-BYTES-PER-IMAGE` and `WS-UIR-MAX-COUNT`.
+`WS-UIR-REQUEST-ID` and `WS-UIR-META` (the raw `_meta` object) are filled when
+sent. To reply with `attachments`, set `WS-UIRESP-ATTACH-COUNT` and up to 4
+`WS-UIRESP-ATTACHMENT` entries (base64 `WS-UIA-DATA`, `WS-UIA-MIME-TYPE`,
+optional `WS-UIA-DESCRIPTION` and `WS-UIA-DISPLAY-NAME`); the wire `type` is
+always `"image"` and attachments are sent only when the count is above zero.
+Image-only answers use a blank `WS-UIRESP-ANSWER` with
+`UIRESP-WAS-FREEFORM-YES`; the runtime enforces the limits. The whole reply
+must fit the SDK's 4096-byte reply buffer, so keep images small.
+
+```cobol
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MY-ASK-USER.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-PNG-COUNT              PIC 9(4)   VALUE 0.
+       LINKAGE SECTION.
+       COPY "COPILOT-TYPES.cpy".
+       PROCEDURE DIVISION USING WS-USER-INPUT-REQ
+           WS-USER-INPUT-RESP.
+           MOVE 0 TO WS-PNG-COUNT
+           INSPECT WS-UIR-ALLOWED-MIME-TYPES TALLYING WS-PNG-COUNT
+               FOR ALL '"image/png"'
+           SET UIRESP-WAS-FREEFORM-YES TO TRUE
+           IF UIR-IMAGES-ACCEPTED AND WS-PNG-COUNT > 0
+      *        Image-only answer: blank answer and one base64 PNG
+               MOVE 1 TO WS-UIRESP-ATTACH-COUNT
+               ACCEPT WS-UIA-DATA(1) FROM ENVIRONMENT "SCREENSHOT_B64"
+               MOVE "image/png" TO WS-UIA-MIME-TYPE(1)
+               MOVE "screenshot.png" TO WS-UIA-DISPLAY-NAME(1)
+           ELSE
+               MOVE "No screenshot available" TO WS-UIRESP-ANSWER
+           END-IF
+           GOBACK.
+```
+
 ## What's New in v3.0.0
 
 The COBOL SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
@@ -258,6 +368,7 @@ a "Method not found" error.
 |---|---|---|
 | `WS-GH-TOKEN-PGM` | `gitHubToken.getToken` (`github.tokenProviderRegistrationId`, a generated UUID) | `WS-GITHUB-TOKEN-REQ`, `WS-GITHUB-TOKEN-RESP` |
 | `WS-SHELL-AUTH-PGM` | `shellAuthentication.request` (`interaction.requestShellAuthentication`) | `WS-SHELL-AUTH-REQ`, `WS-SHELL-AUTH-RESP` |
+| `WS-USER-INPUT-PGM` | `userInput.request`, the ask_user tool (`interaction.requestUserInput`) | `WS-USER-INPUT-REQ`, `WS-USER-INPUT-RESP` |
 | `WS-MEMORY-STORE-PGM` | `memoryStore.store` (`state.hasMemoryStore`) | `WS-STORED-MEMORY` |
 | `WS-SUBAGENT-START-PGM`, `WS-SUBAGENT-STOP-PGM` | `hooks.invoke` for `subagentStart` / `subagentStop` (`hooks.hasHandlers`) | `WS-SUBAGENT-HOOK-INPUT`, `WS-SUBAGENT-HOOK-OUTPUT` |
 | `WS-NET-PROXY-PGM`, `WS-NET-NEGOTIATE-PGM`, `WS-NET-BASIC-PGM` | `network.resolveProxy`, `network.authenticateNegotiate`, `network.authenticateBasic` (`network.setProvider`) | `WS-NETWORK-REQUEST`, `WS-NETWORK-RESPONSE` |
@@ -350,6 +461,12 @@ Main client module managing CLI process lifecycle and I/O.
 | `COPILOT-CLIENT-WRITE` | request, rc | Write one JSON-RPC message (requests, callback replies) |
 | `COPILOT-CLIENT-READ` | response, rc | Read the next JSON-RPC message |
 | `COPILOT-CLEAR-SETTINGS-CACHE` | response, rc | Clear cached managed settings (`managedSettings.clearCache`) |
+| `COPILOT-MCP-SECRETS-SAVE` | `WS-MCP-SECRETS-REQ`, response, rc | Save an MCP credential (`mcp.secrets.save`); sets `MSQ-USED-KEYCHAIN` |
+| `COPILOT-MCP-SECRETS-DELETE` | `WS-MCP-SECRETS-REQ`, response, rc | Delete an MCP credential (`mcp.secrets.delete`) |
+| `COPILOT-MCP-SECRETS-DEL-SERVER` | `WS-MCP-SECRETS-REQ`, response, rc | Delete the MCP credentials indexed for a server (`mcp.secrets.deleteServer`) |
+| `COPILOT-EXT-APPROVALS-GRANT` | `WS-EXT-APPROVALS-REQ`, response, rc | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`); sets `EAQ-GRANTED` |
+| `COPILOT-EXT-APPROVALS-LIST` | `WS-EXT-APPROVALS-REQ`, response, rc | List plugin extension approvals (`permissions.extensionApprovals.list`) |
+| `COPILOT-EXT-APPROVALS-REVOKE` | `WS-EXT-APPROVALS-REQ`, response, rc | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`); sets `EAQ-REVOKED` |
 
 ### COPILOT-SESSION.cob
 

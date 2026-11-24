@@ -76,6 +76,63 @@ pub fn main() !void {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, surfaced as `SdkError.JsonRpcError` like any other RPC error (`client.lastRpcError()` has the details).
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store (`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). The last argument is an optional configuration directory (`null` for the runtime's default). The secret value is never logged:
+
+```zig
+const saved = try client.mcpSecretsSave("my-server-token", token, null);
+std.debug.print("{s}\n", .{if (saved.used_keychain) "Stored in the OS keychain" else "Stored in the file backend"});
+
+try client.mcpSecretsDelete("my-server-token", null);
+try client.mcpSecretsDeleteServer("my-server", null); // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list, and revoke user-scoped approvals for installed plugin extensions (`permissions.extensionApprovals.grant`, `.list`, `.revoke`). `extensionApprovalsGrant` persists a pending extension permission request before the host answers it normally. `extensionApprovalsList` and `extensionApprovalsRevoke` take an optional session ID to use an attached session's configuration profile. Grant and list results are copied into the arena you pass, so they outlive later requests:
+
+```zig
+var arena = std.heap.ArenaAllocator.init(allocator);
+defer arena.deinit();
+
+const grant = try client.extensionApprovalsGrant(arena.allocator(), session.getId(), request_id);
+if (grant.approval) |approval| std.debug.print("Approved {s}\n", .{approval.extension_name});
+
+const listed = try client.extensionApprovalsList(arena.allocator(), null);
+for (listed.approvals) |approval| {
+    // extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label
+    _ = try client.extensionApprovalsRevoke(approval.extension_name, approval.installation_key, null);
+}
+```
+
+### Ask-user image attachments
+
+Set `on_user_input` in the session config to answer `userInput.request` (it sends `interaction.requestUserInput`; `session.registerUserInputHandler` replaces the handler later). When the runtime accepts images in an answer, `request.image_attachment_constraints` is set (`allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `null` otherwise. The request also carries `request_id`, `allow_freeform`, and `meta` (the opaque `_meta` object) when the runtime sends them; all of these are valid only during the call. Answer with `attachments`, a slice of `UserInputImageAttachment` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). Attachments are sent only when set; image-only answers use an empty `answer`, and the runtime enforces the limits:
+
+```zig
+const screenshot_png_base64 = @embedFile("screenshot.png.b64"); // base64 text embedded at build time
+
+fn askUser(req: copilot.UserInputRequest, _: []const u8) anyerror!copilot.UserInputResponse {
+    const constraints = req.image_attachment_constraints orelse return .{ .answer = "No screenshot available" };
+    for (constraints.allowed_mime_types) |mime_type| {
+        if (std.mem.eql(u8, mime_type, "image/png")) return .{
+            .answer = "",
+            .attachments = &.{.{ .data = screenshot_png_base64, .mime_type = "image/png", .display_name = "screenshot.png" }},
+        };
+    }
+    return .{ .answer = "No supported image type" };
+}
+
+const session = try client.createSession(.{ .on_user_input = askUser });
+```
+
+The SDK serializes the answer after the handler returns, so its strings and slices must stay valid after the call (for example static data or memory your application owns).
+
 ## What's New in v3.0.0
 
 The Zig SDK now speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected at `start` with `SdkError.ProtocolMismatch` (the reason is logged under the `copilot_sdk` log scope).
@@ -242,9 +299,10 @@ _ = blocked;
 
 - The runtime-supervised AHP host (`startAhpHost`, the `ahp.*` / `host.*` RPC families) is not implemented: it is an experimental upstream surface that depends on the runtime's in-process hosting library.
 - In-process native runtime hosting is not the default connection: the SDK keeps spawning the CLI. The existing `in_process` option is unchanged.
-- The transport is synchronous: server requests (GitHub token, shell authentication, memory store, hooks, network callbacks) and session events are handled only while the client is blocked in a request or in `sendAndWait`. JSON values returned by client and session methods stay valid until the next request on the client.
+- The transport is synchronous: server requests (GitHub token, shell authentication, memory store, user input, hooks, network callbacks) and session events are handled only while the client is blocked in a request or in `sendAndWait`. JSON values returned by client and session methods stay valid until the next request on the client.
 - `cli_url` (connecting to an already running server) is not implemented yet; `start` returns `SdkError.NotConnected`.
-- Permission and user-input handlers registered on a session are stored but not yet answered over protocol 4; the runtime applies the session's permission mode instead (`permission_mode`, `setPermissionMode`).
+- Permission handlers registered on a session are stored but not yet answered over protocol 4; the runtime applies the session's permission mode instead (`permission_mode`, `setPermissionMode`). User input handlers are answered over protocol 4 when the session is created with `on_user_input` (see [Ask-user image attachments](#ask-user-image-attachments)).
+- Elicitation requests are not dispatched to a handler, so elicitation `requestId` / `_meta` passthrough does not apply to this SDK.
 
 ## Custom Tools
 
@@ -285,15 +343,15 @@ session.registerPermissionHandler(struct {
 
 ## User Input Handling
 
-Enable the `ask_user` tool by registering a user input handler (see Known limitations: not yet answered over protocol 4):
+Enable the `ask_user` tool by setting `on_user_input` when you create the session (it sends `interaction.requestUserInput`); `registerUserInputHandler` replaces the handler later:
 
 ```zig
-session.registerUserInputHandler(struct {
-    fn handler(req: copilot.UserInputRequest, _: []const u8) anyerror!copilot.UserInputResponse {
-        std.debug.print("Agent asks: {s}\n", .{req.question});
-        return .{ .answer = "Yes, proceed.", .was_freeform = true };
-    }
-}.handler);
+fn askUser(req: copilot.UserInputRequest, _: []const u8) anyerror!copilot.UserInputResponse {
+    std.debug.print("Agent asks: {s}\n", .{req.question});
+    return .{ .answer = "Yes, proceed.", .was_freeform = true };
+}
+
+const session = try client.createSession(.{ .on_user_input = askUser });
 ```
 
 ## Event Subscription
@@ -403,6 +461,12 @@ var session = try client.createSession(.{
 | `client.getSessionMetadata(id)` | Get session metadata |
 | `client.setForegroundSessionId(id)` | Set the foreground session |
 | `client.clearManagedSettingsCache()` | Clear cached managed settings (`managedSettings.clearCache`) |
+| `client.mcpSecretsSave(secret_id, value, config_dir)` | Save an MCP credential (`mcp.secrets.save`); returns `McpSecretsSaveResult` |
+| `client.mcpSecretsDelete(secret_id, config_dir)` | Delete an MCP credential (`mcp.secrets.delete`) |
+| `client.mcpSecretsDeleteServer(server_name, config_dir)` | Delete the MCP credentials indexed for a server (`mcp.secrets.deleteServer`) |
+| `client.extensionApprovalsGrant(arena, session_id, request_id)` | Persist a pending plugin extension approval |
+| `client.extensionApprovalsList(arena, session_id)` | List plugin extension approvals |
+| `client.extensionApprovalsRevoke(extension_name, installation_key, session_id)` | Revoke a plugin extension approval |
 | `client.lastRpcError()` | JSON-RPC error of the last failed request |
 | `client.lastPolicyHelperFailure(arena)` | Policy Helper failure from the last failed request's error data |
 | `client.getState()` | Get current connection state |

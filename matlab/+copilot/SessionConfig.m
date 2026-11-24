@@ -219,6 +219,11 @@ classdef SessionConfig
         % accept, or [] to cancel.
         OnShellAuthenticationRequest
 
+        % User input handler for the ask_user tool (function handle).  Called
+        % with a copilot.UserInputRequest; return a copilot.UserInputResponse.
+        % Setting it enables user input requests (wire: requestUserInput).
+        OnUserInputRequest
+
         % Memory store callback (function handle) called with the
         % memoryStore.store request struct (subject, fact, citations, reason).
         StoreMemory
@@ -310,6 +315,7 @@ classdef SessionConfig
             p.addParameter('ClearDefaultProvider',     obj.ClearDefaultProvider);
             p.addParameter('CapiEnabled',              []);
             p.addParameter('OnShellAuthenticationRequest', []);
+            p.addParameter('OnUserInputRequest',       []);
             p.addParameter('StoreMemory',              []);
             p.addParameter('DisableResume',            obj.DisableResume);
             p.addParameter('ContinuePendingWork',      obj.ContinuePendingWork);
@@ -385,6 +391,7 @@ classdef SessionConfig
             obj.ClearDefaultProvider     = p.Results.ClearDefaultProvider;
             obj.CapiEnabled              = p.Results.CapiEnabled;
             obj.OnShellAuthenticationRequest = p.Results.OnShellAuthenticationRequest;
+            obj.OnUserInputRequest       = p.Results.OnUserInputRequest;
             obj.StoreMemory              = p.Results.StoreMemory;
             obj.DisableResume            = p.Results.DisableResume;
             obj.ContinuePendingWork      = p.Results.ContinuePendingWork;
@@ -578,6 +585,9 @@ classdef SessionConfig
             end
             if ~isempty(obj.OnShellAuthenticationRequest)
                 s.requestShellAuthentication = true;
+            end
+            if ~isempty(obj.OnUserInputRequest)
+                s.requestUserInput = true;
             end
             if ~isempty(obj.StoreMemory)
                 s.hasMemoryStore = true;

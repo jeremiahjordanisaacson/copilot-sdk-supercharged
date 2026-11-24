@@ -50,6 +50,57 @@ The SDK requires:
 (client/stop! my-client)
 ```
 
+## What's New in v3.1.0
+
+### MCP secret store and plugin extension approvals
+
+Six server-scoped client functions. They require **Copilot CLI 1.0.116 or newer**; an older runtime answers with a JSON-RPC method-not-found error, which is thrown as `ex-info` like any other RPC error.
+
+```clojure
+;; MCP secret store.  The value is a credential: it is sent to the runtime and never logged.
+(client/mcp-secrets-save! my-client "my-server/api-key" (System/getenv "MY_API_KEY")
+                          :config-dir "/path/to/config")   ;; => {:used-keychain true}
+(client/mcp-secrets-delete! my-client "my-server/api-key") ;; mcp.secrets.delete
+(client/mcp-secrets-delete-server! my-client "my-server")  ;; mcp.secrets.deleteServer
+
+;; Plugin extension approvals (user scoped).  Grant persists a pending extension
+;; permission request before you answer it.
+(client/extension-approvals-grant! my-client session-id request-id)
+;; => {:granted true :approval {:extension-name "plugin:my-plugin:my-extension" ...}}
+(client/extension-approvals-list! my-client)               ;; optional :session-id
+;; => {:approvals [{:extension-name ... :plugin-name ... :capabilities [...] :granted-at ...
+;;                  :installation-key ... :installation-label ...}]}
+(client/extension-approvals-revoke! my-client "plugin:my-plugin:my-extension" installation-key)
+;; => {:revoked true}                                      ;; optional :session-id
+```
+
+| Function | Wire method | Returns |
+|----------|-------------|---------|
+| `mcp-secrets-save!` | `mcp.secrets.save` | `{:used-keychain bool}` (false means the file backend stored it) |
+| `mcp-secrets-delete!` | `mcp.secrets.delete` | nil |
+| `mcp-secrets-delete-server!` | `mcp.secrets.deleteServer` | nil |
+| `extension-approvals-grant!` | `permissions.extensionApprovals.grant` | `{:granted bool :approval map-or-nil}` |
+| `extension-approvals-list!` | `permissions.extensionApprovals.list` | `{:approvals [...]}` |
+| `extension-approvals-revoke!` | `permissions.extensionApprovals.revoke` | `{:revoked bool}` |
+
+### Ask-user image attachments
+
+When the runtime accepts images, the request map passed to `:on-user-input-request` carries `:imageAttachmentConstraints` (`{:allowedMimeTypes [...] :maxBytesPerImage n :maxCount n}`); it is absent otherwise. The request also carries `:requestId` and `:_meta` when the runtime sends them. Answer with images through the optional `:attachments` of `types/user-input-response`:
+
+```clojure
+(client/create-session! my-client
+  :on-user-input-request
+  (fn [{:keys [question imageAttachmentConstraints]} _invocation]
+    (if imageAttachmentConstraints
+      ;; Image-only answer: empty answer and was-freeform true
+      (types/user-input-response "" true
+        :attachments [(types/user-input-image-attachment screenshot-base64 "image/png"
+                                                         :display-name "screenshot.png")])
+      (types/user-input-response "yes" true))))
+```
+
+`:attachments` (each `{:type "image" :data :mimeType}` plus optional `:description` and `:displayName`) is sent only when set, and is only valid when the request advertised `:imageAttachmentConstraints`; the runtime enforces the size and count limits.
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected by `start!` with a protocol version mismatch error.

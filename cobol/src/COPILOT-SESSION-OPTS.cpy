@@ -152,6 +152,10 @@
            05 WS-SUBAGENT-STOP-PGM   PIC X(30)  VALUE SPACES.
       *    Shell authentication program (shellAuthentication.request)
            05 WS-SHELL-AUTH-PGM      PIC X(30)  VALUE SPACES.
+      *    User input program for the ask_user tool (userInput.request,
+      *    WS-USER-INPUT-REQ / WS-USER-INPUT-RESP); sends
+      *    interaction.requestUserInput
+           05 WS-USER-INPUT-PGM      PIC X(30)  VALUE SPACES.
       *    Store-memory program (memoryStore.store)
            05 WS-MEMORY-STORE-PGM    PIC X(30)  VALUE SPACES.
       *    Program CALLed with WS-SHELL-OUTPUT-EVENT for every

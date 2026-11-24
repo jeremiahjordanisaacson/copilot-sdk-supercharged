@@ -900,6 +900,69 @@ void CopilotClient::clearManagedSettingsCache() {
 }
 
 // ============================================================================
+// MCP Secret Store (Copilot CLI 1.0.116+)
+// ============================================================================
+
+McpSecretsSaveResult CopilotClient::mcpSecretsSave(const std::string& secretId, const std::string& value,
+                                                   const std::optional<std::string>& configDir) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    nlohmann::json params = {{"secretId", secretId}, {"value", value}};
+    if (configDir) params["configDir"] = *configDir;
+    auto result = rpcClient_->request("mcp.secrets.save", params);
+    return result.is_object() ? result.get<McpSecretsSaveResult>() : McpSecretsSaveResult{};
+}
+
+void CopilotClient::mcpSecretsDelete(const std::string& secretId,
+                                     const std::optional<std::string>& configDir) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    nlohmann::json params = {{"secretId", secretId}};
+    if (configDir) params["configDir"] = *configDir;
+    rpcClient_->request("mcp.secrets.delete", params);
+}
+
+void CopilotClient::mcpSecretsDeleteServer(const std::string& serverName,
+                                           const std::optional<std::string>& configDir) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    nlohmann::json params = {{"serverName", serverName}};
+    if (configDir) params["configDir"] = *configDir;
+    rpcClient_->request("mcp.secrets.deleteServer", params);
+}
+
+// ============================================================================
+// Plugin Extension Approvals (Copilot CLI 1.0.116+)
+// ============================================================================
+
+PermissionsExtensionApprovalsGrantResult CopilotClient::extensionApprovalsGrant(const std::string& sessionId,
+                                                                                const std::string& requestId) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    auto result = rpcClient_->request("permissions.extensionApprovals.grant",
+                                      {{"sessionId", sessionId}, {"requestId", requestId}});
+    return result.is_object() ? result.get<PermissionsExtensionApprovalsGrantResult>()
+                              : PermissionsExtensionApprovalsGrantResult{};
+}
+
+PermissionsExtensionApprovalsListResult CopilotClient::extensionApprovalsList(
+    const std::optional<std::string>& sessionId) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    nlohmann::json params = nlohmann::json::object();
+    if (sessionId) params["sessionId"] = *sessionId;
+    auto result = rpcClient_->request("permissions.extensionApprovals.list", params);
+    return result.is_object() ? result.get<PermissionsExtensionApprovalsListResult>()
+                              : PermissionsExtensionApprovalsListResult{};
+}
+
+PermissionsExtensionApprovalsRevokeResult CopilotClient::extensionApprovalsRevoke(
+    const std::string& extensionName, const std::string& installationKey,
+    const std::optional<std::string>& sessionId) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    nlohmann::json params = {{"extensionName", extensionName}, {"installationKey", installationKey}};
+    if (sessionId) params["sessionId"] = *sessionId;
+    auto result = rpcClient_->request("permissions.extensionApprovals.revoke", params);
+    return result.is_object() ? result.get<PermissionsExtensionApprovalsRevokeResult>()
+                              : PermissionsExtensionApprovalsRevokeResult{};
+}
+
+// ============================================================================
 // Lifecycle Event Subscriptions
 // ============================================================================
 
@@ -1401,6 +1464,14 @@ CopilotClient::handleUserInputRequest(const nlohmann::json& params) {
         req.question = question;
         if (params.contains("choices")) req.choices = params["choices"].get<std::vector<std::string>>();
         if (params.contains("allowFreeform")) req.allowFreeform = params["allowFreeform"].get<bool>();
+        if (params.contains("requestId") && params["requestId"].is_string()) {
+            req.requestId = params["requestId"].get<std::string>();
+        }
+        if (params.contains("imageAttachmentConstraints") && params["imageAttachmentConstraints"].is_object()) {
+            req.imageAttachmentConstraints =
+                params["imageAttachmentConstraints"].get<UserInputImageAttachmentConstraints>();
+        }
+        if (params.contains("_meta") && params["_meta"].is_object()) req.meta = params["_meta"];
 
         auto response = session->handleUserInputRequest(req);
         return {response, std::nullopt};

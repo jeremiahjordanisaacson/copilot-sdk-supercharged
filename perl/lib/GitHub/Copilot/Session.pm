@@ -320,11 +320,7 @@ sub _handle_user_input_request {
     croak "User input requested but no handler registered"
         unless $self->{_user_input_handler};
 
-    my $input_request = GitHub::Copilot::Types::UserInputRequest->new(
-        question      => $request->{question} // '',
-        choices       => $request->{choices}  // [],
-        allowFreeform => $request->{allowFreeform} // 1,
-    );
+    my $input_request = GitHub::Copilot::Types::UserInputRequest->from_hashref($request);
 
     my $result = $self->{_user_input_handler}->(
         $input_request,

@@ -513,6 +513,99 @@ test permission-wire-flags "permission handler and skip_permission reach the wir
         [dict get [lindex [dict get $d tools definitions] 0] skipPermission]
 } -result [list true true]
 
+# ---- v3.1.0: MCP secrets, extension approvals, ask-user images -----------------
+
+proc ::test_stub_client_rpc {results} {
+    rename ::copilot::client::_client_rpc ::copilot::client::_test_client_rpc
+    proc ::copilot::client::_client_rpc {handle method params} {
+        lappend ::test_rpc_calls $method [::copilot::jsonrpc::params_json $params]
+        return [dict get $::test_rpc_results $method]
+    }
+    set ::test_rpc_calls {}
+    set ::test_rpc_results $results
+}
+
+proc ::test_restore_client_rpc {} {
+    rename ::copilot::client::_client_rpc {}
+    rename ::copilot::client::_test_client_rpc ::copilot::client::_client_rpc
+}
+
+test server-rpc-wire "MCP secret and extension approval procs send camelCase params" -setup {
+    ::test_stub_client_rpc [dict create \
+        mcp.secrets.save [dict create usedKeychain true] \
+        mcp.secrets.delete null \
+        permissions.extensionApprovals.revoke [dict create revoked false]]
+} -body {
+    set saved [::copilot::client::mcp_secrets_save c1 my-token "s3cret value" /cfg]
+    set deleted [::copilot::client::mcp_secrets_delete c1 my-token]
+    set revoked [::copilot::client::extension_approvals_revoke c1 plugin:p:e key-1 s1]
+    list $::test_rpc_calls $saved $deleted $revoked
+} -cleanup {
+    ::test_restore_client_rpc
+} -result [list [list \
+    mcp.secrets.save {{"secretId":"my-token","value":"s3cret value","configDir":"/cfg"}} \
+    mcp.secrets.delete {{"secretId":"my-token"}} \
+    permissions.extensionApprovals.revoke \
+        {{"extensionName":"plugin:p:e","installationKey":"key-1","sessionId":"s1"}}] \
+    {used_keychain 1} {} {revoked 0}]
+
+test extension-approvals-results "grant and list results become snake_case approval dicts" -setup {
+    set approval [::test_decode {{"extensionName":"plugin:p:e","pluginName":"p",
+        "capabilities":["network","fs"],"grantedAt":"2026-11-24T00:00:00Z",
+        "installationKey":"key-1"}}]
+    ::test_stub_client_rpc [dict create \
+        permissions.extensionApprovals.grant [dict create granted true approval $approval] \
+        permissions.extensionApprovals.list [dict create approvals [list $approval]]]
+} -body {
+    set grant [::copilot::client::extension_approvals_grant c1 s1 req-1]
+    set first [lindex [dict get [::copilot::client::extension_approvals_list c1] approvals] 0]
+    list $::test_rpc_calls [dict get $grant granted] [dict get $grant approval extension_name] \
+        [dict get $first capabilities] [dict get $first installation_key] \
+        [dict get $first installation_label]
+} -cleanup {
+    ::test_restore_client_rpc
+} -result [list [list \
+    permissions.extensionApprovals.grant {{"sessionId":"s1","requestId":"req-1"}} \
+    permissions.extensionApprovals.list {{}}] \
+    1 plugin:p:e {network fs} key-1 {}]
+
+test user-input-response-json "user input responses send attachments only when present" -body {
+    set image [::copilot::types::make_user_input_image_attachment data aGk= mime_type image/png \
+        display_name shot.png]
+    list [::copilot::types::user_input_response_json \
+            [::copilot::types::make_user_input_response answer yes]] \
+        [::copilot::types::user_input_response_json [::copilot::types::make_user_input_response \
+            answer "" was_freeform 1 attachments [list $image]]] \
+        [::copilot::types::user_input_response_json "plain text"]
+} -result [list {{"answer":"yes","wasFreeform":false}} \
+    {{"answer":"","wasFreeform":true,"attachments":[{"type":"image","data":"aGk=","mimeType":"image/png","displayName":"shot.png"}]}} \
+    {{"answer":"plain text","wasFreeform":true}}]
+
+test user-input-reply "userInput.request passes image constraints, requestId, and _meta to the handler" -body {
+    proc ::test_user_input {request context} {
+        set ::test_user_input_request $request
+        return [::copilot::types::make_user_input_response answer "" was_freeform 1 \
+            attachments [list [::copilot::types::make_user_input_image_attachment \
+                data aGk= mime_type image/png description "A screenshot"]]]
+    }
+    set cfg [::copilot::types::make_session_config on_user_input_request ::test_user_input]
+    set ::copilot::session::sessions [dict create h1 [dict create session_id s1 config $cfg]]
+    set reply [::copilot::session::_user_input_reply [::test_decode {{"sessionId":"s1",
+        "question":"Screenshot?","requestId":"ui-1","_meta":{"k":"v"},
+        "imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],
+        "maxBytesPerImage":1048576,"maxCount":2}}}]]
+    set ::copilot::session::sessions [dict create]
+    set req $::test_user_input_request
+    set d [::test_decode [::copilot::session::group_session_params \
+        [::copilot::session::_session_flat_params $cfg 0] 0]]
+    list [dict get $req question] [dict get $req allow_freeform] [dict get $req request_id] \
+        [dict get $req image_attachment_constraints] [dict get $req meta] $reply \
+        [dict get $d interaction requestUserInput]
+} -result [list Screenshot? 1 ui-1 \
+    {allowed_mime_types image/png max_bytes_per_image 1048576 max_count 2} {k v} \
+    {{"answer":"","wasFreeform":true,"attachments":[{"type":"image","data":"aGk=","mimeType":"image/png","description":"A screenshot"}]}} \
+    true]
+
 # ---- Summary ----------------------------------------------------------------
 
 puts ""

@@ -266,6 +266,84 @@ pub fn (mut c CopilotClient) clear_managed_settings_cache() ! {
 	c.transport.send_request('managedSettings.clearCache', '{}')!
 }
 
+// mcp_secrets_save saves a legacy MCP configuration credential in the
+// runtime-owned secret store (`mcp.secrets.save`). `value` is a credential and
+// is never logged; an empty `config_dir` uses the runtime's configuration
+// directory. `used_keychain` is true when the OS keychain stored the credential
+// and false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) mcp_secrets_save(secret_id string, value string, config_dir string) !McpSecretsSaveResult {
+	mut params := map[string]string{}
+	params['secretId'] = json_str(secret_id)
+	params['value'] = json_str(value)
+	if config_dir.len > 0 {
+		params['configDir'] = json_str(config_dir)
+	}
+	raw := c.transport.send_request('mcp.secrets.save', build_params(params))!
+	return parse_mcp_secrets_save_result(raw)
+}
+
+// mcp_secrets_delete deletes a legacy MCP configuration credential from the
+// runtime-owned secret store (`mcp.secrets.delete`). An empty `config_dir` uses
+// the runtime's configuration directory. Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) mcp_secrets_delete(secret_id string, config_dir string) ! {
+	mut params := map[string]string{}
+	params['secretId'] = json_str(secret_id)
+	if config_dir.len > 0 {
+		params['configDir'] = json_str(config_dir)
+	}
+	c.transport.send_request('mcp.secrets.delete', build_params(params))!
+}
+
+// mcp_secrets_delete_server deletes every legacy credential indexed for an MCP
+// server (`mcp.secrets.deleteServer`). An empty `config_dir` uses the runtime's
+// configuration directory. Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) mcp_secrets_delete_server(server_name string, config_dir string) ! {
+	mut params := map[string]string{}
+	params['serverName'] = json_str(server_name)
+	if config_dir.len > 0 {
+		params['configDir'] = json_str(config_dir)
+	}
+	c.transport.send_request('mcp.secrets.deleteServer', build_params(params))!
+}
+
+// extension_approvals_grant persists a pending plugin extension permission
+// request as a user-scoped approval, before answering that request normally
+// (`permissions.extensionApprovals.grant`). Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) extension_approvals_grant(session_id string, request_id string) !PermissionsExtensionApprovalsGrantResult {
+	mut params := map[string]string{}
+	params['sessionId'] = json_str(session_id)
+	params['requestId'] = json_str(request_id)
+	raw := c.transport.send_request('permissions.extensionApprovals.grant', build_params(params))!
+	return parse_extension_approvals_grant_result(raw)
+}
+
+// extension_approvals_list lists the user-scoped plugin extension approvals
+// (`permissions.extensionApprovals.list`). A non-empty `session_id` selects an
+// attached session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) extension_approvals_list(session_id string) !PermissionsExtensionApprovalsListResult {
+	mut params := map[string]string{}
+	if session_id.len > 0 {
+		params['sessionId'] = json_str(session_id)
+	}
+	raw := c.transport.send_request('permissions.extensionApprovals.list', build_params(params))!
+	return parse_extension_approvals_list_result(raw)
+}
+
+// extension_approvals_revoke revokes one user-scoped plugin extension approval
+// (`permissions.extensionApprovals.revoke`). Pass the approval's
+// `installation_key` back unchanged; a non-empty `session_id` selects an
+// attached session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+pub fn (mut c CopilotClient) extension_approvals_revoke(extension_name string, installation_key string, session_id string) !PermissionsExtensionApprovalsRevokeResult {
+	mut params := map[string]string{}
+	params['extensionName'] = json_str(extension_name)
+	params['installationKey'] = json_str(installation_key)
+	if session_id.len > 0 {
+		params['sessionId'] = json_str(session_id)
+	}
+	raw := c.transport.send_request('permissions.extensionApprovals.revoke', build_params(params))!
+	return parse_extension_approvals_revoke_result(raw)
+}
+
 // set_session_fs_provider registers a session filesystem provider with the CLI server.
 pub fn (mut c CopilotClient) set_session_fs_provider(config SessionFsConfig) !string {
 	mut params := map[string]string{}
@@ -447,6 +525,9 @@ fn build_session_params(config SessionConfig) map[string]string {
 	}
 	if !isnil(config.on_store_memory) {
 		params['hasMemoryStore'] = 'true'
+	}
+	if !isnil(config.on_user_input_request) {
+		params['requestUserInput'] = 'true'
 	}
 	return params
 }
@@ -809,6 +890,16 @@ fn (mut d Dispatcher) handle_request(method string, params string) !string {
 			// Requests are answered synchronously on the reader thread, so a
 			// cancellation always refers to a request that was already answered.
 			return '{}'
+		}
+		'userInput.request' {
+			session := d.find_session(session_id) or {
+				return error('Session not found: ${session_id}')
+			}
+			if isnil(session.config.on_user_input_request) {
+				return error('User input requested but no handler registered')
+			}
+			answer := session.config.on_user_input_request(parse_user_input_request(params))
+			return answer.to_json()
 		}
 		'memoryStore.store' {
 			session := d.find_session(session_id) or {

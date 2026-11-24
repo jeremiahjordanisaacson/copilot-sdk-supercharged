@@ -804,6 +804,108 @@ class CopilotClient {
   }
 
   // -------------------------------------------------------------------------
+  // MCP Secrets and Plugin Extension Approvals (Copilot CLI 1.0.116 or newer)
+  // -------------------------------------------------------------------------
+
+  /// Saves a legacy MCP configuration credential in the runtime-owned secret
+  /// store (`mcp.secrets.save`). [value] is a credential: it is sent to the
+  /// runtime and never logged. [configDir] selects the configuration
+  /// directory (the runtime's default when null).
+  ///
+  /// [McpSecretsSaveResult.usedKeychain] is true when the OS keychain stored
+  /// the credential and false for the file backend. Requires Copilot CLI
+  /// 1.0.116 or newer; older runtimes fail with a method-not-found
+  /// [JsonRpcError].
+  Future<McpSecretsSaveResult> mcpSecretsSave(
+    String secretId,
+    String value, {
+    String? configDir,
+  }) async {
+    await _ensureConnected();
+    final result = await _connection!.sendRequest('mcp.secrets.save', {
+      'secretId': secretId,
+      'value': value,
+      if (configDir != null) 'configDir': configDir,
+    });
+    return McpSecretsSaveResult.fromJson(
+        result is Map<String, dynamic> ? result : const <String, dynamic>{});
+  }
+
+  /// Deletes a legacy MCP configuration credential from the runtime-owned
+  /// secret store (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or
+  /// newer.
+  Future<void> mcpSecretsDelete(String secretId, {String? configDir}) async {
+    await _ensureConnected();
+    await _connection!.sendRequest('mcp.secrets.delete', {
+      'secretId': secretId,
+      if (configDir != null) 'configDir': configDir,
+    });
+  }
+
+  /// Deletes every legacy credential indexed for an MCP server
+  /// (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+  Future<void> mcpSecretsDeleteServer(String serverName,
+      {String? configDir}) async {
+    await _ensureConnected();
+    await _connection!.sendRequest('mcp.secrets.deleteServer', {
+      'serverName': serverName,
+      if (configDir != null) 'configDir': configDir,
+    });
+  }
+
+  /// Persists a pending plugin extension permission request as a user-scoped
+  /// approval, before the host answers that request normally
+  /// (`permissions.extensionApprovals.grant`). Requires Copilot CLI 1.0.116
+  /// or newer.
+  Future<PermissionsExtensionApprovalsGrantResult> extensionApprovalsGrant(
+      String sessionId, String requestId) async {
+    await _ensureConnected();
+    final result = await _connection!.sendRequest(
+        'permissions.extensionApprovals.grant', {
+      'sessionId': sessionId,
+      'requestId': requestId,
+    });
+    return PermissionsExtensionApprovalsGrantResult.fromJson(
+        result is Map<String, dynamic> ? result : const <String, dynamic>{});
+  }
+
+  /// Lists the user-scoped plugin extension approvals
+  /// (`permissions.extensionApprovals.list`). [sessionId] selects an attached
+  /// session's configuration profile (the server's when null). Requires
+  /// Copilot CLI 1.0.116 or newer.
+  Future<PermissionsExtensionApprovalsListResult> extensionApprovalsList(
+      {String? sessionId}) async {
+    await _ensureConnected();
+    final result = await _connection!.sendRequest(
+        'permissions.extensionApprovals.list', {
+      if (sessionId != null) 'sessionId': sessionId,
+    });
+    return PermissionsExtensionApprovalsListResult.fromJson(
+        result is Map<String, dynamic> ? result : const <String, dynamic>{});
+  }
+
+  /// Revokes one user-scoped plugin extension approval
+  /// (`permissions.extensionApprovals.revoke`). Pass the approval's
+  /// `extensionName` and `installationKey` unchanged; [sessionId] selects an
+  /// attached session's configuration profile. Requires Copilot CLI 1.0.116
+  /// or newer.
+  Future<PermissionsExtensionApprovalsRevokeResult> extensionApprovalsRevoke(
+    String extensionName,
+    String installationKey, {
+    String? sessionId,
+  }) async {
+    await _ensureConnected();
+    final result = await _connection!.sendRequest(
+        'permissions.extensionApprovals.revoke', {
+      'extensionName': extensionName,
+      'installationKey': installationKey,
+      if (sessionId != null) 'sessionId': sessionId,
+    });
+    return PermissionsExtensionApprovalsRevokeResult.fromJson(
+        result is Map<String, dynamic> ? result : const <String, dynamic>{});
+  }
+
+  // -------------------------------------------------------------------------
   // TUI + Server Mode
   // -------------------------------------------------------------------------
 
@@ -1294,11 +1396,18 @@ class CopilotClient {
       throw Exception('Session not found: $sessionId');
     }
 
+    final constraints = params['imageAttachmentConstraints'];
+    final meta = params['_meta'];
     final result = await session.handleUserInputRequest(
       UserInputRequest(
         question: question,
         choices: (params['choices'] as List<dynamic>?)?.cast<String>(),
         allowFreeform: params['allowFreeform'] as bool? ?? true,
+        requestId: params['requestId'] as String?,
+        imageAttachmentConstraints: constraints is Map<String, dynamic>
+            ? UserInputImageAttachmentConstraints.fromJson(constraints)
+            : null,
+        meta: meta is Map<String, dynamic> ? meta : null,
       ),
     );
     return result.toJson();

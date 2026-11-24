@@ -268,7 +268,8 @@ final class CopilotClient
 
         auto session = new CopilotSession(info.sessionId, _rpc);
         session.configureHooks(config.onSubagentStart, config.onSubagentStop);
-        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory);
+        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory,
+            config.onUserInputRequest);
         session.setReleaseHandler(&_releaseSession);
 
         // Register tool handlers if tools were provided.
@@ -316,7 +317,8 @@ final class CopilotClient
 
         auto session = new CopilotSession(sid, _rpc);
         session.configureHooks(config.onSubagentStart, config.onSubagentStop);
-        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory);
+        session.configureCallbacks(config.onShellAuthenticationRequest, config.onStoreMemory,
+            config.onUserInputRequest);
         session.setReleaseHandler(&_releaseSession);
 
         _sessionsMutex.lock();
@@ -388,6 +390,94 @@ final class CopilotClient
     {
         enforce(_started, "client not started");
         return _rpc.request("managedSettings.clearCache", JSONValue(string[string].init));
+    }
+
+    /// Save a legacy MCP configuration credential in the runtime-owned secret
+    /// store (`mcp.secrets.save`). `value` is a credential and is never logged;
+    /// a null `configDir` uses the runtime's configuration directory.
+    /// `usedKeychain` is true when the OS keychain stored the credential and
+    /// false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+    McpSecretsSaveResult mcpSecretsSave(string secretId, string value,
+        string configDir = null) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        params["secretId"] = secretId;
+        params["value"] = value;
+        if (configDir.length > 0)
+            params["configDir"] = configDir;
+        return McpSecretsSaveResult.fromJson(_rpc.request("mcp.secrets.save", params));
+    }
+
+    /// Delete a legacy MCP configuration credential from the runtime-owned
+    /// secret store (`mcp.secrets.delete`). A null `configDir` uses the
+    /// runtime's configuration directory. Requires Copilot CLI 1.0.116 or newer.
+    void mcpSecretsDelete(string secretId, string configDir = null) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        params["secretId"] = secretId;
+        if (configDir.length > 0)
+            params["configDir"] = configDir;
+        _rpc.request("mcp.secrets.delete", params);
+    }
+
+    /// Delete every legacy credential indexed for an MCP server
+    /// (`mcp.secrets.deleteServer`). A null `configDir` uses the runtime's
+    /// configuration directory. Requires Copilot CLI 1.0.116 or newer.
+    void mcpSecretsDeleteServer(string serverName, string configDir = null) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        params["serverName"] = serverName;
+        if (configDir.length > 0)
+            params["configDir"] = configDir;
+        _rpc.request("mcp.secrets.deleteServer", params);
+    }
+
+    /// Persist a pending plugin extension permission request as a user-scoped
+    /// approval, before answering that request normally
+    /// (`permissions.extensionApprovals.grant`). Requires Copilot CLI 1.0.116 or newer.
+    PermissionsExtensionApprovalsGrantResult extensionApprovalsGrant(string sessionId,
+        string requestId) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = sessionId;
+        params["requestId"] = requestId;
+        return PermissionsExtensionApprovalsGrantResult.fromJson(
+            _rpc.request("permissions.extensionApprovals.grant", params));
+    }
+
+    /// List the user-scoped plugin extension approvals
+    /// (`permissions.extensionApprovals.list`). A `sessionId` selects an
+    /// attached session's configuration profile. Requires Copilot CLI 1.0.116
+    /// or newer.
+    PermissionsExtensionApprovalsListResult extensionApprovalsList(string sessionId = null) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        if (sessionId.length > 0)
+            params["sessionId"] = sessionId;
+        return PermissionsExtensionApprovalsListResult.fromJson(
+            _rpc.request("permissions.extensionApprovals.list", params));
+    }
+
+    /// Revoke one user-scoped plugin extension approval
+    /// (`permissions.extensionApprovals.revoke`). Pass the approval's
+    /// `installationKey` back unchanged; a `sessionId` selects an attached
+    /// session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+    PermissionsExtensionApprovalsRevokeResult extensionApprovalsRevoke(string extensionName,
+        string installationKey, string sessionId = null) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(string[string].init);
+        params["extensionName"] = extensionName;
+        params["installationKey"] = installationKey;
+        if (sessionId.length > 0)
+            params["sessionId"] = sessionId;
+        return PermissionsExtensionApprovalsRevokeResult.fromJson(
+            _rpc.request("permissions.extensionApprovals.revoke", params));
     }
 
     /// Get the last session ID, or null if none.
@@ -610,6 +700,7 @@ final class CopilotClient
         _rpc.onRequest("shellAuthentication.request", &_onShellAuthenticationRequest);
         _rpc.onRequest("shellAuthentication.cancel", &_onShellAuthenticationCancel);
         _rpc.onRequest("memoryStore.store", &_onMemoryStore);
+        _rpc.onRequest("userInput.request", &_onUserInputRequest);
         if (_opts.network.resolveProxy !is null)
             _rpc.onRequest("network.resolveProxy", &_onResolveProxy);
         if (_opts.network.authenticateNegotiate !is null)
@@ -650,6 +741,15 @@ final class CopilotClient
         enforce(session !is null, "Memory store owner is unavailable");
         session.handleMemoryStore(params);
         return JSONValue(null);
+    }
+
+    /// Answer `userInput.request` (the ask_user tool) through the session's handler.
+    private JSONValue _onUserInputRequest(JSONValue params) @trusted
+    {
+        auto sid = jsonString(params, "sessionId");
+        auto session = _findSession(sid);
+        enforce(session !is null, "Session not found: " ~ sid);
+        return session.handleUserInput(params);
     }
 
     /// Answer `network.resolveProxy`.

@@ -1961,6 +1961,52 @@ record; it rejects torn tails.
 
 To let a specific custom tool bypass the permission prompt entirely, set `skip_permission=True` on the tool definition. See [Skipping Permission Prompts](#skipping-permission-prompts) under Tools.
 
+## MCP Secret Store and Plugin Extension Approvals
+
+Hosts that manage MCP credentials or plugin extensions can call these server-scoped RPCs on the client. They are experimental and need Copilot CLI 1.0.116 or newer; older runtimes reject them as unknown methods.
+
+```python
+import os
+
+from copilot.rpc import (
+    MCPSecretDeleteRequest,
+    MCPSecretDeleteServerRequest,
+    MCPSecretSaveRequest,
+    PermissionsExtensionApprovalsListRequest,
+    PermissionsExtensionApprovalsRevokeRequest,
+)
+
+# Save a legacy MCP configuration credential. used_keychain is False when the
+# runtime used its file backend instead of the OS keychain. Never log the value.
+saved = await client.rpc.mcp.secrets.save(
+    MCPSecretSaveRequest(secret_id="github-mcp-token", value=os.environ["GITHUB_MCP_TOKEN"])
+)
+print(f"Stored in keychain: {saved.used_keychain}")
+
+# Remove one secret, or every credential indexed for a legacy MCP server.
+await client.rpc.mcp.secrets.delete(MCPSecretDeleteRequest(secret_id="github-mcp-token"))
+await client.rpc.mcp.secrets.delete_server(MCPSecretDeleteServerRequest(server_name="github"))
+
+# List persisted plugin extension approvals, then revoke one.
+listed = await client.rpc.permissions.extension_approvals.list(
+    PermissionsExtensionApprovalsListRequest()
+)
+for approval in listed.approvals:
+    print(f"{approval.plugin_name}/{approval.extension_name}: {', '.join(approval.capabilities)}")
+    if approval.extension_name == "legacy-extension":
+        result = await client.rpc.permissions.extension_approvals.revoke(
+            PermissionsExtensionApprovalsRevokeRequest(
+                extension_name=approval.extension_name,
+                installation_key=approval.installation_key,
+            )
+        )
+        print(f"Revoked: {result.revoked}")
+```
+
+- `MCPSecretSaveRequest`, `MCPSecretDeleteRequest`, and `MCPSecretDeleteServerRequest` accept an optional `config_dir`, the expected `mcp-secrets` directory. Omit it to use the runtime configuration root.
+- `client.rpc.permissions.extension_approvals.grant(PermissionsExtensionApprovalsGrantRequest(session_id=..., request_id=...))` persists the approval for a live extension permission request before your permission handler answers it normally. The result has `granted` (False when the request isn't eligible) and `approval`.
+- The list and revoke requests accept an optional `session_id` to target an attached session's configuration profile instead of the server profile. Each approval has `extension_name`, `plugin_name`, `capabilities`, `granted_at`, `installation_key`, and an optional `installation_label`.
+
 ## User Input Requests
 
 Enable the legacy question-and-answer `ask_user` tool by providing an `interaction.on_user_input_request` handler:
@@ -1991,6 +2037,42 @@ async with await client.create_session(
 ) as session:
     ...
 ```
+
+### Image Attachments
+
+When the runtime can accept images in an answer, `request.get("imageAttachmentConstraints")` returns a `UserInputImageAttachmentConstraints` with `allowed_mime_types`, `max_bytes_per_image`, and `max_count`. It is absent when images are unsupported, so answer with text only. Return images as `UserInputImageAttachment` objects under `"attachments"`; for an image-only answer, use an empty `"answer"` with `"wasFreeform": True`:
+
+```python
+import base64
+from pathlib import Path
+
+from copilot import UserInputImageAttachment
+
+
+async def handle_user_input(request, invocation):
+    limits = request.get("imageAttachmentConstraints")
+    png = Path("screenshot.png").read_bytes()
+    if (
+        limits is None
+        or "image/png" not in limits.allowed_mime_types
+        or len(png) > limits.max_bytes_per_image
+    ):
+        return {"answer": "The screenshot shows the login error.", "wasFreeform": True}
+    return {
+        "answer": "",
+        "wasFreeform": True,
+        "attachments": [
+            UserInputImageAttachment(
+                type="image",
+                data=base64.b64encode(png).decode("ascii"),
+                mime_type="image/png",
+                display_name="screenshot.png",
+            )
+        ],
+    }
+```
+
+Send at most `max_count` images, each within `max_bytes_per_image` decoded bytes. Images need readable, nonzero dimensions, and GIF or WebP images can't exceed 2,000 pixels per side.
 
 ### Reporting a person's answers
 

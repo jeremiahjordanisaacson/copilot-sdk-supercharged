@@ -37,6 +37,13 @@ package Copilot.Wire is
       Key     : String;
       Default : Natural := 0) return Natural;
 
+   --  Call Process with the raw JSON text of every element of the JSON array
+   --  Arr (string values keep their quotes).  Does nothing when Arr is not
+   --  an array.
+   procedure For_Each_Element
+     (Arr     : String;
+      Process : not null access procedure (Value : String));
+
    --  Convert a flat (v1-style) session payload into the SDK protocol 4
    --  grouped payload.  Is_Resume selects the session.resume rules
    --  (disableResume becomes suppressResumeEvent, create-only options are

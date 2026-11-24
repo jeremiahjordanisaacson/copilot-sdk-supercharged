@@ -183,10 +183,13 @@ COPILOT_ON_SUBAGENT_STOP=""
 #   mode              - Elicitation mode (optional)
 #   elicitationSource - Source that initiated the request (optional)
 #   url               - Optional URL for context
+#   requestId         - Pending request ID (optional, when the runtime sends one)
+#   _meta             - Opaque metadata of negotiated extensions (optional)
 #
 # Elicitation results are JSON objects with:
 #   action   - "accept", "decline", or "cancel"
 #   content  - JSON string of form values (optional, for "accept")
+#   _meta    - Opaque metadata (optional), sent back to the runtime unchanged
 #
 # Elicitation handlers are shell functions that receive a JSON context string
 # and echo a JSON result:
@@ -467,7 +470,7 @@ copilot_session_send_and_wait() {
                 fi
 
             # Answer other server -> client requests (gitHubToken.getToken, hooks.invoke,
-            # shellAuthentication.*, memoryStore.store, network.*)
+            # shellAuthentication.*, memoryStore.store, network.*, userInput.request)
             elif [[ -n "$method" ]]; then
                 _copilot_handle_server_request "$msg" || true
             fi
@@ -874,6 +877,10 @@ _copilot_handle_server_request() {
             _copilot_handle_network_request "$method" "$msg" "$req_id"
             return 0
             ;;
+        "userInput.request")
+            _copilot_session_handle_user_input "$msg" "$req_id"
+            return 0
+            ;;
     esac
 
     return 1
@@ -949,6 +956,49 @@ _copilot_session_handle_memory_store() {
     fi
 
     _copilot_send_rpc_result "$req_id" 'null'
+}
+
+# Answer userInput.request (the ask_user tool) by calling COPILOT_USER_INPUT_HANDLER with the
+# request params ({"sessionId","question","choices"?,"allowFreeform"?,"requestId"?,
+# "imageAttachmentConstraints"?,"_meta"?}). A JSON object output is sent as the
+# UserInputResponse: answer, wasFreeform, and attachments (normalized to
+# {"type":"image","data","mimeType","description"?,"displayName"?}, sent only when non-empty).
+# Any other output is sent as a freeform answer. The response is piped to jq rather than
+# passed as an argument, so base64 image attachments are not limited by the argument size.
+_copilot_session_handle_user_input() {
+    local msg="$1"
+    local req_id="$2"
+    local handler="${COPILOT_USER_INPUT_HANDLER:-}"
+
+    if [[ -z "$handler" ]] || ! declare -f "$handler" > /dev/null 2>&1; then
+        _copilot_send_rpc_error "$req_id" -32603 "No user input handler is registered"
+        return 0
+    fi
+
+    local request
+    request=$(echo "$msg" | jq -c '.params // {}' 2>/dev/null) || request='{}'
+
+    local output=""
+    if ! output=$("$handler" "$request"); then
+        _copilot_send_rpc_error "$req_id" -32603 "User input handler failed"
+        return 0
+    fi
+
+    local result=""
+    result=$(printf '%s' "$output" | jq -c 'select(type == "object")
+        | {"answer": ((.answer // "") | tostring), "wasFreeform": (.wasFreeform == true)}
+          + ([(.attachments // [])[]? | select(type == "object")
+              | {"type": "image", "data": .data, "mimeType": .mimeType}
+                + (if .description == null then {} else {"description": .description} end)
+                + (if .displayName == null then {} else {"displayName": .displayName} end)]
+             | if length > 0 then {"attachments": .} else {} end)' 2>/dev/null) || result=""
+    if [[ -z "$result" ]]; then
+        result=$(jq -c -n --arg answer "$output" '{"answer":$answer,"wasFreeform":true}') || return 1
+    fi
+
+    local response
+    response=$(printf '%s' "$result" | jq -c --argjson id "$req_id" '{"jsonrpc":"2.0","id":$id,"result":.}') || return 1
+    copilot_jsonrpc_send_message "$response"
 }
 
 # Answer network.resolveProxy / network.authenticateNegotiate / network.authenticateBasic by

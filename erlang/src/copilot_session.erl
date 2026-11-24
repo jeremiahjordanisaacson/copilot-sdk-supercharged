@@ -460,7 +460,11 @@ maybe_handle_elicitation(<<"elicitation.requested">>, Data,
         requested_schema => maps:get(<<"requestedSchema">>, Data, undefined),
         mode => maps:get(<<"mode">>, Data, undefined),
         elicitation_source => maps:get(<<"elicitationSource">>, Data, undefined),
-        url => maps:get(<<"url">>, Data, undefined)
+        url => maps:get(<<"url">>, Data, undefined),
+        request_id => RequestId,
+        %% Opaque negotiated extensions; a `_meta` in the handler's result
+        %% (copilot_types:elicitation_result/3) is forwarded unchanged.
+        meta => maps:get(<<"_meta">>, Data, undefined)
     },
     try
         Result = Handler(Context),

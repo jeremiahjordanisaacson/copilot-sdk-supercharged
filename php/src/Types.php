@@ -360,11 +360,20 @@ class PermissionRequestResult
 
 class UserInputRequest
 {
+    /**
+     * @param string|null $requestId Pending request id, when the runtime sends it
+     * @param UserInputImageAttachmentConstraints|null $imageAttachmentConstraints Set when the
+     *        runtime accepts image attachments in the answer, null otherwise
+     * @param array<string,mixed>|null $meta The request's opaque `_meta` object, when the runtime sends it
+     */
     public function __construct(
         public readonly string $question,
         /** @var string[]|null */
         public readonly ?array $choices = null,
         public readonly ?bool $allowFreeform = null,
+        public readonly ?string $requestId = null,
+        public readonly ?UserInputImageAttachmentConstraints $imageAttachmentConstraints = null,
+        public readonly ?array $meta = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -373,23 +382,44 @@ class UserInputRequest
             question: $data['question'] ?? '',
             choices: $data['choices'] ?? null,
             allowFreeform: $data['allowFreeform'] ?? null,
+            requestId: isset($data['requestId']) ? (string) $data['requestId'] : null,
+            imageAttachmentConstraints: is_array($data['imageAttachmentConstraints'] ?? null)
+                ? UserInputImageAttachmentConstraints::fromArray($data['imageAttachmentConstraints'])
+                : null,
+            meta: is_array($data['_meta'] ?? null) ? $data['_meta'] : null,
         );
     }
 }
 
+/**
+ * Answer to a user input request. $attachments is an optional list of
+ * UserInputImageAttachment, only valid when the request advertised
+ * $imageAttachmentConstraints; it is sent only when set.
+ */
 class UserInputResponse
 {
+    /**
+     * @param array<UserInputImageAttachment|array<string,mixed>>|null $attachments Images attached to the answer
+     */
     public function __construct(
         public readonly string $answer,
         public readonly bool $wasFreeform,
+        public readonly ?array $attachments = null,
     ) {}
 
     public function toArray(): array
     {
-        return [
+        $result = [
             'answer' => $this->answer,
             'wasFreeform' => $this->wasFreeform,
         ];
+        if ($this->attachments !== null) {
+            $result['attachments'] = array_map(
+                fn($a) => $a instanceof UserInputImageAttachment ? $a->toArray() : $a,
+                array_values($this->attachments),
+            );
+        }
+        return $result;
     }
 }
 
@@ -1556,6 +1586,175 @@ class PermissionModeSetResult
     public function isRefusedByManagedPolicy(): bool
     {
         return $this->reason === PermissionModeRefusalReason::MANAGED_POLICY;
+    }
+}
+
+// ============================================================================
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ============================================================================
+
+/**
+ * Image support advertised by a userInput.request (UserInputRequest::$imageAttachmentConstraints).
+ * Absent (null) when the runtime does not accept images in the answer.
+ */
+class UserInputImageAttachmentConstraints
+{
+    /**
+     * @param string[] $allowedMimeTypes MIME types accepted for this request
+     * @param int $maxBytesPerImage Maximum decoded byte length of each image
+     * @param int $maxCount Maximum number of images in one answer
+     */
+    public function __construct(
+        public readonly array $allowedMimeTypes,
+        public readonly int $maxBytesPerImage,
+        public readonly int $maxCount,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            allowedMimeTypes: is_array($data['allowedMimeTypes'] ?? null) ? array_values($data['allowedMimeTypes']) : [],
+            maxBytesPerImage: (int) ($data['maxBytesPerImage'] ?? 0),
+            maxCount: (int) ($data['maxCount'] ?? 0),
+        );
+    }
+}
+
+/**
+ * An inline image attached to an ask_user answer (UserInputResponse::$attachments).
+ * $data is the base64-encoded image (no data URL prefix); the wire `type` is always
+ * "image". The runtime enforces the advertised MIME types, size and count limits.
+ * Image-only answers use answer: '' and wasFreeform: true.
+ */
+class UserInputImageAttachment
+{
+    public function __construct(
+        public readonly string $data,
+        public readonly string $mimeType,
+        public readonly ?string $description = null,
+        public readonly ?string $displayName = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['type' => 'image', 'data' => $this->data, 'mimeType' => $this->mimeType];
+        if ($this->description !== null) {
+            $result['description'] = $this->description;
+        }
+        if ($this->displayName !== null) {
+            $result['displayName'] = $this->displayName;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Result of CopilotClient::mcpSecretsSave(). $usedKeychain is true when the OS keychain
+ * stored the credential and false when the runtime used its file backend.
+ */
+class McpSecretsSaveResult
+{
+    public function __construct(
+        public readonly bool $usedKeychain,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(usedKeychain: (bool) ($data['usedKeychain'] ?? false));
+    }
+}
+
+/**
+ * A user-scoped approval for one installed plugin extension. $extensionName is the stable
+ * identity (for example "plugin:plugin-name:extension-name"), $capabilities the exact
+ * privileged capabilities the user approved and $grantedAt an RFC 3339 timestamp. Pass
+ * $installationKey back unchanged to CopilotClient::extensionApprovalsRevoke().
+ */
+class PermissionsExtensionApproval
+{
+    /**
+     * @param string[] $capabilities
+     */
+    public function __construct(
+        public readonly string $extensionName,
+        public readonly string $pluginName,
+        public readonly array $capabilities,
+        public readonly string $grantedAt,
+        public readonly string $installationKey,
+        public readonly ?string $installationLabel = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            extensionName: (string) ($data['extensionName'] ?? ''),
+            pluginName: (string) ($data['pluginName'] ?? ''),
+            capabilities: is_array($data['capabilities'] ?? null) ? array_values($data['capabilities']) : [],
+            grantedAt: (string) ($data['grantedAt'] ?? ''),
+            installationKey: (string) ($data['installationKey'] ?? ''),
+            installationLabel: isset($data['installationLabel']) ? (string) $data['installationLabel'] : null,
+        );
+    }
+}
+
+/**
+ * Result of CopilotClient::extensionApprovalsGrant(): whether the pending request was
+ * eligible and persisted, and the stored $approval when it was.
+ */
+class PermissionsExtensionApprovalsGrantResult
+{
+    public function __construct(
+        public readonly bool $granted,
+        public readonly ?PermissionsExtensionApproval $approval = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            granted: (bool) ($data['granted'] ?? false),
+            approval: is_array($data['approval'] ?? null)
+                ? PermissionsExtensionApproval::fromArray($data['approval'])
+                : null,
+        );
+    }
+}
+
+/**
+ * Result of CopilotClient::extensionApprovalsList().
+ */
+class PermissionsExtensionApprovalsListResult
+{
+    /**
+     * @param PermissionsExtensionApproval[] $approvals
+     */
+    public function __construct(
+        public readonly array $approvals,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        $approvals = is_array($data['approvals'] ?? null) ? $data['approvals'] : [];
+        return new self(
+            approvals: array_values(array_map(
+                fn(array $a) => PermissionsExtensionApproval::fromArray($a),
+                array_filter($approvals, 'is_array'),
+            )),
+        );
+    }
+}
+
+/**
+ * Result of CopilotClient::extensionApprovalsRevoke(): whether a matching approval was revoked.
+ */
+class PermissionsExtensionApprovalsRevokeResult
+{
+    public function __construct(
+        public readonly bool $revoked,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(revoked: (bool) ($data['revoked'] ?? false));
     }
 }
 

@@ -1931,6 +1931,56 @@ record; it rejects torn tails.
 
 To let a specific custom tool bypass the permission prompt entirely, set `SkipPermission = true` on the tool. See [Skipping Permission Prompts](#skipping-permission-prompts) under Tools.
 
+## MCP Secret Store and Plugin Extension Approvals
+
+Hosts that manage MCP credentials or plugin extensions can call these server-scoped RPCs on the client. They are experimental and need Copilot CLI 1.0.116 or newer; older runtimes reject them as unknown methods.
+
+```go
+ctx := context.Background()
+
+// Save a legacy MCP configuration credential. UsedKeychain is false when the
+// runtime used its file backend instead of the OS keychain. Never log the value.
+saved, err := client.RPC.MCP.Secrets().Save(ctx, &rpc.MCPSecretSaveRequest{
+	SecretID: "github-mcp-token",
+	Value:    os.Getenv("GITHUB_MCP_TOKEN"),
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("Stored in keychain:", saved.UsedKeychain)
+
+// Remove one secret, or every credential indexed for a legacy MCP server.
+if _, err := client.RPC.MCP.Secrets().Delete(ctx, &rpc.MCPSecretDeleteRequest{SecretID: "github-mcp-token"}); err != nil {
+	log.Fatal(err)
+}
+if _, err := client.RPC.MCP.Secrets().DeleteServer(ctx, &rpc.MCPSecretDeleteServerRequest{ServerName: "github"}); err != nil {
+	log.Fatal(err)
+}
+
+// List persisted plugin extension approvals, then revoke one.
+listed, err := client.RPC.Permissions.ExtensionApprovals().List(ctx, &rpc.PermissionsExtensionApprovalsListRequest{})
+if err != nil {
+	log.Fatal(err)
+}
+for _, approval := range listed.Approvals {
+	fmt.Printf("%s/%s: %v\n", approval.PluginName, approval.ExtensionName, approval.Capabilities)
+	if approval.ExtensionName == "legacy-extension" {
+		result, err := client.RPC.Permissions.ExtensionApprovals().Revoke(ctx, &rpc.PermissionsExtensionApprovalsRevokeRequest{
+			ExtensionName:   approval.ExtensionName,
+			InstallationKey: approval.InstallationKey,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Revoked:", result.Revoked)
+	}
+}
+```
+
+- `MCPSecretSaveRequest`, `MCPSecretDeleteRequest`, and `MCPSecretDeleteServerRequest` accept an optional `ConfigDir`, the expected `mcp-secrets` directory. Leave it nil to use the runtime configuration root.
+- `client.RPC.Permissions.ExtensionApprovals().Grant(ctx, &rpc.PermissionsExtensionApprovalsGrantRequest{SessionID: ..., RequestID: ...})` persists the approval for a live extension permission request before your permission handler answers it normally. The result has `Granted` (false when the request isn't eligible) and `Approval`.
+- The list and revoke requests accept an optional `SessionID` to target an attached session's configuration profile instead of the server profile. Each approval has `ExtensionName`, `PluginName`, `Capabilities`, `GrantedAt`, `InstallationKey`, and an optional `InstallationLabel`.
+
 ## User Input Requests
 
 Enable the legacy question-and-answer `ask_user` tool by providing an `Interaction.OnUserInputRequest` handler:
@@ -1956,6 +2006,38 @@ session, err := client.CreateSession(context.Background(), &copilot.CreateSessio
 })
 
 ```
+
+### Image Attachments
+
+When the runtime can accept images in an answer, `request.ImageAttachmentConstraints` is non-nil and carries `AllowedMIMETypes`, `MaxBytesPerImage`, and `MaxCount`. It is nil when images are unsupported, so answer with text only. `UserInputResponse` is text-only: to return images, register `OnAttributedUserInputRequest` and set `AttributedUserInputResponse.Attachments`. For an image-only answer, leave `Answer` empty and set `WasFreeform: true`:
+
+```go
+session, err := client.CreateSession(context.Background(), &copilot.CreateSessionOptions{Model: "gpt-5", Interaction: copilot.SessionInteractionOptions{OnAttributedUserInputRequest: func(request copilot.UserInputRequest, invocation copilot.UserInputInvocation) (copilot.AttributedUserInputResponse, error) {
+	limits := request.ImageAttachmentConstraints
+	png, err := os.ReadFile("screenshot.png")
+	if err != nil {
+		return copilot.AttributedUserInputResponse{}, err
+	}
+	if limits == nil || !slices.Contains(limits.AllowedMIMETypes, "image/png") || int64(len(png)) > limits.MaxBytesPerImage {
+		return copilot.AttributedUserInputResponse{
+			UserInputResponse: copilot.UserInputResponse{Answer: "The screenshot shows the login error.", WasFreeform: true},
+		}, nil
+	}
+	name := "screenshot.png"
+	return copilot.AttributedUserInputResponse{
+		UserInputResponse: copilot.UserInputResponse{WasFreeform: true},
+		Attachments: []rpc.UserInputImageAttachment{{
+			Type:        rpc.UserInputImageAttachmentTypeImage,
+			Data:        base64.StdEncoding.EncodeToString(png),
+			MIMEType:    "image/png",
+			DisplayName: &name,
+		}},
+	}, nil
+}},
+})
+```
+
+Send at most `MaxCount` images, each within `MaxBytesPerImage` decoded bytes. Images need readable, nonzero dimensions, and GIF or WebP images can't exceed 2,000 pixels per side.
 
 ### Reporting a person's answers
 

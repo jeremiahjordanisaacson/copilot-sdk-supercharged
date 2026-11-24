@@ -323,6 +323,86 @@ pub const CopilotClient = struct {
         _ = try self.transport.?.sendRequest("managedSettings.clearCache", .{ .object = params });
     }
 
+    // -------------------------------------------------------------------
+    // MCP secret store and plugin extension approvals (Copilot CLI 1.0.116+)
+    // Older CLIs fail these with `SdkError.JsonRpcError` (method not found).
+    // -------------------------------------------------------------------
+
+    /// Save a legacy MCP configuration credential in the runtime-owned secret store
+    /// (`mcp.secrets.save`). `value` is a credential and is never logged. `config_dir`
+    /// selects the configuration directory (null for the runtime's default).
+    /// `used_keychain` is true when the OS keychain stored it, false for the file backend.
+    pub fn mcpSecretsSave(self: *CopilotClient, secret_id: []const u8, value: []const u8, config_dir: ?[]const u8) SdkError!types.McpSecretsSaveResult {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        try putValue(&params, "secretId", .{ .string = secret_id });
+        try putValue(&params, "value", .{ .string = value });
+        if (config_dir) |dir| try putValue(&params, "configDir", .{ .string = dir });
+        const result = try self.transport.?.sendRequest("mcp.secrets.save", .{ .object = params });
+        return types.McpSecretsSaveResult.fromJson(result);
+    }
+
+    /// Delete a legacy MCP configuration credential from the runtime-owned secret store
+    /// (`mcp.secrets.delete`).
+    pub fn mcpSecretsDelete(self: *CopilotClient, secret_id: []const u8, config_dir: ?[]const u8) SdkError!void {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        try putValue(&params, "secretId", .{ .string = secret_id });
+        if (config_dir) |dir| try putValue(&params, "configDir", .{ .string = dir });
+        _ = try self.transport.?.sendRequest("mcp.secrets.delete", .{ .object = params });
+    }
+
+    /// Delete the legacy credentials indexed for an MCP server (`mcp.secrets.deleteServer`).
+    pub fn mcpSecretsDeleteServer(self: *CopilotClient, server_name: []const u8, config_dir: ?[]const u8) SdkError!void {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        try putValue(&params, "serverName", .{ .string = server_name });
+        if (config_dir) |dir| try putValue(&params, "configDir", .{ .string = dir });
+        _ = try self.transport.?.sendRequest("mcp.secrets.deleteServer", .{ .object = params });
+    }
+
+    /// Persist a pending plugin extension permission request as a user-scoped approval,
+    /// before the host answers that request normally (`permissions.extensionApprovals.grant`).
+    /// The returned approval is allocated from `arena`.
+    pub fn extensionApprovalsGrant(self: *CopilotClient, arena: Allocator, session_id: []const u8, request_id: []const u8) SdkError!types.PermissionsExtensionApprovalsGrantResult {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        try putValue(&params, "sessionId", .{ .string = session_id });
+        try putValue(&params, "requestId", .{ .string = request_id });
+        const result = try self.transport.?.sendRequest("permissions.extensionApprovals.grant", .{ .object = params });
+        return types.PermissionsExtensionApprovalsGrantResult.fromJson(arena, result) catch SdkError.AllocationFailed;
+    }
+
+    /// List the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+    /// `session_id` selects an attached session whose configuration profile to list. The
+    /// approvals are allocated from `arena`, so they outlive later requests.
+    pub fn extensionApprovalsList(self: *CopilotClient, arena: Allocator, session_id: ?[]const u8) SdkError!types.PermissionsExtensionApprovalsListResult {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        if (session_id) |sid| try putValue(&params, "sessionId", .{ .string = sid });
+        const result = try self.transport.?.sendRequest("permissions.extensionApprovals.list", .{ .object = params });
+        return types.PermissionsExtensionApprovalsListResult.fromJson(arena, result) catch SdkError.AllocationFailed;
+    }
+
+    /// Revoke one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+    /// Pass the approval's `extension_name` and `installation_key` unchanged; `session_id`
+    /// selects an attached session whose configuration profile to use.
+    pub fn extensionApprovalsRevoke(self: *CopilotClient, extension_name: []const u8, installation_key: []const u8, session_id: ?[]const u8) SdkError!types.PermissionsExtensionApprovalsRevokeResult {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        try putValue(&params, "extensionName", .{ .string = extension_name });
+        try putValue(&params, "installationKey", .{ .string = installation_key });
+        if (session_id) |sid| try putValue(&params, "sessionId", .{ .string = sid });
+        const result = try self.transport.?.sendRequest("permissions.extensionApprovals.revoke", .{ .object = params });
+        return types.PermissionsExtensionApprovalsRevokeResult.fromJson(result);
+    }
+
     /// JSON-RPC error of the most recent request that failed with `SdkError.JsonRpcError`.
     /// Valid until the next request.
     pub fn lastRpcError(self: *const CopilotClient) ?jsonrpc.RpcErrorInfo {
@@ -574,6 +654,9 @@ pub const CopilotClient = struct {
         if (config.on_shell_authentication != null) try putValue(params, "requestShellAuthentication", .{ .bool = true });
         if (config.on_memory_store != null) try putValue(params, "hasMemoryStore", .{ .bool = true });
 
+        // --- v3.1.0 session options ---
+        if (config.on_user_input != null) try putValue(params, "requestUserInput", .{ .bool = true });
+
         // W3C trace context for distributed tracing
         if (self.options.on_get_trace_context) |provider| {
             const trace = provider();
@@ -618,6 +701,7 @@ pub const CopilotClient = struct {
         sess.hook_handler = config.on_hook;
         sess.shell_authentication_handler = config.on_shell_authentication;
         sess.memory_store_handler = config.on_memory_store;
+        sess.user_input_handler = config.on_user_input;
         if (registration_id) |id| {
             sess.github_token_registration_id = id;
             sess.close_hook = .{ .ctx = self, .func = releaseTokenProvider };
@@ -680,6 +764,7 @@ pub const CopilotClient = struct {
             return .{ .result = .{ .object = std.json.ObjectMap.init(arena) } };
         }
         if (std.mem.eql(u8, method, "memoryStore.store")) return self.answerMemoryStore(params);
+        if (std.mem.eql(u8, method, "userInput.request")) return self.answerUserInput(arena, params);
         if (std.mem.eql(u8, method, "hooks.invoke")) return self.answerHook(arena, params);
         if (std.mem.eql(u8, method, "network.resolveProxy")) return self.answerResolveProxy(arena, params);
         if (std.mem.eql(u8, method, "network.authenticateNegotiate")) return self.answerAuthenticateNegotiate(arena, params);
@@ -754,6 +839,41 @@ pub const CopilotClient = struct {
             .reason = stringField(params, "reason") orelse "",
         });
         return .{ .result = .null };
+    }
+
+    /// `userInput.request` {sessionId, question, choices?, allowFreeform?, requestId?,
+    /// imageAttachmentConstraints?, _meta?} -> {answer, wasFreeform, attachments?}.
+    /// Attachments are sent only when the handler sets them.
+    fn answerUserInput(self: *CopilotClient, arena: Allocator, params: std.json.ObjectMap) anyerror!jsonrpc.ServerReply {
+        const session_id = stringField(params, "sessionId") orelse return replyError("Invalid user input request payload");
+        const sess = self.sessions.get(session_id) orelse return replyError("Session not found");
+        const handler = sess.user_input_handler orelse return replyError("No user input handler registered");
+
+        var request = types.UserInputRequest{
+            .question = stringField(params, "question") orelse "",
+            .request_id = stringField(params, "requestId"),
+        };
+        if (params.get("choices")) |choices| {
+            if (choices == .array) {
+                var options = std.ArrayList([]const u8).init(arena);
+                for (choices.array.items) |choice| {
+                    if (choice == .string) try options.append(choice.string);
+                }
+                request.options = options.items;
+            }
+        }
+        if (params.get("allowFreeform")) |v| {
+            if (v == .bool) request.allow_freeform = v.bool;
+        }
+        if (params.get("imageAttachmentConstraints")) |v| {
+            request.image_attachment_constraints = try types.UserInputImageAttachmentConstraints.fromJson(arena, v);
+        }
+        if (params.get("_meta")) |v| {
+            if (v == .object) request.meta = v;
+        }
+
+        const response = try handler(request, session_id);
+        return .{ .result = try response.toJson(arena) };
     }
 
     /// `hooks.invoke` {sessionId, hookType, input} -> {output?}, including the
@@ -1096,6 +1216,10 @@ fn testTokenProvider(_: Allocator, args: types.GitHubTokenProviderArgs) anyerror
 
 fn testMemoryStore(_: types.StoredMemory) anyerror!void {}
 
+fn testUserInput(_: types.UserInputRequest, _: []const u8) anyerror!types.UserInputResponse {
+    return .{ .answer = "ok" };
+}
+
 /// Frames a JSON-RPC message the way the CLI sends it.
 fn framed(comptime body: []const u8) []const u8 {
     return std.fmt.comptimePrint("Content-Length: {d}\r\n\r\n{s}", .{ body.len, body });
@@ -1160,6 +1284,7 @@ test "createSession and resumeSession send grouped protocol 4 payloads" {
         .auto_tier = types.AutoTier.fast,
         .github_token_provider = testTokenProvider,
         .on_memory_store = testMemoryStore,
+        .on_user_input = testUserInput,
         .max_output_tokens = 1000,
     });
     try std.testing.expectEqual(@as(u32, 1), client.github_token_providers.count());
@@ -1189,6 +1314,7 @@ test "createSession and resumeSession send grouped protocol 4 payloads" {
     try std.testing.expectEqualStrings("fast", jsonPath(create, &.{ "github", "capi", "autoTier" }).?.string);
     try std.testing.expect(jsonPath(create, &.{ "github", "tokenProviderRegistrationId" }).? == .string);
     try std.testing.expect(jsonPath(create, &.{ "state", "hasMemoryStore" }).?.bool);
+    try std.testing.expect(jsonPath(create, &.{ "interaction", "requestUserInput" }).?.bool);
     try std.testing.expectEqual(@as(i64, 1000), jsonPath(create, &.{ "inference", "capabilities", "limits", "max_output_tokens" }).?.integer);
 
     try std.testing.expectEqualStrings("session.detach", messages[1].object.get("method").?.string);
@@ -1274,4 +1400,113 @@ test "session.event notifications carry tool.shell_output data" {
     try std.testing.expectEqualStrings("hi\n", data.text);
     try std.testing.expectEqual(@as(i64, 3), data.sequence);
     try std.testing.expectEqualStrings("stderr", data.stream.?);
+}
+
+test "MCP secret store and extension approval requests send camelCase params" {
+    const allocator = std.testing.allocator;
+    const responses = comptime framed("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"usedKeychain\":true}}") ++
+        framed("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":null}") ++
+        framed("{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"approvals\":[{\"extensionName\":\"plugin:p:e\",\"pluginName\":\"p\",\"capabilities\":[\"network\",\"fs\"],\"grantedAt\":\"2026-11-24T00:00:00Z\",\"installationKey\":\"k1\"}]}}") ++
+        framed("{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"revoked\":true}}");
+    var input = std.io.fixedBufferStream(responses);
+    const input_reader = input.reader();
+    var output = std.ArrayList(u8).init(allocator);
+    defer output.deinit();
+    const output_writer = output.writer();
+
+    var client = CopilotClient.init(allocator, .{});
+    defer client.deinit();
+    client.transport = jsonrpc.JsonRpcTransport.init(allocator, output_writer.any(), input_reader.any());
+    client.state = .connected;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const saved = try client.mcpSecretsSave("my-token", "test-value", "/cfg");
+    try std.testing.expect(saved.used_keychain);
+    try client.mcpSecretsDeleteServer("my-server", null);
+    const listed = try client.extensionApprovalsList(a, "s1");
+    try std.testing.expectEqual(@as(usize, 1), listed.approvals.len);
+    const approval = listed.approvals[0];
+    try std.testing.expectEqualStrings("fs", approval.capabilities[1]);
+    try std.testing.expect(approval.installation_label == null);
+    // The approval is copied into the arena, so it outlives the next request.
+    const revoked = try client.extensionApprovalsRevoke(approval.extension_name, approval.installation_key, null);
+    try std.testing.expect(revoked.revoked);
+
+    const messages = try writtenMessages(a, output.items);
+    try std.testing.expectEqual(@as(usize, 4), messages.len);
+    try std.testing.expectEqualStrings("mcp.secrets.save", messages[0].object.get("method").?.string);
+    const save_params = messages[0].object.get("params").?.object;
+    try std.testing.expectEqualStrings("my-token", save_params.get("secretId").?.string);
+    try std.testing.expectEqualStrings("test-value", save_params.get("value").?.string);
+    try std.testing.expectEqualStrings("/cfg", save_params.get("configDir").?.string);
+    try std.testing.expectEqualStrings("mcp.secrets.deleteServer", messages[1].object.get("method").?.string);
+    const delete_params = messages[1].object.get("params").?.object;
+    try std.testing.expectEqualStrings("my-server", delete_params.get("serverName").?.string);
+    try std.testing.expect(delete_params.get("configDir") == null);
+    try std.testing.expectEqualStrings("permissions.extensionApprovals.list", messages[2].object.get("method").?.string);
+    try std.testing.expectEqualStrings("s1", messages[2].object.get("params").?.object.get("sessionId").?.string);
+    try std.testing.expectEqualStrings("permissions.extensionApprovals.revoke", messages[3].object.get("method").?.string);
+    const revoke_params = messages[3].object.get("params").?.object;
+    try std.testing.expectEqualStrings("plugin:p:e", revoke_params.get("extensionName").?.string);
+    try std.testing.expectEqualStrings("k1", revoke_params.get("installationKey").?.string);
+    try std.testing.expect(revoke_params.get("sessionId") == null);
+}
+
+test "userInput.request passes image constraints through and sends attachments only when set" {
+    const allocator = std.testing.allocator;
+    const S = struct {
+        fn answer(request: types.UserInputRequest, _: []const u8) anyerror!types.UserInputResponse {
+            const constraints = request.image_attachment_constraints orelse return .{ .answer = "typed answer" };
+            try std.testing.expectEqualStrings("image/png", constraints.allowed_mime_types[0]);
+            try std.testing.expectEqual(@as(i64, 1048576), constraints.max_bytes_per_image);
+            try std.testing.expectEqual(@as(i64, 2), constraints.max_count);
+            try std.testing.expectEqualStrings("ui-1", request.request_id.?);
+            try std.testing.expect(request.meta.? == .object);
+            return .{ .answer = "", .attachments = &.{.{ .data = "aGVsbG8=", .mime_type = "image/png", .display_name = "shot.png" }} };
+        }
+    };
+
+    var input_buf: [1]u8 = undefined;
+    var input = std.io.fixedBufferStream(&input_buf);
+    const input_reader = input.reader();
+    var output_buf: [1]u8 = undefined;
+    var output = std.io.fixedBufferStream(&output_buf);
+    const output_writer = output.writer();
+    var transport = jsonrpc.JsonRpcTransport.init(allocator, output_writer.any(), input_reader.any());
+    defer transport.deinit();
+
+    var client = CopilotClient.init(allocator, .{});
+    defer client.deinit();
+
+    var session = CopilotSession.init(allocator, "s1", null, &transport, null);
+    defer session.deinit();
+    session.registerUserInputHandler(S.answer);
+    try client.sessions.put("s1", &session);
+    defer _ = client.sessions.remove("s1");
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const with_images = CopilotClient.handleServerRequest(&client, a, "userInput.request", try std.json.parseFromSliceLeaky(JsonValue, a,
+        \\{"sessionId":"s1","question":"Attach a screenshot?","requestId":"ui-1","imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],"maxBytesPerImage":1048576,"maxCount":2},"_meta":{"ext":{"a":1}}}
+    , .{}));
+    const reply = with_images.result.object;
+    try std.testing.expectEqualStrings("", reply.get("answer").?.string);
+    try std.testing.expect(reply.get("wasFreeform").?.bool);
+    const image = reply.get("attachments").?.array.items[0].object;
+    try std.testing.expectEqualStrings("image", image.get("type").?.string);
+    try std.testing.expectEqualStrings("aGVsbG8=", image.get("data").?.string);
+    try std.testing.expectEqualStrings("image/png", image.get("mimeType").?.string);
+    try std.testing.expectEqualStrings("shot.png", image.get("displayName").?.string);
+    try std.testing.expect(image.get("description") == null);
+
+    const plain = CopilotClient.handleServerRequest(&client, a, "userInput.request", try std.json.parseFromSliceLeaky(JsonValue, a,
+        \\{"sessionId":"s1","question":"Continue?","choices":["yes","no"]}
+    , .{}));
+    try std.testing.expectEqualStrings("typed answer", plain.result.object.get("answer").?.string);
+    try std.testing.expect(plain.result.object.get("attachments") == null);
 }

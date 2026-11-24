@@ -351,6 +351,61 @@ let test_shell_output_and_policy_failure () =
   | None -> Alcotest.fail "expected policy helper failure"
 
 (* ========================================================================== *)
+(* v3.1.0 ask-user image attachment tests                                     *)
+(* ========================================================================== *)
+
+let test_user_input_image_attachments () =
+  let request =
+    Types.user_input_request_of_yojson
+      (`Assoc
+         [ ("sessionId", `String "s1")
+         ; ("question", `String "Share a screenshot?")
+         ; ("requestId", `String "req-1")
+         ; ( "imageAttachmentConstraints"
+           , `Assoc
+               [ ("allowedMimeTypes", `List [ `String "image/png" ])
+               ; ("maxBytesPerImage", `Int 1024)
+               ; ("maxCount", `Int 2)
+               ] )
+         ])
+  in
+  (match request with
+   | Some r ->
+     Alcotest.(check (option string)) "requestId" (Some "req-1") r.Types.uir_request_id;
+     (match r.Types.uir_image_attachment_constraints with
+      | Some c ->
+        Alcotest.(check (list string)) "allowedMimeTypes" [ "image/png" ]
+          c.Types.uiac_allowed_mime_types;
+        Alcotest.(check int) "maxBytesPerImage" 1024 c.Types.uiac_max_bytes_per_image;
+        Alcotest.(check int) "maxCount" 2 c.Types.uiac_max_count
+      | None -> Alcotest.fail "expected imageAttachmentConstraints")
+   | None -> Alcotest.fail "expected user input request");
+  let open Yojson.Safe.Util in
+  let plain =
+    Types.user_input_response_to_yojson (Types.make_user_input_response ~was_freeform:true "yes")
+  in
+  Alcotest.(check bool) "attachments omitted when unset" true
+    ((plain |> member "attachments") = `Null);
+  let with_image =
+    Types.user_input_response_to_yojson
+      (Types.make_user_input_response ~was_freeform:true
+         ~attachments:[ Types.make_user_input_image_attachment ~mime_type:"image/png" "aGk=" ]
+         "")
+  in
+  let image = with_image |> member "attachments" |> index 0 in
+  Alcotest.(check string) "type" "image" (image |> member "type" |> to_string);
+  Alcotest.(check string) "data" "aGk=" (image |> member "data" |> to_string);
+  Alcotest.(check string) "mimeType" "image/png" (image |> member "mimeType" |> to_string);
+  let config =
+    { (Types.default_session_config ()) with
+      on_user_input_request =
+        Some (fun _request -> Lwt.return (Types.make_user_input_response ~was_freeform:false "ok"))
+    }
+  in
+  Alcotest.(check bool) "requestUserInput" true
+    (Types.session_config_to_yojson config |> member "requestUserInput" |> to_bool)
+
+(* ========================================================================== *)
 (* Tools helper tests                                                         *)
 (* ========================================================================== *)
 
@@ -460,6 +515,9 @@ let () =
         ; Alcotest.test_case "empty_mode_defaults" `Quick test_empty_mode_defaults
         ; Alcotest.test_case "shell_output_and_policy_failure" `Quick
             test_shell_output_and_policy_failure
+        ] )
+    ; ( "user_input"
+      , [ Alcotest.test_case "image_attachments" `Quick test_user_input_image_attachments
         ] )
     ; ( "tools"
       , [ Alcotest.test_case "make_string_param" `Quick test_make_string_param

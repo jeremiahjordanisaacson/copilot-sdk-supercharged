@@ -238,7 +238,7 @@ pub struct PermissionRequestResult {
 // ============================================================================
 
 /// Request for user input from the agent (enables ask_user tool).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputRequest {
     pub question: String,
@@ -246,14 +246,60 @@ pub struct UserInputRequest {
     pub choices: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_freeform: Option<bool>,
+    /// ID of the pending request (`requestId`), when the runtime sends it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// Image limits (`imageAttachmentConstraints`); `None` when the runtime does not
+    /// accept image attachments in the answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_attachment_constraints: Option<UserInputImageAttachmentConstraints>,
+    /// Opaque request metadata (`_meta`), forwarded unchanged.
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// Response to a user input request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// For an image-only answer, use an empty `answer` with `was_freeform: true`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInputResponse {
     pub answer: String,
     pub was_freeform: bool,
+    /// Images sent with the answer (`attachments`), omitted from the response when `None`.
+    /// Only valid when the request advertised `image_attachment_constraints`; the runtime
+    /// enforces the limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<UserInputImageAttachment>>,
+}
+
+/// Image limits a user input request advertises when the runtime accepts image
+/// attachments in the answer (`imageAttachmentConstraints`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UserInputImageAttachmentConstraints {
+    /// Accepted MIME types, for example `image/png`.
+    pub allowed_mime_types: Vec<String>,
+    /// Largest accepted image, in bytes.
+    pub max_bytes_per_image: u64,
+    /// Most images accepted in one answer.
+    pub max_count: u64,
+}
+
+/// An inline image attached to a user input answer ([`UserInputResponse::attachments`]).
+///
+/// Serialized with `type: "image"`; `data` holds the base64-encoded image bytes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename = "image", rename_all = "camelCase")]
+pub struct UserInputImageAttachment {
+    /// Base64-encoded image bytes.
+    pub data: String,
+    /// MIME type of the image, for example `image/png`.
+    pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 // ============================================================================
@@ -2515,6 +2561,65 @@ impl PermissionsSetModeResult {
     pub fn refused_by_managed_policy(&self) -> bool {
         self.reason.as_deref() == Some(permission_mode_refusal::MANAGED_POLICY)
     }
+}
+
+// ============================================================================
+// v3.1.0 Types (MCP secret store, plugin extension approvals)
+// ============================================================================
+
+/// Result of [`crate::CopilotClient::mcp_secrets_save`] (`mcp.secrets.save`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpSecretsSaveResult {
+    /// True when the OS keychain stored the credential, false for the file backend.
+    pub used_keychain: bool,
+}
+
+/// A user-scoped approval for one installed plugin extension
+/// (`permissions.extensionApprovals.*`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PermissionsExtensionApproval {
+    /// Stable identity, for example `plugin:plugin-name:extension-name`.
+    pub extension_name: String,
+    pub plugin_name: String,
+    /// Exact privileged capabilities the user approved.
+    pub capabilities: Vec<String>,
+    /// When the approval was granted (RFC 3339 timestamp).
+    pub granted_at: String,
+    /// Opaque installation identity; pass it back unchanged to revoke the approval.
+    pub installation_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_label: Option<String>,
+}
+
+/// Result of [`crate::CopilotClient::extension_approvals_grant`]
+/// (`permissions.extensionApprovals.grant`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PermissionsExtensionApprovalsGrantResult {
+    /// Whether the pending request was eligible and persisted.
+    pub granted: bool,
+    /// The persisted approval, when granted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval: Option<PermissionsExtensionApproval>,
+}
+
+/// Result of [`crate::CopilotClient::extension_approvals_list`]
+/// (`permissions.extensionApprovals.list`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PermissionsExtensionApprovalsListResult {
+    pub approvals: Vec<PermissionsExtensionApproval>,
+}
+
+/// Result of [`crate::CopilotClient::extension_approvals_revoke`]
+/// (`permissions.extensionApprovals.revoke`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PermissionsExtensionApprovalsRevokeResult {
+    /// Whether a matching approval was revoked.
+    pub revoked: bool,
 }
 
 // ============================================================================

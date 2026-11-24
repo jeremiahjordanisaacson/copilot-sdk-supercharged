@@ -541,6 +541,119 @@ class CopilotClient(
     }
 
     /**
+     * Saves a legacy MCP configuration credential in the runtime-owned secret store
+     * (`mcp.secrets.save`). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param secretId Identifier of the credential
+     * @param value The credential; it is never logged
+     * @param configDir Configuration directory, or null for the runtime's default
+     * @return The result; [McpSecretsSaveResult.usedKeychain] is true when the OS keychain stored
+     *   the credential and false when the runtime used its file backend
+     */
+    suspend fun mcpSecretsSave(secretId: String, value: String, configDir: String? = null): McpSecretsSaveResult {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        val result = client.request("mcp.secrets.save", buildJsonObject {
+            put("secretId", secretId)
+            put("value", value)
+            configDir?.let { put("configDir", it) }
+        })
+        return McpSecretsSaveResult.fromJson(result)
+    }
+
+    /**
+     * Deletes a legacy MCP configuration credential from the runtime-owned secret store
+     * (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param secretId Identifier of the credential
+     * @param configDir Configuration directory, or null for the runtime's default
+     */
+    suspend fun mcpSecretsDelete(secretId: String, configDir: String? = null) {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        client.request("mcp.secrets.delete", buildJsonObject {
+            put("secretId", secretId)
+            configDir?.let { put("configDir", it) }
+        })
+    }
+
+    /**
+     * Deletes the legacy credentials indexed for an MCP server (`mcp.secrets.deleteServer`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param serverName The MCP server name
+     * @param configDir Configuration directory, or null for the runtime's default
+     */
+    suspend fun mcpSecretsDeleteServer(serverName: String, configDir: String? = null) {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        client.request("mcp.secrets.deleteServer", buildJsonObject {
+            put("serverName", serverName)
+            configDir?.let { put("configDir", it) }
+        })
+    }
+
+    /**
+     * Persists a pending plugin extension permission request as a user-scoped approval, before the
+     * host answers that request normally (`permissions.extensionApprovals.grant`). Requires Copilot
+     * CLI 1.0.116 or newer.
+     *
+     * @param sessionId Session that owns the pending request
+     * @param requestId ID of the pending extension permission request
+     * @return Whether the request was eligible and persisted, and the stored approval
+     */
+    suspend fun extensionApprovalsGrant(sessionId: String, requestId: String): PermissionsExtensionApprovalsGrantResult {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        val result = client.request("permissions.extensionApprovals.grant", buildJsonObject {
+            put("sessionId", sessionId)
+            put("requestId", requestId)
+        })
+        return PermissionsExtensionApprovalsGrantResult.fromJson(result)
+    }
+
+    /**
+     * Lists the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param sessionId Attached session whose configuration profile to list, or null for the
+     *   server's profile
+     */
+    suspend fun extensionApprovalsList(sessionId: String? = null): PermissionsExtensionApprovalsListResult {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        val result = client.request("permissions.extensionApprovals.list", buildJsonObject {
+            sessionId?.let { put("sessionId", it) }
+        })
+        return PermissionsExtensionApprovalsListResult.fromJson(result)
+    }
+
+    /**
+     * Revokes one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param extensionName The approval's [PermissionsExtensionApproval.extensionName]
+     * @param installationKey The approval's [PermissionsExtensionApproval.installationKey], unchanged
+     * @param sessionId Attached session whose configuration profile to use, or null for the
+     *   server's profile
+     * @return Whether a matching approval was revoked
+     */
+    suspend fun extensionApprovalsRevoke(
+        extensionName: String,
+        installationKey: String,
+        sessionId: String? = null
+    ): PermissionsExtensionApprovalsRevokeResult {
+        ensureConnected()
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        val result = client.request("permissions.extensionApprovals.revoke", buildJsonObject {
+            put("extensionName", extensionName)
+            put("installationKey", installationKey)
+            sessionId?.let { put("sessionId", it) }
+        })
+        return PermissionsExtensionApprovalsRevokeResult.fromJson(result)
+    }
+
+    /**
      * Subscribes to all session lifecycle events.
      * @return A function that unsubscribes the handler when called.
      */
@@ -1268,13 +1381,17 @@ class CopilotClient(
         val request = UserInputRequest(
             question = question,
             choices = params["choices"]?.jsonArray?.map { it.jsonPrimitive.content },
-            allowFreeform = params["allowFreeform"]?.jsonPrimitive?.booleanOrNull
+            allowFreeform = params["allowFreeform"]?.jsonPrimitive?.booleanOrNull,
+            requestId = (params["requestId"] as? JsonPrimitive)?.contentOrNull,
+            imageAttachmentConstraints = UserInputImageAttachmentConstraints.fromJson(params["imageAttachmentConstraints"]),
+            meta = params["_meta"] as? JsonObject
         )
 
         val result = session.handleUserInputRequest(request)
         return buildJsonObject {
             put("answer", result.answer)
             put("wasFreeform", result.wasFreeform)
+            result.attachments?.let { attachments -> put("attachments", JsonArray(attachments.map { it.toJson() })) }
         }
     }
 
@@ -1314,13 +1431,16 @@ class CopilotClient(
             },
             mode = params["mode"]?.jsonPrimitive?.contentOrNull,
             elicitationSource = params["elicitationSource"]?.jsonPrimitive?.contentOrNull,
-            url = params["url"]?.jsonPrimitive?.contentOrNull
+            url = params["url"]?.jsonPrimitive?.contentOrNull,
+            requestId = (params["requestId"] as? JsonPrimitive)?.contentOrNull,
+            meta = params["_meta"] as? JsonObject
         )
 
         val result = session.handleElicitationRequest(context)
         return buildJsonObject {
             put("action", result.action)
             result.content?.let { put("content", json.encodeToJsonElement(it)) }
+            result.meta?.let { put("_meta", it) }
         }
     }
 

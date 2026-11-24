@@ -151,6 +151,7 @@ proc ::copilot::types::make_session_config {args} {
         on_shell_authentication_request     "" \
         store_memory                        "" \
         on_permission_request               "" \
+        on_user_input_request               "" \
     ]
     set cfg $defaults
     foreach {key value} $args {
@@ -665,6 +666,126 @@ proc ::copilot::types::make_policy_helper_failure {failure} {
             [string is true -strict [dict get $failure previousPolicyRetained]]
     }
     return $result
+}
+
+# -- v3.1.0 types (parity with the Microsoft Copilot SDK 2.0.3-preview.0) -------
+
+# A user-scoped approval for one installed plugin extension (from an
+# ::copilot::client::extension_approvals_grant or extension_approvals_list result)
+# as a dict with snake_case keys: extension_name (stable identity, for example
+# "plugin:plugin-name:extension-name"), plugin_name, capabilities (list of the exact
+# privileged capabilities the user approved), granted_at (RFC 3339 timestamp),
+# installation_key (opaque: pass it back unchanged to extension_approvals_revoke),
+# and installation_label ("" when absent).
+proc ::copilot::types::make_permissions_extension_approval {approval} {
+    set result [dict create extension_name "" plugin_name "" capabilities {} \
+        granted_at "" installation_key "" installation_label ""]
+    foreach {key wire} {
+        extension_name extensionName plugin_name pluginName capabilities capabilities
+        granted_at grantedAt installation_key installationKey
+        installation_label installationLabel
+    } {
+        if {[dict exists $approval $wire] && [dict get $approval $wire] ne "null"} {
+            dict set result $key [dict get $approval $wire]
+        }
+    }
+    return $result
+}
+
+# Image support advertised by a userInput.request (wire imageAttachmentConstraints)
+# as a dict: allowed_mime_types (list), max_bytes_per_image, and max_count. Returns
+# "" when the request carries no constraints (the runtime does not accept images).
+proc ::copilot::types::make_user_input_image_attachment_constraints {constraints} {
+    if {$constraints eq "" || $constraints eq "null" || [catch {dict size $constraints}]} {
+        return ""
+    }
+    set result [dict create allowed_mime_types {} max_bytes_per_image "" max_count ""]
+    foreach {key wire} {
+        allowed_mime_types allowedMimeTypes max_bytes_per_image maxBytesPerImage
+        max_count maxCount
+    } {
+        if {[dict exists $constraints $wire] && [dict get $constraints $wire] ne "null"} {
+            dict set result $key [dict get $constraints $wire]
+        }
+    }
+    return $result
+}
+
+# An image attached to an ask_user answer (UserInputImageAttachment): data is the
+# base64-encoded image and mime_type its MIME type; description and display_name are
+# optional. The wire type is always "image". Only valid when the request advertised
+# image_attachment_constraints; the runtime enforces the MIME types, size, and count.
+proc ::copilot::types::make_user_input_image_attachment {args} {
+    set cfg [_options [dict create data "" mime_type "" description "" display_name ""] \
+        $args "user input image attachment"]
+    if {[dict get $cfg data] eq "" || [dict get $cfg mime_type] eq ""} {
+        error "An image attachment requires data and mime_type"
+    }
+    return [dict merge [dict create type image] $cfg]
+}
+
+# Response to a user input request, returned by an on_user_input_request handler:
+# answer, was_freeform, and attachments (a list of make_user_input_image_attachment
+# dicts, sent only when non-empty). Image-only answers use an empty answer with
+# was_freeform 1.
+proc ::copilot::types::make_user_input_response {args} {
+    return [_options [dict create answer "" was_freeform 0 attachments {}] $args \
+        "user input response"]
+}
+
+# JSON text of a user input response: raw JSON verbatim, a dict with answer (see
+# make_user_input_response; wasFreeform is also accepted), or any other value as a
+# freeform text answer. attachments are sent only when non-empty; each is a
+# make_user_input_image_attachment dict (camelCase keys are also accepted) or raw JSON.
+proc ::copilot::types::user_input_response_json {response} {
+    if {[::copilot::jsonrpc::is_raw $response]} {
+        return [::copilot::jsonrpc::to_json $response]
+    }
+    if {[catch {dict exists $response answer} has_answer] || !$has_answer} {
+        return [::copilot::jsonrpc::json_object [dict create \
+            answer      [::copilot::jsonrpc::json_string $response] \
+            wasFreeform true \
+        ]]
+    }
+    set was_freeform 0
+    foreach key {was_freeform wasFreeform} {
+        if {[dict exists $response $key]} {
+            set was_freeform [dict get $response $key]
+        }
+    }
+    set members [dict create \
+        answer      [::copilot::jsonrpc::json_string [dict get $response answer]] \
+        wasFreeform [::copilot::jsonrpc::json_bool $was_freeform] \
+    ]
+    set texts [list]
+    if {[dict exists $response attachments]} {
+        foreach attachment [dict get $response attachments] {
+            lappend texts [_user_input_image_attachment_json $attachment]
+        }
+    }
+    if {[llength $texts] > 0} {
+        dict set members attachments [::copilot::jsonrpc::json_array $texts]
+    }
+    return [::copilot::jsonrpc::json_object $members]
+}
+
+# Internal: wire JSON of one user input image attachment.
+proc ::copilot::types::_user_input_image_attachment_json {attachment} {
+    if {[::copilot::jsonrpc::is_raw $attachment]} {
+        return [::copilot::jsonrpc::to_json $attachment]
+    }
+    set members [dict create type [::copilot::jsonrpc::json_string image]]
+    foreach {wire keys} {
+        data data mimeType {mime_type mimeType} description description
+        displayName {display_name displayName}
+    } {
+        foreach key $keys {
+            if {[dict exists $attachment $key] && [dict get $attachment $key] ne ""} {
+                dict set members $wire [::copilot::jsonrpc::json_string [dict get $attachment $key]]
+            }
+        }
+    }
+    return [::copilot::jsonrpc::json_object $members]
 }
 
 package provide copilot::types 2.0.0

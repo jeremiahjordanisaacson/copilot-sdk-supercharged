@@ -48,7 +48,10 @@ package Copilot.Session is
      (Self    : in out Copilot_Session;
       Handler : Permission_Handler);
 
-   --  Register a user-input handler (enables the ask_user tool).
+   --  Register (or replace) the handler that answers this session's
+   --  userInput.request (ask_user) requests.  The runtime offers the
+   --  ask_user tool only when the session was created or resumed with
+   --  Session_Config.On_User_Input_Request set.
    procedure Register_User_Input_Handler
      (Self    : in out Copilot_Session;
       Handler : User_Input_Handler);

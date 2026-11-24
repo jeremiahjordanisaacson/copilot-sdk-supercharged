@@ -388,6 +388,111 @@ package Copilot.Types is
      function (Input : Subagent_Hook_Input) return Subagent_Stop_Decision;
 
    --  -----------------------------------------------------------------------
+   --  User input handling (userInput.request, the ask_user tool)
+   --  -----------------------------------------------------------------------
+
+   --  Image support advertised by a userInput.request.  Present is False
+   --  when the runtime does not accept images in the answer.  The runtime
+   --  enforces these limits.
+   type User_Input_Image_Attachment_Constraints is record
+      Present                 : Boolean := False;
+      --  Accepted MIME types as a JSON array of strings.
+      Allowed_Mime_Types_Json : UString := Null_UString;
+      --  Maximum decoded byte length of each image.
+      Max_Bytes_Per_Image     : Natural := 0;
+      --  Maximum number of images in one answer.
+      Max_Count               : Natural := 0;
+   end record;
+
+   --  An inline image attached to an ask_user answer.  Data is the base64
+   --  encoded image; the wire type is always "image".
+   type User_Input_Image_Attachment is record
+      Data         : UString := Null_UString;
+      Mime_Type    : UString := Null_UString;
+      Description  : UString := Null_UString;  --  optional
+      Display_Name : UString := Null_UString;  --  optional
+   end record;
+
+   package User_Input_Image_Attachment_Vectors is new Ada.Containers.Vectors
+     (Index_Type   => Positive,
+      Element_Type => User_Input_Image_Attachment);
+   subtype User_Input_Image_Attachment_List is
+     User_Input_Image_Attachment_Vectors.Vector;
+
+   type User_Input_Request is record
+      Question                     : UString := Null_UString;
+      Session_Id                   : UString := Null_UString;
+      --  Offered choices as a JSON array of strings ("" when none).
+      Choices_Json                 : UString := Null_UString;
+      --  Whether a freeform answer is allowed.
+      Allow_Freeform               : Boolean := True;
+      --  Id of the pending request ("" when the runtime omits it).
+      Request_Id                   : UString := Null_UString;
+      Image_Attachment_Constraints : User_Input_Image_Attachment_Constraints;
+      --  The request's opaque _meta object as raw JSON ("" when absent).
+      Meta_Json                    : UString := Null_UString;
+   end record;
+
+   --  Attachments are only valid when the request advertised image support
+   --  and are sent only when the list is not empty.  An image-only answer
+   --  uses an empty Answer and Was_Freeform => True.
+   type User_Input_Response is record
+      Answer       : UString  := Null_UString;
+      Was_Freeform : Boolean  := True;
+      Attachments  : User_Input_Image_Attachment_List :=
+        User_Input_Image_Attachment_Vectors.Empty_Vector;
+   end record;
+
+   type User_Input_Handler is access
+     function (Req : User_Input_Request) return User_Input_Response;
+
+   --  -----------------------------------------------------------------------
+   --  v3.1.0 feature types (Microsoft Copilot SDK 2.0.3-preview.0)
+   --  -----------------------------------------------------------------------
+
+   --  Result of Copilot.Client.Mcp_Secrets_Save (mcp.secrets.save).
+   type Mcp_Secrets_Save_Result is record
+      --  True when the OS keychain stored the credential, False for the
+      --  file backend.
+      Used_Keychain : Boolean := False;
+   end record;
+
+   --  A user-scoped approval for one installed plugin extension.
+   type Permissions_Extension_Approval is record
+      --  Stable identity, for example "plugin:plugin-name:extension-name".
+      Extension_Name     : UString := Null_UString;
+      Plugin_Name        : UString := Null_UString;
+      --  The exact privileged capabilities the user approved, as a JSON
+      --  array of strings.
+      Capabilities_Json  : UString := Null_UString;
+      --  RFC 3339 timestamp.
+      Granted_At         : UString := Null_UString;
+      --  Opaque; pass it back unchanged to Extension_Approvals_Revoke.
+      Installation_Key   : UString := Null_UString;
+      Installation_Label : UString := Null_UString;  --  optional
+   end record;
+
+   package Permissions_Extension_Approval_Vectors is new Ada.Containers.Vectors
+     (Index_Type   => Positive,
+      Element_Type => Permissions_Extension_Approval);
+   subtype Permissions_Extension_Approval_List is
+     Permissions_Extension_Approval_Vectors.Vector;
+
+   --  Result of Copilot.Client.Extension_Approvals_Grant
+   --  (permissions.extensionApprovals.grant).  Approval holds the stored
+   --  approval when the runtime returned one.
+   type Permissions_Extension_Approvals_Grant_Result is record
+      Granted  : Boolean := False;
+      Approval : Permissions_Extension_Approval;
+   end record;
+
+   --  Result of Copilot.Client.Extension_Approvals_Revoke
+   --  (permissions.extensionApprovals.revoke).
+   type Permissions_Extension_Approvals_Revoke_Result is record
+      Revoked : Boolean := False;
+   end record;
+
+   --  -----------------------------------------------------------------------
    --  Client options
    --  -----------------------------------------------------------------------
 
@@ -547,6 +652,10 @@ package Copilot.Types is
       On_Shell_Authentication       : Shell_Authentication_Handler_Access :=
         null;
       On_Store_Memory               : Memory_Store_Handler_Access := null;
+      --  --- v3.1.0 session options ---
+      --  Answers ask_user requests (userInput.request); setting it enables
+      --  the ask_user tool (interaction.requestUserInput).
+      On_User_Input_Request         : User_Input_Handler := null;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -621,7 +730,8 @@ package Copilot.Types is
        Clear_Default_Provider        => False,
        Capi_Enabled                  => Unset,
        On_Shell_Authentication       => null,
-       On_Store_Memory               => null);
+       On_Store_Memory               => null,
+       On_User_Input_Request         => null);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration
@@ -802,23 +912,6 @@ package Copilot.Types is
 
    type Permission_Handler is access
      function (Req : Permission_Request) return Permission_Result;
-
-   --  -----------------------------------------------------------------------
-   --  User input handling
-   --  -----------------------------------------------------------------------
-
-   type User_Input_Request is record
-      Question   : UString := Null_UString;
-      Session_Id : UString := Null_UString;
-   end record;
-
-   type User_Input_Response is record
-      Answer       : UString  := Null_UString;
-      Was_Freeform : Boolean  := True;
-   end record;
-
-   type User_Input_Handler is access
-     function (Req : User_Input_Request) return User_Input_Response;
 
    --  -----------------------------------------------------------------------
    --  Exceptions

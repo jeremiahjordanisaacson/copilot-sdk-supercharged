@@ -51,6 +51,64 @@ async {
 } |> Async.RunSynchronously
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The six new `CopilotClient` methods call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error, raised as `JsonRpcException` like any other RPC error.
+
+| Feature | F# API |
+|---------|--------|
+| MCP secret store | `client.McpSecretsSaveAsync(secretId, value, ?configDir)` (`mcp.secrets.save`) returns `McpSecretsSaveResult` (`UsedKeychain`: true for the OS keychain, false for the file backend); `client.McpSecretsDeleteAsync(secretId, ?configDir)` (`mcp.secrets.delete`); `client.McpSecretsDeleteServerAsync(serverName, ?configDir)` (`mcp.secrets.deleteServer`). The secret value is never logged |
+| Plugin extension approvals | `client.ExtensionApprovalsGrantAsync(sessionId, requestId)` (`permissions.extensionApprovals.grant`) returns `PermissionsExtensionApprovalsGrantResult` (`Granted`, `Approval`); `client.ExtensionApprovalsListAsync(?sessionId)` (`permissions.extensionApprovals.list`) returns `PermissionsExtensionApprovalsListResult` (`Approvals`); `client.ExtensionApprovalsRevokeAsync(extensionName, installationKey, ?sessionId)` (`permissions.extensionApprovals.revoke`) returns `PermissionsExtensionApprovalsRevokeResult` (`Revoked`) |
+| Ask-user handler and image attachments | `OnUserInputRequest` on `SessionConfig` / `ResumeSessionConfig` answers `userInput.request` (sends `interaction.requestUserInput`). `UserInputRequest.ImageAttachmentConstraints` (`AllowedMimeTypes`, `MaxBytesPerImage`, `MaxCount`) is `Some` when the runtime accepts images; `RequestId` and `Meta` (the opaque `_meta`) are passed through. Answer with `UserInputResponse.Attachments` (`UserInputImageAttachment`: base64 `Data`, `MimeType`, optional `Description` and `DisplayName`; the wire `type` is always `"image"`), sent only when `Some` |
+
+Each `PermissionsExtensionApproval` has `ExtensionName` (the stable identity, for example
+`plugin:my-plugin:my-extension`), `PluginName`, `Capabilities`, `GrantedAt` (RFC 3339),
+`InstallationKey` (opaque: pass it back unchanged to revoke), and `InstallationLabel`.
+Attachments are only valid when the request advertised `ImageAttachmentConstraints`; the runtime
+enforces the MIME type, size, and count limits.
+
+```fsharp
+open System
+open System.IO
+open CopilotSDK.Supercharged.FSharp
+
+async {
+    use client = CopilotClient.create CopilotClientOptions.defaults
+    do! client.StartAsync()
+
+    // MCP secret store. The value is a credential: it is sent to the runtime and never logged.
+    let! saved = client.McpSecretsSaveAsync("my-server/api-key", loadSecret (), configDir = "/path/to/config")
+    printfn "Stored in the %s" (if saved.UsedKeychain then "OS keychain" else "file backend")
+    do! client.McpSecretsDeleteAsync("my-server/api-key")
+    do! client.McpSecretsDeleteServerAsync("my-server")
+
+    // Answer ask_user with an image when the runtime accepts one
+    let! session =
+        client.CreateSessionAsync(
+            { SessionConfig.defaults with
+                OnUserInputRequest =
+                    Some (fun request -> async {
+                        match request.ImageAttachmentConstraints with
+                        | Some c when c.AllowedMimeTypes |> List.contains "image/png" ->
+                            let data = Convert.ToBase64String(File.ReadAllBytes "screenshot.png")
+                            let image = { UserInputImageAttachment.create data "image/png" with DisplayName = Some "screenshot.png" }
+                            // Image-only answer: empty answer and WasFreeform = true
+                            return { UserInputResponse.create "" true with Attachments = Some [ image ] }
+                        | _ -> return UserInputResponse.create "No screenshot available" true }) })
+
+    // Plugin extension approvals (user scoped). Grant persists a pending extension
+    // permission request (pendingRequestId) before you answer it.
+    let! grant = client.ExtensionApprovalsGrantAsync(session.SessionId, pendingRequestId)
+    grant.Approval |> Option.iter (fun approval -> printfn "Approved %s" approval.ExtensionName)
+    let! listed = client.ExtensionApprovalsListAsync()
+    for approval in listed.Approvals do
+        let! revoked = client.ExtensionApprovalsRevokeAsync(approval.ExtensionName, approval.InstallationKey)
+        printfn "Revoked %s: %b" approval.ExtensionName revoked.Revoked
+} |> Async.RunSynchronously
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and
@@ -224,6 +282,14 @@ do! client.DeleteSessionAsync(sessionId)
 let! models = client.ListModelsAsync()
 let! authStatus = client.GetAuthStatusAsync()
 let! status = client.GetStatusAsync()
+
+// MCP secret store and plugin extension approvals (Copilot CLI 1.0.116 or newer)
+let! saved = client.McpSecretsSaveAsync(secretId, value)   // optional configDir
+do! client.McpSecretsDeleteAsync(secretId)
+do! client.McpSecretsDeleteServerAsync(serverName)
+let! grant = client.ExtensionApprovalsGrantAsync(sessionId, requestId)
+let! approvals = client.ExtensionApprovalsListAsync()        // optional sessionId
+let! revoked = client.ExtensionApprovalsRevokeAsync(extensionName, installationKey)
 ```
 
 ### CopilotSession

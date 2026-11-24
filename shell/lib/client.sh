@@ -240,6 +240,32 @@ COPILOT_MEMORY_STORE_HANDLER=""
 # not registered with skip_permission (see copilot_approve_all / copilot_deny_all).
 COPILOT_PERMISSION_HANDLER=""
 
+# --- v3.1.0 Session Config (parity with the Microsoft Copilot SDK 2.0.3-preview.0) ---
+# User input handler function name (the ask_user tool). When set, create/resume request user
+# input and userInput.request is answered by:
+#   my_user_input_handler <request_json>
+#       request: {"sessionId","question","choices"?,"allowFreeform"?,"requestId"?,
+#                 "imageAttachmentConstraints"?,"_meta"?}
+#                imageAttachmentConstraints ({"allowedMimeTypes","maxBytesPerImage","maxCount"})
+#                is present only when the runtime accepts images in the answer
+#       → echo a UserInputResponse JSON (see copilot_user_input_response), for example
+#         {"answer":"yes","wasFreeform":false}; any other output is sent as a freeform answer
+# A failing handler fails the ask_user tool call.
+COPILOT_USER_INPUT_HANDLER=""
+
+# --- MCP Secret Store / Plugin Extension Approval Results ---
+# "true" when the last copilot_client_mcp_secrets_save stored the credential in the OS
+# keychain, "false" when the runtime used its file backend.
+COPILOT_MCP_SECRETS_USED_KEYCHAIN=""
+# Result JSON of the last copilot_client_extension_approvals_grant:
+# {"granted":true|false,"approval"?:<PermissionsExtensionApproval>} (see types.sh).
+COPILOT_EXTENSION_APPROVALS_GRANT_RESULT=""
+# JSON array of PermissionsExtensionApproval objects from the last
+# copilot_client_extension_approvals_list.
+COPILOT_EXTENSION_APPROVALS=""
+# "true" when the last copilot_client_extension_approvals_revoke removed an approval.
+COPILOT_EXTENSION_APPROVAL_REVOKED=""
+
 # --- GitHub Token Provider Registry (client-level) ---
 # Newline-separated "registration_id|function_name|session_id" records used to answer
 # gitHubToken.getToken requests. Cleared by copilot_client_stop.
@@ -970,6 +996,250 @@ copilot_client_clear_managed_settings_cache() {
     return 0
 }
 
+# Save a legacy MCP configuration credential in the runtime-owned secret store
+# (mcp.secrets.save). Requires Copilot CLI 1.0.116 or newer; older CLIs answer with a
+# JSON-RPC method-not-found error (see COPILOT_JSONRPC_LAST_ERROR).
+#
+# The value is a credential: it is sent only to the runtime and never logged.
+#
+# Arguments:
+#   $1 - Secret ID (required)
+#   $2 - Secret value (required)
+#   $3 - Optional configuration directory (configDir; the runtime default when empty)
+#
+# Sets:
+#   COPILOT_MCP_SECRETS_USED_KEYCHAIN - "true" when the OS keychain stored the credential,
+#                                       "false" for the file backend
+#   COPILOT_JSONRPC_LAST_RESPONSE     - The full mcp.secrets.save response
+#
+# Usage:
+#   copilot_client_mcp_secrets_save "my-server-token" "$MY_SERVER_TOKEN"
+#   echo "Keychain: $COPILOT_MCP_SECRETS_USED_KEYCHAIN"
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_mcp_secrets_save() {
+    local secret_id="${1:-}"
+    local value="${2:-}"
+    local config_dir="${3:-}"
+
+    COPILOT_MCP_SECRETS_USED_KEYCHAIN=""
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$secret_id" ]] || [[ -z "$value" ]]; then
+        echo "ERROR: secret_id and value are required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$secret_id" --arg val "$value" '{"secretId":$sid,"value":$val}') || return 1
+    if [[ -n "$config_dir" ]]; then
+        params=$(echo "$params" | jq -c --arg cd "$config_dir" '. + {"configDir":$cd}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "mcp.secrets.save" "$params"; then
+        echo "ERROR: Failed to save MCP secret $secret_id" >&2
+        return 1
+    fi
+
+    COPILOT_MCP_SECRETS_USED_KEYCHAIN=$(copilot_jsonrpc_get_result | jq -r '.usedKeychain == true' 2>/dev/null) || COPILOT_MCP_SECRETS_USED_KEYCHAIN="false"
+    return 0
+}
+
+# Delete a legacy MCP configuration credential from the runtime-owned secret store
+# (mcp.secrets.delete). Requires Copilot CLI 1.0.116 or newer.
+#
+# Arguments:
+#   $1 - Secret ID (required)
+#   $2 - Optional configuration directory (configDir; the runtime default when empty)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full mcp.secrets.delete response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_mcp_secrets_delete() {
+    local secret_id="${1:-}"
+    local config_dir="${2:-}"
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$secret_id" ]]; then
+        echo "ERROR: secret_id is required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$secret_id" '{"secretId":$sid}') || return 1
+    if [[ -n "$config_dir" ]]; then
+        params=$(echo "$params" | jq -c --arg cd "$config_dir" '. + {"configDir":$cd}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "mcp.secrets.delete" "$params"; then
+        echo "ERROR: Failed to delete MCP secret $secret_id" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Delete every legacy credential indexed for an MCP server (mcp.secrets.deleteServer).
+# Requires Copilot CLI 1.0.116 or newer.
+#
+# Arguments:
+#   $1 - MCP server name (required)
+#   $2 - Optional configuration directory (configDir; the runtime default when empty)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full mcp.secrets.deleteServer response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_mcp_secrets_delete_server() {
+    local server_name="${1:-}"
+    local config_dir="${2:-}"
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$server_name" ]]; then
+        echo "ERROR: server_name is required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sn "$server_name" '{"serverName":$sn}') || return 1
+    if [[ -n "$config_dir" ]]; then
+        params=$(echo "$params" | jq -c --arg cd "$config_dir" '. + {"configDir":$cd}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "mcp.secrets.deleteServer" "$params"; then
+        echo "ERROR: Failed to delete the MCP secrets of server $server_name" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Persist a pending plugin extension permission request as a user-scoped approval, before
+# answering that request normally (permissions.extensionApprovals.grant). Requires Copilot CLI
+# 1.0.116 or newer.
+#
+# Arguments:
+#   $1 - Session ID that owns the pending request (required)
+#   $2 - Request ID of the pending extension permission request (required)
+#
+# Sets:
+#   COPILOT_EXTENSION_APPROVALS_GRANT_RESULT - The result JSON ({"granted","approval"?}):
+#     whether the request was eligible and persisted, and the stored approval
+#   COPILOT_JSONRPC_LAST_RESPONSE            - The full response
+#
+# Returns 0 on success (check "granted" in the result), 1 on failure.
+copilot_client_extension_approvals_grant() {
+    local session_id="${1:-}"
+    local request_id="${2:-}"
+
+    COPILOT_EXTENSION_APPROVALS_GRANT_RESULT=""
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$session_id" ]] || [[ -z "$request_id" ]]; then
+        echo "ERROR: session_id and request_id are required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" --arg rid "$request_id" '{"sessionId":$sid,"requestId":$rid}') || return 1
+
+    if ! copilot_jsonrpc_request "permissions.extensionApprovals.grant" "$params"; then
+        echo "ERROR: Failed to grant the extension approval for request $request_id" >&2
+        return 1
+    fi
+
+    COPILOT_EXTENSION_APPROVALS_GRANT_RESULT=$(copilot_jsonrpc_get_result | jq -c 'if type == "object"
+        then {"granted": (.granted == true)} + (if .approval == null then {} else {"approval": .approval} end)
+        else {"granted": false} end' 2>/dev/null) || COPILOT_EXTENSION_APPROVALS_GRANT_RESULT='{"granted":false}'
+    return 0
+}
+
+# List the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+# Requires Copilot CLI 1.0.116 or newer.
+#
+# Arguments:
+#   $1 - Optional attached session ID whose configuration profile to list (the server
+#        profile when empty)
+#
+# Sets:
+#   COPILOT_EXTENSION_APPROVALS   - JSON array of PermissionsExtensionApproval objects
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full response
+#
+# Usage:
+#   copilot_client_extension_approvals_list
+#   echo "$COPILOT_EXTENSION_APPROVALS" | jq -r '.[].extensionName'
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_extension_approvals_list() {
+    local session_id="${1:-}"
+
+    COPILOT_EXTENSION_APPROVALS=""
+
+    _copilot_client_ensure_connected || return 1
+
+    local params='{}'
+    if [[ -n "$session_id" ]]; then
+        params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "permissions.extensionApprovals.list" "$params"; then
+        echo "ERROR: Failed to list extension approvals" >&2
+        return 1
+    fi
+
+    COPILOT_EXTENSION_APPROVALS=$(copilot_jsonrpc_get_result | jq -c 'if (.approvals | type) == "array"
+        then .approvals else [] end' 2>/dev/null) || COPILOT_EXTENSION_APPROVALS='[]'
+    return 0
+}
+
+# Revoke one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+# Requires Copilot CLI 1.0.116 or newer.
+#
+# Arguments:
+#   $1 - Extension name of the approval (required)
+#   $2 - Installation key of the approval, passed back unchanged (required)
+#   $3 - Optional attached session ID whose configuration profile holds the approval
+#
+# Sets:
+#   COPILOT_EXTENSION_APPROVAL_REVOKED - "true" when a matching approval was revoked
+#   COPILOT_JSONRPC_LAST_RESPONSE      - The full response
+#
+# Returns 0 on success (check COPILOT_EXTENSION_APPROVAL_REVOKED), 1 on failure.
+copilot_client_extension_approvals_revoke() {
+    local extension_name="${1:-}"
+    local installation_key="${2:-}"
+    local session_id="${3:-}"
+
+    COPILOT_EXTENSION_APPROVAL_REVOKED=""
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$extension_name" ]] || [[ -z "$installation_key" ]]; then
+        echo "ERROR: extension_name and installation_key are required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg en "$extension_name" --arg ik "$installation_key" \
+        '{"extensionName":$en,"installationKey":$ik}') || return 1
+    if [[ -n "$session_id" ]]; then
+        params=$(echo "$params" | jq -c --arg sid "$session_id" '. + {"sessionId":$sid}') || return 1
+    fi
+
+    if ! copilot_jsonrpc_request "permissions.extensionApprovals.revoke" "$params"; then
+        echo "ERROR: Failed to revoke the extension approval for $extension_name" >&2
+        return 1
+    fi
+
+    COPILOT_EXTENSION_APPROVAL_REVOKED=$(copilot_jsonrpc_get_result | jq -r '.revoked == true' 2>/dev/null) || COPILOT_EXTENSION_APPROVAL_REVOKED="false"
+    return 0
+}
+
 # List all available sessions.
 #
 # Sets:
@@ -1223,6 +1493,11 @@ _copilot_client_add_common_session_options() {
     fi
     if [[ -n "${COPILOT_PERMISSION_HANDLER:-}" ]]; then
         params=$(echo "$params" | jq -c '. + {"requestPermission":true}') || return 1
+    fi
+
+    # --- v3.1.0 options ---
+    if [[ -n "${COPILOT_USER_INPUT_HANDLER:-}" ]]; then
+        params=$(echo "$params" | jq -c '. + {"requestUserInput":true}') || return 1
     fi
 
     echo "$params"

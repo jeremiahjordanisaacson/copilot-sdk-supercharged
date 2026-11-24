@@ -644,6 +644,8 @@ function _session_flat_params(client::CopilotClient, config::SessionConfig; resu
     config.default_provider !== nothing && (p["defaultProvider"] = config.default_provider)
     config.on_shell_authentication_request !== nothing && (p["requestShellAuthentication"] = true)
     config.store_memory !== nothing && (p["hasMemoryStore"] = true)
+    # ask_user questions arrive as `userInput.request` requests answered by the handler
+    config.on_user_input_request !== nothing && (p["requestUserInput"] = true)
     return p
 end
 
@@ -1145,6 +1147,130 @@ function clear_managed_settings_cache(client::CopilotClient)
     return send_request(client.rpc, "managedSettings.clearCache", Dict{String, Any}(); timeout=30)
 end
 
+# -- MCP secret store and plugin extension approvals -------------------------------
+# Server-scoped requests that require Copilot CLI 1.0.116 or newer; older CLIs answer with a
+# method-not-found `JsonRpcError`, raised like any other RPC error.
+
+"""
+    mcp_secrets_save(client, secret_id, value; config_dir=nothing) -> McpSecretsSaveResult
+
+Save a legacy MCP configuration credential in the runtime-owned secret store
+(`mcp.secrets.save`). `value` is a credential: it is sent only to the runtime and never
+logged. `config_dir` selects the configuration directory (`nothing` uses the runtime
+default). Requires Copilot CLI 1.0.116 or newer.
+"""
+function mcp_secrets_save(client::CopilotClient, secret_id::AbstractString, value::AbstractString;
+                          config_dir::Union{AbstractString, Nothing}=nothing)
+    _ensure_started!(client)
+    params = Dict{String, Any}("secretId" => secret_id, "value" => value)
+    config_dir !== nothing && (params["configDir"] = config_dir)
+    result = send_request(client.rpc, "mcp.secrets.save", params; timeout=30)
+    return McpSecretsSaveResult(
+        used_keychain = result isa AbstractDict && get(result, "usedKeychain", false) === true)
+end
+
+"""
+    mcp_secrets_delete(client, secret_id; config_dir=nothing) -> Nothing
+
+Delete a legacy MCP configuration credential from the runtime-owned secret store
+(`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+"""
+function mcp_secrets_delete(client::CopilotClient, secret_id::AbstractString;
+                            config_dir::Union{AbstractString, Nothing}=nothing)
+    _ensure_started!(client)
+    params = Dict{String, Any}("secretId" => secret_id)
+    config_dir !== nothing && (params["configDir"] = config_dir)
+    send_request(client.rpc, "mcp.secrets.delete", params; timeout=30)
+    return nothing
+end
+
+"""
+    mcp_secrets_delete_server(client, server_name; config_dir=nothing) -> Nothing
+
+Delete every legacy credential indexed for an MCP server (`mcp.secrets.deleteServer`).
+Requires Copilot CLI 1.0.116 or newer.
+"""
+function mcp_secrets_delete_server(client::CopilotClient, server_name::AbstractString;
+                                   config_dir::Union{AbstractString, Nothing}=nothing)
+    _ensure_started!(client)
+    params = Dict{String, Any}("serverName" => server_name)
+    config_dir !== nothing && (params["configDir"] = config_dir)
+    send_request(client.rpc, "mcp.secrets.deleteServer", params; timeout=30)
+    return nothing
+end
+
+"""
+    extension_approvals_grant(client, session_id, request_id) -> PermissionsExtensionApprovalsGrantResult
+
+Persist a pending plugin extension permission request as a user-scoped approval, before
+answering that request normally (`permissions.extensionApprovals.grant`). Requires Copilot
+CLI 1.0.116 or newer.
+"""
+function extension_approvals_grant(client::CopilotClient, session_id::AbstractString,
+                                   request_id::AbstractString)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "permissions.extensionApprovals.grant",
+        Dict{String, Any}("sessionId" => session_id, "requestId" => request_id); timeout=30)
+    result isa AbstractDict || return PermissionsExtensionApprovalsGrantResult()
+    approval = get(result, "approval", nothing)
+    return PermissionsExtensionApprovalsGrantResult(
+        granted = get(result, "granted", false) === true,
+        approval = approval isa AbstractDict ? _extension_approval_from_wire(approval) : nothing,
+    )
+end
+
+"""
+    extension_approvals_list(client; session_id=nothing) -> PermissionsExtensionApprovalsListResult
+
+List the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+`session_id` selects an attached session whose configuration profile to list (`nothing`
+lists the server profile). Requires Copilot CLI 1.0.116 or newer.
+"""
+function extension_approvals_list(client::CopilotClient;
+                                  session_id::Union{AbstractString, Nothing}=nothing)
+    _ensure_started!(client)
+    params = Dict{String, Any}()
+    session_id !== nothing && (params["sessionId"] = session_id)
+    result = send_request(client.rpc, "permissions.extensionApprovals.list", params; timeout=30)
+    approvals = result isa AbstractDict ? get(result, "approvals", nothing) : nothing
+    approvals isa AbstractVector || return PermissionsExtensionApprovalsListResult()
+    return PermissionsExtensionApprovalsListResult(approvals = PermissionsExtensionApproval[
+        _extension_approval_from_wire(a) for a in approvals if a isa AbstractDict])
+end
+
+"""
+    extension_approvals_revoke(client, extension_name, installation_key; session_id=nothing)
+        -> PermissionsExtensionApprovalsRevokeResult
+
+Revoke one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+Pass the approval's `installation_key` back unchanged; `session_id` selects an attached
+session whose configuration profile holds the approval. Requires Copilot CLI 1.0.116 or newer.
+"""
+function extension_approvals_revoke(client::CopilotClient, extension_name::AbstractString,
+                                    installation_key::AbstractString;
+                                    session_id::Union{AbstractString, Nothing}=nothing)
+    _ensure_started!(client)
+    params = Dict{String, Any}("extensionName" => extension_name, "installationKey" => installation_key)
+    session_id !== nothing && (params["sessionId"] = session_id)
+    result = send_request(client.rpc, "permissions.extensionApprovals.revoke", params; timeout=30)
+    return PermissionsExtensionApprovalsRevokeResult(
+        revoked = result isa AbstractDict && get(result, "revoked", false) === true)
+end
+
+# PermissionsExtensionApproval from its wire object.
+function _extension_approval_from_wire(d::AbstractDict)
+    capabilities = get(d, "capabilities", nothing)
+    label = get(d, "installationLabel", nothing)
+    return PermissionsExtensionApproval(
+        extension_name = _str(get(d, "extensionName", "")),
+        plugin_name = _str(get(d, "pluginName", "")),
+        capabilities = capabilities isa AbstractVector ? String[string(c) for c in capabilities] : String[],
+        granted_at = _str(get(d, "grantedAt", "")),
+        installation_key = _str(get(d, "installationKey", "")),
+        installation_label = label === nothing ? nothing : string(label),
+    )
+end
+
 """
     policy_helper_failure(x) -> Union{PolicyHelperFailure, Nothing}
 
@@ -1265,6 +1391,9 @@ function _register_client_handlers!(client::CopilotClient)
     end
     on_request!(rpc, "memoryStore.store") do params
         _handle_memory_store(client, params)
+    end
+    on_request!(rpc, "userInput.request") do params
+        _handle_user_input_request(client, params)
     end
     on_request!(rpc, "network.resolveProxy") do params
         _handle_network_request(client, :resolve_proxy, params)
@@ -1397,6 +1526,78 @@ function _handle_memory_store(client::CopilotClient, params)
         throw(ErrorException("Memory store callback failed"))
     end
     return nothing
+end
+
+# Answer a `userInput.request` (the ask_user tool) with the session's `on_user_input_request`
+# handler. The handler gets a UserInputRequest (including `image_attachment_constraints`,
+# `request_id`, and `meta`) and returns a UserInputResponse (see `_user_input_response_wire`).
+function _handle_user_input_request(client::CopilotClient, params)
+    s = _session_for(client, params)
+    s === nothing && throw(ErrorException("Session not found: $(get(params, "sessionId", ""))"))
+    s.config.on_user_input_request === nothing &&
+        throw(ErrorException("No user input handler is registered"))
+    response = s.config.on_user_input_request(_user_input_request_from_wire(s.session_id, params))
+    return _user_input_response_wire(response)
+end
+
+# UserInputRequest from `userInput.request` params; `imageAttachmentConstraints`, `requestId`,
+# and `_meta` are passed through when present.
+function _user_input_request_from_wire(session_id::AbstractString, params::AbstractDict)
+    choices = get(params, "choices", nothing)
+    request_id = get(params, "requestId", nothing)
+    constraints = get(params, "imageAttachmentConstraints", nothing)
+    meta = get(params, "_meta", nothing)
+    return UserInputRequest(
+        session_id = String(session_id),
+        question = _str(get(params, "question", "")),
+        choices = choices isa AbstractVector ? String[string(c) for c in choices] : nothing,
+        allow_freeform = get(params, "allowFreeform", true) !== false,
+        request_id = request_id === nothing ? nothing : string(request_id),
+        image_attachment_constraints = constraints isa AbstractDict ?
+            _image_attachment_constraints_from_wire(constraints) : nothing,
+        meta = meta isa AbstractDict ? Dict{String, Any}(meta) : nothing,
+    )
+end
+
+function _image_attachment_constraints_from_wire(d::AbstractDict)
+    mime_types = get(d, "allowedMimeTypes", nothing)
+    max_bytes = get(d, "maxBytesPerImage", nothing)
+    max_count = get(d, "maxCount", nothing)
+    return UserInputImageAttachmentConstraints(
+        allowed_mime_types = mime_types isa AbstractVector ? String[string(m) for m in mime_types] : String[],
+        max_bytes_per_image = max_bytes isa Integer ? Int(max_bytes) : nothing,
+        max_count = max_count isa Integer ? Int(max_count) : nothing,
+    )
+end
+
+# Wire result for an `on_user_input_request` handler result: a UserInputResponse, a
+# NamedTuple or Dict with answer / was_freeform (or wasFreeform) / attachments, or a string
+# (a freeform answer). Attachments are sent only when non-empty.
+function _user_input_response_wire(response)
+    response === nothing && throw(ErrorException("The user input handler returned no response"))
+    if response isa AbstractString
+        return Dict{String, Any}("answer" => String(response), "wasFreeform" => true)
+    end
+    was_freeform = something(_field(response, :was_freeform), _field(response, :wasFreeform), false)
+    wire = Dict{String, Any}("answer" => _str(_field(response, :answer)),
+        "wasFreeform" => was_freeform === true)
+    attachments = _field(response, :attachments)
+    if attachments isa AbstractVector && !isempty(attachments)
+        wire["attachments"] = Any[_user_input_attachment_wire(a) for a in attachments]
+    end
+    return wire
+end
+
+# Wire object of one ask_user image attachment (the type is always "image").
+function _user_input_attachment_wire(attachment)
+    mime_type = something(_field(attachment, :mime_type), _field(attachment, :mimeType), Some(nothing))
+    wire = Dict{String, Any}("type" => "image", "data" => _str(_field(attachment, :data)),
+        "mimeType" => _str(mime_type))
+    description = _field(attachment, :description)
+    description !== nothing && (wire["description"] = string(description))
+    display_name = something(_field(attachment, :display_name), _field(attachment, :displayName), Some(nothing))
+    display_name !== nothing && (wire["displayName"] = string(display_name))
+    return wire
 end
 
 # Answer a network callback request. Tokens and passwords are never logged.

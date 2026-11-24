@@ -56,6 +56,72 @@ session:destroy()
 client:stop()
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned like any other RPC error (`nil` or `false`, the error message, and the structured `{ code, message, data }` error).
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged.
+
+```lua
+local result, err = client:mcp_secrets_save("my-server-token", os.getenv("MY_SERVER_TOKEN"))  -- optional config_dir
+if result then
+    print(result.usedKeychain and "Stored in the OS keychain" or "Stored in the file backend")
+end
+
+client:mcp_secrets_delete("my-server-token")
+client:mcp_secrets_delete_server("my-server")  -- every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extension_approvals_list` and `extension_approvals_revoke` take an optional trailing `session_id` to use an attached session's configuration profile.
+
+```lua
+-- Persist a pending extension permission request before answering it normally
+local grant = client:extension_approvals_grant(session.session_id, request_id)
+if grant and grant.granted then
+    print("Approved " .. grant.approval.extensionName)
+end
+
+local list = client:extension_approvals_list()
+for _, approval in ipairs(list and list.approvals or {}) do
+    -- extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    client:extension_approvals_revoke(approval.extensionName, approval.installationKey)
+end
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the user input request carries `imageAttachmentConstraints` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is `nil` otherwise. The request also carries `requestId` and the opaque `_meta` table when sent. Answer with `attachments`, an array built with `types.UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`; `type` is always `"image"`). Image-only answers use `answer = ""` and `wasFreeform = true`; the runtime enforces the limits.
+
+```lua
+local session = client:create_session({
+    onUserInputRequest = function(request, invocation)
+        local constraints = request.imageAttachmentConstraints
+        if constraints then
+            for _, mime_type in ipairs(constraints.allowedMimeTypes) do
+                if mime_type == "image/png" then
+                    return types.UserInputResponse({
+                        answer      = "",
+                        wasFreeform = true,
+                        attachments = {
+                            types.UserInputImageAttachment({
+                                data        = base64_encode(read_file("screenshot.png")),
+                                mimeType    = "image/png",
+                                displayName = "screenshot.png",
+                            }),
+                        },
+                    })
+                end
+            end
+        end
+        return types.UserInputResponse({ answer = "No screenshot available", wasFreeform = true })
+    end,
+})
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected by `client:start()` with an `SDK protocol version mismatch` error.
@@ -640,6 +706,12 @@ The client automatically verifies protocol compatibility on startup via the `pin
 | `client:get_foreground_session_id()` | Get TUI foreground session |
 | `client:set_foreground_session_id(id)` | Set TUI foreground session |
 | `client:clear_managed_settings_cache()` | Clear the runtime's cached managed settings |
+| `client:mcp_secrets_save(secret_id, value, config_dir)` | Save an MCP credential (result has `usedKeychain`) |
+| `client:mcp_secrets_delete(secret_id, config_dir)` | Delete an MCP credential |
+| `client:mcp_secrets_delete_server(server_name, config_dir)` | Delete the MCP credentials indexed for a server |
+| `client:extension_approvals_grant(session_id, request_id)` | Persist a pending plugin extension approval (result has `granted`, `approval`) |
+| `client:extension_approvals_list(session_id)` | List plugin extension approvals (result has `approvals`) |
+| `client:extension_approvals_revoke(extension_name, installation_key, session_id)` | Revoke a plugin extension approval (result has `revoked`) |
 
 ### CopilotSession
 

@@ -175,6 +175,34 @@ Public Class ProtocolV4Tests
         Assert.Null(New JsonRpcException("other").PolicyHelperFailure)
     End Sub
 
+    <Fact>
+    Public Sub UserInput_PassesImageConstraintsThroughAndSendsAttachmentsOnlyWhenSet()
+        Dim request = System.Text.Json.JsonSerializer.Deserialize(Of UserInputRequest)(
+            "{""sessionId"":""s1"",""question"":""Screenshot?"",""requestId"":""r1"",""_meta"":{""k"":1}," &
+            """imageAttachmentConstraints"":{""allowedMimeTypes"":[""image/png""],""maxBytesPerImage"":1024,""maxCount"":2}}")
+
+        Assert.Equal("r1", request.RequestId)
+        Assert.True(request.Meta.ContainsKey("k"))
+        Assert.Equal("image/png", request.ImageAttachmentConstraints.AllowedMimeTypes(0))
+        Assert.Equal(1024L, request.ImageAttachmentConstraints.MaxBytesPerImage)
+        Assert.Equal(2L, request.ImageAttachmentConstraints.MaxCount)
+
+        Dim plain = New UserInputResponse With {.Answer = "no", .WasFreeform = True}.ToWire()
+        Assert.False(plain.ContainsKey("attachments"))
+
+        Dim withImage = New UserInputResponse With {
+            .WasFreeform = True,
+            .Attachments = New List(Of UserInputImageAttachment) From {
+                New UserInputImageAttachment With {.Data = "iVBORw0=", .MimeType = "image/png"}}
+        }.ToWire()
+        Assert.Equal(Of Object)("", withImage("answer"))
+        Dim attachment = DirectCast(withImage("attachments"), List(Of Dictionary(Of String, Object)))(0)
+        Assert.Equal(Of Object)("image", attachment("type"))
+        Assert.Equal(Of Object)("iVBORw0=", attachment("data"))
+        Assert.Equal(Of Object)("image/png", attachment("mimeType"))
+        Assert.False(attachment.ContainsKey("displayName"))
+    End Sub
+
 End Class
 
 Public Class TypesTests

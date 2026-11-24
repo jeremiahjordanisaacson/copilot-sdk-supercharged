@@ -70,6 +70,87 @@ let () =
      Client.stop client)
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0.
+
+| Feature | OCaml API |
+|---|---|
+| MCP secret store | `Client.mcp_secrets_save ?config_dir client ~secret_id ~value` (`mcp.secrets.save`, returns `Types.mcp_secrets_save_result`; `mss_used_keychain = false` means the file backend stored it), `Client.mcp_secrets_delete ?config_dir client ~secret_id` (`mcp.secrets.delete`), `Client.mcp_secrets_delete_server ?config_dir client ~server_name` (`mcp.secrets.deleteServer`) |
+| Plugin extension approvals | `Client.extension_approvals_grant client ~session_id ~request_id` (`permissions.extensionApprovals.grant`, returns `peag_granted` and `peag_approval`), `Client.extension_approvals_list ?session_id client` (`permissions.extensionApprovals.list`, returns `peal_approvals`), `Client.extension_approvals_revoke ?session_id client ~extension_name ~installation_key` (`permissions.extensionApprovals.revoke`, returns `pear_revoked`) |
+| Ask-user handler | `on_user_input_request` (sends `requestUserInput`) answers `userInput.request` with a `Types.user_input_response` (`answer`, `was_freeform`, `attachments`) |
+| Ask-user image attachments | The `Types.user_input_request` carries `uir_image_attachment_constraints` (`uiac_allowed_mime_types`, `uiac_max_bytes_per_image`, `uiac_max_count`; `None` when the runtime does not accept images), plus `uir_request_id` and `uir_meta` (the opaque `_meta` object); answer with `Types.make_user_input_response ~was_freeform:true ~attachments:[ Types.make_user_input_image_attachment ~mime_type data ] ""` |
+
+The six MCP secret and extension approval RPCs are server scoped and require **Copilot CLI 1.0.116
+or newer**; an older runtime answers with a method-not-found `Jsonrpc.Jsonrpc_error`, raised like any
+other RPC error. A `Types.permissions_extension_approval` carries `pea_extension_name` (stable
+identity, for example `plugin:plugin-name:extension-name`), `pea_plugin_name`, `pea_capabilities`
+(the exact privileged capabilities the user approved), `pea_granted_at` (RFC 3339),
+`pea_installation_key` (opaque; pass it back unchanged to revoke), and `pea_installation_label`.
+
+`attachments` is sent only when set (each image as `{"type": "image", "data", "mimeType"}` plus
+optional `description` and `displayName`) and is only valid when the request advertised
+`uir_image_attachment_constraints`; the runtime enforces the MIME type, size, and count limits.
+
+```ocaml
+open Copilot_sdk
+
+(* read_api_key and screenshot_base64 are your own functions. *)
+let () =
+  Lwt_main.run
+    (let open Lwt.Syntax in
+     let client = Client.create () in
+     let* () = Client.start client in
+     (* MCP secret store: the value is a credential and is never logged. *)
+     let* saved =
+       Client.mcp_secrets_save client ~secret_id:"my-server/api-key" ~value:(read_api_key ())
+     in
+     Printf.printf "OS keychain: %b\n" saved.Types.mss_used_keychain;
+     let* () = Client.mcp_secrets_delete client ~secret_id:"my-server/api-key" in
+     let* () =
+       Client.mcp_secrets_delete_server ~config_dir:"/path/to/config" client ~server_name:"my-server"
+     in
+     (* Plugin extension approvals. Use Client.extension_approvals_grant client ~session_id
+        ~request_id to persist a pending extension permission request before answering it. *)
+     let* listed = Client.extension_approvals_list client in
+     let* () =
+       Lwt_list.iter_s
+         (fun (approval : Types.permissions_extension_approval) ->
+           let* revoked =
+             Client.extension_approvals_revoke client
+               ~extension_name:approval.Types.pea_extension_name
+               ~installation_key:approval.Types.pea_installation_key
+           in
+           Printf.printf "%s revoked: %b\n" approval.Types.pea_extension_name
+             revoked.Types.pear_revoked;
+           Lwt.return_unit)
+         listed.Types.peal_approvals
+     in
+     (* Ask-user with image attachments *)
+     let config =
+       { (Types.default_session_config ()) with
+         on_user_input_request =
+           Some
+             (fun request ->
+               match request.Types.uir_image_attachment_constraints with
+               | Some _constraints ->
+                 (* Image-only answer: empty answer and was_freeform = true *)
+                 Lwt.return
+                   (Types.make_user_input_response ~was_freeform:true
+                      ~attachments:
+                        [ Types.make_user_input_image_attachment ~display_name:"screenshot.png"
+                            ~mime_type:"image/png" (screenshot_base64 ())
+                        ]
+                      "")
+               | None -> Lwt.return (Types.make_user_input_response ~was_freeform:true "yes"))
+       }
+     in
+     let* session = Client.create_session ~config client in
+     let* _ = Session.send_and_wait session (Types.make_message "Ask me for a screenshot.") in
+     let* () = Client.disconnect_session client session in
+     Client.stop client)
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and

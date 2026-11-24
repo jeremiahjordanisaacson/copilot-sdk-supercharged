@@ -304,6 +304,21 @@ type CopilotClient(options: CopilotClientOptions) =
             return raise (InvalidOperationException("Memory store owner is unavailable"))
     }
 
+    /// Handle a `userInput.request` (ask_user) by asking the session's handler. The
+    /// request's imageAttachmentConstraints, requestId and _meta are passed through.
+    let handleUserInputRequest (parameters: JsonElement option) : Async<obj> = async {
+        match parameters |> Option.bind UserInputRequest.tryParse with
+        | Some request ->
+            match sessions.TryGetValue(request.SessionId) with
+            | true, session ->
+                let! response = session.HandleUserInputRequestAsync(request)
+                return box (UserInputResponse.toWire response)
+            | _ ->
+                return raise (InvalidOperationException(sprintf "Session not found: %s" request.SessionId))
+        | None ->
+            return raise (InvalidOperationException("Invalid user input request payload"))
+    }
+
     /// Handle `network.resolveProxy` {url} -> {proxy?}.
     let handleResolveProxy (parameters: JsonElement option) : Async<obj> = async {
         let result = Dictionary<string, obj>()
@@ -360,6 +375,7 @@ type CopilotClient(options: CopilotClientOptions) =
         t.OnRequest("shellAuthentication.request", handleShellAuthentication)
         t.OnRequest("shellAuthentication.cancel", handleShellAuthenticationCancel)
         t.OnRequest("memoryStore.store", handleMemoryStore)
+        t.OnRequest("userInput.request", handleUserInputRequest)
         match options.Network with
         | Some network ->
             if network.ResolveProxy.IsSome then t.OnRequest("network.resolveProxy", handleResolveProxy)
@@ -441,7 +457,8 @@ type CopilotClient(options: CopilotClientOptions) =
             (defaultProvider: string option)
             (capiEnabled: bool option)
             (hasShellAuthentication: bool)
-            (hasMemoryStore: bool) =
+            (hasMemoryStore: bool)
+            (hasUserInput: bool) =
         tools
         |> Option.iter (fun registered ->
             WireJson.set request "tools" (box (registered |> List.map (fun r -> Tool.toWire r.Tool))))
@@ -463,6 +480,7 @@ type CopilotClient(options: CopilotClientOptions) =
                 request.["capi"] <- capi)
         if hasShellAuthentication then WireJson.set request "requestShellAuthentication" (box true)
         if hasMemoryStore then WireJson.set request "hasMemoryStore" (box true)
+        if hasUserInput then WireJson.set request "requestUserInput" (box true)
 
     /// Fail when an empty-mode client creates or resumes a session without AvailableTools.
     let requireAvailableToolsForMode (availableTools: string list option) =
@@ -485,7 +503,8 @@ type CopilotClient(options: CopilotClientOptions) =
             onStop
             (tools: RegisteredTool list option)
             (onShellAuthentication: ShellAuthenticationHandler option)
-            (onStoreMemory: StoreMemoryHandler option) =
+            (onStoreMemory: StoreMemoryHandler option)
+            (onUserInput: UserInputHandler option) =
         let sid = session.SessionId
         registrationId
         |> Option.iter (fun id ->
@@ -496,6 +515,7 @@ type CopilotClient(options: CopilotClientOptions) =
         tools |> Option.iter session.RegisterTools
         session.SetShellAuthenticationHandler(onShellAuthentication)
         session.SetMemoryStoreHandler(onStoreMemory)
+        session.SetUserInputHandler(onUserInput)
         session.AddDisconnectCallback(fun () ->
             removeGitHubTokenProvider registrationId
             // Only forget the session if a later create/resume did not replace it.
@@ -656,6 +676,7 @@ type CopilotClient(options: CopilotClientOptions) =
             config.CapiEnabled
             config.OnShellAuthenticationRequest.IsSome
             config.OnStoreMemory.IsSome
+            config.OnUserInputRequest.IsSome
         WireJson.setOpt request "gitHubToken" config.GitHubToken
         WireJson.setOpt request "modelCapabilities" config.ModelCapabilities
         WireJson.setOpt request "mcpServers" config.McpServers
@@ -687,6 +708,7 @@ type CopilotClient(options: CopilotClientOptions) =
             config.Tools
             config.OnShellAuthenticationRequest
             config.OnStoreMemory
+            config.OnUserInputRequest
         return session
     }
 
@@ -732,6 +754,7 @@ type CopilotClient(options: CopilotClientOptions) =
             config.CapiEnabled
             config.OnShellAuthenticationRequest.IsSome
             config.OnStoreMemory.IsSome
+            config.OnUserInputRequest.IsSome
         // Resume-only options.
         WireJson.setOpt request "allowTranscriptRecovery" config.AllowTranscriptRecovery
         WireJson.setOpt request "suppressResumeEvent" config.SuppressResumeEvent
@@ -764,6 +787,7 @@ type CopilotClient(options: CopilotClientOptions) =
             config.Tools
             config.OnShellAuthenticationRequest
             config.OnStoreMemory
+            config.OnUserInputRequest
         return session
     }
 
@@ -771,6 +795,73 @@ type CopilotClient(options: CopilotClientOptions) =
     member _.ClearManagedSettingsCacheAsync(?cancellationToken: CancellationToken) : Async<JsonElement> = async {
         let t = getTransport ()
         return! t.SendRequestAsync<JsonElement>("managedSettings.clearCache", {||})
+    }
+
+    /// Save an MCP server secret in the runtime-owned secret store (`mcp.secrets.save`).
+    /// The value is a credential: it is sent to the runtime and never logged. configDir
+    /// selects the configuration directory (the runtime's default when omitted).
+    /// UsedKeychain is true when the OS keychain stored the secret and false for the file
+    /// backend. Requires Copilot CLI 1.0.116 or newer; older runtimes fail with a
+    /// method-not-found JsonRpcException.
+    member _.McpSecretsSaveAsync(secretId: string, value: string, ?configDir: string, ?cancellationToken: CancellationToken) : Async<McpSecretsSaveResult> = async {
+        let t = getTransport ()
+        let request = WireJson.toObject (box {| secretId = secretId; value = value |})
+        WireJson.setOpt request "configDir" configDir
+        let! result = t.SendRequestAsync<JsonElement>("mcp.secrets.save", request)
+        return McpSecretsSaveResult.parse result
+    }
+
+    /// Delete one secret from the runtime-owned MCP secret store (`mcp.secrets.delete`).
+    /// configDir selects the configuration directory. Requires Copilot CLI 1.0.116 or newer.
+    member _.McpSecretsDeleteAsync(secretId: string, ?configDir: string, ?cancellationToken: CancellationToken) : Async<unit> = async {
+        let t = getTransport ()
+        let request = WireJson.toObject (box {| secretId = secretId |})
+        WireJson.setOpt request "configDir" configDir
+        do! t.SendRequestAsync<JsonElement>("mcp.secrets.delete", request) |> Async.Ignore
+    }
+
+    /// Delete every stored secret of one MCP server (`mcp.secrets.deleteServer`).
+    /// configDir selects the configuration directory. Requires Copilot CLI 1.0.116 or newer.
+    member _.McpSecretsDeleteServerAsync(serverName: string, ?configDir: string, ?cancellationToken: CancellationToken) : Async<unit> = async {
+        let t = getTransport ()
+        let request = WireJson.toObject (box {| serverName = serverName |})
+        WireJson.setOpt request "configDir" configDir
+        do! t.SendRequestAsync<JsonElement>("mcp.secrets.deleteServer", request) |> Async.Ignore
+    }
+
+    /// Persist a pending plugin extension permission request as a user-scoped approval,
+    /// before answering that request normally (`permissions.extensionApprovals.grant`).
+    /// Requires Copilot CLI 1.0.116 or newer.
+    member _.ExtensionApprovalsGrantAsync(sessionId: string, requestId: string, ?cancellationToken: CancellationToken) : Async<PermissionsExtensionApprovalsGrantResult> = async {
+        let t = getTransport ()
+        let! result =
+            t.SendRequestAsync<JsonElement>(
+                "permissions.extensionApprovals.grant",
+                {| sessionId = sessionId; requestId = requestId |})
+        return PermissionsExtensionApprovalsGrantResult.parse result
+    }
+
+    /// List the persisted plugin extension approvals (`permissions.extensionApprovals.list`).
+    /// sessionId lists the configuration profile of that attached session. Requires Copilot
+    /// CLI 1.0.116 or newer.
+    member _.ExtensionApprovalsListAsync(?sessionId: string, ?cancellationToken: CancellationToken) : Async<PermissionsExtensionApprovalsListResult> = async {
+        let t = getTransport ()
+        let request = JsonObject()
+        WireJson.setOpt request "sessionId" sessionId
+        let! result = t.SendRequestAsync<JsonElement>("permissions.extensionApprovals.list", request)
+        return PermissionsExtensionApprovalsListResult.parse result
+    }
+
+    /// Revoke a persisted plugin extension approval (`permissions.extensionApprovals.revoke`).
+    /// Pass the approval's ExtensionName and InstallationKey unchanged; sessionId selects the
+    /// attached session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+    member _.ExtensionApprovalsRevokeAsync(extensionName: string, installationKey: string, ?sessionId: string, ?cancellationToken: CancellationToken) : Async<PermissionsExtensionApprovalsRevokeResult> = async {
+        let t = getTransport ()
+        let request =
+            WireJson.toObject (box {| extensionName = extensionName; installationKey = installationKey |})
+        WireJson.setOpt request "sessionId" sessionId
+        let! result = t.SendRequestAsync<JsonElement>("permissions.extensionApprovals.revoke", request)
+        return PermissionsExtensionApprovalsRevokeResult.parse result
     }
 
     /// Get metadata for a session.

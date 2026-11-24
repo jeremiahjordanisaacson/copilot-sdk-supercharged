@@ -59,6 +59,72 @@ fn main() {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned as `RpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged. Pass `''` as `config_dir` to use the runtime's configuration directory.
+
+```v
+saved := client.mcp_secrets_save('my-server-token', os.getenv('MY_SERVER_TOKEN'), '')!
+println(if saved.used_keychain { 'Stored in the OS keychain' } else { 'Stored in the file backend' })
+
+client.mcp_secrets_delete('my-server-token', '')!
+client.mcp_secrets_delete_server('my-server', '')! // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extension_approvals_list` and `extension_approvals_revoke` take a `session_id` (`''` for none) to use an attached session's configuration profile.
+
+```v
+// Persist a pending extension permission request before answering it normally
+grant := client.extension_approvals_grant(session.id(), request_id)!
+if approval := grant.approval {
+    println('Approved ${approval.extension_name}')
+}
+
+listed := client.extension_approvals_list('')!
+for approval in listed.approvals {
+    // extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label
+    client.extension_approvals_revoke(approval.extension_name, approval.installation_key, '')!
+}
+```
+
+### Ask-user image attachments
+
+Set `on_user_input_request` on the session (it sends `requestUserInput`) to answer the agent's ask_user questions with a `UserInputResponse`. When the runtime accepts images in the answer, the `UserInputRequest` carries `image_attachment_constraints` (`allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `none` otherwise. The request also exposes `request_id` and `meta` (the raw JSON of the opaque `_meta` object) when sent. Answer with `attachments`, an array of `UserInputImageAttachment` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). Image-only answers use an empty `answer` with `was_freeform: true`; the runtime enforces the limits.
+
+```v
+import encoding.base64
+
+mut asking := client.create_session(copilot.SessionConfig{
+    on_user_input_request: fn (req copilot.UserInputRequest) copilot.UserInputResponse {
+        if constraints := req.image_attachment_constraints {
+            if 'image/png' in constraints.allowed_mime_types {
+                png := os.read_bytes('screenshot.png') or { []u8{} }
+                return copilot.UserInputResponse{
+                    was_freeform: true
+                    attachments: [
+                        copilot.UserInputImageAttachment{
+                            data: base64.encode(png)
+                            mime_type: 'image/png'
+                            display_name: 'screenshot.png'
+                        },
+                    ]
+                }
+            }
+        }
+        return copilot.UserInputResponse{
+            answer: 'No screenshot available'
+            was_freeform: true
+        }
+    }
+})!
+```
+
 ## What's New in v3.0.0
 
 **SDK protocol 4.** The SDK now speaks SDK protocol 4 (`copilot.protocol_version == 4`), which requires Copilot CLI 1.0.113 or newer. Older CLIs are rejected by `start()` with an `SDK protocol version mismatch` error. Existing options keep working: you fill in the same `SessionConfig` fields as before, and the SDK translates the flat payload into the grouped protocol 4 shape (`group_session_params`) right before `session.create` and `session.resume`. A legacy single `provider` is translated into a named `"default"` provider automatically. The transport now runs one background reader that answers server requests (hooks, tokens, shell authentication, memory store, network callbacks) and routes `session.event` notifications to sessions.
@@ -314,6 +380,14 @@ client.with_session(config, fn [mut s] () ! { ... })!
 // Server info
 status := client.get_status()!
 models := client.get_models()!
+
+// MCP secret store and plugin extension approvals (Copilot CLI 1.0.116 or newer)
+saved := client.mcp_secrets_save(secret_id, value, config_dir)!
+client.mcp_secrets_delete(secret_id, config_dir)!
+client.mcp_secrets_delete_server(server_name, config_dir)!
+grant := client.extension_approvals_grant(session_id, request_id)!
+listed := client.extension_approvals_list(session_id)!
+revoked := client.extension_approvals_revoke(extension_name, installation_key, session_id)!
 ```
 
 ### CopilotSession

@@ -87,6 +87,69 @@ main = do
   pure ()
 ```
 
+## What's New in v3.1.0
+
+### MCP secret store and plugin extension approvals
+
+Six server-scoped `Copilot.Client` functions. They require **Copilot CLI 1.0.116 or newer**; an older runtime answers with a JSON-RPC method-not-found error, which is thrown as `RequestFailed` like any other failed request.
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+import Control.Monad (forM_)
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.Environment (getEnv)
+
+-- MCP secret store. The value is a credential: it is sent to the runtime and never logged.
+apiKey <- T.pack <$> getEnv "MY_API_KEY"
+saved <- mcpSecretsSave client "my-server/api-key" apiKey (Just "/path/to/config")
+print (mssrUsedKeychain saved)                       -- False means the file backend stored it
+mcpSecretsDelete client "my-server/api-key" Nothing  -- mcp.secrets.delete
+mcpSecretsDeleteServer client "my-server" Nothing    -- mcp.secrets.deleteServer
+
+-- Plugin extension approvals (user scoped). Grant persists a pending extension
+-- permission request (identified by its session ID and request ID) before you answer it.
+granted <- extensionApprovalsGrant client pendingSessionId pendingRequestId
+print (peagGranted granted, peaExtensionName <$> peagApproval granted)
+listed <- extensionApprovalsList client Nothing      -- or Just sid for an attached session's profile
+forM_ (pealApprovals listed) $ \approval ->
+  TIO.putStrLn (peaExtensionName approval <> ": " <> T.intercalate ", " (peaCapabilities approval))
+revoked <- extensionApprovalsRevoke client "plugin:my-plugin:my-extension" installationKey Nothing
+print (pearRevoked revoked)
+```
+
+| Function | Wire method | Returns |
+|----------|-------------|---------|
+| `mcpSecretsSave client secretId value mConfigDir` | `mcp.secrets.save` | `McpSecretsSaveResult` (`mssrUsedKeychain`: `False` means the file backend stored it) |
+| `mcpSecretsDelete client secretId mConfigDir` | `mcp.secrets.delete` | `()` |
+| `mcpSecretsDeleteServer client serverName mConfigDir` | `mcp.secrets.deleteServer` | `()` |
+| `extensionApprovalsGrant client sessionId requestId` | `permissions.extensionApprovals.grant` | `PermissionsExtensionApprovalsGrantResult` (`peagGranted`, `peagApproval`) |
+| `extensionApprovalsList client mSessionId` | `permissions.extensionApprovals.list` | `PermissionsExtensionApprovalsListResult` (`pealApprovals`) |
+| `extensionApprovalsRevoke client extensionName installationKey mSessionId` | `permissions.extensionApprovals.revoke` | `PermissionsExtensionApprovalsRevokeResult` (`pearRevoked`) |
+
+A `PermissionsExtensionApproval` carries `peaExtensionName` (stable identity, for example `plugin:plugin-name:extension-name`), `peaPluginName`, `peaCapabilities` (the exact privileged capabilities the user approved), `peaGrantedAt` (RFC 3339), `peaInstallationKey` (opaque; pass it back unchanged to revoke), and `peaInstallationLabel`.
+
+### Ask-user image attachments
+
+When the runtime accepts images, the `UserInputRequest` passed to `scOnUserInputRequest` carries `uirImageAttachmentConstraints` (`uiacAllowedMimeTypes`, `uiacMaxBytesPerImage`, `uiacMaxCount`); it is `Nothing` otherwise. The request also carries `uirRequestId` and `uirMeta` (the opaque `_meta` object) when the runtime sends them. Answer with images through the optional `uirAttachments` of `UserInputResponse`:
+
+```haskell
+session <- createSession client defaultSessionConfig
+  { scOnUserInputRequest = Just $ \req _sessionId ->
+      pure $ case uirImageAttachmentConstraints req of
+        -- Image-only answer: empty answer and wasFreeform True
+        Just _constraints -> (defaultUserInputResponse "" True)
+          { uirAttachments = Just
+              [ (defaultUserInputImageAttachment screenshotBase64 "image/png")
+                  { uiaDisplayName = Just "screenshot.png" } ]
+          }
+        Nothing -> defaultUserInputResponse "yes" True
+  }
+```
+
+`uirAttachments` (each `UserInputImageAttachment` is sent as `{"type": "image", "data", "mimeType"}` plus optional `description` and `displayName`) is sent only when set, and is only valid when the request advertised `uirImageAttachmentConstraints`; the runtime enforces the MIME type, size, and count limits. `UserInputResponse` gained this third field, so build responses with `defaultUserInputResponse answer wasFreeform` (or pass `Nothing` as the third constructor argument).
+
 ## What's New in v3.0.0
 
 **SDK protocol 4.** The SDK now speaks SDK protocol 4 (`sdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. `startClient` sends the `connect` handshake (falling back to `ping` on servers without it) and rejects older CLIs with `SDK protocol version mismatch: SDK supports version 4, but server reports version N. Please update your SDK or server to ensure compatibility.`
@@ -383,7 +446,7 @@ Allow the assistant to ask the user questions:
 session <- createSession client defaultSessionConfig
   { scOnUserInputRequest = Just $ \req sessionId -> do
       putStrLn $ "Question: " ++ show (uirQuestion req)
-      pure $ UserInputResponse "yes" True
+      pure $ defaultUserInputResponse "yes" True
   }
 ```
 
@@ -613,6 +676,12 @@ Content-Length: 123\r\n
 | `models.list` | List available models |
 | `network.setProvider` | Register network callbacks (`ccoNetwork`) |
 | `managedSettings.clearCache` | Clear cached managed settings |
+| `mcp.secrets.save` | Save an MCP secret (`mcpSecretsSave`, CLI 1.0.116+) |
+| `mcp.secrets.delete` | Delete an MCP secret (`mcpSecretsDelete`, CLI 1.0.116+) |
+| `mcp.secrets.deleteServer` | Delete an MCP server's secrets (`mcpSecretsDeleteServer`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.grant` | Persist a pending plugin extension approval (`extensionApprovalsGrant`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.list` | List plugin extension approvals (`extensionApprovalsList`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.revoke` | Revoke a plugin extension approval (`extensionApprovalsRevoke`, CLI 1.0.116+) |
 | `session.create` | Create a new session (grouped protocol 4 options) |
 | `session.resume` | Resume an existing session (grouped protocol 4 options) |
 | `session.send` | Send a message to a session |

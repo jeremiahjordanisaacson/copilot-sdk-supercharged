@@ -74,6 +74,69 @@ public class QuickStart {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error, which is thrown like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store
+(`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). The secret value is never
+logged. Each method has an overload that takes a `configDir` (null selects the runtime's default).
+
+```java
+Types.McpSecretsSaveResult saved = client.mcpSecretsSave("my-server-token", System.getenv("MY_SERVER_TOKEN"));
+System.out.println(saved.usedKeychain ? "Stored in the OS keychain" : "Stored in the file backend");
+
+client.mcpSecretsDelete("my-server-token");
+client.mcpSecretsDeleteServer("my-server");   // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `list` and `revoke`). `extensionApprovalsList` and
+`extensionApprovalsRevoke` have overloads that take a `sessionId` to use an attached session's
+configuration profile.
+
+```java
+// Persist a pending extension permission request (its requestId) before answering it normally
+Types.PermissionsExtensionApprovalsGrantResult grant = client.extensionApprovalsGrant(session.getSessionId(), requestId);
+if (grant.granted) System.out.println("Approved " + grant.approval.extensionName);
+
+for (Types.PermissionsExtensionApproval approval : client.extensionApprovalsList().approvals) {
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    if (client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey).revoked) {
+        System.out.println("Revoked " + approval.extensionName);
+    }
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, `Types.UserInputRequest.imageAttachmentConstraints`
+carries `allowedMimeTypes`, `maxBytesPerImage` and `maxCount`; it is null otherwise. The request also
+exposes `requestId` and `meta` (the opaque `_meta` object) when the runtime sends them. Answer with
+`new Types.UserInputResponse(answer, wasFreeform, attachments)`, where each
+`Types.UserInputImageAttachment` holds base64 `data`, a `mimeType`, and an optional `description` and
+`displayName` (the wire `type` is always `"image"`). Attachments are sent only when set; image-only
+answers use an empty answer and `wasFreeform = true`. The runtime enforces the limits.
+
+```java
+new SessionConfig().onUserInputRequest((request, sessionId) -> {
+    Types.UserInputImageAttachmentConstraints constraints = request.imageAttachmentConstraints;
+    if (constraints != null && constraints.allowedMimeTypes.contains("image/png")) {
+        String data = Base64.getEncoder().encodeToString(Files.readAllBytes(Path.of("screenshot.png")));
+        Types.UserInputImageAttachment image = new Types.UserInputImageAttachment(data, "image/png")
+            .displayName("screenshot.png");
+        return new Types.UserInputResponse("", true, List.of(image));
+    }
+    return new Types.UserInputResponse("No screenshot available", true);
+});
+```
+
 ## What's New in v3.0.0
 
 This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
@@ -323,6 +386,12 @@ jbang https://github.com/github/copilot-sdk-java/blob/main/jbang-example.java
 | `ping(message)` | Ping the server |
 | `listModels()` | List available models |
 | `getState()` | Get connection state |
+| `mcpSecretsSave(secretId, value[, configDir])` | Save an MCP credential (returns `McpSecretsSaveResult`) |
+| `mcpSecretsDelete(secretId[, configDir])` | Delete an MCP credential |
+| `mcpSecretsDeleteServer(serverName[, configDir])` | Delete the MCP credentials indexed for a server |
+| `extensionApprovalsGrant(sessionId, requestId)` | Persist a pending plugin extension approval |
+| `extensionApprovalsList([sessionId])` | List plugin extension approvals |
+| `extensionApprovalsRevoke(extensionName, installationKey[, sessionId])` | Revoke a plugin extension approval |
 | `on(handler)` | Subscribe to lifecycle events |
 
 ### CopilotSession

@@ -131,4 +131,46 @@ defmodule Copilot.SessionParamsTest do
 
     assert Types.ShellAuthenticationRequest.response_to_wire(:cancel) == %{"action" => "cancel"}
   end
+
+  test "v3.1 ask-user image attachment wire helpers" do
+    request =
+      Types.UserInputRequest.from_map(%{
+        "question" => "Attach a screenshot?",
+        "requestId" => "req-1",
+        "_meta" => %{"ext" => %{"k" => 1}},
+        "imageAttachmentConstraints" => %{
+          "allowedMimeTypes" => ["image/png"],
+          "maxBytesPerImage" => 1024,
+          "maxCount" => 2
+        }
+      })
+
+    assert %Types.UserInputRequest{
+             request_id: "req-1",
+             meta: %{"ext" => %{"k" => 1}},
+             image_attachment_constraints: %Types.UserInputImageAttachmentConstraints{
+               allowed_mime_types: ["image/png"],
+               max_bytes_per_image: 1024,
+               max_count: 2
+             }
+           } = request
+
+    assert Types.UserInputRequest.from_map(%{"question" => "q"}).image_attachment_constraints ==
+             nil
+
+    plain = %Types.UserInputResponse{answer: "ok", was_freeform: false}
+    assert Types.UserInputResponse.to_map(plain) == %{"answer" => "ok", "wasFreeform" => false}
+
+    image = %Types.UserInputImageAttachment{data: "aGk=", mime_type: "image/png"}
+
+    assert Types.UserInputResponse.to_map(%Types.UserInputResponse{
+             answer: "",
+             was_freeform: true,
+             attachments: [image]
+           }) == %{
+             "answer" => "",
+             "wasFreeform" => true,
+             "attachments" => [%{"type" => "image", "data" => "aGk=", "mimeType" => "image/png"}]
+           }
+  end
 end

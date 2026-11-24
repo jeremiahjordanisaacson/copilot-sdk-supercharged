@@ -534,6 +534,100 @@ module Copilot
       @rpc_client.request("managedSettings.clearCache", {})
     end
 
+    # Save a legacy MCP configuration credential in the runtime-owned secret store
+    # (+mcp.secrets.save+). Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param secret_id [String] identifier of the credential
+    # @param value [String] the credential; it is never logged
+    # @param config_dir [String, nil] configuration directory (the runtime's default when nil)
+    # @return [McpSecretsSaveResult] +used_keychain+ is true when the OS keychain stored the
+    #   credential and false for the file backend
+    def mcp_secrets_save(secret_id, value, config_dir: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = { secretId: secret_id, value: value }
+      params[:configDir] = config_dir if config_dir
+      result = @rpc_client.request("mcp.secrets.save", params)
+      McpSecretsSaveResult.from_hash(result.is_a?(Hash) ? result : {})
+    end
+
+    # Delete a legacy MCP configuration credential from the runtime-owned secret store
+    # (+mcp.secrets.delete+). Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param secret_id [String] identifier of the credential
+    # @param config_dir [String, nil] configuration directory (the runtime's default when nil)
+    # @return [void]
+    def mcp_secrets_delete(secret_id, config_dir: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = { secretId: secret_id }
+      params[:configDir] = config_dir if config_dir
+      @rpc_client.request("mcp.secrets.delete", params)
+      nil
+    end
+
+    # Delete the legacy credentials indexed for an MCP server (+mcp.secrets.deleteServer+).
+    # Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param server_name [String] the MCP server name
+    # @param config_dir [String, nil] configuration directory (the runtime's default when nil)
+    # @return [void]
+    def mcp_secrets_delete_server(server_name, config_dir: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = { serverName: server_name }
+      params[:configDir] = config_dir if config_dir
+      @rpc_client.request("mcp.secrets.deleteServer", params)
+      nil
+    end
+
+    # Persist a pending plugin extension permission request as a user-scoped approval,
+    # before the host answers that request normally (+permissions.extensionApprovals.grant+).
+    # Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param session_id [String] session that owns the pending request
+    # @param request_id [String] id of the pending extension permission request
+    # @return [PermissionsExtensionApprovalsGrantResult] whether the request was eligible and
+    #   persisted, and the stored approval
+    def extension_approvals_grant(session_id, request_id)
+      raise_not_connected! unless @rpc_client
+
+      result = @rpc_client.request("permissions.extensionApprovals.grant",
+                                   { sessionId: session_id, requestId: request_id })
+      PermissionsExtensionApprovalsGrantResult.from_hash(result.is_a?(Hash) ? result : {})
+    end
+
+    # List the user-scoped plugin extension approvals (+permissions.extensionApprovals.list+).
+    # Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param session_id [String, nil] attached session whose configuration profile to list
+    #   (the server's profile when nil)
+    # @return [PermissionsExtensionApprovalsListResult] the approvals
+    def extension_approvals_list(session_id: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = {}
+      params[:sessionId] = session_id if session_id
+      result = @rpc_client.request("permissions.extensionApprovals.list", params)
+      PermissionsExtensionApprovalsListResult.from_hash(result.is_a?(Hash) ? result : {})
+    end
+
+    # Revoke one user-scoped plugin extension approval (+permissions.extensionApprovals.revoke+).
+    # Requires Copilot CLI 1.0.116 or newer.
+    #
+    # @param extension_name [String] the approval's +extension_name+
+    # @param installation_key [String] the approval's +installation_key+, unchanged
+    # @param session_id [String, nil] attached session whose configuration profile to use
+    # @return [PermissionsExtensionApprovalsRevokeResult] whether a matching approval was revoked
+    def extension_approvals_revoke(extension_name, installation_key, session_id: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = { extensionName: extension_name, installationKey: installation_key }
+      params[:sessionId] = session_id if session_id
+      result = @rpc_client.request("permissions.extensionApprovals.revoke", params)
+      PermissionsExtensionApprovalsRevokeResult.from_hash(result.is_a?(Hash) ? result : {})
+    end
+
     # Subscribe to session lifecycle events.
     #
     # @overload on(&handler)
@@ -936,7 +1030,10 @@ module Copilot
       raise "Session not found: #{session_id}" unless session
 
       result = session._handle_user_input_request(params)
-      { answer: result[:answer], wasFreeform: result[:wasFreeform] }
+      reply = { answer: result[:answer], wasFreeform: result[:wasFreeform] }
+      attachments = result[:attachments]
+      reply[:attachments] = attachments.map { |a| a.respond_to?(:to_wire) ? a.to_wire : a } if attachments
+      reply
     end
 
     def handle_hooks_invoke(params)

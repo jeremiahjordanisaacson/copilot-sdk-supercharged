@@ -61,6 +61,47 @@ disconnect(session)
 stop!(client)
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The MCP secret store and plugin
+extension approval functions are server-scoped client calls that require **Copilot CLI 1.0.116
+or newer**; older CLIs answer with a method-not-found `JsonRpcError`, raised like any other RPC
+error.
+
+- **MCP secret store**: `mcp_secrets_save(client, secret_id, value; config_dir=nothing)` returns an `McpSecretsSaveResult` whose `used_keychain` is `true` when the OS keychain stored the credential (`false` for the file backend). `mcp_secrets_delete(client, secret_id; config_dir=nothing)` and `mcp_secrets_delete_server(client, server_name; config_dir=nothing)` remove credentials. The value is a credential: the SDK never logs it.
+- **Plugin extension approvals**: `extension_approvals_grant(client, session_id, request_id)` persists a pending extension permission request before you answer it and returns a `PermissionsExtensionApprovalsGrantResult` (`granted`, `approval`). `extension_approvals_list(client; session_id=nothing)` returns a `PermissionsExtensionApprovalsListResult` whose `approvals` are `PermissionsExtensionApproval` values (`extension_name`, `plugin_name`, `capabilities`, `granted_at`, `installation_key`, `installation_label`). `extension_approvals_revoke(client, extension_name, installation_key; session_id=nothing)` returns a `PermissionsExtensionApprovalsRevokeResult` (`revoked`).
+- **Ask-user image attachments**: the new `on_user_input_request` session option answers `userInput.request` (the `ask_user` tool). The handler gets a `UserInputRequest` (`session_id`, `question`, `choices`, `allow_freeform`, `request_id`, `image_attachment_constraints`, and `meta`, the request's opaque `_meta`). `image_attachment_constraints` is a `UserInputImageAttachmentConstraints` (`allowed_mime_types`, `max_bytes_per_image`, `max_count`), or `nothing` when the runtime does not accept images. Return a `UserInputResponse` (`answer`, `was_freeform`, `attachments`) whose images are `UserInputImageAttachment` values (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). `attachments` is sent only when set and non-empty, and the runtime enforces the limits.
+- The existing `on_elicitation_request` option is not dispatched by this SDK, so the elicitation `requestId` / `_meta` passthrough does not apply here.
+
+```julia
+using Base64
+
+session = create_session(client;
+    on_user_input_request = req -> begin
+        limits = req.image_attachment_constraints
+        if limits !== nothing && "image/png" in limits.allowed_mime_types
+            image = UserInputImageAttachment(data=base64encode(read("screenshot.png")),
+                mime_type="image/png", display_name="screenshot.png")
+            UserInputResponse(answer="", was_freeform=true, attachments=[image])  # image-only answer
+        else
+            UserInputResponse(answer="No screenshot available", was_freeform=true)
+        end
+    end,
+    on_permission_request = approve_all,
+)
+
+saved = mcp_secrets_save(client, "my-server-token", ENV["MY_SERVER_TOKEN"])
+saved.used_keychain || @info "Stored with the file backend"
+mcp_secrets_delete_server(client, "my-server")
+
+# request_id is the requestId of a pending extension permission request (from its
+# permission.requested event): persist it, then answer the request as usual.
+grant = extension_approvals_grant(client, session.session_id, request_id)
+for approval in extension_approvals_list(client).approvals
+    extension_approvals_revoke(client, approval.extension_name, approval.installation_key)
+end
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4** and requires **Copilot CLI 1.0.113 or newer**; the
@@ -260,6 +301,12 @@ client = CopilotClient(cli_url="localhost:3000")
 | `get_models(client)` | List available models |
 | `list_sessions(client)` | List known sessions on the server |
 | `clear_managed_settings_cache(client)` | Re-read managed (enterprise) settings |
+| `mcp_secrets_save(client, secret_id, value; config_dir)` | Save an MCP credential (returns `McpSecretsSaveResult`) |
+| `mcp_secrets_delete(client, secret_id; config_dir)` | Delete an MCP credential |
+| `mcp_secrets_delete_server(client, server_name; config_dir)` | Delete the MCP credentials indexed for a server |
+| `extension_approvals_grant(client, session_id, request_id)` | Persist a pending plugin extension approval |
+| `extension_approvals_list(client; session_id)` | List plugin extension approvals |
+| `extension_approvals_revoke(client, extension_name, installation_key; session_id)` | Revoke a plugin extension approval |
 
 ### CopilotSession
 

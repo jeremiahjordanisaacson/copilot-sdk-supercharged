@@ -10,12 +10,32 @@ module test_callbacks
   private
 
   public :: accept_shell_auth, remember_fact, add_subagent_context, provide_token
-  public :: lookup_tool, last_stored_fact
+  public :: lookup_tool, last_stored_fact, answer_with_image, last_user_input
 
   !> Fact recorded by remember_fact.
   character(len=:), allocatable :: last_stored_fact
 
+  !> Request seen by answer_with_image.
+  type(user_input_request) :: last_user_input
+
 contains
+
+  function answer_with_image(request) result(response)
+    type(user_input_request), intent(in) :: request
+    type(user_input_response) :: response
+
+    last_user_input = request
+    response%was_freeform = .true.
+    if (allocated(request%image_attachment_constraints)) then
+      response%answer = ''
+      allocate(response%attachments(1))
+      response%attachments(1)%data = 'aGk='
+      response%attachments(1)%mime_type = 'image/png'
+      response%attachments(1)%display_name = 'shot.png'
+    else
+      response%answer = 'yes'
+    end if
+  end function answer_with_image
 
   function accept_shell_auth(request) result(response)
     type(shell_authentication_request), intent(in) :: request
@@ -86,6 +106,7 @@ program test_client
   call test_build_session_params(failures)
   call test_session_server_requests(failures)
   call test_v3_parsers(failures)
+  call test_user_input_request(failures)
 
   if (failures > 0) then
     print '(A,I0,A)', 'FAILED: ', failures, ' test(s) failed'
@@ -433,6 +454,43 @@ contains
     call assert_eq_str('policy helper category', 'timeout', failure%category, failures)
     call assert_true('policy retained', failure%previous_policy_retained, failures)
     call assert_eq_str('message source agent', 'agent-42', message_source_agent('42'), failures)
+  end subroutine
+
+  ! ------------------------------------------------------------------
+  subroutine test_user_input_request(failures)
+    integer, intent(inout) :: failures
+    type(copilot_session_type) :: session
+    type(session_config) :: config
+    character(len=:), allocatable :: result_json, error_text, params
+    logical :: handled
+
+    session%session_id = 'sess-1'
+    session%is_active = .true.
+    config%on_user_input_request => answer_with_image
+    call session%configure(config)
+
+    call session%answer_request('userInput.request', '{"sessionId":"sess-1","question":"Screenshot?",' // &
+      '"requestId":"r9","imageAttachmentConstraints":{"allowedMimeTypes":["image/png","image/jpeg"],' // &
+      '"maxBytesPerImage":1024,"maxCount":2},"_meta":{"k":1}}', handled, result_json, error_text)
+    call assert_eq_str('image answer', '{"answer":"","wasFreeform":true,"attachments":[{"type":"image",' // &
+      '"data":"aGk=","mimeType":"image/png","displayName":"shot.png"}]}', result_json, failures)
+    call assert_eq_str('request id passed through', 'r9', last_user_input%request_id, failures)
+    call assert_true('constraints passed through', allocated(last_user_input%image_attachment_constraints), &
+                     failures)
+    if (allocated(last_user_input%image_attachment_constraints)) then
+      call assert_eq_str('allowed mime type', 'image/jpeg', &
+                         last_user_input%image_attachment_constraints%allowed_mime_types(2), failures)
+      call assert_true('max count', last_user_input%image_attachment_constraints%max_count == 2, failures)
+    end if
+    call assert_eq_str('meta passed through', '{"k":1}', last_user_input%meta_json, failures)
+
+    call session%answer_request('userInput.request', '{"sessionId":"sess-1","question":"Proceed?"}', &
+      handled, result_json, error_text)
+    call assert_eq_str('attachments omitted when unset', '{"answer":"yes","wasFreeform":true}', &
+                       result_json, failures)
+
+    params = copilot_build_session_params(config, .false., '')
+    call assert_true('user input requested', index(params, '"requestUserInput":true') > 0, failures)
   end subroutine
 
 end program test_client

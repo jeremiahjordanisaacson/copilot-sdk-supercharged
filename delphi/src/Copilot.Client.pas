@@ -130,6 +130,45 @@ type
     // (managedSettings.clearCache).
     procedure ClearManagedSettingsCache;
 
+    // --- MCP secret store and plugin extension approvals (v3.1.0) ---
+    // Server-scoped requests that need Copilot CLI 1.0.116 or newer; older
+    // CLIs answer method-not-found, raised as EJsonRpcError (Code -32601)
+    // like any other RPC error.
+
+    // Save a legacy MCP configuration credential in the runtime-owned secret
+    // store (mcp.secrets.save). Value is a credential and is never logged.
+    // ConfigDir = '' uses the runtime's default configuration directory.
+    function McpSecretsSave(const SecretId: string; const Value: string;
+      const ConfigDir: string = ''): TMcpSecretsSaveResult;
+
+    // Delete a legacy MCP configuration credential (mcp.secrets.delete).
+    procedure McpSecretsDelete(const SecretId: string;
+      const ConfigDir: string = '');
+
+    // Delete the legacy MCP credentials indexed for a server
+    // (mcp.secrets.deleteServer).
+    procedure McpSecretsDeleteServer(const ServerName: string;
+      const ConfigDir: string = '');
+
+    // Persist a pending plugin extension permission request as a user-scoped
+    // approval, before answering that request normally
+    // (permissions.extensionApprovals.grant).
+    function ExtensionApprovalsGrant(const ASessionId: string;
+      const RequestId: string): TPermissionsExtensionApprovalsGrantResult;
+
+    // List the user-scoped plugin extension approvals
+    // (permissions.extensionApprovals.list). ASessionId = '' lists the
+    // server's configuration profile, otherwise the attached session's.
+    function ExtensionApprovalsList(
+      const ASessionId: string = ''): TArray<TPermissionsExtensionApproval>;
+
+    // Revoke one user-scoped plugin extension approval
+    // (permissions.extensionApprovals.revoke). Pass the approval's
+    // ExtensionName and InstallationKey unchanged.
+    function ExtensionApprovalsRevoke(const ExtensionName: string;
+      const InstallationKey: string;
+      const ASessionId: string = ''): TPermissionsExtensionApprovalsRevokeResult;
+
     // Get connection state
     property State: TConnectionState read FState;
     property Options: TCopilotClientOptions read FOptions;
@@ -191,6 +230,30 @@ begin
   Result.AgentType := Input.GetValue<string>('agentType', '');
   Result.StopReason := Input.GetValue<string>('stopReason', '');
   Result.Response := Input.GetValue<string>('response', '');
+end;
+
+// String items of a JSON array (empty when Value is not an array).
+function JsonStrings(const Value: TJSONValue): TArray<string>;
+begin
+  Result := nil;
+  if Value is TJSONArray then
+    for var Item in TJSONArray(Value) do
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Item.Value;
+    end;
+end;
+
+// Decode one PermissionsExtensionApproval object.
+function ParseExtensionApproval(Obj: TJSONObject): TPermissionsExtensionApproval;
+begin
+  Result := Default(TPermissionsExtensionApproval);
+  Result.ExtensionName := Obj.GetValue<string>('extensionName', '');
+  Result.PluginName := Obj.GetValue<string>('pluginName', '');
+  Result.Capabilities := JsonStrings(Obj.GetValue('capabilities'));
+  Result.GrantedAt := Obj.GetValue<string>('grantedAt', '');
+  Result.InstallationKey := Obj.GetValue<string>('installationKey', '');
+  Result.InstallationLabel := Obj.GetValue<string>('installationLabel', '');
 end;
 
 // Decode error.data.policyHelperFailure from a JSON-RPC error object.
@@ -1016,6 +1079,10 @@ begin
 
     if Assigned(Config.StoreMemory) then
       Params.AddPair('hasMemoryStore', TJSONBool.Create(True));
+
+    // The ask_user tool is answered through userInput.request.
+    if Assigned(Config.OnUserInputRequest) then
+      Params.AddPair('requestUserInput', TJSONBool.Create(True));
   except
     Params.Free;
     raise;
@@ -1198,6 +1265,154 @@ begin
     Params.Free;
   end;
 end;
+
+function TCopilotClient.McpSecretsSave(const SecretId: string;
+  const Value: string; const ConfigDir: string): TMcpSecretsSaveResult;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Result := Default(TMcpSecretsSaveResult);
+  Params := TJSONObject.Create;
+  try
+    Params.AddPair('secretId', SecretId);
+    Params.AddPair('value', Value);
+    if ConfigDir <> '' then
+      Params.AddPair('configDir', ConfigDir);
+    ResultVal := FRpc.SendRequest('mcp.secrets.save', Params);
+  finally
+    Params.Free;
+  end;
+  try
+    if ResultVal is TJSONObject then
+      Result.UsedKeychain :=
+        TJSONObject(ResultVal).GetValue<Boolean>('usedKeychain', False);
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+procedure TCopilotClient.McpSecretsDelete(const SecretId: string;
+  const ConfigDir: string);
+var
+  Params: TJSONObject;
+begin
+  Params := TJSONObject.Create;
+  try
+    Params.AddPair('secretId', SecretId);
+    if ConfigDir <> '' then
+      Params.AddPair('configDir', ConfigDir);
+    FRpc.SendRequest('mcp.secrets.delete', Params).Free;
+  finally
+    Params.Free;
+  end;
+end;
+
+procedure TCopilotClient.McpSecretsDeleteServer(const ServerName: string;
+  const ConfigDir: string);
+var
+  Params: TJSONObject;
+begin
+  Params := TJSONObject.Create;
+  try
+    Params.AddPair('serverName', ServerName);
+    if ConfigDir <> '' then
+      Params.AddPair('configDir', ConfigDir);
+    FRpc.SendRequest('mcp.secrets.deleteServer', Params).Free;
+  finally
+    Params.Free;
+  end;
+end;
+
+function TCopilotClient.ExtensionApprovalsGrant(const ASessionId: string;
+  const RequestId: string): TPermissionsExtensionApprovalsGrantResult;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Result := Default(TPermissionsExtensionApprovalsGrantResult);
+  Params := TJSONObject.Create;
+  try
+    Params.AddPair('sessionId', ASessionId);
+    Params.AddPair('requestId', RequestId);
+    ResultVal := FRpc.SendRequest('permissions.extensionApprovals.grant', Params);
+  finally
+    Params.Free;
+  end;
+  try
+    if ResultVal is TJSONObject then
+    begin
+      Result.Granted := TJSONObject(ResultVal).GetValue<Boolean>('granted', False);
+      var ApprovalVal := TJSONObject(ResultVal).GetValue('approval');
+      if ApprovalVal is TJSONObject then
+      begin
+        Result.HasApproval := True;
+        Result.Approval := ParseExtensionApproval(TJSONObject(ApprovalVal));
+      end;
+    end;
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+function TCopilotClient.ExtensionApprovalsList(
+  const ASessionId: string): TArray<TPermissionsExtensionApproval>;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Result := nil;
+  Params := TJSONObject.Create;
+  try
+    if ASessionId <> '' then
+      Params.AddPair('sessionId', ASessionId);
+    ResultVal := FRpc.SendRequest('permissions.extensionApprovals.list', Params);
+  finally
+    Params.Free;
+  end;
+  try
+    if ResultVal is TJSONObject then
+    begin
+      var ApprovalsVal := TJSONObject(ResultVal).GetValue('approvals');
+      if ApprovalsVal is TJSONArray then
+        for var Item in TJSONArray(ApprovalsVal) do
+          if Item is TJSONObject then
+          begin
+            SetLength(Result, Length(Result) + 1);
+            Result[High(Result)] := ParseExtensionApproval(TJSONObject(Item));
+          end;
+    end;
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+function TCopilotClient.ExtensionApprovalsRevoke(const ExtensionName: string;
+  const InstallationKey: string;
+  const ASessionId: string): TPermissionsExtensionApprovalsRevokeResult;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Result := Default(TPermissionsExtensionApprovalsRevokeResult);
+  Params := TJSONObject.Create;
+  try
+    Params.AddPair('extensionName', ExtensionName);
+    Params.AddPair('installationKey', InstallationKey);
+    if ASessionId <> '' then
+      Params.AddPair('sessionId', ASessionId);
+    ResultVal := FRpc.SendRequest('permissions.extensionApprovals.revoke', Params);
+  finally
+    Params.Free;
+  end;
+  try
+    if ResultVal is TJSONObject then
+      Result.Revoked := TJSONObject(ResultVal).GetValue<Boolean>('revoked', False);
+  finally
+    ResultVal.Free;
+  end;
+end;
+
 function TCopilotClient.GetSessionMetadata(
   const ASessionId: string): TSessionMetadata;
 var
@@ -1536,23 +1751,66 @@ var
   Session: TCopilotSession;
   InputResult: TUserInputResponse;
   ResultObj: TJSONObject;
+  WasFreeform: Boolean;
 begin
   Obj := Params as TJSONObject;
+  Request := Default(TUserInputRequest);
   Request.Question := Obj.GetValue<string>('question', '');
   Request.SessionId := Obj.GetValue<string>('sessionId', '');
+  Request.Choices := JsonStrings(Obj.GetValue('choices'));
+  Request.AllowFreeform := Obj.GetValue<Boolean>('allowFreeform', True);
+  Request.RequestId := Obj.GetValue<string>('requestId', '');
+  var MetaVal := Obj.GetValue('_meta');
+  if MetaVal is TJSONObject then
+    Request.MetaJson := MetaVal.ToJSON;
+  // Image support advertised by the runtime (absent when not accepted).
+  var ConstraintsVal := Obj.GetValue('imageAttachmentConstraints');
+  if ConstraintsVal is TJSONObject then
+  begin
+    Request.ImageAttachmentConstraints.Present := True;
+    Request.ImageAttachmentConstraints.AllowedMimeTypes :=
+      JsonStrings(TJSONObject(ConstraintsVal).GetValue('allowedMimeTypes'));
+    Request.ImageAttachmentConstraints.MaxBytesPerImage :=
+      TJSONObject(ConstraintsVal).GetValue<Int64>('maxBytesPerImage', 0);
+    Request.ImageAttachmentConstraints.MaxCount :=
+      TJSONObject(ConstraintsVal).GetValue<Integer>('maxCount', 0);
+  end;
 
   Session := FindSession(Request.SessionId);
   if Assigned(Session) then
     InputResult := Session.HandleUserInput(Request)
   else
-  begin
-    InputResult.Answer := '';
-    InputResult.Accepted := False;
-  end;
+    InputResult := Default(TUserInputResponse);
+
+  // wasFreeform: the answer is not one of the offered choices (so an
+  // image-only answer with an empty Answer is freeform).
+  WasFreeform := True;
+  for var Choice in Request.Choices do
+    if Choice = InputResult.Answer then
+      WasFreeform := False;
 
   ResultObj := TJSONObject.Create;
   ResultObj.AddPair('answer', InputResult.Answer);
+  ResultObj.AddPair('wasFreeform', TJSONBool.Create(WasFreeform));
   ResultObj.AddPair('accepted', TJSONBool.Create(InputResult.Accepted));
+  // Image attachments are sent only when the handler attached any.
+  if Length(InputResult.Attachments) > 0 then
+  begin
+    var AttachmentsArr := TJSONArray.Create;
+    for var Attachment in InputResult.Attachments do
+    begin
+      var AttachmentObj := TJSONObject.Create;
+      AttachmentObj.AddPair('type', 'image');
+      AttachmentObj.AddPair('data', Attachment.Data);
+      AttachmentObj.AddPair('mimeType', Attachment.MimeType);
+      if Attachment.Description <> '' then
+        AttachmentObj.AddPair('description', Attachment.Description);
+      if Attachment.DisplayName <> '' then
+        AttachmentObj.AddPair('displayName', Attachment.DisplayName);
+      AttachmentsArr.AddElement(AttachmentObj);
+    end;
+    ResultObj.AddPair('attachments', AttachmentsArr);
+  end;
   Result := ResultObj;
 end;
 

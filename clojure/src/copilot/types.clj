@@ -246,18 +246,39 @@
 (defn user-input-request
   "Construct a user input request.
   `question` - string
-  Optional: :choices (vec of strings), :allow-freeform (bool)"
+  Optional: :choices (vec of strings), :allow-freeform (bool),
+            :image-attachment-constraints (map with :allowedMimeTypes,
+            :maxBytesPerImage, :maxCount; absent when the runtime does not
+            accept images), :request-id (pending request id string)"
   [question & {:as opts}]
   (merge {:question question}
          (when-let [c (:choices opts)]        {:choices c})
-         (when-let [a (:allow-freeform opts)] {:allowFreeform a})))
+         (when-let [a (:allow-freeform opts)] {:allowFreeform a})
+         (when-let [i (:image-attachment-constraints opts)] {:imageAttachmentConstraints i})
+         (when-let [r (:request-id opts)]     {:requestId r})))
 
 (defn user-input-response
   "Construct a user input response.
   `answer`       - string
-  `was-freeform` - boolean"
-  [answer was-freeform]
-  {:answer answer :wasFreeform was-freeform})
+  `was-freeform` - boolean
+  Optional: :attachments (vector of `user-input-image-attachment` maps), sent
+            only when set and only valid when the request carried
+            :imageAttachmentConstraints.  For an image-only answer use an
+            empty answer and was-freeform true."
+  [answer was-freeform & {:keys [attachments]}]
+  (cond-> {:answer answer :wasFreeform was-freeform}
+    (some? attachments) (assoc :attachments (vec attachments))))
+
+(defn user-input-image-attachment
+  "Construct an image attachment for a user input response
+  (UserInputImageAttachment).
+  `data`      - base64-encoded image bytes
+  `mime-type` - MIME type string, for example \"image/png\"
+  Optional: :description, :display-name"
+  [data mime-type & {:keys [description display-name]}]
+  (cond-> {:type "image" :data data :mimeType mime-type}
+    description  (assoc :description description)
+    display-name (assoc :displayName display-name)))
 
 ;; ============================================================================
 ;; Canvas / cloud session types
@@ -931,6 +952,47 @@
   {:success (true? (:success m))
    :mode    (:mode m)
    :reason  (:reason m)})
+
+(defn mcp-secrets-save-result
+  "Parse an mcp.secrets.save result into {:used-keychain bool}: true when the
+  OS keychain stored the secret, false for the file backend."
+  [m]
+  {:used-keychain (true? (:usedKeychain m))})
+
+(defn extension-approval
+  "Parse a PermissionsExtensionApproval (a user-scoped approval for one
+  installed plugin extension) into {:extension-name :plugin-name
+  :capabilities :granted-at :installation-key :installation-label}, or nil.
+  :extension-name is the stable identity (for example
+  \"plugin:plugin-name:extension-name\"), :capabilities the exact privileged
+  capabilities the user approved, :granted-at an RFC 3339 timestamp, and
+  :installation-key an opaque key to pass back unchanged to revoke."
+  [m]
+  (when (map? m)
+    {:extension-name     (:extensionName m)
+     :plugin-name        (:pluginName m)
+     :capabilities       (vec (:capabilities m))
+     :granted-at         (:grantedAt m)
+     :installation-key   (:installationKey m)
+     :installation-label (:installationLabel m)}))
+
+(defn extension-approvals-grant-result
+  "Parse a permissions.extensionApprovals.grant result into
+  {:granted bool :approval approval-or-nil} (see `extension-approval`)."
+  [m]
+  {:granted  (true? (:granted m))
+   :approval (extension-approval (:approval m))})
+
+(defn extension-approvals-list-result
+  "Parse a permissions.extensionApprovals.list result into
+  {:approvals [approval ...]} (see `extension-approval`)."
+  [m]
+  {:approvals (mapv extension-approval (:approvals m))})
+
+(defn extension-approvals-revoke-result
+  "Parse a permissions.extensionApprovals.revoke result into {:revoked bool}."
+  [m]
+  {:revoked (true? (:revoked m))})
 
 ;; ============================================================================
 ;; Session filesystem types

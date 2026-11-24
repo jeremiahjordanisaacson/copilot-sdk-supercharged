@@ -512,7 +512,8 @@ class CopilotSession {
             String mode = (String) eventData.mode
             String elicitationSource = (String) eventData.elicitationSource
             String url = (String) eventData.url
-            submitCallback { handleElicitationRequest(requestId, message, requestedSchema, mode, elicitationSource, url) }
+            Map<String, Object> meta = eventData._meta instanceof Map ? (Map<String, Object>) eventData._meta : null
+            submitCallback { handleElicitationRequest(requestId, message, requestedSchema, mode, elicitationSource, url, meta) }
         }
 
         handleBroadcastEvent(eventType, eventData)
@@ -669,7 +670,8 @@ class CopilotSession {
     }
 
     private void handleElicitationRequest(String requestId, String message, Object requestedSchema,
-                                          String mode, String elicitationSource, String url) {
+                                          String mode, String elicitationSource, String url,
+                                          Map<String, Object> meta) {
         if (!elicitationHandler) return
 
         try {
@@ -680,6 +682,8 @@ class CopilotSession {
                 it.mode = mode
                 it.elicitationSource = elicitationSource
                 it.url = url
+                it.requestId = requestId
+                it.meta = meta
                 it
             }
             Object result = elicitationHandler.call(ctx)
@@ -688,6 +692,7 @@ class CopilotSession {
                 ElicitationResult er = (ElicitationResult) result
                 resultMap = [action: er.action] as Map<String, Object>
                 if (er.content) resultMap.content = er.content
+                if (er.meta != null) resultMap._meta = er.meta
             } else if (result instanceof Map) {
                 resultMap = (Map<String, Object>) result
             } else {
@@ -751,6 +756,9 @@ class CopilotSession {
             question = (String) params.question
             choices = params.containsKey('choices') ? (List<String>) params.choices : null
             allowFreeform = (Boolean) params.allowFreeform
+            requestId = params.requestId instanceof String ? (String) params.requestId : null
+            imageAttachmentConstraints = UserInputImageAttachmentConstraints.fromMap(params.imageAttachmentConstraints)
+            meta = params._meta instanceof Map ? (Map<String, Object>) params._meta : null
             it
         }
         (UserInputResponse) userInputHandler.call(req, sessionId)

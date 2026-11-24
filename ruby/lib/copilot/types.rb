@@ -167,20 +167,36 @@ module Copilot
   end
 
   # Request for user input from the agent (enables ask_user tool).
-  UserInputRequest = Struct.new(:question, :choices, :allow_freeform, keyword_init: true) do
+  #
+  # +image_attachment_constraints+ ({UserInputImageAttachmentConstraints}) is set when the
+  # runtime accepts image attachments in the answer and nil otherwise. +request_id+ is the
+  # pending request id and +meta+ the request's opaque +_meta+ object, when the runtime sends them.
+  UserInputRequest = Struct.new(
+    :question, :choices, :allow_freeform, :request_id, :image_attachment_constraints, :meta,
+    keyword_init: true
+  ) do
     def self.from_hash(h)
+      constraints = h["imageAttachmentConstraints"]
       new(
         question: h["question"],
         choices: h["choices"],
-        allow_freeform: h.fetch("allowFreeform", true)
+        allow_freeform: h.fetch("allowFreeform", true),
+        request_id: h["requestId"],
+        image_attachment_constraints:
+          constraints.is_a?(Hash) ? UserInputImageAttachmentConstraints.from_hash(constraints) : nil,
+        meta: h["_meta"]
       )
     end
   end
 
-  # Response to a user input request.
-  UserInputResponse = Struct.new(:answer, :was_freeform, keyword_init: true) do
+  # Response to a user input request. +attachments+ is an optional Array of
+  # {UserInputImageAttachment}, only valid when the request advertised
+  # +image_attachment_constraints+; it is sent only when set.
+  UserInputResponse = Struct.new(:answer, :was_freeform, :attachments, keyword_init: true) do
     def to_h
-      { answer: answer, wasFreeform: was_freeform }
+      h = { answer: answer, wasFreeform: was_freeform }
+      h[:attachments] = attachments.map { |a| a.respond_to?(:to_wire) ? a.to_wire : a } if attachments
+      h
     end
   end
 
@@ -1084,6 +1100,96 @@ module Copilot
     # @return [Boolean] true when managed (enterprise) policy refused the mode
     def refused_by_managed_policy?
       reason == PermissionModeRefusalReason::MANAGED_POLICY
+    end
+  end
+
+  # --- v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0) ---
+
+  # Image support advertised by a +userInput.request+ ({UserInputRequest#image_attachment_constraints}).
+  # Absent (nil) when the runtime does not accept images in the answer.
+  UserInputImageAttachmentConstraints = Struct.new(
+    :allowed_mime_types, :max_bytes_per_image, :max_count,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        allowed_mime_types: h["allowedMimeTypes"] || [],
+        max_bytes_per_image: h["maxBytesPerImage"],
+        max_count: h["maxCount"]
+      )
+    end
+  end
+
+  # An inline image attached to an ask_user answer ({UserInputResponse#attachments}).
+  # +data+ is the base64-encoded image; the wire +type+ is always "image". The runtime
+  # enforces the advertised MIME types, size and count limits. Image-only answers use
+  # +answer: ""+ and +was_freeform: true+.
+  UserInputImageAttachment = Struct.new(:data, :mime_type, :description, :display_name, keyword_init: true) do
+    # @return [String] always "image"
+    def type
+      "image"
+    end
+
+    def to_wire
+      h = { type: "image", data: data, mimeType: mime_type }
+      h[:description] = description if description
+      h[:displayName] = display_name if display_name
+      h
+    end
+  end
+
+  # Result of {CopilotClient#mcp_secrets_save}. +used_keychain+ is true when the OS keychain
+  # stored the credential and false when the runtime used its file backend.
+  McpSecretsSaveResult = Struct.new(:used_keychain, keyword_init: true) do
+    def self.from_hash(h)
+      new(used_keychain: h["usedKeychain"] ? true : false)
+    end
+  end
+
+  # A user-scoped approval for one installed plugin extension. +extension_name+ is the stable
+  # identity (for example "plugin:plugin-name:extension-name"), +capabilities+ the exact
+  # privileged capabilities the user approved and +granted_at+ an RFC 3339 timestamp. Pass
+  # +installation_key+ back unchanged to {CopilotClient#extension_approvals_revoke}.
+  PermissionsExtensionApproval = Struct.new(
+    :extension_name, :plugin_name, :capabilities, :granted_at, :installation_key, :installation_label,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        extension_name: h["extensionName"],
+        plugin_name: h["pluginName"],
+        capabilities: h["capabilities"] || [],
+        granted_at: h["grantedAt"],
+        installation_key: h["installationKey"],
+        installation_label: h["installationLabel"]
+      )
+    end
+  end
+
+  # Result of {CopilotClient#extension_approvals_grant}: whether the pending request was
+  # eligible and persisted, and the stored +approval+ when it was.
+  PermissionsExtensionApprovalsGrantResult = Struct.new(:granted, :approval, keyword_init: true) do
+    def self.from_hash(h)
+      approval = h["approval"]
+      new(
+        granted: h["granted"] ? true : false,
+        approval: approval.is_a?(Hash) ? PermissionsExtensionApproval.from_hash(approval) : nil
+      )
+    end
+  end
+
+  # Result of {CopilotClient#extension_approvals_list}: an Array of {PermissionsExtensionApproval}.
+  PermissionsExtensionApprovalsListResult = Struct.new(:approvals, keyword_init: true) do
+    def self.from_hash(h)
+      approvals = h["approvals"].is_a?(Array) ? h["approvals"] : []
+      new(approvals: approvals.select { |a| a.is_a?(Hash) }.map { |a| PermissionsExtensionApproval.from_hash(a) })
+    end
+  end
+
+  # Result of {CopilotClient#extension_approvals_revoke}: whether a matching approval was revoked.
+  PermissionsExtensionApprovalsRevokeResult = Struct.new(:revoked, keyword_init: true) do
+    def self.from_hash(h)
+      new(revoked: h["revoked"] ? true : false)
     end
   end
 end

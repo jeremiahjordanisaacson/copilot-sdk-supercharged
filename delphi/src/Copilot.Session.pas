@@ -501,10 +501,7 @@ begin
   if Assigned(FOnUserInputRequest) then
     Result := FOnUserInputRequest(Request)
   else
-  begin
-    Result.Answer := '';
-    Result.Accepted := False;
-  end;
+    Result := Default(TUserInputResponse);
 end;
 
 function TCopilotSession.HandleExitPlanMode(

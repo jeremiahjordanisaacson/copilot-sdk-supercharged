@@ -71,6 +71,81 @@ async fn main() -> Result<(), CopilotError> {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, returned as `CopilotError::JsonRpc { code: -32601, .. }` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged. Each method takes an optional `config_dir` (the runtime's configuration directory when `None`).
+
+```rust
+let token = std::env::var("MY_SERVER_TOKEN").unwrap_or_default();
+let saved = client.mcp_secrets_save("my-server-token", &token, None).await?; // mcp.secrets.save
+if saved.used_keychain {
+    println!("Stored in the OS keychain");
+} else {
+    println!("Stored in the file backend");
+}
+
+client.mcp_secrets_delete("my-server-token", None).await?; // mcp.secrets.delete
+client.mcp_secrets_delete_server("my-server", None).await?; // mcp.secrets.deleteServer: every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions (`PermissionsExtensionApproval`: `extension_name`, `plugin_name`, `capabilities`, `granted_at`, `installation_key`, `installation_label`). `extension_approvals_list` and `extension_approvals_revoke` take an optional `session_id` to use an attached session's configuration profile.
+
+```rust
+// Persist a pending extension permission request before answering it normally.
+let grant = client.extension_approvals_grant(session.session_id(), &request_id).await?;
+if grant.granted {
+    if let Some(approval) = &grant.approval {
+        println!("Approved {}", approval.extension_name);
+    }
+}
+
+let list = client.extension_approvals_list(None).await?;
+for approval in &list.approvals {
+    client
+        .extension_approvals_revoke(&approval.extension_name, &approval.installation_key, None)
+        .await?;
+}
+```
+
+### Ask-user image attachments
+
+Create the session with `request_user_input: Some(true)` and register a `UserInputHandlerFn`. When the runtime accepts images in an answer, the `UserInputRequest` carries `image_attachment_constraints` (`UserInputImageAttachmentConstraints`: `allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `None` otherwise. The request also exposes `request_id` and `meta` (the opaque `_meta` object) when sent. Answer with `UserInputResponse::attachments`, a `Vec<UserInputImageAttachment>` (base64 `data`, `mime_type`, optional `description` and `display_name`; serialized with `type: "image"`), which is sent only when `Some`. Image-only answers use an empty `answer` with `was_freeform: true`; the runtime enforces the limits.
+
+```rust
+let input_handler: UserInputHandlerFn = Arc::new(|request, _session_id| {
+    Box::pin(async move {
+        let accepts_png = request
+            .image_attachment_constraints
+            .as_ref()
+            .is_some_and(|c| c.allowed_mime_types.iter().any(|m| m == "image/png"));
+        if !accepts_png {
+            return Ok(UserInputResponse {
+                answer: "No screenshot available".into(),
+                was_freeform: true,
+                ..Default::default()
+            });
+        }
+        Ok(UserInputResponse {
+            answer: String::new(),
+            was_freeform: true,
+            attachments: Some(vec![UserInputImageAttachment {
+                data: screenshot_base64(), // your base64-encoded PNG bytes
+                mime_type: "image/png".into(),
+                display_name: Some("screenshot.png".into()),
+                ..Default::default()
+            }]),
+        })
+    })
+});
+session.register_user_input_handler(input_handler).await;
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4**, the contract of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**: `start()` rejects older CLIs with `CopilotError::ProtocolMismatch`. Existing options keep working. You fill `SessionConfig` and `ResumeSessionConfig` exactly as before, and the SDK converts the flat options into the grouped v4 `session.create` / `session.resume` payload right before sending (for example `streaming` becomes `events.streaming`, `request_permission` becomes `permissions.request`, `hooks: Some(true)` becomes `hooks.hasHandlers`, and `disable_resume` becomes `suppressResumeEvent`). The legacy single `provider` is translated into a named `"default"` connection with Copilot API (CAPI) models disabled, which preserves v1 BYOK behavior. A `cli_path` ending in `.js` (such as the CLI's `npm-loader.js`) is now run with `node`.
@@ -301,6 +376,7 @@ let input_handler: UserInputHandlerFn = Arc::new(|request, _session_id| {
         Ok(UserInputResponse {
             answer: "Yes, proceed.".to_string(),
             was_freeform: true,
+            ..Default::default()
         })
     })
 });
@@ -426,6 +502,12 @@ let config = SessionConfig {
 | `client.get_auth_status()` | Get authentication status |
 | `client.list_models()` | List available models (cached) |
 | `client.clear_managed_settings_cache()` | Clear cached managed settings |
+| `client.mcp_secrets_save(secret_id, value, config_dir)` | Save an MCP credential (`mcp.secrets.save`); returns `McpSecretsSaveResult` |
+| `client.mcp_secrets_delete(secret_id, config_dir)` | Delete an MCP credential (`mcp.secrets.delete`) |
+| `client.mcp_secrets_delete_server(server_name, config_dir)` | Delete a server's MCP credentials (`mcp.secrets.deleteServer`) |
+| `client.extension_approvals_grant(session_id, request_id)` | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`) |
+| `client.extension_approvals_list(session_id)` | List plugin extension approvals (`permissions.extensionApprovals.list`) |
+| `client.extension_approvals_revoke(extension_name, installation_key, session_id)` | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`) |
 | `client.get_state()` | Get current connection state |
 | `client.mode()` | Get the client mode (`ClientMode`) |
 | `client.on_lifecycle(handler)` | Subscribe to lifecycle events |

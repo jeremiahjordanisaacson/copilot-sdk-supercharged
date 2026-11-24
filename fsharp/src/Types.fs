@@ -934,6 +934,239 @@ type PermissionModeSetResult =
       Reason: string option }
 
 // ---------------------------------------------------------------------------
+// v3.1.0: ask-user image attachments, MCP secret store, extension approvals
+// ---------------------------------------------------------------------------
+
+/// Readers for optional properties of runtime JSON payloads.
+module internal JsonRead =
+    let private tryProperty (elem: JsonElement) (name: string) =
+        if elem.ValueKind <> JsonValueKind.Object then None
+        else
+            match elem.TryGetProperty(name) with
+            | true, v -> Some v
+            | _ -> None
+
+    let tryString (elem: JsonElement) (name: string) =
+        match tryProperty elem name with
+        | Some v when v.ValueKind = JsonValueKind.String -> Some (v.GetString())
+        | _ -> None
+
+    let tryBool (elem: JsonElement) (name: string) =
+        match tryProperty elem name with
+        | Some v when v.ValueKind = JsonValueKind.True -> Some true
+        | Some v when v.ValueKind = JsonValueKind.False -> Some false
+        | _ -> None
+
+    let tryInt64 (elem: JsonElement) (name: string) =
+        match tryProperty elem name with
+        | Some v when v.ValueKind = JsonValueKind.Number ->
+            match v.TryGetInt64() with
+            | true, n -> Some n
+            | _ -> None
+        | _ -> None
+
+    let tryStringList (elem: JsonElement) (name: string) =
+        match tryProperty elem name with
+        | Some v when v.ValueKind = JsonValueKind.Array ->
+            v.EnumerateArray()
+            |> Seq.filter (fun s -> s.ValueKind = JsonValueKind.String)
+            |> Seq.map (fun s -> s.GetString())
+            |> Seq.toList
+            |> Some
+        | _ -> None
+
+    let tryObject (elem: JsonElement) (name: string) =
+        match tryProperty elem name with
+        | Some v when v.ValueKind = JsonValueKind.Object -> Some (v.Clone())
+        | _ -> None
+
+/// Image support advertised by a `userInput.request` (wire `imageAttachmentConstraints`).
+type UserInputImageAttachmentConstraints =
+    { /// MIME types accepted by this request.
+      AllowedMimeTypes: string list
+      /// Maximum decoded byte length of each image.
+      MaxBytesPerImage: int64
+      /// Maximum number of images accepted in one answer.
+      MaxCount: int64 }
+
+/// A request for user input from the agent (the ask_user tool, `userInput.request`).
+type UserInputRequest =
+    { SessionId: string
+      /// The question to ask the user.
+      Question: string
+      /// Choices for a multiple-choice question, when offered.
+      Choices: string list option
+      /// Whether a freeform answer is allowed, when the runtime says so.
+      AllowFreeform: bool option
+      /// Id of the pending request, when the runtime sends it.
+      RequestId: string option
+      /// Image support for the answer; None when the runtime does not accept images.
+      ImageAttachmentConstraints: UserInputImageAttachmentConstraints option
+      /// The request's opaque `_meta` object, when the runtime sends it.
+      Meta: JsonElement option }
+
+module UserInputRequest =
+    /// Parse `userInput.request` params. Returns None without a sessionId and a question.
+    let tryParse (parameters: JsonElement) : UserInputRequest option =
+        match JsonRead.tryString parameters "sessionId", JsonRead.tryString parameters "question" with
+        | Some sessionId, Some question ->
+            let constraints =
+                JsonRead.tryObject parameters "imageAttachmentConstraints"
+                |> Option.map (fun c ->
+                    ({ AllowedMimeTypes = JsonRead.tryStringList c "allowedMimeTypes" |> Option.defaultValue []
+                       MaxBytesPerImage = JsonRead.tryInt64 c "maxBytesPerImage" |> Option.defaultValue 0L
+                       MaxCount = JsonRead.tryInt64 c "maxCount" |> Option.defaultValue 0L }
+                     : UserInputImageAttachmentConstraints))
+            Some
+                ({ SessionId = sessionId
+                   Question = question
+                   Choices = JsonRead.tryStringList parameters "choices"
+                   AllowFreeform = JsonRead.tryBool parameters "allowFreeform"
+                   RequestId = JsonRead.tryString parameters "requestId"
+                   ImageAttachmentConstraints = constraints
+                   Meta = JsonRead.tryObject parameters "_meta" }
+                 : UserInputRequest)
+        | _ -> None
+
+/// An inline image attached to an ask_user answer (UserInputResponse.Attachments). The wire
+/// `type` is always "image"; the runtime enforces the advertised MIME types, size and count.
+type UserInputImageAttachment =
+    { /// Base64-encoded image bytes (no data URL prefix).
+      Data: string
+      /// MIME type, matching one of the request's AllowedMimeTypes.
+      MimeType: string
+      /// Optional description of the image.
+      Description: string option
+      /// Optional client-facing name of the image.
+      DisplayName: string option }
+
+module UserInputImageAttachment =
+    /// An image attachment from base64 data and its MIME type.
+    let create (data: string) (mimeType: string) : UserInputImageAttachment =
+        { Data = data
+          MimeType = mimeType
+          Description = None
+          DisplayName = None }
+
+    /// Build the wire object: type "image", data, mimeType, and description/displayName when set.
+    let toWire (attachment: UserInputImageAttachment) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        wire.["type"] <- box "image"
+        wire.["data"] <- box attachment.Data
+        wire.["mimeType"] <- box attachment.MimeType
+        attachment.Description |> Option.iter (fun v -> wire.["description"] <- box v)
+        attachment.DisplayName |> Option.iter (fun v -> wire.["displayName"] <- box v)
+        wire :> IDictionary<string, obj>
+
+/// Answer to a user input request.
+type UserInputResponse =
+    { /// The answer text (empty for an image-only answer).
+      Answer: string
+      /// Whether the answer was freeform rather than one of the choices (true for image-only answers).
+      WasFreeform: bool
+      /// Images for a request that advertised ImageAttachmentConstraints; sent only when Some.
+      Attachments: UserInputImageAttachment list option }
+
+module UserInputResponse =
+    /// A text answer without attachments.
+    let create (answer: string) (wasFreeform: bool) : UserInputResponse =
+        { Answer = answer
+          WasFreeform = wasFreeform
+          Attachments = None }
+
+    /// Build the `userInput.request` JSON-RPC result; `attachments` is included only when set.
+    let toWire (response: UserInputResponse) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        wire.["answer"] <- box response.Answer
+        wire.["wasFreeform"] <- box response.WasFreeform
+        response.Attachments
+        |> Option.iter (fun attachments ->
+            wire.["attachments"] <- box (attachments |> List.map UserInputImageAttachment.toWire))
+        wire :> IDictionary<string, obj>
+
+/// Answers ask_user requests (`userInput.request`; sends interaction.requestUserInput).
+type UserInputHandler = UserInputRequest -> Async<UserInputResponse>
+
+/// Result of `mcp.secrets.save` (CopilotClient.McpSecretsSaveAsync).
+type McpSecretsSaveResult =
+    { /// True when the OS keychain stored the secret; false when the runtime used its file backend.
+      UsedKeychain: bool }
+
+module McpSecretsSaveResult =
+    /// Parse an `mcp.secrets.save` result.
+    let parse (result: JsonElement) : McpSecretsSaveResult =
+        { UsedKeychain = JsonRead.tryBool result "usedKeychain" |> Option.defaultValue false }
+
+/// A user-scoped approval for one installed plugin extension.
+type PermissionsExtensionApproval =
+    { /// Stable identity, for example "plugin:plugin-name:extension-name".
+      ExtensionName: string
+      /// Name of the plugin that provides the extension.
+      PluginName: string
+      /// Exact privileged capabilities the user approved.
+      Capabilities: string list
+      /// When the approval was granted (RFC 3339 timestamp).
+      GrantedAt: string
+      /// Opaque key; pass it back unchanged to CopilotClient.ExtensionApprovalsRevokeAsync.
+      InstallationKey: string
+      /// Human-readable label of the installation, when known.
+      InstallationLabel: string option }
+
+module PermissionsExtensionApproval =
+    /// Parse an approval object. Returns None when the value is not an object.
+    let tryParse (elem: JsonElement) : PermissionsExtensionApproval option =
+        if elem.ValueKind <> JsonValueKind.Object then None
+        else
+            Some
+                ({ ExtensionName = JsonRead.tryString elem "extensionName" |> Option.defaultValue ""
+                   PluginName = JsonRead.tryString elem "pluginName" |> Option.defaultValue ""
+                   Capabilities = JsonRead.tryStringList elem "capabilities" |> Option.defaultValue []
+                   GrantedAt = JsonRead.tryString elem "grantedAt" |> Option.defaultValue ""
+                   InstallationKey = JsonRead.tryString elem "installationKey" |> Option.defaultValue ""
+                   InstallationLabel = JsonRead.tryString elem "installationLabel" }
+                 : PermissionsExtensionApproval)
+
+/// Result of `permissions.extensionApprovals.grant` (CopilotClient.ExtensionApprovalsGrantAsync).
+type PermissionsExtensionApprovalsGrantResult =
+    { /// Whether the pending request was eligible and persisted.
+      Granted: bool
+      /// The stored approval, when one was persisted.
+      Approval: PermissionsExtensionApproval option }
+
+module PermissionsExtensionApprovalsGrantResult =
+    /// Parse a `permissions.extensionApprovals.grant` result.
+    let parse (result: JsonElement) : PermissionsExtensionApprovalsGrantResult =
+        { Granted = JsonRead.tryBool result "granted" |> Option.defaultValue false
+          Approval = JsonRead.tryObject result "approval" |> Option.bind PermissionsExtensionApproval.tryParse }
+
+/// Result of `permissions.extensionApprovals.list` (CopilotClient.ExtensionApprovalsListAsync).
+type PermissionsExtensionApprovalsListResult =
+    { /// The persisted approvals.
+      Approvals: PermissionsExtensionApproval list }
+
+module PermissionsExtensionApprovalsListResult =
+    /// Parse a `permissions.extensionApprovals.list` result.
+    let parse (result: JsonElement) : PermissionsExtensionApprovalsListResult =
+        let approvals =
+            if result.ValueKind <> JsonValueKind.Object then []
+            else
+                match result.TryGetProperty("approvals") with
+                | true, v when v.ValueKind = JsonValueKind.Array ->
+                    v.EnumerateArray() |> Seq.choose PermissionsExtensionApproval.tryParse |> Seq.toList
+                | _ -> []
+        { Approvals = approvals }
+
+/// Result of `permissions.extensionApprovals.revoke` (CopilotClient.ExtensionApprovalsRevokeAsync).
+type PermissionsExtensionApprovalsRevokeResult =
+    { /// Whether a matching approval was revoked.
+      Revoked: bool }
+
+module PermissionsExtensionApprovalsRevokeResult =
+    /// Parse a `permissions.extensionApprovals.revoke` result.
+    let parse (result: JsonElement) : PermissionsExtensionApprovalsRevokeResult =
+        { Revoked = JsonRead.tryBool result "revoked" |> Option.defaultValue false }
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -1280,7 +1513,9 @@ type SessionConfig =
       /// Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).
       OnShellAuthenticationRequest: ShellAuthenticationHandler option
       /// Persists agent memories (sends state.hasMemoryStore).
-      OnStoreMemory: StoreMemoryHandler option }
+      OnStoreMemory: StoreMemoryHandler option
+      /// Answers ask_user requests (`userInput.request`; sends interaction.requestUserInput).
+      OnUserInputRequest: UserInputHandler option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
@@ -1359,7 +1594,8 @@ module SessionConfig =
           DefaultProvider = None
           CapiEnabled = None
           OnShellAuthenticationRequest = None
-          OnStoreMemory = None }
+          OnStoreMemory = None
+          OnUserInputRequest = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration
@@ -1434,7 +1670,9 @@ type ResumeSessionConfig =
       /// Answers sudo/ssh/git prompts (sends interaction.requestShellAuthentication).
       OnShellAuthenticationRequest: ShellAuthenticationHandler option
       /// Persists agent memories (sends state.hasMemoryStore).
-      OnStoreMemory: StoreMemoryHandler option }
+      OnStoreMemory: StoreMemoryHandler option
+      /// Answers ask_user requests (`userInput.request`; sends interaction.requestUserInput).
+      OnUserInputRequest: UserInputHandler option }
 
 module ResumeSessionConfig =
     /// Resume configuration for sessionId with approveAll and every option unset.
@@ -1471,7 +1709,8 @@ module ResumeSessionConfig =
           ClearDefaultProvider = None
           CapiEnabled = None
           OnShellAuthenticationRequest = None
-          OnStoreMemory = None }
+          OnStoreMemory = None
+          OnUserInputRequest = None }
 
 // ---------------------------------------------------------------------------
 // Tool result

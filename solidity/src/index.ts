@@ -90,6 +90,17 @@ export type {
     ToolShellOutputData,
     ToolShellOutputEvent,
     ToolShellOutputStream,
+    // v3.1.0 types (MCP secret store, plugin extension approvals, ask-user images)
+    McpSecretsSaveResult,
+    PermissionsExtensionApproval,
+    PermissionsExtensionApprovalsGrantResult,
+    PermissionsExtensionApprovalsListResult,
+    PermissionsExtensionApprovalsRevokeResult,
+    UserInputHandler,
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
+    UserInputRequest,
+    UserInputResponse,
 } from "./types.js";
 
 // Upstream-sync feature constants

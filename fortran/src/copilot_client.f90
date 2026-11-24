@@ -27,6 +27,9 @@ module copilot_client_module
   public :: copilot_clear_managed_settings_cache, copilot_handle_server_request
   public :: copilot_verify_protocol_version, copilot_build_session_params
   public :: copilot_network_provider_params
+  public :: copilot_mcp_secrets_save, copilot_mcp_secrets_delete, copilot_mcp_secrets_delete_server
+  public :: copilot_extension_approvals_grant, copilot_extension_approvals_list
+  public :: copilot_extension_approvals_revoke
 
   integer, parameter :: MAX_SESSIONS = 32
 
@@ -64,6 +67,12 @@ module copilot_client_module
     procedure :: delete_session     => client_delete_session
     procedure :: get_last_session_id => client_get_last_session_id
     procedure :: clear_managed_settings_cache => client_clear_managed_settings_cache
+    procedure :: mcp_secrets_save => client_mcp_secrets_save
+    procedure :: mcp_secrets_delete => client_mcp_secrets_delete
+    procedure :: mcp_secrets_delete_server => client_mcp_secrets_delete_server
+    procedure :: extension_approvals_grant => client_extension_approvals_grant
+    procedure :: extension_approvals_list => client_extension_approvals_list
+    procedure :: extension_approvals_revoke => client_extension_approvals_revoke
     procedure :: handle_server_request => client_handle_server_request
   end type copilot_client
 
@@ -515,6 +524,8 @@ contains
     if (is_resume) call add_true(members, 'suppressResumeEvent', config%suppress_resume_event)
     call add_true(members, 'requestShellAuthentication', associated(config%on_shell_authentication_request))
     call add_true(members, 'hasMemoryStore', associated(config%on_store_memory))
+    ! --- v3.1.0 options ---
+    call add_true(members, 'requestUserInput', associated(config%on_user_input_request))
   end function flat_session_options
 
   !> True when any hook handler answered through hooks.invoke is registered.
@@ -758,10 +769,195 @@ contains
     call client%clear_managed_settings_cache(iostat)
   end subroutine copilot_clear_managed_settings_cache
 
+  ! ==========================================================================
+  ! MCP secret store and plugin extension approvals (Copilot CLI 1.0.116+)
+  ! ==========================================================================
+  ! Server-scoped requests. An older runtime answers with a method-not-found JSON-RPC error,
+  ! reported like any other through iostat = COPILOT_IOSTAT_RPC_ERROR and client%last_error.
+
+  !> Save a legacy MCP configuration credential in the runtime-owned secret store
+  !! (mcp.secrets.save). value is a credential: it is sent to the runtime and never logged.
+  !! config_dir overrides the runtime's configuration root. outcome%used_keychain is .true.
+  !! when the OS keychain stored the credential and .false. for the file backend.
+  subroutine client_mcp_secrets_save(self, secret_id, value, outcome, iostat, config_dir)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: secret_id, value
+    type(mcp_secrets_save_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    character(len=:), allocatable :: params, response, result_json
+    logical :: found
+
+    params = '{"secretId":' // json_quote(secret_id) // ',"value":' // json_quote(value)
+    if (present(config_dir)) params = params // ',"configDir":' // json_quote(config_dir)
+    params = params // '}'
+    call client_request(self, 'mcp.secrets.save', params, response, iostat)
+    if (iostat /= 0) return
+    call json_get_raw(response, 'result', result_json, found)
+    if (found) outcome%used_keychain = json_get_logical(result_json, 'usedKeychain', .false.)
+  end subroutine client_mcp_secrets_save
+
+  subroutine copilot_mcp_secrets_save(client, secret_id, value, outcome, iostat, config_dir)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: secret_id, value
+    type(mcp_secrets_save_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    call client%mcp_secrets_save(secret_id, value, outcome, iostat, config_dir)
+  end subroutine copilot_mcp_secrets_save
+
+  !> Delete a legacy MCP configuration credential from the runtime-owned secret store
+  !! (mcp.secrets.delete). config_dir overrides the runtime's configuration root.
+  subroutine client_mcp_secrets_delete(self, secret_id, iostat, config_dir)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: secret_id
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    character(len=:), allocatable :: params, response
+
+    params = '{"secretId":' // json_quote(secret_id)
+    if (present(config_dir)) params = params // ',"configDir":' // json_quote(config_dir)
+    params = params // '}'
+    call client_request(self, 'mcp.secrets.delete', params, response, iostat)
+  end subroutine client_mcp_secrets_delete
+
+  subroutine copilot_mcp_secrets_delete(client, secret_id, iostat, config_dir)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: secret_id
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    call client%mcp_secrets_delete(secret_id, iostat, config_dir)
+  end subroutine copilot_mcp_secrets_delete
+
+  !> Delete the legacy credentials indexed for an MCP server (mcp.secrets.deleteServer).
+  !! config_dir overrides the runtime's configuration root.
+  subroutine client_mcp_secrets_delete_server(self, server_name, iostat, config_dir)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: server_name
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    character(len=:), allocatable :: params, response
+
+    params = '{"serverName":' // json_quote(server_name)
+    if (present(config_dir)) params = params // ',"configDir":' // json_quote(config_dir)
+    params = params // '}'
+    call client_request(self, 'mcp.secrets.deleteServer', params, response, iostat)
+  end subroutine client_mcp_secrets_delete_server
+
+  subroutine copilot_mcp_secrets_delete_server(client, server_name, iostat, config_dir)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: server_name
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: config_dir
+    call client%mcp_secrets_delete_server(server_name, iostat, config_dir)
+  end subroutine copilot_mcp_secrets_delete_server
+
+  !> Persist the pending plugin extension permission request request_id of session session_id
+  !! as a user-scoped approval, before answering that request normally
+  !! (permissions.extensionApprovals.grant). outcome%approval is allocated when granted.
+  subroutine client_extension_approvals_grant(self, session_id, request_id, outcome, iostat)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: session_id, request_id
+    type(permissions_extension_approvals_grant_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=:), allocatable :: params, response, result_json, approval_json
+    logical :: found
+
+    params = '{"sessionId":' // json_quote(session_id) // ',"requestId":' // json_quote(request_id) // '}'
+    call client_request(self, 'permissions.extensionApprovals.grant', params, response, iostat)
+    if (iostat /= 0) return
+    call json_get_raw(response, 'result', result_json, found)
+    if (.not. found) return
+    outcome%granted = json_get_logical(result_json, 'granted', .false.)
+    call json_get_raw(result_json, 'approval', approval_json, found)
+    if (found) found = json_is_object(approval_json)
+    if (found) then
+      allocate(outcome%approval)
+      call parse_permissions_extension_approval(approval_json, outcome%approval)
+    end if
+  end subroutine client_extension_approvals_grant
+
+  subroutine copilot_extension_approvals_grant(client, session_id, request_id, outcome, iostat)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: session_id, request_id
+    type(permissions_extension_approvals_grant_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    call client%extension_approvals_grant(session_id, request_id, outcome, iostat)
+  end subroutine copilot_extension_approvals_grant
+
+  !> List the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+  !! session_id selects an attached session's configuration profile instead of the server's.
+  !! outcome%approvals is allocated (zero-size when there are none) after a successful call.
+  subroutine client_extension_approvals_list(self, outcome, iostat, session_id)
+    class(copilot_client), intent(inout) :: self
+    type(permissions_extension_approvals_list_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: session_id
+    character(len=:), allocatable :: params, response, result_json, approvals_json, item
+    integer :: i, n
+    logical :: found
+
+    params = '{}'
+    if (present(session_id)) params = '{"sessionId":' // json_quote(session_id) // '}'
+    call client_request(self, 'permissions.extensionApprovals.list', params, response, iostat)
+    if (iostat /= 0) return
+    n = 0
+    call json_get_raw(response, 'result', result_json, found)
+    if (found) call json_get_raw(result_json, 'approvals', approvals_json, found)
+    if (found) n = json_array_size(approvals_json)
+    allocate(outcome%approvals(n))
+    do i = 1, n
+      call json_array_get(approvals_json, i, item, found)
+      call parse_permissions_extension_approval(item, outcome%approvals(i))
+    end do
+  end subroutine client_extension_approvals_list
+
+  subroutine copilot_extension_approvals_list(client, outcome, iostat, session_id)
+    type(copilot_client), intent(inout) :: client
+    type(permissions_extension_approvals_list_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: session_id
+    call client%extension_approvals_list(outcome, iostat, session_id)
+  end subroutine copilot_extension_approvals_list
+
+  !> Revoke one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+  !! Pass the approval's extension_name and installation_key unchanged; session_id selects an
+  !! attached session's configuration profile.
+  subroutine client_extension_approvals_revoke(self, extension_name, installation_key, outcome, &
+                                               iostat, session_id)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: extension_name, installation_key
+    type(permissions_extension_approvals_revoke_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: session_id
+    character(len=:), allocatable :: params, response, result_json
+    logical :: found
+
+    params = '{"extensionName":' // json_quote(extension_name) // &
+             ',"installationKey":' // json_quote(installation_key)
+    if (present(session_id)) params = params // ',"sessionId":' // json_quote(session_id)
+    params = params // '}'
+    call client_request(self, 'permissions.extensionApprovals.revoke', params, response, iostat)
+    if (iostat /= 0) return
+    call json_get_raw(response, 'result', result_json, found)
+    if (found) outcome%revoked = json_get_logical(result_json, 'revoked', .false.)
+  end subroutine client_extension_approvals_revoke
+
+  subroutine copilot_extension_approvals_revoke(client, extension_name, installation_key, outcome, &
+                                                iostat, session_id)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: extension_name, installation_key
+    type(permissions_extension_approvals_revoke_result), intent(out) :: outcome
+    integer, intent(out) :: iostat
+    character(len=*), intent(in), optional :: session_id
+    call client%extension_approvals_revoke(extension_name, installation_key, outcome, iostat, session_id)
+  end subroutine copilot_extension_approvals_revoke
+
   !> Answer one server-to-client JSON-RPC request read from the connection.
   !! gitHubToken.getToken is routed by registration id, hooks.invoke,
-  !! shellAuthentication.*, and memoryStore.store by sessionId, and network.* to the client's
-  !! network callbacks. Unknown methods get a method-not-found error (handled = .false.).
+  !! shellAuthentication.*, memoryStore.store, and userInput.request by sessionId, and network.*
+  !! to the client's network callbacks. Unknown methods get a method-not-found error
+  !! (handled = .false.).
   subroutine client_handle_server_request(self, message, handled, iostat)
     class(copilot_client), intent(inout) :: self
     character(len=*), intent(in) :: message

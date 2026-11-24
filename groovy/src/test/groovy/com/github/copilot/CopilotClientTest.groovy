@@ -528,4 +528,52 @@ class CopilotClientTest extends Specification {
         config.backgroundCompactionThreshold == 0.8
         config.bufferExhaustionThreshold == 0.95
     }
+
+    // --- v3.1.0: MCP secret store, plugin extension approvals, ask-user image attachments ---
+
+    def 'mcpSecretsSave and extensionApprovalsRevoke send their wire names and camelCase params'() {
+        given:
+        def rpc = Mock(JsonRpcClient)
+        def client = new CopilotClient()
+        client.@rpcClient = rpc
+
+        when:
+        def saved = client.mcpSecretsSave('server-token', 'credential', '/cfg')
+        def revoked = client.extensionApprovalsRevoke('plugin:p:ext', 'install-1')
+
+        then:
+        1 * rpc.request('mcp.secrets.save', [secretId: 'server-token', value: 'credential', configDir: '/cfg']) >> [usedKeychain: true]
+        1 * rpc.request('permissions.extensionApprovals.revoke', [extensionName: 'plugin:p:ext', installationKey: 'install-1']) >> [revoked: true]
+        saved.usedKeychain
+        revoked.revoked
+    }
+
+    def 'user input request passes imageAttachmentConstraints and the response sends attachments only when set'() {
+        given:
+        def rpc = Mock(JsonRpcClient)
+        def session = new CopilotSession('sess-1', rpc, '/workspace')
+        UserInputRequest seen = null
+        session.registerUserInputHandler { UserInputRequest req, String sid ->
+            seen = req
+            new UserInputResponse('', true, [new UserInputImageAttachment('aGVsbG8=', 'image/png')])
+        }
+
+        when:
+        UserInputResponse response = session.handleUserInputRequest([
+            sessionId                 : 'sess-1',
+            question                  : 'Attach a screenshot?',
+            requestId                 : 'req-1',
+            imageAttachmentConstraints: [allowedMimeTypes: ['image/png'], maxBytesPerImage: 1048576, maxCount: 2],
+            _meta                     : [ext: [k: 1]]
+        ] as Map<String, Object>)
+
+        then:
+        seen.requestId == 'req-1'
+        seen.imageAttachmentConstraints.allowedMimeTypes == ['image/png']
+        seen.imageAttachmentConstraints.maxBytesPerImage == 1048576L
+        seen.imageAttachmentConstraints.maxCount == 2
+        seen.meta == [ext: [k: 1]]
+        response.toMap() == [answer: '', wasFreeform: true, attachments: [[type: 'image', data: 'aGVsbG8=', mimeType: 'image/png']]]
+        new UserInputResponse('yes', false).toMap() == [answer: 'yes', wasFreeform: false]
+    }
 }

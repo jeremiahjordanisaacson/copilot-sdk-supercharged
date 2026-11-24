@@ -176,7 +176,8 @@ module CopilotSDK
       registration_id = config.github_token_provider ? UUID.random.to_s : nil
       flat = JSON.parse(config.to_json).as_h
       payload = prepare_session_payload(flat, false, config.hooks,
-        config.on_shell_authentication_request, config.memory_config, registration_id)
+        config.on_shell_authentication_request, config.on_user_input_request,
+        config.memory_config, registration_id)
       result = send_session_request("session.create", payload, registration_id,
         config.github_token_provider)
 
@@ -185,7 +186,8 @@ module CopilotSDK
 
       session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
       attach_session(session, registration_id, config.hooks,
-        config.on_shell_authentication_request, config.memory_config)
+        config.on_shell_authentication_request, config.on_user_input_request,
+        config.memory_config)
       session
     end
 
@@ -208,7 +210,8 @@ module CopilotSDK
         flat["defaultProvider"] = JSON::Any.new(nil)
       end
       payload = prepare_session_payload(flat, true, config.hooks,
-        config.on_shell_authentication_request, config.memory_config, registration_id)
+        config.on_shell_authentication_request, config.on_user_input_request,
+        config.memory_config, registration_id)
       result = send_session_request("session.resume", payload, registration_id,
         config.github_token_provider)
 
@@ -217,7 +220,8 @@ module CopilotSDK
 
       session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
       attach_session(session, registration_id, config.hooks,
-        config.on_shell_authentication_request, config.memory_config)
+        config.on_shell_authentication_request, config.on_user_input_request,
+        config.memory_config)
       session
     end
 
@@ -228,6 +232,84 @@ module CopilotSDK
       rpc.send_request("managedSettings.clearCache", JSON::Any.new({} of String => JSON::Any),
         @options.request_timeout)
       nil
+    end
+
+    # Save a legacy MCP configuration credential in the runtime-owned secret
+    # store (`mcp.secrets.save`). The value is never logged. `config_dir`
+    # defaults to the runtime's configuration directory. The result's
+    # `used_keychain` is true when the OS keychain stored the credential and
+    # false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+    def mcp_secrets_save(secret_id : String, value : String,
+                         config_dir : String? = nil) : McpSecretsSaveResult
+      ensure_connected!
+      params = {"secretId" => JSON::Any.new(secret_id), "value" => JSON::Any.new(value)}
+      params["configDir"] = JSON::Any.new(config_dir) if config_dir
+      result = rpc.send_request("mcp.secrets.save", JSON::Any.new(params), @options.request_timeout)
+      return McpSecretsSaveResult.new unless result.as_h?
+      McpSecretsSaveResult.from_json(result.to_json)
+    end
+
+    # Delete a legacy MCP configuration credential from the runtime-owned
+    # secret store (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+    def mcp_secrets_delete(secret_id : String, config_dir : String? = nil) : Nil
+      ensure_connected!
+      params = {"secretId" => JSON::Any.new(secret_id)}
+      params["configDir"] = JSON::Any.new(config_dir) if config_dir
+      rpc.send_request("mcp.secrets.delete", JSON::Any.new(params), @options.request_timeout)
+      nil
+    end
+
+    # Delete every legacy credential indexed for an MCP server
+    # (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+    def mcp_secrets_delete_server(server_name : String, config_dir : String? = nil) : Nil
+      ensure_connected!
+      params = {"serverName" => JSON::Any.new(server_name)}
+      params["configDir"] = JSON::Any.new(config_dir) if config_dir
+      rpc.send_request("mcp.secrets.deleteServer", JSON::Any.new(params), @options.request_timeout)
+      nil
+    end
+
+    # Persist a pending plugin extension permission request as a user-scoped
+    # approval, before answering that request normally
+    # (`permissions.extensionApprovals.grant`). Requires Copilot CLI 1.0.116 or newer.
+    def extension_approvals_grant(session_id : String,
+                                  request_id : String) : PermissionsExtensionApprovalsGrantResult
+      ensure_connected!
+      params = {"sessionId" => JSON::Any.new(session_id), "requestId" => JSON::Any.new(request_id)}
+      result = rpc.send_request("permissions.extensionApprovals.grant", JSON::Any.new(params),
+        @options.request_timeout)
+      return PermissionsExtensionApprovalsGrantResult.new unless result.as_h?
+      PermissionsExtensionApprovalsGrantResult.from_json(result.to_json)
+    end
+
+    # List the user-scoped plugin extension approvals
+    # (`permissions.extensionApprovals.list`). `session_id` selects an attached
+    # session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+    def extension_approvals_list(session_id : String? = nil) : PermissionsExtensionApprovalsListResult
+      ensure_connected!
+      params = {} of String => JSON::Any
+      params["sessionId"] = JSON::Any.new(session_id) if session_id
+      result = rpc.send_request("permissions.extensionApprovals.list", JSON::Any.new(params),
+        @options.request_timeout)
+      return PermissionsExtensionApprovalsListResult.new unless result.as_h?
+      PermissionsExtensionApprovalsListResult.from_json(result.to_json)
+    end
+
+    # Revoke one user-scoped plugin extension approval
+    # (`permissions.extensionApprovals.revoke`). Pass the approval's
+    # `installation_key` back unchanged. Requires Copilot CLI 1.0.116 or newer.
+    def extension_approvals_revoke(extension_name : String, installation_key : String,
+                                   session_id : String? = nil) : PermissionsExtensionApprovalsRevokeResult
+      ensure_connected!
+      params = {
+        "extensionName"   => JSON::Any.new(extension_name),
+        "installationKey" => JSON::Any.new(installation_key),
+      }
+      params["sessionId"] = JSON::Any.new(session_id) if session_id
+      result = rpc.send_request("permissions.extensionApprovals.revoke", JSON::Any.new(params),
+        @options.request_timeout)
+      return PermissionsExtensionApprovalsRevokeResult.new unless result.as_h?
+      PermissionsExtensionApprovalsRevokeResult.from_json(result.to_json)
     end
 
     # Get the status of the connected server.
@@ -490,6 +572,7 @@ module CopilotSDK
     private def prepare_session_payload(flat : Hash(String, JSON::Any), resume : Bool,
                                         hooks : SessionHooks?,
                                         shell_auth : ShellAuthenticationHandler?,
+                                        user_input : UserInputHandler?,
                                         memory : MemoryConfiguration?,
                                         registration_id : String?) : Hash(String, JSON::Any)
       # Protocol 4 takes a system message object; a plain string is appended.
@@ -507,6 +590,7 @@ module CopilotSDK
       end
       flat["hooks"] = JSON::Any.new(true) if hooks && hooks.any?
       flat["requestShellAuthentication"] = JSON::Any.new(true) if shell_auth
+      flat["requestUserInput"] = JSON::Any.new(true) if user_input
       if memory && memory.store_memory
         flat["hasMemoryStore"] = JSON::Any.new(true)
         wire_memory = flat["memory"]?.try(&.as_h?) || {} of String => JSON::Any
@@ -544,9 +628,11 @@ module CopilotSDK
     # it (and its GitHub token provider) from this client.
     private def attach_session(session : CopilotSession, registration_id : String?,
                                hooks : SessionHooks?, shell_auth : ShellAuthenticationHandler?,
+                               user_input : UserInputHandler?,
                                memory : MemoryConfiguration?) : Nil
       session.register_hooks(hooks)
       session.register_shell_authentication_handler(shell_auth)
+      session.register_user_input_handler(user_input)
       session.register_memory_store(memory.try(&.store_memory))
       session_id = session.session_id
       session.on_close = -> {
@@ -696,6 +782,14 @@ module CopilotSDK
           end
         end
         JSON::Any.new({} of String => JSON::Any)
+      end
+
+      # ask_user questions (`userInput.request`), including image answers
+      r.on_request("userInput.request") do |params|
+        request = UserInputRequest.from_json(params.to_json)
+        session = @mutex.synchronize { @sessions[request.session_id]? }
+        raise CopilotError.new("Session not found: #{request.session_id}") unless session
+        session.handle_user_input_request(request).to_json_any
       end
 
       # App-side memory store (replied to with null)

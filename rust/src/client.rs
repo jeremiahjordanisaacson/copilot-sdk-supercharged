@@ -1087,6 +1087,122 @@ impl CopilotClient {
         Ok(())
     }
 
+    // ========================================================================
+    // MCP Secret Store / Plugin Extension Approvals (Copilot CLI 1.0.116+)
+    // ========================================================================
+
+    /// Saves a legacy MCP configuration credential in the runtime-owned secret store
+    /// (`mcp.secrets.save`). Requires Copilot CLI 1.0.116 or newer.
+    ///
+    /// `value` is the credential and is never logged. `config_dir` defaults to the
+    /// runtime's configuration directory. The result's `used_keychain` is true when the
+    /// OS keychain stored the credential and false for the file backend.
+    pub async fn mcp_secrets_save(
+        &self,
+        secret_id: &str,
+        value: &str,
+        config_dir: Option<&str>,
+    ) -> Result<McpSecretsSaveResult, CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let mut params = serde_json::json!({ "secretId": secret_id, "value": value });
+        if let Some(config_dir) = config_dir {
+            params["configDir"] = Value::from(config_dir);
+        }
+        let response = rpc.request("mcp.secrets.save", params, None).await?;
+        serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
+    }
+
+    /// Deletes a legacy MCP configuration credential from the runtime-owned secret store
+    /// (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+    pub async fn mcp_secrets_delete(
+        &self,
+        secret_id: &str,
+        config_dir: Option<&str>,
+    ) -> Result<(), CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let mut params = serde_json::json!({ "secretId": secret_id });
+        if let Some(config_dir) = config_dir {
+            params["configDir"] = Value::from(config_dir);
+        }
+        rpc.request("mcp.secrets.delete", params, None).await?;
+        Ok(())
+    }
+
+    /// Deletes every legacy credential indexed for an MCP server
+    /// (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+    pub async fn mcp_secrets_delete_server(
+        &self,
+        server_name: &str,
+        config_dir: Option<&str>,
+    ) -> Result<(), CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let mut params = serde_json::json!({ "serverName": server_name });
+        if let Some(config_dir) = config_dir {
+            params["configDir"] = Value::from(config_dir);
+        }
+        rpc.request("mcp.secrets.deleteServer", params, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Persists a pending plugin extension permission request as a user-scoped approval,
+    /// before the host answers that request normally (`permissions.extensionApprovals.grant`).
+    /// Requires Copilot CLI 1.0.116 or newer.
+    pub async fn extension_approvals_grant(
+        &self,
+        session_id: &str,
+        request_id: &str,
+    ) -> Result<PermissionsExtensionApprovalsGrantResult, CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let params = serde_json::json!({ "sessionId": session_id, "requestId": request_id });
+        let response = rpc
+            .request("permissions.extensionApprovals.grant", params, None)
+            .await?;
+        serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
+    }
+
+    /// Lists the user-scoped plugin extension approvals
+    /// (`permissions.extensionApprovals.list`). `session_id` selects an attached session's
+    /// configuration profile. Requires Copilot CLI 1.0.116 or newer.
+    pub async fn extension_approvals_list(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<PermissionsExtensionApprovalsListResult, CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let mut params = serde_json::json!({});
+        if let Some(session_id) = session_id {
+            params["sessionId"] = Value::from(session_id);
+        }
+        let response = rpc
+            .request("permissions.extensionApprovals.list", params, None)
+            .await?;
+        serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
+    }
+
+    /// Revokes one user-scoped plugin extension approval
+    /// (`permissions.extensionApprovals.revoke`). Pass the approval's `installation_key`
+    /// back unchanged; `session_id` selects an attached session's configuration profile.
+    /// Requires Copilot CLI 1.0.116 or newer.
+    pub async fn extension_approvals_revoke(
+        &self,
+        extension_name: &str,
+        installation_key: &str,
+        session_id: Option<&str>,
+    ) -> Result<PermissionsExtensionApprovalsRevokeResult, CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let mut params = serde_json::json!({
+            "extensionName": extension_name,
+            "installationKey": installation_key,
+        });
+        if let Some(session_id) = session_id {
+            params["sessionId"] = Value::from(session_id);
+        }
+        let response = rpc
+            .request("permissions.extensionApprovals.revoke", params, None)
+            .await?;
+        serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
+    }
+
     /// Lists available models with their metadata.
     ///
     /// Results are cached after the first successful call.
@@ -2112,5 +2228,179 @@ mod tests {
         let millis: PingResponse =
             serde_json::from_value(json!({ "message": "pong", "timestamp": 1234.0 })).unwrap();
         assert_eq!(millis.timestamp, 1234.0);
+    }
+
+    async fn write_framed(writer: &mut tokio::io::DuplexStream, message: Value) {
+        use tokio::io::AsyncWriteExt;
+        let body = serde_json::to_vec(&message).unwrap();
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        writer.write_all(header.as_bytes()).await.unwrap();
+        writer.write_all(&body).await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    async fn read_framed(reader: &mut tokio::io::DuplexStream) -> Value {
+        use tokio::io::AsyncReadExt;
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            header.push(reader.read_u8().await.unwrap());
+        }
+        let length: usize = String::from_utf8(header)
+            .unwrap()
+            .trim()
+            .strip_prefix("Content-Length: ")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut body = vec![0u8; length];
+        reader.read_exact(&mut body).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    /// A client connected to an in-memory fake server; returns the server's read and
+    /// write halves alongside the client.
+    async fn connected_client() -> (
+        CopilotClient,
+        tokio::io::DuplexStream,
+        tokio::io::DuplexStream,
+    ) {
+        let (client_write, server_read) = tokio::io::duplex(8192);
+        let (server_write, client_read) = tokio::io::duplex(8192);
+        let client = CopilotClient::new(CopilotClientOptions::default());
+        let rpc = Arc::new(JsonRpcClient::new(client_read, client_write));
+        client.attach_connection_handlers(&rpc).await;
+        *client.rpc_client.lock().await = Some(rpc);
+        (client, server_read, server_write)
+    }
+
+    #[tokio::test]
+    async fn server_scoped_rpcs_send_wire_names_and_camel_case_params() {
+        let (client, mut server_read, mut server_write) = connected_client().await;
+
+        let server = async {
+            let save = read_framed(&mut server_read).await;
+            write_framed(
+                &mut server_write,
+                json!({ "jsonrpc": "2.0", "id": save["id"], "result": { "usedKeychain": true } }),
+            )
+            .await;
+            let revoke = read_framed(&mut server_read).await;
+            write_framed(
+                &mut server_write,
+                json!({ "jsonrpc": "2.0", "id": revoke["id"], "result": { "revoked": true } }),
+            )
+            .await;
+            (save, revoke)
+        };
+        let calls = async {
+            let saved = client
+                .mcp_secrets_save("server-token", "credential", Some("/cfg"))
+                .await
+                .unwrap();
+            let revoked = client
+                .extension_approvals_revoke("plugin:p:ext", "install-1", None)
+                .await
+                .unwrap();
+            (saved, revoked)
+        };
+        let ((save, revoke), (saved, revoked)) = tokio::join!(server, calls);
+
+        assert_eq!(save["method"], "mcp.secrets.save");
+        assert_eq!(
+            save["params"],
+            json!({ "secretId": "server-token", "value": "credential", "configDir": "/cfg" })
+        );
+        assert!(saved.used_keychain);
+        assert_eq!(revoke["method"], "permissions.extensionApprovals.revoke");
+        assert_eq!(
+            revoke["params"],
+            json!({ "extensionName": "plugin:p:ext", "installationKey": "install-1" })
+        );
+        assert!(revoked.revoked);
+    }
+
+    #[tokio::test]
+    async fn user_input_request_passes_image_constraints_and_returns_attachments() {
+        let (client, mut server_read, mut server_write) = connected_client().await;
+        let rpc = client.get_rpc_client().await.unwrap();
+        let session = Arc::new(CopilotSession::new("s1".to_string(), rpc, None));
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        session
+            .register_user_input_handler(Arc::new(move |request: UserInputRequest, _session_id| {
+                let _ = seen_tx.send(request);
+                Box::pin(async move {
+                    Ok(UserInputResponse {
+                        answer: String::new(),
+                        was_freeform: true,
+                        attachments: Some(vec![UserInputImageAttachment {
+                            data: "aGVsbG8=".to_string(),
+                            mime_type: "image/png".to_string(),
+                            ..Default::default()
+                        }]),
+                    })
+                })
+            }))
+            .await;
+        client
+            .sessions
+            .lock()
+            .await
+            .insert("s1".to_string(), session);
+
+        write_framed(
+            &mut server_write,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "userInput.request",
+                "params": {
+                    "sessionId": "s1",
+                    "question": "Attach a screenshot?",
+                    "requestId": "req-1",
+                    "imageAttachmentConstraints": {
+                        "allowedMimeTypes": ["image/png"],
+                        "maxBytesPerImage": 1048576,
+                        "maxCount": 2
+                    },
+                    "_meta": { "ext": { "k": 1 } }
+                }
+            }),
+        )
+        .await;
+        let response = read_framed(&mut server_read).await;
+
+        assert_eq!(response["id"], 7);
+        assert_eq!(
+            response["result"],
+            json!({
+                "answer": "",
+                "wasFreeform": true,
+                "attachments": [{ "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" }]
+            })
+        );
+        let request = seen_rx.recv().await.unwrap();
+        assert_eq!(request.request_id.as_deref(), Some("req-1"));
+        assert_eq!(
+            request.image_attachment_constraints,
+            Some(UserInputImageAttachmentConstraints {
+                allowed_mime_types: vec!["image/png".to_string()],
+                max_bytes_per_image: 1_048_576,
+                max_count: 2,
+            })
+        );
+        assert_eq!(request.meta, Some(json!({ "ext": { "k": 1 } })));
+    }
+
+    #[test]
+    fn user_input_response_omits_attachments_when_unset() {
+        let response = UserInputResponse {
+            answer: "yes".to_string(),
+            was_freeform: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            json!({ "answer": "yes", "wasFreeform": false })
+        );
     }
 }

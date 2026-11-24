@@ -216,6 +216,11 @@ pub const SessionConfig = struct {
     on_shell_authentication: ?ShellAuthenticationHandlerFn = null,
     /// Persists memories the agent stores (`memoryStore.store`).
     on_memory_store: ?MemoryStoreHandlerFn = null,
+
+    // --- v3.1.0 session options ---
+    /// Answers `userInput.request` (the ask_user tool) and sends `interaction.requestUserInput`.
+    /// `CopilotSession.registerUserInputHandler` replaces the handler later.
+    on_user_input: ?*const fn (req: UserInputRequest, session_id: []const u8) anyerror!UserInputResponse = null,
 };
 
 pub const ProviderConfig = struct {
@@ -292,14 +297,90 @@ pub const PermissionResult = struct {
 // User input
 // ---------------------------------------------------------------------------
 
+/// Image support advertised by a `userInput.request` (`imageAttachmentConstraints`).
+/// Absent (null on the request) when the runtime does not accept images in the answer.
+pub const UserInputImageAttachmentConstraints = struct {
+    /// MIME types the runtime accepts, such as "image/png".
+    allowed_mime_types: []const []const u8 = &.{},
+    /// Maximum size of one image, in bytes.
+    max_bytes_per_image: i64 = 0,
+    /// Maximum number of images in one answer.
+    max_count: i64 = 0,
+
+    /// Reads `imageAttachmentConstraints`; null unless `value` is an object. Strings
+    /// reference `value`; the MIME type list is allocated from `allocator`.
+    pub fn fromJson(allocator: std.mem.Allocator, value: JsonValue) std.mem.Allocator.Error!?UserInputImageAttachmentConstraints {
+        if (value != .object) return null;
+        var out = UserInputImageAttachmentConstraints{};
+        if (value.object.get("allowedMimeTypes")) |mime_types| {
+            if (mime_types == .array) {
+                var list = std.ArrayList([]const u8).init(allocator);
+                for (mime_types.array.items) |item| {
+                    if (item == .string) try list.append(item.string);
+                }
+                out.allowed_mime_types = list.items;
+            }
+        }
+        out.max_bytes_per_image = integerMember(value.object, "maxBytesPerImage") orelse 0;
+        out.max_count = integerMember(value.object, "maxCount") orelse 0;
+        return out;
+    }
+};
+
+/// An inline image attached to an ask_user answer (`UserInputResponse.attachments`).
+/// The wire `type` is always "image". The runtime enforces the advertised MIME types,
+/// size and count limits.
+pub const UserInputImageAttachment = struct {
+    /// Base64-encoded image bytes.
+    data: []const u8,
+    /// MIME type of the image, such as "image/png".
+    mime_type: []const u8,
+    description: ?[]const u8 = null,
+    display_name: ?[]const u8 = null,
+};
+
+/// A `userInput.request` (the ask_user tool). Slices are valid only during the handler call.
 pub const UserInputRequest = struct {
     question: []const u8,
     options: ?[]const []const u8 = null,
+    /// Whether a freeform answer is allowed (`allowFreeform`), when the runtime says so.
+    allow_freeform: ?bool = null,
+    /// Pending request id (`requestId`), when the runtime sends one.
+    request_id: ?[]const u8 = null,
+    /// Image support for the answer; null when the runtime does not accept images.
+    image_attachment_constraints: ?UserInputImageAttachmentConstraints = null,
+    /// The request's opaque `_meta` object, when the runtime sends one.
+    meta: ?JsonValue = null,
 };
 
 pub const UserInputResponse = struct {
     answer: []const u8,
     was_freeform: bool = true,
+    /// Images attached to the answer, only valid when the request advertised
+    /// `image_attachment_constraints`. Sent only when set. Image-only answers use an
+    /// empty `answer`.
+    attachments: ?[]const UserInputImageAttachment = null,
+
+    /// The `userInput.request` reply: {answer, wasFreeform, attachments?}.
+    pub fn toJson(self: UserInputResponse, allocator: std.mem.Allocator) std.mem.Allocator.Error!JsonValue {
+        var obj = std.json.ObjectMap.init(allocator);
+        try obj.put("answer", .{ .string = self.answer });
+        try obj.put("wasFreeform", .{ .bool = self.was_freeform });
+        if (self.attachments) |attachments| {
+            var list = std.json.Array.init(allocator);
+            for (attachments) |attachment| {
+                var item = std.json.ObjectMap.init(allocator);
+                try item.put("type", .{ .string = "image" });
+                try item.put("data", .{ .string = attachment.data });
+                try item.put("mimeType", .{ .string = attachment.mime_type });
+                if (attachment.description) |v| try item.put("description", .{ .string = v });
+                if (attachment.display_name) |v| try item.put("displayName", .{ .string = v });
+                try list.append(.{ .object = item });
+            }
+            try obj.put("attachments", .{ .array = list });
+        }
+        return .{ .object = obj };
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -900,6 +981,119 @@ fn stringMember(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
     const v = obj.get(key) orelse return null;
     return if (v == .string) v.string else null;
 }
+
+fn integerMember(obj: std.json.ObjectMap, key: []const u8) ?i64 {
+    const v = obj.get(key) orelse return null;
+    return switch (v) {
+        .integer => |i| i,
+        .float => |f| @as(i64, @intFromFloat(f)),
+        else => null,
+    };
+}
+
+/// True when `obj[key]` is the JSON literal true.
+fn boolMember(obj: std.json.ObjectMap, key: []const u8) bool {
+    const v = obj.get(key) orelse return false;
+    return v == .bool and v.bool;
+}
+
+// ---------------------------------------------------------------------------
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ---------------------------------------------------------------------------
+
+/// Result of `CopilotClient.mcpSecretsSave`.
+pub const McpSecretsSaveResult = struct {
+    /// True when the OS keychain stored the credential, false for the file backend.
+    used_keychain: bool = false,
+
+    pub fn fromJson(value: JsonValue) McpSecretsSaveResult {
+        if (value != .object) return .{};
+        return .{ .used_keychain = boolMember(value.object, "usedKeychain") };
+    }
+};
+
+/// A user-scoped approval for one installed plugin extension.
+pub const PermissionsExtensionApproval = struct {
+    /// Stable identity, for example "plugin:plugin-name:extension-name".
+    extension_name: []const u8 = "",
+    plugin_name: []const u8 = "",
+    /// Exact privileged capabilities the user approved.
+    capabilities: []const []const u8 = &.{},
+    /// When the approval was granted (RFC 3339 timestamp).
+    granted_at: []const u8 = "",
+    /// Opaque key; pass it back unchanged to `CopilotClient.extensionApprovalsRevoke`.
+    installation_key: []const u8 = "",
+    installation_label: ?[]const u8 = null,
+
+    /// Reads an approval object; every slice is copied into `allocator`.
+    pub fn fromJson(allocator: std.mem.Allocator, value: JsonValue) std.mem.Allocator.Error!PermissionsExtensionApproval {
+        var out = PermissionsExtensionApproval{};
+        if (value != .object) return out;
+        const obj = value.object;
+        out.extension_name = try allocator.dupe(u8, stringMember(obj, "extensionName") orelse "");
+        out.plugin_name = try allocator.dupe(u8, stringMember(obj, "pluginName") orelse "");
+        out.granted_at = try allocator.dupe(u8, stringMember(obj, "grantedAt") orelse "");
+        out.installation_key = try allocator.dupe(u8, stringMember(obj, "installationKey") orelse "");
+        if (stringMember(obj, "installationLabel")) |label| out.installation_label = try allocator.dupe(u8, label);
+        if (obj.get("capabilities")) |capabilities| {
+            if (capabilities == .array) {
+                var list = std.ArrayList([]const u8).init(allocator);
+                for (capabilities.array.items) |item| {
+                    if (item == .string) try list.append(try allocator.dupe(u8, item.string));
+                }
+                out.capabilities = list.items;
+            }
+        }
+        return out;
+    }
+};
+
+/// Result of `CopilotClient.extensionApprovalsGrant`.
+pub const PermissionsExtensionApprovalsGrantResult = struct {
+    /// Whether the pending request was eligible and persisted.
+    granted: bool = false,
+    /// The stored approval, when granted.
+    approval: ?PermissionsExtensionApproval = null,
+
+    /// Reads a grant result; the approval is copied into `allocator`.
+    pub fn fromJson(allocator: std.mem.Allocator, value: JsonValue) std.mem.Allocator.Error!PermissionsExtensionApprovalsGrantResult {
+        var out = PermissionsExtensionApprovalsGrantResult{};
+        if (value != .object) return out;
+        out.granted = boolMember(value.object, "granted");
+        if (value.object.get("approval")) |approval| {
+            if (approval == .object) out.approval = try PermissionsExtensionApproval.fromJson(allocator, approval);
+        }
+        return out;
+    }
+};
+
+/// Result of `CopilotClient.extensionApprovalsList`.
+pub const PermissionsExtensionApprovalsListResult = struct {
+    approvals: []const PermissionsExtensionApproval = &.{},
+
+    /// Reads a list result; every approval is copied into `allocator`.
+    pub fn fromJson(allocator: std.mem.Allocator, value: JsonValue) std.mem.Allocator.Error!PermissionsExtensionApprovalsListResult {
+        if (value != .object) return .{};
+        const approvals = value.object.get("approvals") orelse return .{};
+        if (approvals != .array) return .{};
+        var list = std.ArrayList(PermissionsExtensionApproval).init(allocator);
+        for (approvals.array.items) |item| {
+            if (item == .object) try list.append(try PermissionsExtensionApproval.fromJson(allocator, item));
+        }
+        return .{ .approvals = list.items };
+    }
+};
+
+/// Result of `CopilotClient.extensionApprovalsRevoke`.
+pub const PermissionsExtensionApprovalsRevokeResult = struct {
+    /// Whether a matching approval was revoked.
+    revoked: bool = false,
+
+    pub fn fromJson(value: JsonValue) PermissionsExtensionApprovalsRevokeResult {
+        if (value != .object) return .{};
+        return .{ .revoked = boolMember(value.object, "revoked") };
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Protocol constants

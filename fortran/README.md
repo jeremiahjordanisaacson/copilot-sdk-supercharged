@@ -76,6 +76,88 @@ program hello_copilot
 end program
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0.
+
+### MCP secret store and plugin extension approvals
+
+Six server-scoped client methods. They require **Copilot CLI 1.0.116 or newer**; an older runtime
+answers with a JSON-RPC method-not-found error, reported like any other through
+`iostat = COPILOT_IOSTAT_RPC_ERROR` and `client%last_error`.
+
+```fortran
+type(mcp_secrets_save_result) :: saved
+type(permissions_extension_approvals_grant_result) :: grant
+type(permissions_extension_approvals_list_result) :: listed
+type(permissions_extension_approvals_revoke_result) :: revoked
+integer :: i
+
+! MCP secret store. The value is a credential: it is sent to the runtime and never logged.
+call client%mcp_secrets_save('my-server/api-key', api_key, saved, ios, config_dir='/path/to/config')
+if (ios == 0 .and. .not. saved%used_keychain) print *, 'stored by the file backend'
+call client%mcp_secrets_delete('my-server/api-key', ios)          ! mcp.secrets.delete
+call client%mcp_secrets_delete_server('my-server', ios)           ! mcp.secrets.deleteServer
+
+! Plugin extension approvals (user scoped). Grant persists a pending extension permission
+! request before you answer it.
+call client%extension_approvals_grant(session%session_id, pending_request_id, grant, ios)
+if (ios == 0 .and. allocated(grant%approval)) print *, 'approved ', grant%approval%extension_name
+call client%extension_approvals_list(listed, ios)                 ! optional session_id=
+if (ios == 0) then
+  do i = 1, size(listed%approvals)
+    call client%extension_approvals_revoke(listed%approvals(i)%extension_name, &
+                                           listed%approvals(i)%installation_key, revoked, ios)
+  end do
+end if
+```
+
+| Type-bound procedure (module wrapper) | Wire method | Result |
+|---|---|---|
+| `mcp_secrets_save(secret_id, value, outcome, iostat[, config_dir])` (`copilot_mcp_secrets_save`) | `mcp.secrets.save` | `mcp_secrets_save_result`: `used_keychain` (`.false.` means the file backend stored it) |
+| `mcp_secrets_delete(secret_id, iostat[, config_dir])` (`copilot_mcp_secrets_delete`) | `mcp.secrets.delete` | none |
+| `mcp_secrets_delete_server(server_name, iostat[, config_dir])` (`copilot_mcp_secrets_delete_server`) | `mcp.secrets.deleteServer` | none |
+| `extension_approvals_grant(session_id, request_id, outcome, iostat)` (`copilot_extension_approvals_grant`) | `permissions.extensionApprovals.grant` | `permissions_extension_approvals_grant_result`: `granted`, `approval` (allocated when granted) |
+| `extension_approvals_list(outcome, iostat[, session_id])` (`copilot_extension_approvals_list`) | `permissions.extensionApprovals.list` | `permissions_extension_approvals_list_result`: `approvals(:)` |
+| `extension_approvals_revoke(extension_name, installation_key, outcome, iostat[, session_id])` (`copilot_extension_approvals_revoke`) | `permissions.extensionApprovals.revoke` | `permissions_extension_approvals_revoke_result`: `revoked` |
+
+A `permissions_extension_approval` carries `extension_name` (stable identity, for example
+`plugin:plugin-name:extension-name`), `plugin_name`, `capabilities(:)` (the exact privileged
+capabilities the user approved, blank padded), `granted_at` (RFC 3339), `installation_key` (opaque;
+pass it back unchanged to revoke), and `installation_label` (unallocated when absent).
+
+### Ask-user image attachments
+
+`config%on_user_input_request` answers the agent's ask_user questions (`userInput.request`; setting
+it sends `interaction.requestUserInput`). When the runtime accepts images, the `user_input_request`
+carries an allocated `image_attachment_constraints` (`allowed_mime_types(:)`,
+`max_bytes_per_image`, `max_count`); it is unallocated otherwise. The request also carries
+`request_id` and `meta_json` (the opaque `_meta` object) when the runtime sends them. Answer with
+images through the optional `attachments(:)` of `user_input_response`:
+
+```fortran
+function ask_user(request) result(response)
+  type(user_input_request), intent(in) :: request
+  type(user_input_response) :: response
+  response%was_freeform = .true.
+  if (allocated(request%image_attachment_constraints)) then
+    response%answer = ''                             ! image-only answer
+    allocate(response%attachments(1))
+    response%attachments(1)%data = screenshot_base64()
+    response%attachments(1)%mime_type = 'image/png'
+    response%attachments(1)%display_name = 'screenshot.png'
+  else
+    response%answer = 'yes'
+  end if
+end function ask_user
+
+config%on_user_input_request => ask_user
+```
+
+`attachments` is sent only when allocated (each image as `{"type": "image", "data", "mimeType"}` plus
+optional `description` and `displayName`) and is only valid when the request advertised
+`image_attachment_constraints`; the runtime enforces the MIME type, size, and count limits.
+
 ## What's New in v3.0.0
 
 - **SDK protocol v4.** The client now requires the server to report protocol version 4, so it
@@ -351,6 +433,12 @@ Content-Length: <byte-count>\r\n
 | `session.managedSettings.recheckPolicyHelper` | Re-run the managed-settings Policy Helper |
 | `managedSettings.clearCache` | Clear the managed settings cache |
 | `network.setProvider` | Register host network callbacks |
+| `mcp.secrets.save` | Save an MCP secret (`mcp_secrets_save`, CLI 1.0.116+) |
+| `mcp.secrets.delete` | Delete an MCP secret (`mcp_secrets_delete`, CLI 1.0.116+) |
+| `mcp.secrets.deleteServer` | Delete an MCP server's secrets (`mcp_secrets_delete_server`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.grant` | Persist a pending plugin extension approval (`extension_approvals_grant`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.list` | List plugin extension approvals (`extension_approvals_list`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.revoke` | Revoke a plugin extension approval (`extension_approvals_revoke`, CLI 1.0.116+) |
 
 **Server to Client (notifications):**
 
@@ -369,6 +457,7 @@ Content-Length: <byte-count>\r\n
 | `hooks.invoke` | Run a hook handler (`subagentStart`, `subagentStop`) |
 | `shellAuthentication.request` / `.cancel` | Answer or cancel a shell authentication prompt |
 | `memoryStore.store` | Store a fact with the memory store callback |
+| `userInput.request` | Answer an ask_user question with `on_user_input_request` (optional image attachments) |
 | `network.resolveProxy` / `.authenticateNegotiate` / `.authenticateBasic` | Network callbacks |
 
 ## API Reference
@@ -417,6 +506,12 @@ call copilot_stop(client)
 | `list_sessions(json, iostat)` | List sessions |
 | `set_foreground(id, iostat)` | Set foreground session |
 | `clear_managed_settings_cache(iostat)` | Clear the managed settings cache |
+| `mcp_secrets_save(id, value, outcome, iostat[, config_dir])` | Save an MCP secret (`mcp.secrets.save`) |
+| `mcp_secrets_delete(id, iostat[, config_dir])` | Delete an MCP secret (`mcp.secrets.delete`) |
+| `mcp_secrets_delete_server(name, iostat[, config_dir])` | Delete an MCP server's secrets (`mcp.secrets.deleteServer`) |
+| `extension_approvals_grant(session_id, request_id, outcome, iostat)` | Persist a pending extension approval |
+| `extension_approvals_list(outcome, iostat[, session_id])` | List plugin extension approvals |
+| `extension_approvals_revoke(name, key, outcome, iostat[, session_id])` | Revoke a plugin extension approval |
 | `handle_server_request(message, handled, iostat)` | Answer a server-to-client request |
 
 ### copilot_session_type

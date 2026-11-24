@@ -79,21 +79,21 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
-## What's New in v3.0.0
+## What's New in v3.1.0
 
-**Major release: SDK protocol 4 and the Microsoft Copilot SDK 2.0 sync.** Copilot CLI 1.0.113 and newer speak SDK protocol 4, which groups session options (`inference`, `tools`, `permissions`, `events`, and more) and rejects the flat payloads that v2.x SDKs send, so every v2.x SDK fails to start against a current CLI. v3.0.0 moves all 40 SDKs to protocol 4. See the [CHANGELOG](./CHANGELOG.md) for the full list.
+**Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0.** The MCP secret store, plugin extension approvals, and ask-user image answers are in all 40 SDKs, with no breaking changes. See the [CHANGELOG](./CHANGELOG.md) for details.
 
-- **Protocol 4 in all 40 SDKs**: requires Copilot CLI (or runtime) 1.0.113 or newer; older runtimes are rejected at startup with a clear protocol version error.
-- **Core SDKs track upstream Microsoft Copilot SDK 2.0** (Node.js, Python, Go, .NET): explicit client mode (`coding-agent` or `empty`), runtime connections with in-process hosting by default, grouped client and session options, and named BYOK providers. These are breaking changes; follow the [v2 breaking changes guide](./docs/v2-breaking-changes.md). Registry package names do not change (`copilot-sdk-supercharged`, `CopilotSDK.Supercharged`); the .NET namespace is now `Microsoft.Copilot` and the Go module path is `github.com/microsoft/copilot-sdk/go/v2`.
-- **The 36 additional SDKs stay source compatible**: existing options keep working, and each SDK translates them into the protocol 4 grouped payload internally.
-- **New in every SDK**: named BYOK providers and model definitions, idempotent tools, client turn IDs, explicit client mode, `tool.shell_output` events, shell authentication prompts, a memory store callback, network proxy and authentication callbacks, Policy Helper failure details and recheck, and the permission-mode refusal reason.
-- **Also new in the additional SDKs** (the v2.6 feature wave): client info handshake, Auto routing tier, ask-user variant, session-scoped GitHub token provider, sandbox bypass, feature flag overrides, session detach, message source, managed settings cache clear, model allowlist, OAuth client metadata URL, max output tokens override, structured output, agent and hook directories, working directory trust, transcript recovery, image generation config, autopilot options, subagent lifecycle hooks, and the BYOK API key command.
-- **Security and CI**: refreshed test harness dependencies (0 `npm audit` findings), a new core SDK test workflow, and E2E harnesses that use the Copilot CLI 1.0.113 npm loader.
-
-Coverage is enforced by `scripts/verify-sdk-coverage.mjs`, which now also checks that every additional SDK declares SDK protocol 4.
+- **MCP secret store**: `mcp.secrets.save`, `delete`, and `deleteServer` store legacy MCP configuration credentials in the OS keychain (or the runtime's file backend) and remove them by secret or by server.
+- **Plugin extension approvals**: `permissions.extensionApprovals.grant`, `list`, and `revoke` persist the approval for a live extension permission request, list persisted approvals, and revoke one installation's approval.
+- **Image answers for ask-user**: user input requests carry `imageAttachmentConstraints` (allowed MIME types, a per-image byte limit, and a maximum count) when the runtime accepts images, and handlers can answer with base64 image `attachments`. The field is absent when images aren't supported, so existing text-only handlers keep working.
+- **Ask-user works everywhere**: 18 additional SDKs whose ask-user handler was missing or never reached by `userInput.request` now answer it (including Objective-C, Zig, F#, OCaml, MATLAB, COBOL, Visual Basic, Ada, and Erlang).
+- **Elicitation metadata**: in the SDKs that dispatch elicitation requests (the core SDKs plus Kotlin, Groovy, Erlang, R, Shell, and Solidity), handlers receive the runtime's `requestId` and `_meta`, and a result's `_meta` goes back unchanged.
+- **Runtime requirement**: the secret store and extension approval RPCs are experimental and need Copilot CLI 1.0.116 or newer. This release keeps the core SDK runtime and E2E pin at Copilot CLI 1.0.113, which rejects these methods as unknown.
+- **Publishing and maintenance**: NuGet, RubyGems, crates.io, and PyPI now publish through trusted publishing (OIDC) with no stored API keys, like npm. Dependabot version updates are back for minor and patch releases, and `scripts/verify-sdk-coverage.mjs` checks 7 more features (87 in total).
 
 ### Previous releases
 
+- **v3.0.0**: SDK protocol 4 in all 40 SDKs (Copilot CLI 1.0.113 or newer), the Microsoft Copilot SDK 2.0 sync for the core SDKs (see the [v2 breaking changes guide](./docs/v2-breaking-changes.md)), and the v2.6 feature wave in the 36 additional SDKs.
 - **v2.5.3**: PyPI package name fixed (`copilot-sdk-supercharged`), a High-severity ReDoS fix in the Python code generator, OIDC trusted publishing for npm, PyPI, and pub.dev, and "Recent Features (v2.4 to v2.5)" sections in all 40 SDK READMEs.
 - **v2.5.2**: `user_setting` permission source, optional `login` on `AccountLoginRequest`, and Jackson 2.18.10 for the Java SDK.
 - **v2.5.0**: session rewind, in-process (FFI) transport, additional session directories, disabled MCP servers and GitHub MCP tool config, canvas provider, `reasoningEffort: max` with tool search, and Agent Factories `argsSchema`.

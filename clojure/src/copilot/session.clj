@@ -119,7 +119,12 @@
 (defn register-user-input-handler!
   "Register a user input handler.
 
-  `handler` - (fn [request invocation] -> {:answer str :wasFreeform bool})"
+  `handler` - (fn [request invocation] -> {:answer str :wasFreeform bool})
+              `request` has :question, :choices, :allowFreeform and, when the
+              runtime sends them, :requestId, :_meta, and
+              :imageAttachmentConstraints ({:allowedMimeTypes :maxBytesPerImage
+              :maxCount}).  The reply may add :attachments (see
+              `copilot.types/user-input-image-attachment`)."
   [session-atom handler]
   (swap! session-atom assoc :user-input-handler handler))
 

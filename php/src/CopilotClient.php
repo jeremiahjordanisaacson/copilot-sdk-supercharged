@@ -624,6 +624,132 @@ class CopilotClient
     }
 
     /**
+     * Saves a legacy MCP configuration credential in the runtime-owned secret store
+     * (`mcp.secrets.save`). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string $secretId Identifier of the credential
+     * @param string $value The credential; it is never logged
+     * @param string|null $configDir Configuration directory (the runtime's default when null)
+     * @return McpSecretsSaveResult $usedKeychain is true when the OS keychain stored the
+     *         credential and false for the file backend
+     * @throws \RuntimeException If not connected
+     */
+    public function mcpSecretsSave(
+        string $secretId,
+        #[\SensitiveParameter] string $value,
+        ?string $configDir = null,
+    ): McpSecretsSaveResult {
+        $this->ensureConnected();
+        $params = ['secretId' => $secretId, 'value' => $value];
+        if ($configDir !== null) {
+            $params['configDir'] = $configDir;
+        }
+        $result = $this->connection->request('mcp.secrets.save', $params);
+        return McpSecretsSaveResult::fromArray(is_array($result) ? $result : []);
+    }
+
+    /**
+     * Deletes a legacy MCP configuration credential from the runtime-owned secret store
+     * (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string $secretId Identifier of the credential
+     * @param string|null $configDir Configuration directory (the runtime's default when null)
+     * @throws \RuntimeException If not connected
+     */
+    public function mcpSecretsDelete(string $secretId, ?string $configDir = null): void
+    {
+        $this->ensureConnected();
+        $params = ['secretId' => $secretId];
+        if ($configDir !== null) {
+            $params['configDir'] = $configDir;
+        }
+        $this->connection->request('mcp.secrets.delete', $params);
+    }
+
+    /**
+     * Deletes the legacy credentials indexed for an MCP server (`mcp.secrets.deleteServer`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string $serverName The MCP server name
+     * @param string|null $configDir Configuration directory (the runtime's default when null)
+     * @throws \RuntimeException If not connected
+     */
+    public function mcpSecretsDeleteServer(string $serverName, ?string $configDir = null): void
+    {
+        $this->ensureConnected();
+        $params = ['serverName' => $serverName];
+        if ($configDir !== null) {
+            $params['configDir'] = $configDir;
+        }
+        $this->connection->request('mcp.secrets.deleteServer', $params);
+    }
+
+    /**
+     * Persists a pending plugin extension permission request as a user-scoped approval,
+     * before the host answers that request normally (`permissions.extensionApprovals.grant`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string $sessionId Session that owns the pending request
+     * @param string $requestId Id of the pending extension permission request
+     * @return PermissionsExtensionApprovalsGrantResult Whether the request was eligible and
+     *         persisted, and the stored approval
+     * @throws \RuntimeException If not connected
+     */
+    public function extensionApprovalsGrant(string $sessionId, string $requestId): PermissionsExtensionApprovalsGrantResult
+    {
+        $this->ensureConnected();
+        $result = $this->connection->request('permissions.extensionApprovals.grant', [
+            'sessionId' => $sessionId,
+            'requestId' => $requestId,
+        ]);
+        return PermissionsExtensionApprovalsGrantResult::fromArray(is_array($result) ? $result : []);
+    }
+
+    /**
+     * Lists the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string|null $sessionId Attached session whose configuration profile to list
+     *        (the server's profile when null)
+     * @return PermissionsExtensionApprovalsListResult The approvals
+     * @throws \RuntimeException If not connected
+     */
+    public function extensionApprovalsList(?string $sessionId = null): PermissionsExtensionApprovalsListResult
+    {
+        $this->ensureConnected();
+        $params = [];
+        if ($sessionId !== null) {
+            $params['sessionId'] = $sessionId;
+        }
+        $result = $this->connection->request('permissions.extensionApprovals.list', $params);
+        return PermissionsExtensionApprovalsListResult::fromArray(is_array($result) ? $result : []);
+    }
+
+    /**
+     * Revokes one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param string $extensionName The approval's extensionName
+     * @param string $installationKey The approval's installationKey, unchanged
+     * @param string|null $sessionId Attached session whose configuration profile to use
+     * @return PermissionsExtensionApprovalsRevokeResult Whether a matching approval was revoked
+     * @throws \RuntimeException If not connected
+     */
+    public function extensionApprovalsRevoke(
+        string $extensionName,
+        string $installationKey,
+        ?string $sessionId = null,
+    ): PermissionsExtensionApprovalsRevokeResult {
+        $this->ensureConnected();
+        $params = ['extensionName' => $extensionName, 'installationKey' => $installationKey];
+        if ($sessionId !== null) {
+            $params['sessionId'] = $sessionId;
+        }
+        $result = $this->connection->request('permissions.extensionApprovals.revoke', $params);
+        return PermissionsExtensionApprovalsRevokeResult::fromArray(is_array($result) ? $result : []);
+    }
+
+    /**
      * Subscribe to session lifecycle events (typed).
      *
      * @param string $eventType e.g. "session.created", "session.deleted"
@@ -1394,6 +1520,11 @@ class CopilotClient
             question: $question,
             choices: $params['choices'] ?? null,
             allowFreeform: $params['allowFreeform'] ?? null,
+            requestId: is_string($params['requestId'] ?? null) ? $params['requestId'] : null,
+            imageAttachmentConstraints: is_array($params['imageAttachmentConstraints'] ?? null)
+                ? UserInputImageAttachmentConstraints::fromArray($params['imageAttachmentConstraints'])
+                : null,
+            meta: is_array($params['_meta'] ?? null) ? $params['_meta'] : null,
         );
 
         $result = $session->handleUserInputRequestInternal($request);

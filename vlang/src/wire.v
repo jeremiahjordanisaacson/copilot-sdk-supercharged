@@ -52,6 +52,20 @@ fn any_raw(obj map[string]json2.Any, key string) string {
 	return value.json_str()
 }
 
+// any_str_list returns the string items of an array member ([] when absent).
+fn any_str_list(obj map[string]json2.Any, key string) []string {
+	mut items := []string{}
+	value := obj[key] or { return items }
+	if value is []json2.Any {
+		for item in value {
+			if item is string {
+				items << item
+			}
+		}
+	}
+	return items
+}
+
 fn new_registration_id() string {
 	return rand.uuid_v4()
 }
@@ -329,6 +343,122 @@ pub fn parse_shell_output(raw string) ShellOutputData {
 		text:         any_str(obj, 'text')
 		sequence:     any_int(obj, 'sequence')
 		stream:       any_str(obj, 'stream')
+	}
+}
+
+// parse_user_input_request decodes `userInput.request` params, passing
+// `imageAttachmentConstraints`, `requestId` and `_meta` (raw JSON) through.
+pub fn parse_user_input_request(raw string) UserInputRequest {
+	obj := decode_object(raw)
+	mut request := UserInputRequest{
+		session_id: any_str(obj, 'sessionId')
+		question:   any_str(obj, 'question')
+		choices:    any_str_list(obj, 'choices')
+		request_id: any_str(obj, 'requestId')
+		meta:       any_raw(obj, '_meta')
+	}
+	if value := obj['allowFreeform'] {
+		if value is bool {
+			request.allow_freeform = value
+		}
+	}
+	if value := obj['imageAttachmentConstraints'] {
+		if value is map[string]json2.Any {
+			request.image_attachment_constraints = UserInputImageAttachmentConstraints{
+				allowed_mime_types:  any_str_list(value, 'allowedMimeTypes')
+				max_bytes_per_image: any_int(value, 'maxBytesPerImage')
+				max_count:           any_int(value, 'maxCount')
+			}
+		}
+	}
+	return request
+}
+
+// to_json renders one ask_user image attachment (`type` is always "image").
+pub fn (a UserInputImageAttachment) to_json() string {
+	mut parts := map[string]string{}
+	parts['type'] = '"image"'
+	parts['data'] = json_str(a.data)
+	parts['mimeType'] = json_str(a.mime_type)
+	if a.description.len > 0 {
+		parts['description'] = json_str(a.description)
+	}
+	if a.display_name.len > 0 {
+		parts['displayName'] = json_str(a.display_name)
+	}
+	return build_params(parts)
+}
+
+// to_json renders the `userInput.request` answer; `attachments` is sent only when set.
+pub fn (r UserInputResponse) to_json() string {
+	mut parts := map[string]string{}
+	parts['answer'] = json_str(r.answer)
+	parts['wasFreeform'] = bool_json(r.was_freeform)
+	if r.attachments.len > 0 {
+		parts['attachments'] = '[${r.attachments.map(it.to_json()).join(',')}]'
+	}
+	return build_params(parts)
+}
+
+// parse_mcp_secrets_save_result decodes a `mcp.secrets.save` result.
+pub fn parse_mcp_secrets_save_result(raw string) McpSecretsSaveResult {
+	return McpSecretsSaveResult{
+		used_keychain: any_bool(decode_object(raw), 'usedKeychain')
+	}
+}
+
+fn parse_extension_approval(obj map[string]json2.Any) PermissionsExtensionApproval {
+	return PermissionsExtensionApproval{
+		extension_name:     any_str(obj, 'extensionName')
+		plugin_name:        any_str(obj, 'pluginName')
+		capabilities:       any_str_list(obj, 'capabilities')
+		granted_at:         any_str(obj, 'grantedAt')
+		installation_key:   any_str(obj, 'installationKey')
+		installation_label: any_str(obj, 'installationLabel')
+	}
+}
+
+// parse_extension_approvals_grant_result decodes a
+// `permissions.extensionApprovals.grant` result.
+pub fn parse_extension_approvals_grant_result(raw string) PermissionsExtensionApprovalsGrantResult {
+	obj := decode_object(raw)
+	if value := obj['approval'] {
+		if value is map[string]json2.Any {
+			return PermissionsExtensionApprovalsGrantResult{
+				granted:  any_bool(obj, 'granted')
+				approval: parse_extension_approval(value)
+			}
+		}
+	}
+	return PermissionsExtensionApprovalsGrantResult{
+		granted: any_bool(obj, 'granted')
+	}
+}
+
+// parse_extension_approvals_list_result decodes a
+// `permissions.extensionApprovals.list` result.
+pub fn parse_extension_approvals_list_result(raw string) PermissionsExtensionApprovalsListResult {
+	obj := decode_object(raw)
+	mut approvals := []PermissionsExtensionApproval{}
+	if value := obj['approvals'] {
+		if value is []json2.Any {
+			for item in value {
+				if item is map[string]json2.Any {
+					approvals << parse_extension_approval(item)
+				}
+			}
+		}
+	}
+	return PermissionsExtensionApprovalsListResult{
+		approvals: approvals
+	}
+}
+
+// parse_extension_approvals_revoke_result decodes a
+// `permissions.extensionApprovals.revoke` result.
+pub fn parse_extension_approvals_revoke_result(raw string) PermissionsExtensionApprovalsRevokeResult {
+	return PermissionsExtensionApprovalsRevokeResult{
+		revoked: any_bool(decode_object(raw), 'revoked')
 	}
 }
 

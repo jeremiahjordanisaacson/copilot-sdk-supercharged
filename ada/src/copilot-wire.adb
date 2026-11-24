@@ -292,6 +292,37 @@ package body Copilot.Wire is
          return Default;
    end Natural_Member;
 
+   procedure For_Each_Element
+     (Arr     : String;
+      Process : not null access procedure (Value : String))
+   is
+      I          : Positive;
+      Value_Last : Natural;
+   begin
+      if Arr'Length = 0 then
+         return;
+      end if;
+      I := Skip_Blanks (Arr, Arr'First);
+      if I > Arr'Last or else Arr (I) /= '[' then
+         return;
+      end if;
+      I := I + 1;
+
+      loop
+         I := Skip_Blanks (Arr, I);
+         if I <= Arr'Last and then Arr (I) = ',' then
+            I := Skip_Blanks (Arr, I + 1);
+         end if;
+         exit when I > Arr'Last or else Arr (I) = ']';
+
+         Value_Last := Value_End (Arr, I);
+         exit when Value_Last < I;
+
+         Process (Arr (I .. Value_Last));
+         I := Value_Last + 1;
+      end loop;
+   end For_Each_Element;
+
    --  -------------------------------------------------------------------
    --  SDK protocol 4 grouped session payloads
    --  -------------------------------------------------------------------

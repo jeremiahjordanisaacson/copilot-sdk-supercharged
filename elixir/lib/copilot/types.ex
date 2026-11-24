@@ -306,31 +306,125 @@ defmodule Copilot.Types do
   # User Input Types
   # ---------------------------------------------------------------------------
 
+  defmodule UserInputImageAttachmentConstraints do
+    @moduledoc """
+    Image support advertised by a `userInput.request`
+    (`UserInputRequest.image_attachment_constraints`, wire
+    `imageAttachmentConstraints`). It is `nil` when the runtime does not accept
+    images in the answer.
+    """
+    @type t :: %__MODULE__{
+            allowed_mime_types: [String.t()],
+            max_bytes_per_image: non_neg_integer() | nil,
+            max_count: non_neg_integer() | nil
+          }
+    defstruct [:max_bytes_per_image, :max_count, allowed_mime_types: []]
+
+    @spec from_map(map() | nil) :: t() | nil
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        allowed_mime_types: m["allowedMimeTypes"] || [],
+        max_bytes_per_image: m["maxBytesPerImage"],
+        max_count: m["maxCount"]
+      }
+    end
+
+    def from_map(_other), do: nil
+  end
+
+  defmodule UserInputImageAttachment do
+    @moduledoc """
+    An inline image attached to an ask_user answer
+    (`UserInputResponse.attachments`). `data` is the base64-encoded image; the
+    wire `type` is always `"image"`. The runtime enforces the advertised MIME
+    types, size, and count limits.
+    """
+    @type t :: %__MODULE__{
+            data: String.t(),
+            mime_type: String.t(),
+            description: String.t() | nil,
+            display_name: String.t() | nil
+          }
+    defstruct [:data, :mime_type, :description, :display_name]
+
+    @doc "Encode the attachment (a plain map is sent unchanged)."
+    @spec to_map(t() | map()) :: map()
+    def to_map(%__MODULE__{} = a) do
+      Copilot.Types.compact(%{
+        "type" => "image",
+        "data" => a.data,
+        "mimeType" => a.mime_type,
+        "description" => a.description,
+        "displayName" => a.display_name
+      })
+    end
+
+    def to_map(m) when is_map(m), do: m
+  end
+
   defmodule UserInputRequest do
-    @moduledoc "Request for user input from the agent (enables ask_user tool)."
+    @moduledoc """
+    Request for user input from the agent (enables ask_user tool).
+
+    `image_attachment_constraints` (`%UserInputImageAttachmentConstraints{}`)
+    is set when the runtime accepts image attachments in the answer and `nil`
+    otherwise. `request_id` is the pending request ID and `meta` the request's
+    opaque `_meta` map, when the runtime sends them.
+    """
     @type t :: %__MODULE__{
             question: String.t(),
             choices: [String.t()] | nil,
-            allow_freeform: boolean()
+            allow_freeform: boolean(),
+            request_id: String.t() | nil,
+            image_attachment_constraints: UserInputImageAttachmentConstraints.t() | nil,
+            meta: map() | nil
           }
-    defstruct [:question, :choices, allow_freeform: true]
+    defstruct [
+      :question,
+      :choices,
+      :request_id,
+      :image_attachment_constraints,
+      :meta,
+      allow_freeform: true
+    ]
 
     def from_map(m) when is_map(m) do
       %__MODULE__{
         question: m["question"],
         choices: m["choices"],
-        allow_freeform: Map.get(m, "allowFreeform", true)
+        allow_freeform: Map.get(m, "allowFreeform", true),
+        request_id: m["requestId"],
+        image_attachment_constraints:
+          UserInputImageAttachmentConstraints.from_map(m["imageAttachmentConstraints"]),
+        meta: m["_meta"]
       }
     end
   end
 
   defmodule UserInputResponse do
-    @moduledoc "Response to a user input request."
-    @type t :: %__MODULE__{answer: String.t(), was_freeform: boolean()}
-    defstruct [:answer, :was_freeform]
+    @moduledoc """
+    Response to a user input request.
+
+    `attachments` is an optional list of `%UserInputImageAttachment{}` (or wire
+    maps), only valid when the request advertised `image_attachment_constraints`;
+    it is sent only when set. Image-only answers use `answer: ""` and
+    `was_freeform: true`.
+    """
+    @type t :: %__MODULE__{
+            answer: String.t(),
+            was_freeform: boolean(),
+            attachments: [UserInputImageAttachment.t() | map()] | nil
+          }
+    defstruct [:answer, :was_freeform, :attachments]
 
     def to_map(%__MODULE__{} = r) do
-      %{"answer" => r.answer, "wasFreeform" => r.was_freeform}
+      m = %{"answer" => r.answer, "wasFreeform" => r.was_freeform}
+
+      if r.attachments do
+        Map.put(m, "attachments", Enum.map(r.attachments, &UserInputImageAttachment.to_map/1))
+      else
+        m
+      end
     end
   end
 
@@ -1119,6 +1213,124 @@ defmodule Copilot.Types do
   @spec compact(map()) :: map()
   def compact(map) when is_map(map) do
     map |> Enum.reject(fn {_key, value} -> is_nil(value) end) |> Map.new()
+  end
+
+  # ---------------------------------------------------------------------------
+  # v3.1.0 Types (MCP secret store and plugin extension approvals)
+  # ---------------------------------------------------------------------------
+
+  defmodule McpSecretsSaveResult do
+    @moduledoc """
+    Result of `Copilot.Client.mcp_secrets_save/4` (`mcp.secrets.save`).
+    `used_keychain` is `true` when the OS keychain stored the secret and
+    `false` when the runtime used its file backend.
+    """
+    @type t :: %__MODULE__{used_keychain: boolean()}
+    defstruct used_keychain: false
+
+    @spec from_map(map() | nil) :: t()
+    def from_map(m) when is_map(m), do: %__MODULE__{used_keychain: m["usedKeychain"] == true}
+    def from_map(_other), do: %__MODULE__{}
+  end
+
+  defmodule PermissionsExtensionApproval do
+    @moduledoc """
+    A user-scoped approval for one installed plugin extension.
+
+    `extension_name` is the stable identity (for example
+    `"plugin:plugin-name:extension-name"`), `capabilities` the exact privileged
+    capabilities the user approved, and `granted_at` an RFC 3339 timestamp.
+    Pass `installation_key` (opaque) back unchanged to
+    `Copilot.Client.extension_approvals_revoke/4`.
+    """
+    @type t :: %__MODULE__{
+            extension_name: String.t(),
+            plugin_name: String.t(),
+            capabilities: [String.t()],
+            granted_at: String.t(),
+            installation_key: String.t(),
+            installation_label: String.t() | nil
+          }
+    defstruct [
+      :extension_name,
+      :plugin_name,
+      :granted_at,
+      :installation_key,
+      :installation_label,
+      capabilities: []
+    ]
+
+    @spec from_map(map() | nil) :: t() | nil
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        extension_name: m["extensionName"],
+        plugin_name: m["pluginName"],
+        capabilities: m["capabilities"] || [],
+        granted_at: m["grantedAt"],
+        installation_key: m["installationKey"],
+        installation_label: m["installationLabel"]
+      }
+    end
+
+    def from_map(_other), do: nil
+  end
+
+  defmodule PermissionsExtensionApprovalsGrantResult do
+    @moduledoc """
+    Result of `Copilot.Client.extension_approvals_grant/3`
+    (`permissions.extensionApprovals.grant`): whether the pending request was
+    eligible and persisted, and the stored `approval` when it was.
+    """
+    @type t :: %__MODULE__{
+            granted: boolean(),
+            approval: PermissionsExtensionApproval.t() | nil
+          }
+    defstruct [:approval, granted: false]
+
+    @spec from_map(map() | nil) :: t()
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        granted: m["granted"] == true,
+        approval: PermissionsExtensionApproval.from_map(m["approval"])
+      }
+    end
+
+    def from_map(_other), do: %__MODULE__{}
+  end
+
+  defmodule PermissionsExtensionApprovalsListResult do
+    @moduledoc """
+    Result of `Copilot.Client.extension_approvals_list/2`
+    (`permissions.extensionApprovals.list`): the persisted approvals.
+    """
+    @type t :: %__MODULE__{approvals: [PermissionsExtensionApproval.t()]}
+    defstruct approvals: []
+
+    @spec from_map(map() | nil) :: t()
+    def from_map(%{"approvals" => approvals}) when is_list(approvals) do
+      %__MODULE__{
+        approvals:
+          approvals
+          |> Enum.filter(&is_map/1)
+          |> Enum.map(&PermissionsExtensionApproval.from_map/1)
+      }
+    end
+
+    def from_map(_other), do: %__MODULE__{}
+  end
+
+  defmodule PermissionsExtensionApprovalsRevokeResult do
+    @moduledoc """
+    Result of `Copilot.Client.extension_approvals_revoke/4`
+    (`permissions.extensionApprovals.revoke`): whether a matching approval was
+    revoked.
+    """
+    @type t :: %__MODULE__{revoked: boolean()}
+    defstruct revoked: false
+
+    @spec from_map(map() | nil) :: t()
+    def from_map(m) when is_map(m), do: %__MODULE__{revoked: m["revoked"] == true}
+    def from_map(_other), do: %__MODULE__{}
   end
 
   # ---------------------------------------------------------------------------

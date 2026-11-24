@@ -29,6 +29,7 @@ Namespace GitHub.Copilot.SDK
         Private _subagentStopHandler As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
         Private _shellAuthenticationHandler As ShellAuthenticationHandler
         Private _storeMemoryHandler As Func(Of StoredMemory, Task)
+        Private _userInputHandler As Func(Of UserInputRequest, Task(Of UserInputResponse))
         Private _onDetached As Action
         Private _disposed As Boolean = False
 
@@ -340,6 +341,11 @@ Namespace GitHub.Copilot.SDK
             _storeMemoryHandler = handler
         End Sub
 
+        ''' <summary>Registers the user input (ask_user) handler for this session.</summary>
+        Friend Sub SetUserInputHandler(handler As Func(Of UserInputRequest, Task(Of UserInputResponse)))
+            _userInputHandler = handler
+        End Sub
+
         ''' <summary>Registers a callback run once after the session is detached.</summary>
         Friend Sub SetDetachedCallback(callback As Action)
             _onDetached = callback
@@ -428,6 +434,22 @@ Namespace GitHub.Copilot.SDK
                 Throw New InvalidOperationException("No memory store is registered for this session")
             End If
             Await handler(memory)
+        End Function
+
+        ''' <summary>
+        ''' Answers a <c>userInput.request</c> with the registered handler. Fails (a JSON-RPC error)
+        ''' when no handler is registered or the handler returns Nothing.
+        ''' </summary>
+        Friend Async Function HandleUserInputRequestAsync(request As UserInputRequest) As Task(Of UserInputResponse)
+            Dim handler = _userInputHandler
+            If handler Is Nothing Then
+                Throw New InvalidOperationException("User input requested but no handler registered")
+            End If
+            Dim response = Await handler(request)
+            If response Is Nothing Then
+                Throw New InvalidOperationException("User input handler returned no response")
+            End If
+            Return response
         End Function
 
         ' -----------------------------------------------------------------------

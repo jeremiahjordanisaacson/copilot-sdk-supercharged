@@ -421,6 +421,92 @@ NSString * const CPPolicyHelperFailureErrorKey = @"CPPolicyHelperFailure";
 
 @end
 
+#pragma mark - v3.1.0 Types (MCP secrets, plugin extension approvals)
+
+@implementation CPMcpSecretsSaveResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _usedKeychain = [CPNumberOrNil(dict[@"usedKeychain"]) boolValue];
+    }
+    return self;
+}
+
+@end
+
+@implementation CPPermissionsExtensionApproval
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _extensionName = [(CPStringOrNil(dict[@"extensionName"]) ?: @"") copy];
+        _pluginName = [(CPStringOrNil(dict[@"pluginName"]) ?: @"") copy];
+        NSMutableArray<NSString *> *capabilities = [NSMutableArray array];
+        id rawCapabilities = dict[@"capabilities"];
+        if ([rawCapabilities isKindOfClass:[NSArray class]]) {
+            for (id capability in (NSArray *)rawCapabilities) {
+                if ([capability isKindOfClass:[NSString class]]) [capabilities addObject:capability];
+            }
+        }
+        _capabilities = [capabilities copy];
+        _grantedAt = [(CPStringOrNil(dict[@"grantedAt"]) ?: @"") copy];
+        _installationKey = [(CPStringOrNil(dict[@"installationKey"]) ?: @"") copy];
+        _installationLabel = [CPStringOrNil(dict[@"installationLabel"]) copy];
+    }
+    return self;
+}
+
+@end
+
+@implementation CPPermissionsExtensionApprovalsGrantResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _granted = [CPNumberOrNil(dict[@"granted"]) boolValue];
+        id approval = dict[@"approval"];
+        if ([approval isKindOfClass:[NSDictionary class]]) {
+            _approval = [[CPPermissionsExtensionApproval alloc] initWithDictionary:approval];
+        }
+    }
+    return self;
+}
+
+@end
+
+@implementation CPPermissionsExtensionApprovalsListResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        NSMutableArray<CPPermissionsExtensionApproval *> *approvals = [NSMutableArray array];
+        id rawApprovals = dict[@"approvals"];
+        if ([rawApprovals isKindOfClass:[NSArray class]]) {
+            for (id approval in (NSArray *)rawApprovals) {
+                if (![approval isKindOfClass:[NSDictionary class]]) continue;
+                [approvals addObject:[[CPPermissionsExtensionApproval alloc] initWithDictionary:approval]];
+            }
+        }
+        _approvals = [approvals copy];
+    }
+    return self;
+}
+
+@end
+
+@implementation CPPermissionsExtensionApprovalsRevokeResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _revoked = [CPNumberOrNil(dict[@"revoked"]) boolValue];
+    }
+    return self;
+}
+
+@end
+
 #pragma mark - CPToolInvocation
 
 @implementation CPToolInvocation
@@ -858,6 +944,52 @@ NSString * const CPPolicyHelperFailureErrorKey = @"CPPolicyHelperFailure";
 
 @end
 
+#pragma mark - CPUserInputImageAttachmentConstraints
+
+@implementation CPUserInputImageAttachmentConstraints
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        NSMutableArray<NSString *> *mimeTypes = [NSMutableArray array];
+        id allowed = dict[@"allowedMimeTypes"];
+        if ([allowed isKindOfClass:[NSArray class]]) {
+            for (id mimeType in (NSArray *)allowed) {
+                if ([mimeType isKindOfClass:[NSString class]]) [mimeTypes addObject:mimeType];
+            }
+        }
+        _allowedMimeTypes = [mimeTypes copy];
+        _maxBytesPerImage = [CPNumberOrNil(dict[@"maxBytesPerImage"]) integerValue];
+        _maxCount = [CPNumberOrNil(dict[@"maxCount"]) integerValue];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPUserInputImageAttachment
+
+@implementation CPUserInputImageAttachment
+
++ (instancetype)attachmentWithData:(NSString *)data mimeType:(NSString *)mimeType {
+    CPUserInputImageAttachment *attachment = [[CPUserInputImageAttachment alloc] init];
+    attachment.data = data;
+    attachment.mimeType = mimeType;
+    return attachment;
+}
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"type"] = @"image";
+    dict[@"data"] = self.data ?: @"";
+    dict[@"mimeType"] = self.mimeType ?: @"";
+    if (self.imageDescription) dict[@"description"] = self.imageDescription;
+    if (self.displayName) dict[@"displayName"] = self.displayName;
+    return [dict copy];
+}
+
+@end
+
 #pragma mark - CPUserInputRequest
 
 @implementation CPUserInputRequest
@@ -868,6 +1000,13 @@ NSString * const CPPolicyHelperFailureErrorKey = @"CPPolicyHelperFailure";
         _question = [dict[@"question"] copy];
         _choices = [dict[@"choices"] copy];
         _allowFreeform = dict[@"allowFreeform"];
+        _requestId = [CPStringOrNil(dict[@"requestId"]) copy];
+        id constraints = dict[@"imageAttachmentConstraints"];
+        if ([constraints isKindOfClass:[NSDictionary class]]) {
+            _imageAttachmentConstraints = [[CPUserInputImageAttachmentConstraints alloc] initWithDictionary:constraints];
+        }
+        id meta = dict[@"_meta"];
+        if ([meta isKindOfClass:[NSDictionary class]]) _meta = [meta copy];
     }
     return self;
 }
@@ -879,10 +1018,17 @@ NSString * const CPPolicyHelperFailureErrorKey = @"CPPolicyHelperFailure";
 @implementation CPUserInputResponse
 
 - (NSDictionary<NSString *, id> *)toDictionary {
-    return @{
-        @"answer": self.answer ?: @"",
-        @"wasFreeform": @(self.wasFreeform),
-    };
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"answer"] = self.answer ?: @"";
+    dict[@"wasFreeform"] = @(self.wasFreeform);
+    if (self.attachments) {
+        NSMutableArray *attachments = [NSMutableArray arrayWithCapacity:self.attachments.count];
+        for (CPUserInputImageAttachment *attachment in self.attachments) {
+            [attachments addObject:[attachment toDictionary]];
+        }
+        dict[@"attachments"] = attachments;
+    }
+    return [dict copy];
 }
 
 @end
@@ -1157,6 +1303,9 @@ static NSArray *CPWireToolDefinitions(NSArray *tools) {
     if (self.permissionMode) dict[@"permissionMode"] = self.permissionMode;
     if (self.onShellAuthentication) dict[@"requestShellAuthentication"] = @YES;
     if (self.onMemoryStore) dict[@"hasMemoryStore"] = @YES;
+
+    // --- v3.1.0 session options ---
+    if (self.userInputHandler) dict[@"requestUserInput"] = @YES;
 
     return [dict copy];
 }

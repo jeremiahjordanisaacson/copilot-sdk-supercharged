@@ -54,6 +54,75 @@ fun main() = runBlocking {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error, which is thrown as a `JsonRpcException` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store
+(`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). The secret value is never
+logged. Each method takes an optional `configDir` (null selects the runtime's default).
+
+```kotlin
+val saved = client.mcpSecretsSave("my-server-token", System.getenv("MY_SERVER_TOKEN"))
+println(if (saved.usedKeychain) "Stored in the OS keychain" else "Stored in the file backend")
+
+client.mcpSecretsDelete("my-server-token")
+client.mcpSecretsDeleteServer("my-server")   // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `list` and `revoke`). `extensionApprovalsList` and
+`extensionApprovalsRevoke` take an optional `sessionId` to use an attached session's configuration
+profile.
+
+```kotlin
+// Persist a pending extension permission request (its requestId) before answering it normally
+val grant = client.extensionApprovalsGrant(session.sessionId, requestId)
+if (grant.granted) println("Approved ${grant.approval?.extensionName}")
+
+client.extensionApprovalsList().approvals.forEach { approval ->
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    if (client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey).revoked) {
+        println("Revoked ${approval.extensionName}")
+    }
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, `UserInputRequest.imageAttachmentConstraints` carries
+`allowedMimeTypes`, `maxBytesPerImage` and `maxCount`; it is null otherwise. The request also exposes
+`requestId` and `meta` (the opaque `_meta` object) when the runtime sends them. Answer with
+`UserInputResponse(..., attachments = listOf(...))`, where each `UserInputImageAttachment` holds
+base64 `data`, a `mimeType`, and an optional `description` and `displayName` (the wire `type` is
+always `"image"`). Attachments are sent only when set; image-only answers use `answer = ""` and
+`wasFreeform = true`. The runtime enforces the limits.
+
+```kotlin
+SessionConfig(onUserInputRequest = { request, _ ->
+    val constraints = request.imageAttachmentConstraints
+    if (constraints != null && "image/png" in constraints.allowedMimeTypes) {
+        val data = java.util.Base64.getEncoder().encodeToString(java.io.File("screenshot.png").readBytes())
+        UserInputResponse(
+            answer = "",
+            wasFreeform = true,
+            attachments = listOf(UserInputImageAttachment(data = data, mimeType = "image/png", displayName = "screenshot.png"))
+        )
+    } else {
+        UserInputResponse(answer = "No screenshot available", wasFreeform = true)
+    }
+})
+```
+
+Elicitation handlers also receive `ElicitationContext.requestId` and `meta` (the opaque `_meta`
+object); a `meta` set on the returned `ElicitationResult` is sent back to the runtime unchanged.
+
 ## What's New in v3.0.0
 
 This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).

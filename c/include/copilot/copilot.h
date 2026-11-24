@@ -229,17 +229,47 @@ typedef copilot_error_t (*copilot_permission_handler_fn)(
  * User input types
  * ============================================================================ */
 
+/** Image support advertised by a userInput.request (imageAttachmentConstraints).
+ *  Owned by the SDK and valid only for the duration of the handler call. */
+typedef struct {
+    const char **allowed_mime_types;   /**< NULL-terminated array of accepted MIME types, such as "image/png" */
+    size_t allowed_mime_types_count;   /**< Number of entries in allowed_mime_types */
+    int64_t max_bytes_per_image;       /**< Maximum size of one image, in bytes */
+    int max_count;                     /**< Maximum number of images in one answer */
+} copilot_user_input_image_attachment_constraints_t;
+
+/** An inline image attached to an ask_user answer (copilot_user_input_response_t.attachments).
+ *  The wire type is always "image". Allocate every string with malloc()/strdup(); the SDK frees them. */
+typedef struct {
+    char *data;           /**< Base64-encoded image bytes (required) */
+    char *mime_type;      /**< MIME type of the image, such as "image/png" (required) */
+    char *description;    /**< Optional description, or NULL */
+    char *display_name;   /**< Optional display name, or NULL */
+} copilot_user_input_image_attachment_t;
+
+/** A user input request (userInput.request). Strings and arrays are owned by the SDK
+ *  and valid only for the duration of the handler call. */
 typedef struct {
     const char *question;
     const char **choices;       /**< NULL-terminated array, or NULL if no choices */
     int choices_count;
     bool allow_freeform;
     bool has_allow_freeform;    /**< Whether allow_freeform was explicitly provided */
+    const char *request_id;     /**< Pending request id (requestId), or NULL */
+    /** Image support for the answer, or NULL when the runtime does not accept images */
+    const copilot_user_input_image_attachment_constraints_t *image_attachment_constraints;
+    const char *meta_json;      /**< The request's opaque _meta object as JSON, or NULL */
 } copilot_user_input_request_t;
 
 typedef struct {
     char *answer;               /**< Caller-allocated; SDK will copy */
     bool was_freeform;
+    /** Images attached to the answer, or NULL (only valid when the request advertised
+     *  image_attachment_constraints; sent only when set). Allocate the array with
+     *  malloc()/calloc(); the SDK frees it and its strings. Image-only answers use
+     *  answer = strdup("") and was_freeform = true. */
+    copilot_user_input_image_attachment_t *attachments;
+    size_t attachments_count;   /**< Number of entries in attachments */
 } copilot_user_input_response_t;
 
 /**
@@ -943,6 +973,46 @@ typedef struct {
 } copilot_policy_helper_failure_t;
 
 /* ============================================================================
+ * v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+ * ============================================================================ */
+
+/** Result of copilot_client_mcp_secrets_save(). Owns no heap memory. */
+typedef struct {
+    bool used_keychain;   /**< True when the OS keychain stored the credential, false for the file backend */
+} copilot_mcp_secrets_save_result_t;
+
+/** A user-scoped approval for one installed plugin extension (PermissionsExtensionApproval).
+ *  Strings are owned by the containing result and released by its *_free() function. */
+typedef struct {
+    char *extension_name;       /**< Stable identity, for example "plugin:plugin-name:extension-name" */
+    char *plugin_name;
+    char **capabilities;        /**< NULL-terminated array of the exact privileged capabilities the user approved */
+    size_t capabilities_count;  /**< Number of entries in capabilities */
+    char *granted_at;           /**< RFC 3339 timestamp */
+    char *installation_key;     /**< Opaque; pass it back unchanged to copilot_client_extension_approvals_revoke() */
+    char *installation_label;   /**< Or NULL */
+} copilot_permissions_extension_approval_t;
+
+/** Result of copilot_client_extension_approvals_grant().
+ *  Free with copilot_permissions_extension_approvals_grant_result_free(). */
+typedef struct {
+    bool granted;                                       /**< Whether the pending request was eligible and persisted */
+    copilot_permissions_extension_approval_t *approval; /**< The stored approval, or NULL */
+} copilot_permissions_extension_approvals_grant_result_t;
+
+/** Result of copilot_client_extension_approvals_list().
+ *  Free with copilot_permissions_extension_approvals_list_result_free(). */
+typedef struct {
+    copilot_permissions_extension_approval_t *approvals;
+    size_t count;
+} copilot_permissions_extension_approvals_list_result_t;
+
+/** Result of copilot_client_extension_approvals_revoke(). Owns no heap memory. */
+typedef struct {
+    bool revoked;         /**< Whether a matching approval was revoked */
+} copilot_permissions_extension_approvals_revoke_result_t;
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -1412,6 +1482,126 @@ copilot_error_t copilot_client_set_foreground_session_id(
  * @return COPILOT_OK on success.
  */
 copilot_error_t copilot_client_clear_managed_settings_cache(copilot_client_t *client);
+
+/*
+ * MCP secret store and plugin extension approvals (server-scoped RPCs). They require
+ * Copilot CLI 1.0.116 or newer; older CLIs answer with a JSON-RPC method-not-found
+ * error, reported as COPILOT_ERROR_RPC like any other RPC error. Each call blocks until
+ * the runtime answers, and SDK callbacks run on the reader thread, so call these
+ * functions from your own thread rather than from inside an SDK callback.
+ */
+
+/**
+ * Saves a legacy MCP configuration credential in the runtime-owned secret store
+ * (mcp.secrets.save). The value is a credential: the SDK never logs it.
+ *
+ * @param client      The client.
+ * @param secret_id   Identifier of the credential (secretId).
+ * @param value       The credential.
+ * @param config_dir  Configuration directory (configDir), or NULL for the runtime's default.
+ * @param out         Output (may be NULL): whether the OS keychain stored the credential.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_mcp_secrets_save(
+    copilot_client_t *client,
+    const char *secret_id,
+    const char *value,
+    const char *config_dir,
+    copilot_mcp_secrets_save_result_t *out
+);
+
+/**
+ * Deletes a legacy MCP configuration credential from the runtime-owned secret store
+ * (mcp.secrets.delete).
+ *
+ * @param client      The client.
+ * @param secret_id   Identifier of the credential (secretId).
+ * @param config_dir  Configuration directory (configDir), or NULL for the runtime's default.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_mcp_secrets_delete(
+    copilot_client_t *client,
+    const char *secret_id,
+    const char *config_dir
+);
+
+/**
+ * Deletes the legacy credentials indexed for an MCP server (mcp.secrets.deleteServer).
+ *
+ * @param client       The client.
+ * @param server_name  The MCP server name (serverName).
+ * @param config_dir   Configuration directory (configDir), or NULL for the runtime's default.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_mcp_secrets_delete_server(
+    copilot_client_t *client,
+    const char *server_name,
+    const char *config_dir
+);
+
+/**
+ * Persists a pending plugin extension permission request as a user-scoped approval,
+ * before the host answers that request normally (permissions.extensionApprovals.grant).
+ *
+ * @param client      The client.
+ * @param session_id  Session that owns the pending request (sessionId).
+ * @param request_id  ID of the pending extension permission request (requestId).
+ * @param out         Output (may be NULL): whether the request was eligible and persisted,
+ *                    and the stored approval. Free with
+ *                    copilot_permissions_extension_approvals_grant_result_free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_extension_approvals_grant(
+    copilot_client_t *client,
+    const char *session_id,
+    const char *request_id,
+    copilot_permissions_extension_approvals_grant_result_t *out
+);
+
+/**
+ * Frees the approval owned by a grant result and zeroes it.
+ */
+void copilot_permissions_extension_approvals_grant_result_free(
+    copilot_permissions_extension_approvals_grant_result_t *result);
+
+/**
+ * Lists the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+ *
+ * @param client      The client.
+ * @param session_id  Attached session whose configuration profile to list (sessionId), or NULL.
+ * @param out         Output: the approvals. Free with
+ *                    copilot_permissions_extension_approvals_list_result_free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_extension_approvals_list(
+    copilot_client_t *client,
+    const char *session_id,
+    copilot_permissions_extension_approvals_list_result_t *out
+);
+
+/**
+ * Frees the approvals owned by a list result and zeroes it.
+ */
+void copilot_permissions_extension_approvals_list_result_free(
+    copilot_permissions_extension_approvals_list_result_t *result);
+
+/**
+ * Revokes one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+ *
+ * @param client            The client.
+ * @param extension_name    The approval's extension_name (extensionName).
+ * @param installation_key  The approval's installation_key, unchanged (installationKey).
+ * @param session_id        Attached session whose configuration profile to use (sessionId), or NULL.
+ * @param out               Output (may be NULL): whether a matching approval was revoked.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_extension_approvals_revoke(
+    copilot_client_t *client,
+    const char *extension_name,
+    const char *installation_key,
+    const char *session_id,
+    copilot_permissions_extension_approvals_revoke_result_t *out
+);
 
 /**
  * Retrieves the structured Policy Helper failure (error.data.policyHelperFailure)

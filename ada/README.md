@@ -84,6 +84,105 @@ begin
 end Quick_Start;
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client calls
+below are server-scoped requests that need **Copilot CLI 1.0.116 or newer**;
+older CLIs answer method-not-found, raised as `Protocol_Error` like any other
+JSON-RPC error. The examples assume `use Copilot.Types; use Copilot.Client;
+use Copilot.Session;` and a running `Client`.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store (`mcp.secrets.save`, `mcp.secrets.delete`,
+`mcp.secrets.deleteServer`). Each call also takes an optional `Config_Dir`.
+The secret value is never logged.
+
+```ada
+declare
+   Saved : constant Mcp_Secrets_Save_Result :=
+     Mcp_Secrets_Save (Client, "my-server-token",
+                       Ada.Environment_Variables.Value ("MY_SERVER_TOKEN"));
+begin
+   Put_Line (if Saved.Used_Keychain then "Stored in the OS keychain"
+             else "Stored in the file backend");
+end;
+Mcp_Secrets_Delete (Client, "my-server-token");
+Mcp_Secrets_Delete_Server (Client, "my-server");  --  every credential of the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `.list`, `.revoke`).
+`Extension_Approvals_List` and `Extension_Approvals_Revoke` take an optional
+`Session_Id` to use an attached session's configuration profile.
+
+```ada
+declare
+   --  Persist a pending extension permission request before answering it.
+   Grant : constant Permissions_Extension_Approvals_Grant_Result :=
+     Extension_Approvals_Grant (Client, Session_Id (Sess), Pending_Request_Id);
+begin
+   if Grant.Granted then
+      Put_Line ("Approved " & To_String (Grant.Approval.Extension_Name));
+   end if;
+end;
+
+for Approval of Extension_Approvals_List (Client) loop
+   --  Extension_Name, Plugin_Name, Capabilities_Json, Granted_At,
+   --  Installation_Key, Installation_Label
+   if Extension_Approvals_Revoke
+        (Client, To_String (Approval.Extension_Name),
+         To_String (Approval.Installation_Key)).Revoked
+   then
+      Put_Line ("Revoked " & To_String (Approval.Extension_Name));
+   end if;
+end loop;
+```
+
+### Ask-user image attachments
+
+`Session_Config.On_User_Input_Request` now answers the runtime's
+`userInput.request` (the ask_user tool) and enables the tool. The
+`User_Input_Request` carries `Request_Id`, `Choices_Json`, `Allow_Freeform`,
+`Meta_Json` (the opaque `_meta` object) and `Image_Attachment_Constraints`
+(`Present`, `Allowed_Mime_Types_Json`, `Max_Bytes_Per_Image`, `Max_Count`);
+`Present` is False when the runtime does not accept images. Answer with
+`Attachments`, a `User_Input_Image_Attachment_List` of
+`User_Input_Image_Attachment` (base64 `Data`, `Mime_Type`, optional
+`Description` and `Display_Name`; the wire `type` is always `"image"`). It is
+sent only when not empty. Image-only answers use an empty `Answer` and
+`Was_Freeform => True`; the runtime enforces the limits. `User_Input_Response`
+aggregates now need a value for `Attachments` (`Attachments => <>` for none).
+
+```ada
+function Answer_With_Screenshot
+  (Req : User_Input_Request) return User_Input_Response
+is
+   Images : User_Input_Image_Attachment_List;
+begin
+   if Req.Image_Attachment_Constraints.Present
+     and then Ada.Strings.Fixed.Index
+       (To_String (Req.Image_Attachment_Constraints.Allowed_Mime_Types_Json),
+        """image/png""") > 0
+   then
+      Images.Append ((Data         => +Screenshot_Base64,  --  base64 PNG bytes
+                      Mime_Type    => +"image/png",
+                      Display_Name => +"screenshot.png",
+                      others       => <>));
+      return (Answer => Null_UString, Was_Freeform => True,
+              Attachments => Images);
+   end if;
+   return (Answer => +"No screenshot available", Was_Freeform => True,
+           Attachments => <>);
+end Answer_With_Screenshot;
+
+--  ...
+Cfg.On_User_Input_Request := Answer_With_Screenshot'Access;
+```
+
 ## What's New in v3.0.0
 
 The Ada SDK now speaks **SDK protocol 4** (the Microsoft Copilot SDK 2.0
@@ -380,7 +479,10 @@ Register_Permission_Handler (Sess, My_Permission_Handler'Access);
 
 ## User Input Handling
 
-Enable the ask_user tool by registering a user input handler:
+Enable the ask_user tool by setting `Session_Config.On_User_Input_Request`
+before creating (or resuming) the session; the client then answers the
+runtime's `userInput.request`. `Register_User_Input_Handler` replaces the
+handler of a live session.
 
 ```ada
 function My_Input_Handler
@@ -389,10 +491,12 @@ is
 begin
    Put_Line ("Agent asks: " & To_String (Req.Question));
    return (Answer       => To_Unbounded_String ("Yes, proceed."),
-           Was_Freeform => True);
+           Was_Freeform => True,
+           Attachments  => <>);  --  no images
 end My_Input_Handler;
 
-Register_User_Input_Handler (Sess, My_Input_Handler'Access);
+Cfg.On_User_Input_Request := My_Input_Handler'Access;
+Sess := Create_Session (Client, Cfg);
 ```
 
 ## Event Types
@@ -505,6 +609,12 @@ end;
 | `Get_State (Client)` | Get current connection state |
 | `Is_Connected (Client)` | Check if connected |
 | `Clear_Managed_Settings_Cache (Client)` | Clear cached managed settings |
+| `Mcp_Secrets_Save (Client, Secret_Id, Value, Config_Dir)` | Save an MCP credential (`mcp.secrets.save`) |
+| `Mcp_Secrets_Delete (Client, Secret_Id, Config_Dir)` | Delete an MCP credential (`mcp.secrets.delete`) |
+| `Mcp_Secrets_Delete_Server (Client, Server_Name, Config_Dir)` | Delete a server's MCP credentials (`mcp.secrets.deleteServer`) |
+| `Extension_Approvals_Grant (Client, Session_Id, Request_Id)` | Persist a pending plugin extension approval |
+| `Extension_Approvals_List (Client, Session_Id)` | List plugin extension approvals |
+| `Extension_Approvals_Revoke (Client, Extension_Name, Installation_Key, Session_Id)` | Revoke a plugin extension approval |
 | `Last_Policy_Helper_Failure (Client)` | Policy Helper failure of the last failed create/resume |
 
 ### Copilot_Session
@@ -523,7 +633,7 @@ end;
 | `Shell_Output (Event)` | Decode a `tool.shell_output` event |
 | `Register_Tool (Session, Name, Handler)` | Register a tool handler |
 | `Register_Permission_Handler (Session, H)` | Register permission handler |
-| `Register_User_Input_Handler (Session, H)` | Register user input handler |
+| `Register_User_Input_Handler (Session, H)` | Replace the user input (ask_user) handler |
 | `Session_Id (Session)` | Get session ID |
 | `Workspace_Path (Session)` | Get workspace path |
 | `Is_Active (Session)` | Check if session is active |

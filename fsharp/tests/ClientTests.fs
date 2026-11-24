@@ -489,3 +489,36 @@ let ``JsonRpcException exposes policyHelperFailure from error data`` () =
     failure.FailureMode |> should equal "failClosed"
     failure.PreviousPolicyRetained |> should equal true
     JsonRpcException(-32603, "other", None).PolicyHelperFailure |> should equal None
+
+// ---------------------------------------------------------------------------
+// v3.1.0 tests
+// ---------------------------------------------------------------------------
+
+[<Fact>]
+let ``UserInputRequest tryParse passes imageAttachmentConstraints, requestId and _meta through`` () =
+    let parameters =
+        JsonDocument.Parse(
+            """{"sessionId":"s1","question":"Attach a screenshot?","requestId":"r1","_meta":{"ext":1},"imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],"maxBytesPerImage":1024,"maxCount":2}}""")
+            .RootElement.Clone()
+    let request = UserInputRequest.tryParse parameters |> Option.get
+    request.RequestId |> should equal (Some "r1")
+    request.Meta.Value.GetProperty("ext").GetInt32() |> should equal 1
+    let constraints = request.ImageAttachmentConstraints |> Option.get
+    constraints.AllowedMimeTypes |> should equal [ "image/png" ]
+    constraints.MaxBytesPerImage |> should equal 1024L
+    constraints.MaxCount |> should equal 2L
+    let plain = JsonDocument.Parse("""{"sessionId":"s1","question":"q"}""").RootElement.Clone()
+    (UserInputRequest.tryParse plain |> Option.get).ImageAttachmentConstraints |> should equal None
+
+[<Fact>]
+let ``UserInputResponse toWire sends attachments only when set`` () =
+    let plain = UserInputResponse.toWire (UserInputResponse.create "ok" false)
+    plain.ContainsKey("attachments") |> should equal false
+    let image = { UserInputImageAttachment.create "aGk=" "image/png" with DisplayName = Some "shot.png" }
+    let json =
+        JsonSerializer.Serialize(
+            UserInputResponse.toWire { UserInputResponse.create "" true with Attachments = Some [ image ] })
+    let expected =
+        "\"attachments\":[{\"type\":\"image\",\"data\":\"aGk=\",\"mimeType\":\"image/png\",\"displayName\":\"shot.png\"}]"
+    json |> should haveSubstring expected
+    json |> should not' (haveSubstring "description")

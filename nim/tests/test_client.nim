@@ -458,4 +458,46 @@ suite "SDK protocol 4":
     check payload["mcp"]["oauthTokenStorage"].getStr() == "in-memory"
     check parseClientMode("copilot-cli") == cmCodingAgent
 
+# ===========================================================================
+# v3.1.0: ask-user image attachments
+# ===========================================================================
+
+suite "Ask-user image attachments":
+  test "user input request passes image constraints, requestId and _meta through":
+    let req = parseUserInputRequest(%*{
+      "sessionId": "s1",
+      "question": "Attach a screenshot",
+      "requestId": "req-1",
+      "imageAttachmentConstraints": {
+        "allowedMimeTypes": ["image/png"],
+        "maxBytesPerImage": 1024,
+        "maxCount": 2,
+      },
+      "_meta": {"ext": {"v": 1}},
+    })
+    check req.question == "Attach a screenshot"
+    check req.allowFreeform
+    check req.requestId == "req-1"
+    check req.imageAttachmentConstraints.isSome
+    check req.imageAttachmentConstraints.get().allowedMimeTypes == @["image/png"]
+    check req.imageAttachmentConstraints.get().maxBytesPerImage == 1024
+    check req.imageAttachmentConstraints.get().maxCount == 2
+    check req.meta["ext"]["v"].getInt() == 1
+    check parseUserInputRequest(%*{"question": "q"}).imageAttachmentConstraints.isNone
+
+  test "user input response sends attachments only when set":
+    let plain = UserInputResponse(answer: "yes", wasFreeform: true).toWireJson()
+    check plain["answer"].getStr() == "yes"
+    check plain["wasFreeform"].getBool()
+    check not plain.hasKey("attachments")
+
+    let image = UserInputImageAttachment(data: "aGVsbG8=", mimeType: "image/png")
+    let wire = UserInputResponse(answer: "", wasFreeform: true,
+                                 attachments: @[image]).toWireJson()
+    check wire["attachments"].len == 1
+    check wire["attachments"][0]["type"].getStr() == "image"
+    check wire["attachments"][0]["data"].getStr() == "aGVsbG8="
+    check wire["attachments"][0]["mimeType"].getStr() == "image/png"
+    check not wire["attachments"][0].hasKey("displayName")
+
 echo "\nAll tests passed."

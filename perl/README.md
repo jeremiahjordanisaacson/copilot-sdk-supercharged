@@ -55,6 +55,63 @@ $session->destroy();
 $client->stop();
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, raised as a `GitHub::Copilot::JsonRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged.
+
+```perl
+my $result = $client->mcp_secrets_save('my-server-token', $ENV{MY_SERVER_TOKEN});  # optional config_dir => $dir
+print $result->used_keychain ? "Stored in the OS keychain\n" : "Stored in the file backend\n";
+
+$client->mcp_secrets_delete('my-server-token');
+$client->mcp_secrets_delete_server('my-server');  # every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extension_approvals_list` and `extension_approvals_revoke` take an optional `session_id => $id` to use an attached session's configuration profile.
+
+```perl
+# Persist a pending extension permission request before answering it normally
+my $grant = $client->extension_approvals_grant($session->session_id, $request_id);
+print 'Approved ' . $grant->approval->extension_name . "\n" if $grant->granted;
+
+for my $approval (@{ $client->extension_approvals_list->approvals }) {
+    # extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label
+    $client->extension_approvals_revoke($approval->extension_name, $approval->installation_key);
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the user input request carries `image_attachment_constraints` (a `GitHub::Copilot::Types::UserInputImageAttachmentConstraints` with `allowed_mime_types`, `max_bytes_per_image` and `max_count`); it is `undef` otherwise. The request also exposes `request_id` and `meta` (the opaque `_meta` hashref) when sent. Answer with `attachments`, an arrayref of `GitHub::Copilot::Types::UserInputImageAttachment` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `image`). Image-only answers use `answer => ''` and `wasFreeform => 1`; the runtime enforces the limits.
+
+```perl
+use MIME::Base64 qw(encode_base64);
+
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        on_user_input_request => sub {
+            my ($request, $ctx) = @_;
+            my $constraints = $request->image_attachment_constraints;
+            if ($constraints && grep { $_ eq 'image/png' } @{ $constraints->allowed_mime_types }) {
+                my $image = GitHub::Copilot::Types::UserInputImageAttachment->new(
+                    data         => encode_base64(read_file_bytes('screenshot.png'), ''),
+                    mime_type    => 'image/png',
+                    display_name => 'screenshot.png',
+                );
+                return { answer => '', wasFreeform => 1, attachments => [$image] };
+            }
+            return { answer => 'No screenshot available', wasFreeform => 1 };
+        },
+    ),
+);
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected by `start()` with an `SDK protocol version mismatch` error.

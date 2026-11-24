@@ -54,6 +54,77 @@ session.destroy
 client.stop
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a
+JSON-RPC method-not-found error, raised as `CopilotSDK::JsonRpcError` (`method_not_found?` is
+true) like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The
+secret value is never logged. Each method takes an optional `config_dir`.
+
+```crystal
+result = client.mcp_secrets_save("my-server-token", ENV["MY_SERVER_TOKEN"]) # mcp.secrets.save
+puts result.used_keychain ? "Stored in the OS keychain" : "Stored in the file backend"
+
+client.mcp_secrets_delete("my-server-token")  # mcp.secrets.delete
+client.mcp_secrets_delete_server("my-server") # mcp.secrets.deleteServer: every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`PermissionsExtensionApproval`: `extension_name`, `plugin_name`, `capabilities`, `granted_at`,
+`installation_key`, `installation_label`). `extension_approvals_list` and
+`extension_approvals_revoke` take an optional `session_id` to use an attached session's
+configuration profile.
+
+```crystal
+# Persist a pending extension permission request before answering it normally.
+grant = client.extension_approvals_grant(session.session_id, request_id)
+if grant.granted && (approval = grant.approval)
+  puts "Approved #{approval.extension_name}"
+end
+
+client.extension_approvals_list.approvals.each do |approval|
+  client.extension_approvals_revoke(approval.extension_name, approval.installation_key)
+end
+```
+
+### Ask-user image attachments
+
+`SessionConfig#on_user_input_request` (and `ResumeSessionConfig#on_user_input_request`) answers
+the agent's ask_user questions (`userInput.request`; the client sends
+`interaction.requestUserInput`). When the runtime accepts images in the answer, the
+`UserInputRequest` carries `image_attachment_constraints` (`allowed_mime_types`,
+`max_bytes_per_image`, `max_count`); it is `nil` otherwise. The request also exposes
+`request_id` and `meta` (the opaque `_meta` object) when sent. Answer with
+`UserInputResponse.new(answer, was_freeform, attachments)`, where `attachments` is an array of
+`UserInputImageAttachment` (base64 `data`, `mime_type`, optional `description` and
+`display_name`; the wire `type` is always `"image"`) and is sent only when set. Image-only
+answers use an empty `answer` with `was_freeform` true; the runtime enforces the limits.
+
+```crystal
+require "base64"
+
+session = client.create_session(CopilotSDK::SessionConfig.new(
+  on_user_input_request: ->(request : CopilotSDK::UserInputRequest) {
+    constraints = request.image_attachment_constraints
+    if constraints && constraints.allowed_mime_types.includes?("image/png")
+      image = CopilotSDK::UserInputImageAttachment.new(
+        data: Base64.strict_encode(File.read("screenshot.png")),
+        mime_type: "image/png", display_name: "screenshot.png")
+      CopilotSDK::UserInputResponse.new("", true, [image])
+    else
+      CopilotSDK::UserInputResponse.new("No screenshot available", true)
+    end
+  },
+))
+```
+
 ## What's New in v3.0.0
 
 SDK protocol 4 support (the upstream SDK 2.0 wire format). **Requires Copilot CLI 1.0.113 or
@@ -334,6 +405,12 @@ The SDK uses Crystal's built-in concurrency model:
 | `#list_models` | List available models |
 | `#list_sessions` | List active sessions |
 | `#clear_managed_settings_cache` | Clear cached managed settings (`managedSettings.clearCache`) |
+| `#mcp_secrets_save(secret_id, value, config_dir = nil)` | Save an MCP credential (`mcp.secrets.save`) |
+| `#mcp_secrets_delete(secret_id, config_dir = nil)` | Delete an MCP credential (`mcp.secrets.delete`) |
+| `#mcp_secrets_delete_server(server_name, config_dir = nil)` | Delete a server's MCP credentials (`mcp.secrets.deleteServer`) |
+| `#extension_approvals_grant(session_id, request_id)` | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`) |
+| `#extension_approvals_list(session_id = nil)` | List plugin extension approvals (`permissions.extensionApprovals.list`) |
+| `#extension_approvals_revoke(extension_name, installation_key, session_id = nil)` | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`) |
 
 ### CopilotSession
 

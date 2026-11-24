@@ -362,25 +362,82 @@ using PermissionHandler = std::function<PermissionRequestResult(
 // User Input Types
 // ============================================================================
 
+/// Image support advertised by a `userInput.request` (UserInputRequest::imageAttachmentConstraints).
+/// Absent when the runtime does not accept images in the answer.
+struct UserInputImageAttachmentConstraints {
+    /// MIME types the runtime accepts, such as "image/png".
+    std::vector<std::string> allowedMimeTypes;
+    /// Maximum size of one image, in bytes.
+    int64_t maxBytesPerImage = 0;
+    /// Maximum number of images in one answer.
+    int64_t maxCount = 0;
+};
+
+inline void from_json(const nlohmann::json& j, UserInputImageAttachmentConstraints& c) {
+    c.allowedMimeTypes.clear();
+    if (j.contains("allowedMimeTypes") && j["allowedMimeTypes"].is_array()) {
+        for (const auto& t : j["allowedMimeTypes"]) {
+            if (t.is_string()) c.allowedMimeTypes.push_back(t.get<std::string>());
+        }
+    }
+    c.maxBytesPerImage = j.contains("maxBytesPerImage") && j["maxBytesPerImage"].is_number()
+        ? j["maxBytesPerImage"].get<int64_t>() : 0;
+    c.maxCount = j.contains("maxCount") && j["maxCount"].is_number() ? j["maxCount"].get<int64_t>() : 0;
+}
+
+/// An inline image attached to an ask_user answer (UserInputResponse::attachments).
+/// The wire `type` is always "image". The runtime enforces the advertised MIME types,
+/// size and count limits.
+struct UserInputImageAttachment {
+    /// Base64-encoded image bytes.
+    std::string data;
+    /// MIME type of the image, such as "image/png".
+    std::string mimeType;
+    std::optional<std::string> description;
+    std::optional<std::string> displayName;
+};
+
+inline void to_json(nlohmann::json& j, const UserInputImageAttachment& a) {
+    j = {{"type", "image"}, {"data", a.data}, {"mimeType", a.mimeType}};
+    if (a.description) j["description"] = *a.description;
+    if (a.displayName) j["displayName"] = *a.displayName;
+}
+
 struct UserInputRequest {
     std::string question;
     std::optional<std::vector<std::string>> choices;
     std::optional<bool> allowFreeform;
+    /// Pending request id, when the runtime sends one.
+    std::optional<std::string> requestId;
+    /// Image support for the answer; std::nullopt when the runtime does not accept images.
+    std::optional<UserInputImageAttachmentConstraints> imageAttachmentConstraints;
+    /// The request's opaque `_meta` object, when the runtime sends one.
+    std::optional<nlohmann::json> meta;
 };
 
 inline void from_json(const nlohmann::json& j, UserInputRequest& r) {
     j.at("question").get_to(r.question);
     if (j.contains("choices")) r.choices = j["choices"].get<std::vector<std::string>>();
     if (j.contains("allowFreeform")) r.allowFreeform = j["allowFreeform"].get<bool>();
+    if (j.contains("requestId") && j["requestId"].is_string()) r.requestId = j["requestId"].get<std::string>();
+    if (j.contains("imageAttachmentConstraints") && j["imageAttachmentConstraints"].is_object()) {
+        r.imageAttachmentConstraints = j["imageAttachmentConstraints"].get<UserInputImageAttachmentConstraints>();
+    }
+    if (j.contains("_meta") && j["_meta"].is_object()) r.meta = j["_meta"];
 }
 
 struct UserInputResponse {
     std::string answer;
     bool wasFreeform = false;
+    /// Images attached to the answer, only valid when the request advertised
+    /// imageAttachmentConstraints. Sent only when set. Image-only answers use an
+    /// empty answer and wasFreeform = true.
+    std::optional<std::vector<UserInputImageAttachment>> attachments;
 };
 
 inline void to_json(nlohmann::json& j, const UserInputResponse& r) {
     j = {{"answer", r.answer}, {"wasFreeform", r.wasFreeform}};
+    if (r.attachments) j["attachments"] = *r.attachments;
 }
 
 /// Handler for user input requests.
@@ -1393,6 +1450,89 @@ inline std::optional<PolicyHelperFailure> PolicyHelperFailure::from(const nlohma
         return std::nullopt;
     }
     return failure.get<PolicyHelperFailure>();
+}
+
+// ============================================================================
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ============================================================================
+
+/// Result of CopilotClient::mcpSecretsSave() (`mcp.secrets.save`).
+struct McpSecretsSaveResult {
+    /// True when the OS keychain stored the credential, false for the file backend.
+    bool usedKeychain = false;
+};
+
+inline void from_json(const nlohmann::json& j, McpSecretsSaveResult& r) {
+    r.usedKeychain = j.value("usedKeychain", false);
+}
+
+/// A user-scoped approval for one installed plugin extension.
+struct PermissionsExtensionApproval {
+    /// Stable identity, for example "plugin:plugin-name:extension-name".
+    std::string extensionName;
+    std::string pluginName;
+    /// Exact privileged capabilities the user approved.
+    std::vector<std::string> capabilities;
+    /// When the approval was granted (RFC 3339 timestamp).
+    std::string grantedAt;
+    /// Opaque key; pass it back unchanged to CopilotClient::extensionApprovalsRevoke().
+    std::string installationKey;
+    std::optional<std::string> installationLabel;
+};
+
+inline void from_json(const nlohmann::json& j, PermissionsExtensionApproval& a) {
+    a.extensionName = j.value("extensionName", "");
+    a.pluginName = j.value("pluginName", "");
+    a.capabilities.clear();
+    if (j.contains("capabilities") && j["capabilities"].is_array()) {
+        for (const auto& c : j["capabilities"]) {
+            if (c.is_string()) a.capabilities.push_back(c.get<std::string>());
+        }
+    }
+    a.grantedAt = j.value("grantedAt", "");
+    a.installationKey = j.value("installationKey", "");
+    if (j.contains("installationLabel") && j["installationLabel"].is_string()) {
+        a.installationLabel = j["installationLabel"].get<std::string>();
+    }
+}
+
+/// Result of CopilotClient::extensionApprovalsGrant() (`permissions.extensionApprovals.grant`).
+struct PermissionsExtensionApprovalsGrantResult {
+    /// Whether the pending request was eligible and persisted.
+    bool granted = false;
+    /// The stored approval, when granted.
+    std::optional<PermissionsExtensionApproval> approval;
+};
+
+inline void from_json(const nlohmann::json& j, PermissionsExtensionApprovalsGrantResult& r) {
+    r.granted = j.value("granted", false);
+    if (j.contains("approval") && j["approval"].is_object()) {
+        r.approval = j["approval"].get<PermissionsExtensionApproval>();
+    }
+}
+
+/// Result of CopilotClient::extensionApprovalsList() (`permissions.extensionApprovals.list`).
+struct PermissionsExtensionApprovalsListResult {
+    std::vector<PermissionsExtensionApproval> approvals;
+};
+
+inline void from_json(const nlohmann::json& j, PermissionsExtensionApprovalsListResult& r) {
+    r.approvals.clear();
+    if (j.contains("approvals") && j["approvals"].is_array()) {
+        for (const auto& a : j["approvals"]) {
+            if (a.is_object()) r.approvals.push_back(a.get<PermissionsExtensionApproval>());
+        }
+    }
+}
+
+/// Result of CopilotClient::extensionApprovalsRevoke() (`permissions.extensionApprovals.revoke`).
+struct PermissionsExtensionApprovalsRevokeResult {
+    /// Whether a matching approval was revoked.
+    bool revoked = false;
+};
+
+inline void from_json(const nlohmann::json& j, PermissionsExtensionApprovalsRevokeResult& r) {
+    r.revoked = j.value("revoked", false);
 }
 
 // ============================================================================

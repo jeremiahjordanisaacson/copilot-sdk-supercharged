@@ -69,10 +69,23 @@
        01  WS-FIELD-COUNT           PIC 9(2)    VALUE 0.
        01  WS-ERROR-TEXT            PIC X(200)  VALUE SPACES.
 
+      *    Server-scoped request builder (mcp.secrets.*,
+      *    permissions.extensionApprovals.*)
+       01  WS-JSON-KEY              PIC X(32)   VALUE SPACES.
+       01  WS-JSON-TEXT             PIC X(2048) VALUE SPACES.
+       01  WS-JSON-TEXT-LEN         PIC 9(5)    VALUE 0.
+       01  WS-JSON-IDX              PIC 9(5)    VALUE 0.
+       01  WS-JSON-CHAR             PIC X       VALUE SPACE.
+
        LINKAGE SECTION.
        01  LS-REQUEST               PIC X(8192).
        01  LS-RESPONSE              PIC X(8192).
        01  LS-RETURN-CODE           PIC S9(4).
+      *    Caller records of the v3.1.0 server-scoped entries, each as
+      *    long as its COPILOT-TYPES.cpy record (WS-MCP-SECRETS-REQ,
+      *    WS-EXT-APPROVALS-REQ).
+       01  LS-MCP-SECRETS-REQ       PIC X(3073).
+       01  LS-EXT-APPROVALS-REQ     PIC X(898).
 
        PROCEDURE DIVISION.
 
@@ -187,6 +200,105 @@
        ENTRY "COPILOT-CLEAR-SETTINGS-CACHE" USING LS-RESPONSE
            LS-RETURN-CODE.
            PERFORM CLEAR-MANAGED-SETTINGS-CACHE
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-SAVE: Save a legacy MCP credential in the runtime  *
+      * secret store (mcp.secrets.save, Copilot CLI 1.0.116 or newer). *
+      * Input:  WS-MCP-SECRETS-REQ (secret id, value, config dir)      *
+      * Output: MSQ-USED-KEYCHAIN, LS-RESPONSE, LS-RETURN-CODE         *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-MCP-SECRETS-SAVE" USING LS-MCP-SECRETS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-MCP-SECRETS-REQ TO WS-MCP-SECRETS-REQ
+           PERFORM MCP-SECRETS-SAVE
+           MOVE WS-MCP-SECRETS-REQ TO LS-MCP-SECRETS-REQ
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-DELETE: Delete a legacy MCP credential             *
+      * (mcp.secrets.delete, Copilot CLI 1.0.116 or newer).            *
+      * Input:  WS-MCP-SECRETS-REQ (secret id, config dir)             *
+      * Output: LS-RESPONSE, LS-RETURN-CODE                            *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-MCP-SECRETS-DELETE" USING LS-MCP-SECRETS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-MCP-SECRETS-REQ TO WS-MCP-SECRETS-REQ
+           PERFORM MCP-SECRETS-DELETE
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-DEL-SERVER: Delete the legacy credentials indexed  *
+      * for an MCP server (mcp.secrets.deleteServer, Copilot CLI       *
+      * 1.0.116 or newer).                                             *
+      * Input:  WS-MCP-SECRETS-REQ (server name, config dir)           *
+      * Output: LS-RESPONSE, LS-RETURN-CODE                            *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-MCP-SECRETS-DEL-SERVER" USING LS-MCP-SECRETS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-MCP-SECRETS-REQ TO WS-MCP-SECRETS-REQ
+           PERFORM MCP-SECRETS-DELETE-SERVER
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-GRANT: Persist a pending plugin extension        *
+      * permission request as a user-scoped approval before answering  *
+      * it (permissions.extensionApprovals.grant, Copilot CLI 1.0.116  *
+      * or newer).                                                     *
+      * Input:  WS-EXT-APPROVALS-REQ (session id, request id)          *
+      * Output: EAQ-GRANTED, LS-RESPONSE (approval), LS-RETURN-CODE    *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-EXT-APPROVALS-GRANT" USING LS-EXT-APPROVALS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-EXT-APPROVALS-REQ TO WS-EXT-APPROVALS-REQ
+           PERFORM EXT-APPROVALS-GRANT
+           MOVE WS-EXT-APPROVALS-REQ TO LS-EXT-APPROVALS-REQ
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-LIST: List the user-scoped plugin extension      *
+      * approvals (permissions.extensionApprovals.list, Copilot CLI    *
+      * 1.0.116 or newer).                                             *
+      * Input:  WS-EXT-APPROVALS-REQ (optional session id)             *
+      * Output: LS-RESPONSE (approvals), LS-RETURN-CODE                *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-EXT-APPROVALS-LIST" USING LS-EXT-APPROVALS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-EXT-APPROVALS-REQ TO WS-EXT-APPROVALS-REQ
+           PERFORM EXT-APPROVALS-LIST
+           MOVE WS-READ-BUFFER TO LS-RESPONSE
+           MOVE WS-RETURN-CODE TO LS-RETURN-CODE
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-REVOKE: Revoke one plugin extension approval     *
+      * (permissions.extensionApprovals.revoke, Copilot CLI 1.0.116 or *
+      * newer).                                                        *
+      * Input:  WS-EXT-APPROVALS-REQ (extension name, installation     *
+      *         key, optional session id)                              *
+      * Output: EAQ-REVOKED, LS-RESPONSE, LS-RETURN-CODE               *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-EXT-APPROVALS-REVOKE" USING LS-EXT-APPROVALS-REQ
+           LS-RESPONSE LS-RETURN-CODE.
+           MOVE LS-EXT-APPROVALS-REQ TO WS-EXT-APPROVALS-REQ
+           PERFORM EXT-APPROVALS-REVOKE
+           MOVE WS-EXT-APPROVALS-REQ TO LS-EXT-APPROVALS-REQ
            MOVE WS-READ-BUFFER TO LS-RESPONSE
            MOVE WS-RETURN-CODE TO LS-RETURN-CODE
            GOBACK
@@ -747,6 +859,235 @@
            IF WS-RETURN-CODE = 0
                PERFORM CHECK-RESPONSE-ERROR
            END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-SAVE: mcp.secrets.save {secretId, value,           *
+      * configDir?}. The value is a credential and is never logged.    *
+      * Sets MSQ-USED-KEYCHAIN when the OS keychain stored it          *
+      * (usedKeychain true).                                           *
+      *----------------------------------------------------------------*
+       MCP-SECRETS-SAVE.
+           SET MSQ-USED-FILE-BACKEND TO TRUE
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "secretId" TO WS-JSON-KEY
+           MOVE WS-MSQ-SECRET-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "value" TO WS-JSON-KEY
+           MOVE WS-MSQ-VALUE TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "configDir" TO WS-JSON-KEY
+           MOVE WS-MSQ-CONFIG-DIR TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "mcp.secrets.save" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           IF WS-RETURN-CODE = 0
+               MOVE 0 TO WS-SCAN-COUNT
+               INSPECT WS-READ-BUFFER TALLYING WS-SCAN-COUNT
+                   FOR ALL '"usedKeychain":true'
+               IF WS-SCAN-COUNT > 0
+                   SET MSQ-USED-KEYCHAIN TO TRUE
+               END-IF
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-DELETE: mcp.secrets.delete {secretId, configDir?}. *
+      *----------------------------------------------------------------*
+       MCP-SECRETS-DELETE.
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "secretId" TO WS-JSON-KEY
+           MOVE WS-MSQ-SECRET-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "configDir" TO WS-JSON-KEY
+           MOVE WS-MSQ-CONFIG-DIR TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "mcp.secrets.delete" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * MCP-SECRETS-DELETE-SERVER: mcp.secrets.deleteServer            *
+      * {serverName, configDir?}: every legacy credential indexed for  *
+      * the MCP server.                                                *
+      *----------------------------------------------------------------*
+       MCP-SECRETS-DELETE-SERVER.
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "serverName" TO WS-JSON-KEY
+           MOVE WS-MSQ-SERVER-NAME TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "configDir" TO WS-JSON-KEY
+           MOVE WS-MSQ-CONFIG-DIR TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "mcp.secrets.deleteServer" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-GRANT: permissions.extensionApprovals.grant      *
+      * {sessionId, requestId}. Sets EAQ-GRANTED when the pending      *
+      * request was eligible and persisted (granted true).             *
+      *----------------------------------------------------------------*
+       EXT-APPROVALS-GRANT.
+           MOVE 0 TO WS-EAQ-GRANTED
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "sessionId" TO WS-JSON-KEY
+           MOVE WS-EAQ-SESSION-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "requestId" TO WS-JSON-KEY
+           MOVE WS-EAQ-REQUEST-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "permissions.extensionApprovals.grant" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           IF WS-RETURN-CODE = 0
+               MOVE 0 TO WS-SCAN-COUNT
+               INSPECT WS-READ-BUFFER TALLYING WS-SCAN-COUNT
+                   FOR ALL '"granted":true'
+               IF WS-SCAN-COUNT > 0
+                   SET EAQ-GRANTED TO TRUE
+               END-IF
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-LIST: permissions.extensionApprovals.list        *
+      * {sessionId?}. The approvals are left in WS-READ-BUFFER.        *
+      *----------------------------------------------------------------*
+       EXT-APPROVALS-LIST.
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "sessionId" TO WS-JSON-KEY
+           MOVE WS-EAQ-SESSION-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "permissions.extensionApprovals.list" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * EXT-APPROVALS-REVOKE: permissions.extensionApprovals.revoke    *
+      * {extensionName, installationKey, sessionId?}. Sets EAQ-REVOKED *
+      * when a matching approval was removed (revoked true).           *
+      *----------------------------------------------------------------*
+       EXT-APPROVALS-REVOKE.
+           MOVE 0 TO WS-EAQ-REVOKED
+           PERFORM BEGIN-JSON-PARAMS
+           MOVE "extensionName" TO WS-JSON-KEY
+           MOVE WS-EAQ-EXTENSION-NAME TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "installationKey" TO WS-JSON-KEY
+           MOVE WS-EAQ-INSTALL-KEY TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           MOVE "sessionId" TO WS-JSON-KEY
+           MOVE WS-EAQ-SESSION-ID TO WS-JSON-TEXT
+           PERFORM PUT-JSON-STRING-FIELD
+           PERFORM END-JSON-PARAMS
+           MOVE "permissions.extensionApprovals.revoke" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+           IF WS-RETURN-CODE = 0
+               PERFORM CHECK-RESPONSE-ERROR
+           END-IF
+           IF WS-RETURN-CODE = 0
+               MOVE 0 TO WS-SCAN-COUNT
+               INSPECT WS-READ-BUFFER TALLYING WS-SCAN-COUNT
+                   FOR ALL '"revoked":true'
+               IF WS-SCAN-COUNT > 0
+                   SET EAQ-REVOKED TO TRUE
+               END-IF
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * BEGIN-JSON-PARAMS / END-JSON-PARAMS / PUT-JSON-STRING-FIELD:   *
+      * Build the WS-REQ-PARAMS object of a server-scoped request.     *
+      * PUT-JSON-STRING-FIELD appends "WS-JSON-KEY":"WS-JSON-TEXT"     *
+      * (trailing blanks dropped; quotes, backslashes and control      *
+      * characters escaped) and skips a blank WS-JSON-TEXT.            *
+      *----------------------------------------------------------------*
+       BEGIN-JSON-PARAMS.
+           MOVE SPACES TO WS-REQ-PARAMS
+           MOVE 1 TO WS-JSON-WORK-LEN
+           MOVE 0 TO WS-FIELD-COUNT
+           STRING '{' DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           .
+
+       END-JSON-PARAMS.
+           STRING '}' DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-REQ-PARAMS-LEN
+           .
+
+       PUT-JSON-STRING-FIELD.
+           IF WS-JSON-TEXT = SPACES
+               EXIT PARAGRAPH
+           END-IF
+           IF WS-FIELD-COUNT > 0
+               STRING ',' DELIMITED SIZE INTO WS-REQ-PARAMS
+                   WITH POINTER WS-JSON-WORK-LEN
+               END-STRING
+           END-IF
+           ADD 1 TO WS-FIELD-COUNT
+           STRING '"' FUNCTION TRIM(WS-JSON-KEY) '":"'
+               DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           MOVE FUNCTION LENGTH(FUNCTION TRIM(WS-JSON-TEXT TRAILING))
+               TO WS-JSON-TEXT-LEN
+           PERFORM VARYING WS-JSON-IDX FROM 1 BY 1
+                   UNTIL WS-JSON-IDX > WS-JSON-TEXT-LEN
+               MOVE WS-JSON-TEXT(WS-JSON-IDX:1) TO WS-JSON-CHAR
+               EVALUATE TRUE
+                   WHEN WS-JSON-CHAR = '"' OR WS-JSON-CHAR = "\"
+                       STRING "\" WS-JSON-CHAR DELIMITED SIZE
+                           INTO WS-REQ-PARAMS
+                           WITH POINTER WS-JSON-WORK-LEN
+                       END-STRING
+                   WHEN WS-JSON-CHAR = X"0A"
+                       STRING "\n" DELIMITED SIZE INTO WS-REQ-PARAMS
+                           WITH POINTER WS-JSON-WORK-LEN
+                       END-STRING
+                   WHEN WS-JSON-CHAR = X"0D"
+                       STRING "\r" DELIMITED SIZE INTO WS-REQ-PARAMS
+                           WITH POINTER WS-JSON-WORK-LEN
+                       END-STRING
+                   WHEN WS-JSON-CHAR = X"09"
+                       STRING "\t" DELIMITED SIZE INTO WS-REQ-PARAMS
+                           WITH POINTER WS-JSON-WORK-LEN
+                       END-STRING
+                   WHEN WS-JSON-CHAR < SPACE
+                       CONTINUE
+                   WHEN OTHER
+                       STRING WS-JSON-CHAR DELIMITED SIZE
+                           INTO WS-REQ-PARAMS
+                           WITH POINTER WS-JSON-WORK-LEN
+                       END-STRING
+               END-EVALUATE
+           END-PERFORM
+           STRING '"' DELIMITED SIZE INTO WS-REQ-PARAMS
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
            .
 
       *----------------------------------------------------------------*

@@ -505,6 +505,54 @@ unittest
 }
 
 // ---------------------------------------------------------------------------
+// v3.1.0: ask-user image attachments
+// ---------------------------------------------------------------------------
+
+unittest
+{
+    // The user-input handler sees the image constraints, requestId and _meta;
+    // attachments are sent only when set.
+    SessionConfig cfg;
+    cfg.onUserInputRequest = (UserInputRequest request) {
+        UserInputResponse response;
+        if (request.imageAttachmentConstraints.isNull)
+        {
+            response.answer = "no images";
+            return response;
+        }
+        auto constraints = request.imageAttachmentConstraints.get;
+        assert(constraints.allowedMimeTypes == ["image/png"]);
+        assert(constraints.maxBytesPerImage == 1024);
+        assert(constraints.maxCount == 2);
+        assert(request.requestId.get == "req-1");
+        assert(request.meta["ext"].str == "on");
+        response.attachments = [UserInputImageAttachment("aGVsbG8=", "image/png")];
+        return response;
+    };
+    assert(cfg.toJson()["requestUserInput"].type == JSONType.true_);
+    auto noHandler = SessionConfig.init.toJson();
+    assert("requestUserInput" !in noHandler);
+
+    auto session = new CopilotSession("s1", null);
+    session.configureCallbacks(null, null, cfg.onUserInputRequest);
+    auto withImage = session.handleUserInput(parseJSON(
+        `{"sessionId":"s1","question":"Attach a screenshot","requestId":"req-1",` ~
+        `"imageAttachmentConstraints":{"allowedMimeTypes":["image/png"],` ~
+        `"maxBytesPerImage":1024,"maxCount":2},"_meta":{"ext":"on"}}`));
+    assert(withImage["answer"].str == "");
+    assert(withImage["wasFreeform"].type == JSONType.true_);
+    auto image = withImage["attachments"][0];
+    assert(image["type"].str == "image");
+    assert(image["data"].str == "aGVsbG8=");
+    assert(image["mimeType"].str == "image/png");
+    assert("displayName" !in image);
+
+    auto plain = session.handleUserInput(parseJSON(`{"sessionId":"s1","question":"Name?"}`));
+    assert(plain["answer"].str == "no images");
+    assert("attachments" !in plain);
+}
+
+// ---------------------------------------------------------------------------
 // Main for running unit tests from DUB.
 // ---------------------------------------------------------------------------
 

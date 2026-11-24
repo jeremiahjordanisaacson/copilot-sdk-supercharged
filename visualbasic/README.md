@@ -48,6 +48,79 @@ Using client As New CopilotClient()
 End Using
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error, thrown as a `JsonRpcException` (`Code = -32601`) like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store
+(`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). Each method also takes an
+optional `configDir`. The secret value is never logged.
+
+```vb
+Dim saved = Await client.McpSecretsSaveAsync("my-server-token", Environment.GetEnvironmentVariable("MY_SERVER_TOKEN"))
+Console.WriteLine(If(saved.UsedKeychain, "Stored in the OS keychain", "Stored in the file backend"))
+
+Await client.McpSecretsDeleteAsync("my-server-token")
+Await client.McpSecretsDeleteServerAsync("my-server") ' every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `.list`, `.revoke`). `ExtensionApprovalsListAsync` and
+`ExtensionApprovalsRevokeAsync` take an optional `sessionId` to use an attached session's
+configuration profile.
+
+```vb
+' Persist a pending extension permission request before answering it normally
+Dim grant = Await client.ExtensionApprovalsGrantAsync(session.SessionId, requestId)
+If grant.Granted Then Console.WriteLine($"Approved {grant.Approval.ExtensionName}")
+
+Dim listed = Await client.ExtensionApprovalsListAsync()
+For Each approval In listed.Approvals
+    ' ExtensionName, PluginName, Capabilities, GrantedAt, InstallationKey, InstallationLabel
+    Dim result = Await client.ExtensionApprovalsRevokeAsync(approval.ExtensionName, approval.InstallationKey)
+    Console.WriteLine($"{approval.ExtensionName} revoked: {result.Revoked}")
+Next
+```
+
+### Ask-user image attachments
+
+The client now answers `userInput.request` (the ask_user tool). Set `OnUserInputRequest` on
+`SessionConfig` or `ResumeSessionConfig` to receive a `UserInputRequest` (`Question`, `Choices`,
+`AllowFreeform`, `RequestId`, and `Meta` for the opaque `_meta` object) and return a
+`UserInputResponse`. When the runtime accepts images in the answer, `ImageAttachmentConstraints`
+(`AllowedMimeTypes`, `MaxBytesPerImage`, `MaxCount`) is set; it is `Nothing` otherwise. Answer with
+`Attachments`, a list of `UserInputImageAttachment` (base64 `Data`, `MimeType`, optional `Description`
+and `DisplayName`; the wire `type` is always `"image"`). `attachments` is sent only when set.
+Image-only answers use `Answer = ""` and `WasFreeform = True`; the runtime enforces the limits. The
+answer-only `OnUserInput` handler is used when `OnUserInputRequest` is not set.
+
+```vb
+Dim session = Await client.CreateSessionAsync(New SessionConfig With {
+    .OnPermissionRequest = PermissionHandlers.ApproveAll(),
+    .OnUserInputRequest = Function(request)
+                              Dim constraints = request.ImageAttachmentConstraints
+                              If constraints IsNot Nothing AndAlso constraints.AllowedMimeTypes.Contains("image/png") Then
+                                  Dim image As New UserInputImageAttachment With {
+                                      .Data = Convert.ToBase64String(IO.File.ReadAllBytes("screenshot.png")),
+                                      .MimeType = "image/png",
+                                      .DisplayName = "screenshot.png"
+                                  }
+                                  Return Task.FromResult(New UserInputResponse With {
+                                      .Answer = "", .WasFreeform = True,
+                                      .Attachments = New List(Of UserInputImageAttachment) From {image}})
+                              End If
+                              Return Task.FromResult(New UserInputResponse With {
+                                  .Answer = "No screenshot available", .WasFreeform = True})
+                          End Function
+})
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and
@@ -409,7 +482,8 @@ Disconnects from the session without deleting server-side data.
 | `Model` | `String` | Model to use (e.g. "gpt-4") |
 | `SystemMessage` | `String` | System message prepended to conversation |
 | `OnPermissionRequest` | `PermissionHandler` | Permission request handler |
-| `OnUserInput` | `Func(Of UserInputRequest, Task(Of String))` | User input handler |
+| `OnUserInput` | `Func(Of UserInputRequest, Task(Of String))` | User input handler (answer text only) |
+| `OnUserInputRequest` | `Func(Of UserInputRequest, Task(Of UserInputResponse))` | User input handler that can attach images (takes precedence over `OnUserInput`) |
 | `OnElicitation` | `Func(Of ElicitationRequest, Task(Of ElicitationResponse))` | Elicitation handler |
 | `Tools` | `List(Of DefineTool)` | Custom tools |
 | `Skills` | `List(Of String)` | Enabled skills |

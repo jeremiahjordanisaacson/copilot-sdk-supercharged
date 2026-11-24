@@ -61,6 +61,15 @@ module copilot_types
   public :: PERMISSION_MODE_REFUSAL_MANAGED_POLICY, permission_mode_set_result
   public :: COPILOT_IOSTAT_RPC_ERROR, COPILOT_IOSTAT_PROTOCOL_MISMATCH
   public :: COPILOT_IOSTAT_INVALID_CONFIG
+  ! --- v3.1.0 surface (parity with the Microsoft Copilot SDK 2.0.3-preview.0) ---
+  public :: user_input_image_attachment_constraints, user_input_request
+  public :: user_input_image_attachment, user_input_response, user_input_handler_interface
+  public :: parse_user_input_request, user_input_response_json
+  public :: mcp_secrets_save_result, permissions_extension_approval
+  public :: permissions_extension_approvals_grant_result
+  public :: permissions_extension_approvals_list_result
+  public :: permissions_extension_approvals_revoke_result
+  public :: parse_permissions_extension_approval
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -492,6 +501,93 @@ module copilot_types
   end type permission_mode_set_result
 
   ! --------------------------------------------------------------------------
+  ! Ask-user requests and image attachments (userInput.request)
+  ! --------------------------------------------------------------------------
+  !> Image support advertised by a userInput.request (imageAttachmentConstraints).
+  type :: user_input_image_attachment_constraints
+    !> Accepted image MIME types (blank padded; use trim).
+    character(len=:), allocatable :: allowed_mime_types(:)
+    integer :: max_bytes_per_image = 0
+    integer :: max_count = 0
+  end type user_input_image_attachment_constraints
+
+  !> A question from the agent's ask_user tool (userInput.request).
+  type :: user_input_request
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: question
+    !> Suggested answers (blank padded; use trim). Zero-size when the runtime sends none.
+    character(len=:), allocatable :: choices(:)
+    logical :: allow_freeform = .true.
+    !> Pending request id; unallocated when the runtime omits it.
+    character(len=:), allocatable :: request_id
+    !> Allocated when the runtime accepts image attachments in the answer.
+    type(user_input_image_attachment_constraints), allocatable :: image_attachment_constraints
+    !> The request's opaque _meta object as JSON; unallocated when absent.
+    character(len=:), allocatable :: meta_json
+  end type user_input_request
+
+  !> An inline image attached to an ask_user answer (sent with type "image").
+  type :: user_input_image_attachment
+    !> Base64-encoded image bytes.
+    character(len=:), allocatable :: data
+    character(len=:), allocatable :: mime_type
+    character(len=:), allocatable :: description
+    character(len=:), allocatable :: display_name
+  end type user_input_image_attachment
+
+  !> Answer to a userInput.request. attachments is only valid when the request advertised
+  !! image_attachment_constraints and is sent only when allocated; an image-only answer uses
+  !! an empty answer and was_freeform = .true.
+  type :: user_input_response
+    character(len=:), allocatable :: answer
+    logical :: was_freeform = .false.
+    type(user_input_image_attachment), allocatable :: attachments(:)
+  end type user_input_response
+
+  ! --------------------------------------------------------------------------
+  ! MCP secret store and plugin extension approvals (Copilot CLI 1.0.116+)
+  ! --------------------------------------------------------------------------
+  !> Result of mcp.secrets.save.
+  type :: mcp_secrets_save_result
+    !> .true. when the OS keychain stored the credential, .false. for the file backend.
+    logical :: used_keychain = .false.
+  end type mcp_secrets_save_result
+
+  !> A user-scoped approval for one installed plugin extension.
+  type :: permissions_extension_approval
+    !> Stable identity, for example 'plugin:plugin-name:extension-name'.
+    character(len=:), allocatable :: extension_name
+    character(len=:), allocatable :: plugin_name
+    !> Exact privileged capabilities the user approved (blank padded; use trim).
+    character(len=:), allocatable :: capabilities(:)
+    !> RFC 3339 timestamp.
+    character(len=:), allocatable :: granted_at
+    !> Opaque installation identity; pass it back unchanged to revoke.
+    character(len=:), allocatable :: installation_key
+    !> Human-readable installation source; unallocated when absent.
+    character(len=:), allocatable :: installation_label
+  end type permissions_extension_approval
+
+  !> Result of permissions.extensionApprovals.grant.
+  type :: permissions_extension_approvals_grant_result
+    !> Whether the pending request was eligible and its approval persisted.
+    logical :: granted = .false.
+    !> The persisted approval; allocated when granted.
+    type(permissions_extension_approval), allocatable :: approval
+  end type permissions_extension_approvals_grant_result
+
+  !> Result of permissions.extensionApprovals.list.
+  type :: permissions_extension_approvals_list_result
+    type(permissions_extension_approval), allocatable :: approvals(:)
+  end type permissions_extension_approvals_list_result
+
+  !> Result of permissions.extensionApprovals.revoke.
+  type :: permissions_extension_approvals_revoke_result
+    !> Whether a matching approval existed and was removed.
+    logical :: revoked = .false.
+  end type permissions_extension_approvals_revoke_result
+
+  ! --------------------------------------------------------------------------
   ! Session configuration
   ! --------------------------------------------------------------------------
   type :: session_config
@@ -617,6 +713,10 @@ module copilot_types
     procedure(shell_authentication_handler_interface), pointer, nopass :: on_shell_authentication_request => null()
     !> Memory store callback (enables state.hasMemoryStore).
     procedure(store_memory_handler_interface), pointer, nopass :: on_store_memory => null()
+    ! --- v3.1.0 session options ---
+    !> Ask-user handler answering userInput.request (enables interaction.requestUserInput).
+    !! The request carries image_attachment_constraints when the runtime accepts images.
+    procedure(user_input_handler_interface), pointer, nopass :: on_user_input_request => null()
   end type session_config
 
   ! --------------------------------------------------------------------------
@@ -848,6 +948,13 @@ module copilot_types
       type(network_basic_auth_request), intent(in) :: request
       type(network_basic_credentials) :: credentials
     end function network_authenticate_basic_interface
+
+    !> Ask-user handler: answer a userInput.request (see user_input_response).
+    function user_input_handler_interface(request) result(response)
+      import :: user_input_request, user_input_response
+      type(user_input_request), intent(in) :: request
+      type(user_input_response) :: response
+    end function user_input_handler_interface
   end interface
 
 contains
@@ -948,5 +1055,106 @@ contains
     text = json_get_string(raw, 'severity', is_set)
     if (is_set) failure%severity = text
   end subroutine parse_policy_helper_failure
+
+  !> Read the params of a userInput.request, including imageAttachmentConstraints (only when
+  !! the runtime accepts images), requestId, and the opaque _meta object.
+  subroutine parse_user_input_request(params, request)
+    character(len=*), intent(in) :: params
+    type(user_input_request), intent(out) :: request
+    character(len=:), allocatable :: raw, text
+    logical :: found
+
+    request%session_id = json_get_string(params, 'sessionId')
+    request%question = json_get_string(params, 'question')
+    call json_get_string_array(params, 'choices', request%choices)
+    request%allow_freeform = json_get_logical(params, 'allowFreeform', .true.)
+    text = json_get_string(params, 'requestId', found)
+    if (found) request%request_id = text
+    call json_get_raw(params, 'imageAttachmentConstraints', raw, found)
+    if (found) found = json_is_object(raw)
+    if (found) then
+      allocate(request%image_attachment_constraints)
+      call json_get_string_array(raw, 'allowedMimeTypes', &
+                                 request%image_attachment_constraints%allowed_mime_types)
+      call json_get_integer(raw, 'maxBytesPerImage', &
+                            request%image_attachment_constraints%max_bytes_per_image, found)
+      call json_get_integer(raw, 'maxCount', request%image_attachment_constraints%max_count, found)
+    end if
+    call json_get_raw(params, '_meta', raw, found)
+    if (found) found = json_is_object(raw)
+    if (found) request%meta_json = raw
+  end subroutine parse_user_input_request
+
+  !> Result of a userInput.request: answer and wasFreeform, plus attachments only when
+  !! allocated (each image as {"type":"image","data","mimeType"} with optional description
+  !! and displayName).
+  function user_input_response_json(response) result(json)
+    type(user_input_response), intent(in) :: response
+    character(len=:), allocatable :: json
+    integer :: i
+
+    json = '{"answer":'
+    if (allocated(response%answer)) then
+      json = json // json_quote(response%answer)
+    else
+      json = json // '""'
+    end if
+    if (response%was_freeform) then
+      json = json // ',"wasFreeform":true'
+    else
+      json = json // ',"wasFreeform":false'
+    end if
+    if (allocated(response%attachments)) then
+      json = json // ',"attachments":['
+      do i = 1, size(response%attachments)
+        if (i > 1) json = json // ','
+        json = json // user_input_image_attachment_json(response%attachments(i))
+      end do
+      json = json // ']'
+    end if
+    json = json // '}'
+  end function user_input_response_json
+
+  !> One image attachment of a user input response.
+  function user_input_image_attachment_json(attachment) result(json)
+    type(user_input_image_attachment), intent(in) :: attachment
+    character(len=:), allocatable :: json
+
+    json = '{"type":"image","data":'
+    if (allocated(attachment%data)) then
+      json = json // json_quote(attachment%data)
+    else
+      json = json // '""'
+    end if
+    json = json // ',"mimeType":'
+    if (allocated(attachment%mime_type)) then
+      json = json // json_quote(attachment%mime_type)
+    else
+      json = json // '""'
+    end if
+    if (allocated(attachment%description)) then
+      json = json // ',"description":' // json_quote(attachment%description)
+    end if
+    if (allocated(attachment%display_name)) then
+      json = json // ',"displayName":' // json_quote(attachment%display_name)
+    end if
+    json = json // '}'
+  end function user_input_image_attachment_json
+
+  !> Read a PermissionsExtensionApproval object.
+  subroutine parse_permissions_extension_approval(raw, approval)
+    character(len=*), intent(in) :: raw
+    type(permissions_extension_approval), intent(out) :: approval
+    character(len=:), allocatable :: text
+    logical :: found
+
+    approval%extension_name = json_get_string(raw, 'extensionName')
+    approval%plugin_name = json_get_string(raw, 'pluginName')
+    call json_get_string_array(raw, 'capabilities', approval%capabilities)
+    approval%granted_at = json_get_string(raw, 'grantedAt')
+    approval%installation_key = json_get_string(raw, 'installationKey')
+    text = json_get_string(raw, 'installationLabel', found)
+    if (found) approval%installation_label = text
+  end subroutine parse_permissions_extension_approval
 
 end module copilot_types

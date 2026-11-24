@@ -503,6 +503,137 @@ function CopilotClient:clear_managed_settings_cache()
     return self._rpc_client:request("managedSettings.clearCache", {})
 end
 
+--- Save a legacy MCP configuration credential in the runtime-owned secret store
+-- (mcp.secrets.save). Requires Copilot CLI 1.0.116 or newer.
+-- @param secret_id string  Identifier of the credential
+-- @param value string      The credential; it is never logged
+-- @param config_dir string|nil  Configuration directory (the runtime's default when nil)
+-- @return table|nil McpSecretsSaveResult { usedKeychain }; usedKeychain is true when the
+--   OS keychain stored the credential and false for the file backend
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:mcp_secrets_save(secret_id, value, config_dir)
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err, rpc_err = self._rpc_client:request("mcp.secrets.save", {
+        secretId  = secret_id,
+        value     = value,
+        configDir = config_dir,
+    })
+    if req_err then
+        return nil, req_err, rpc_err
+    end
+    return types.McpSecretsSaveResult(type(result) == "table" and result or {}), nil
+end
+
+--- Delete a legacy MCP configuration credential from the runtime-owned secret store
+-- (mcp.secrets.delete). Requires Copilot CLI 1.0.116 or newer.
+-- @param secret_id string  Identifier of the credential
+-- @param config_dir string|nil  Configuration directory (the runtime's default when nil)
+-- @return boolean success
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:mcp_secrets_delete(secret_id, config_dir)
+    local ok, err = self:_ensure_connected()
+    if not ok then return false, err end
+
+    local _, req_err, rpc_err = self._rpc_client:request("mcp.secrets.delete", {
+        secretId  = secret_id,
+        configDir = config_dir,
+    })
+    if req_err then
+        return false, req_err, rpc_err
+    end
+    return true, nil
+end
+
+--- Delete the legacy credentials indexed for an MCP server (mcp.secrets.deleteServer).
+-- Requires Copilot CLI 1.0.116 or newer.
+-- @param server_name string  The MCP server name
+-- @param config_dir string|nil  Configuration directory (the runtime's default when nil)
+-- @return boolean success
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:mcp_secrets_delete_server(server_name, config_dir)
+    local ok, err = self:_ensure_connected()
+    if not ok then return false, err end
+
+    local _, req_err, rpc_err = self._rpc_client:request("mcp.secrets.deleteServer", {
+        serverName = server_name,
+        configDir  = config_dir,
+    })
+    if req_err then
+        return false, req_err, rpc_err
+    end
+    return true, nil
+end
+
+--- Persist a pending plugin extension permission request as a user-scoped approval,
+-- before the host answers that request normally (permissions.extensionApprovals.grant).
+-- Requires Copilot CLI 1.0.116 or newer.
+-- @param session_id string  Session that owns the pending request
+-- @param request_id string  Id of the pending extension permission request
+-- @return table|nil PermissionsExtensionApprovalsGrantResult { granted, approval }
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:extension_approvals_grant(session_id, request_id)
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err, rpc_err = self._rpc_client:request("permissions.extensionApprovals.grant", {
+        sessionId = session_id,
+        requestId = request_id,
+    })
+    if req_err then
+        return nil, req_err, rpc_err
+    end
+    return types.PermissionsExtensionApprovalsGrantResult(type(result) == "table" and result or {}), nil
+end
+
+--- List the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+-- Requires Copilot CLI 1.0.116 or newer.
+-- @param session_id string|nil  Attached session whose configuration profile to list
+--   (the server's profile when nil)
+-- @return table|nil PermissionsExtensionApprovalsListResult { approvals }
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:extension_approvals_list(session_id)
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err, rpc_err = self._rpc_client:request("permissions.extensionApprovals.list", {
+        sessionId = session_id,
+    })
+    if req_err then
+        return nil, req_err, rpc_err
+    end
+    return types.PermissionsExtensionApprovalsListResult(type(result) == "table" and result or {}), nil
+end
+
+--- Revoke one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+-- Requires Copilot CLI 1.0.116 or newer.
+-- @param extension_name string    The approval's extensionName
+-- @param installation_key string  The approval's installationKey, unchanged
+-- @param session_id string|nil    Attached session whose configuration profile to use
+-- @return table|nil PermissionsExtensionApprovalsRevokeResult { revoked }
+-- @return string|nil error
+-- @return table|nil structured JSON-RPC error { code, message, data }
+function CopilotClient:extension_approvals_revoke(extension_name, installation_key, session_id)
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err, rpc_err = self._rpc_client:request("permissions.extensionApprovals.revoke", {
+        extensionName   = extension_name,
+        installationKey = installation_key,
+        sessionId       = session_id,
+    })
+    if req_err then
+        return nil, req_err, rpc_err
+    end
+    return types.PermissionsExtensionApprovalsRevokeResult(type(result) == "table" and result or {}), nil
+end
+
 --- List all sessions.
 -- @return table|nil  Array of SessionMetadata
 -- @return string|nil error
@@ -946,6 +1077,10 @@ function CopilotClient:_handle_user_input_request(params)
         question      = params.question,
         choices       = params.choices,
         allowFreeform = params.allowFreeform,
+        requestId     = type(params.requestId) == "string" and params.requestId or nil,
+        -- nil unless the runtime accepts image attachments in the answer
+        imageAttachmentConstraints = types.UserInputImageAttachmentConstraints(params.imageAttachmentConstraints),
+        _meta         = type(params._meta) == "table" and params._meta or nil,
     }
     local invocation = { sessionId = params.sessionId }
 
@@ -954,10 +1089,19 @@ function CopilotClient:_handle_user_input_request(params)
         return nil, { code = -32603, message = tostring(result) }
     end
 
-    return {
+    local response = {
         answer      = result.answer or "",
         wasFreeform = result.wasFreeform or false,
-    }, nil
+    }
+    -- Image attachments are sent only when set; an empty Lua table would encode as {}
+    if type(result.attachments) == "table" and #result.attachments > 0 then
+        local attachments = {}
+        for i, attachment in ipairs(result.attachments) do
+            attachments[i] = types.UserInputImageAttachment(attachment)
+        end
+        response.attachments = attachments
+    end
+    return response, nil
 end
 
 --- Handle a hooks invocation from the server.

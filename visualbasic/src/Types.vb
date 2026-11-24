@@ -111,8 +111,15 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Handler for exit-plan-mode requests from the assistant.</summary>
         Public Property OnExitPlanMode As ExitPlanModeHandler
 
-        ''' <summary>Handler for user input requests.</summary>
+        ''' <summary>Handler for user input requests (answer text only; see <see cref="OnUserInputRequest"/>).</summary>
         Public Property OnUserInput As Func(Of UserInputRequest, Task(Of String))
+
+        ''' <summary>
+        ''' Handler for ask_user requests (<c>userInput.request</c>) that returns a full
+        ''' <see cref="UserInputResponse"/>, including image <c>Attachments</c> when the request carries
+        ''' <see cref="UserInputRequest.ImageAttachmentConstraints"/>. Takes precedence over <see cref="OnUserInput"/>.
+        ''' </summary>
+        Public Property OnUserInputRequest As Func(Of UserInputRequest, Task(Of UserInputResponse))
 
         ''' <summary>Handler for elicitation requests.</summary>
         Public Property OnElicitation As Func(Of ElicitationRequest, Task(Of ElicitationResponse))
@@ -343,8 +350,15 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Handler for permission requests from the assistant.</summary>
         Public Property OnPermissionRequest As PermissionHandler
 
-        ''' <summary>Handler for user input requests.</summary>
+        ''' <summary>Handler for user input requests (answer text only; see <see cref="OnUserInputRequest"/>).</summary>
         Public Property OnUserInput As Func(Of UserInputRequest, Task(Of String))
+
+        ''' <summary>
+        ''' Handler for ask_user requests (<c>userInput.request</c>) that returns a full
+        ''' <see cref="UserInputResponse"/>, including image <c>Attachments</c> when the request carries
+        ''' <see cref="UserInputRequest.ImageAttachmentConstraints"/>. Takes precedence over <see cref="OnUserInput"/>.
+        ''' </summary>
+        Public Property OnUserInputRequest As Func(Of UserInputRequest, Task(Of UserInputResponse))
 
         ''' <summary>Handler for elicitation requests.</summary>
         Public Property OnElicitation As Func(Of ElicitationRequest, Task(Of ElicitationResponse))
@@ -684,15 +698,43 @@ Namespace GitHub.Copilot.SDK
     ' -----------------------------------------------------------------------
 
     ''' <summary>
-    ''' Request from the assistant for user input.
+    ''' Request from the assistant for user input (<c>userInput.request</c>, the ask_user tool).
     ''' </summary>
     Public Class UserInputRequest
 
+        ''' <summary>The question text (same value as <see cref="Question"/>; kept for compatibility).</summary>
         <JsonPropertyName("prompt")>
         Public Property Prompt As String
 
         <JsonPropertyName("placeholder")>
         Public Property Placeholder As String
+
+        ''' <summary>The question to ask the user.</summary>
+        <JsonPropertyName("question")>
+        Public Property Question As String
+
+        ''' <summary>Optional choices for a multiple choice question.</summary>
+        <JsonPropertyName("choices")>
+        Public Property Choices As List(Of String)
+
+        ''' <summary>Whether a freeform answer is allowed (Nothing when the runtime did not say).</summary>
+        <JsonPropertyName("allowFreeform")>
+        Public Property AllowFreeform As Boolean?
+
+        ''' <summary>Id of the pending request, when the runtime sends it.</summary>
+        <JsonPropertyName("requestId")>
+        Public Property RequestId As String
+
+        ''' <summary>
+        ''' Image support advertised by the runtime. Nothing when images are not accepted in the answer;
+        ''' otherwise <see cref="UserInputResponse.Attachments"/> may carry images within these limits.
+        ''' </summary>
+        <JsonPropertyName("imageAttachmentConstraints")>
+        Public Property ImageAttachmentConstraints As UserInputImageAttachmentConstraints
+
+        ''' <summary>The request's opaque <c>_meta</c> object, when the runtime sends one.</summary>
+        <JsonPropertyName("_meta")>
+        Public Property Meta As Dictionary(Of String, Object)
 
     End Class
 
@@ -2165,6 +2207,176 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Why the requested mode was refused, when known (see <see cref="PermissionModeRefusalReason"/>).</summary>
         <JsonPropertyName("reason")>
         Public Property Reason As String
+
+    End Class
+
+    ' -----------------------------------------------------------------------
+    '  v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Image support advertised by a <c>userInput.request</c>
+    ''' (<see cref="UserInputRequest.ImageAttachmentConstraints"/>). The runtime enforces these limits.
+    ''' </summary>
+    Public Class UserInputImageAttachmentConstraints
+
+        ''' <summary>MIME types accepted for attached images.</summary>
+        <JsonPropertyName("allowedMimeTypes")>
+        Public Property AllowedMimeTypes As List(Of String)
+
+        ''' <summary>Maximum decoded byte length of each image.</summary>
+        <JsonPropertyName("maxBytesPerImage")>
+        Public Property MaxBytesPerImage As Long
+
+        ''' <summary>Maximum number of images accepted in one answer.</summary>
+        <JsonPropertyName("maxCount")>
+        Public Property MaxCount As Long
+
+    End Class
+
+    ''' <summary>
+    ''' An inline image attached to an ask_user answer (<see cref="UserInputResponse.Attachments"/>).
+    ''' The wire <c>type</c> is always "image".
+    ''' </summary>
+    Public Class UserInputImageAttachment
+
+        ''' <summary>Attachment type; always "image".</summary>
+        Public ReadOnly Property Type As String = "image"
+
+        ''' <summary>The image bytes encoded as standard base64 (no data URL prefix).</summary>
+        Public Property Data As String
+
+        ''' <summary>MIME type of the image, one of the advertised allowed MIME types.</summary>
+        Public Property MimeType As String
+
+        ''' <summary>Optional description of the image.</summary>
+        Public Property Description As String
+
+        ''' <summary>Optional client-facing name of the image.</summary>
+        Public Property DisplayName As String
+
+        ''' <summary>Build the wire object ({type:"image", data, mimeType, description?, displayName?}).</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim wire As New Dictionary(Of String, Object) From {
+                {"type", "image"},
+                {"data", Data},
+                {"mimeType", MimeType}
+            }
+            If Description IsNot Nothing Then wire("description") = Description
+            If DisplayName IsNot Nothing Then wire("displayName") = DisplayName
+            Return wire
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Answer to a <see cref="UserInputRequest"/> (returned by <see cref="SessionConfig.OnUserInputRequest"/>).
+    ''' </summary>
+    Public Class UserInputResponse
+
+        ''' <summary>The user's answer. Use an empty string for an image-only answer.</summary>
+        Public Property Answer As String = ""
+
+        ''' <summary>Whether the answer was freeform (not one of the offered choices).</summary>
+        Public Property WasFreeform As Boolean
+
+        ''' <summary>
+        ''' Optional images, only valid when the request advertised
+        ''' <see cref="UserInputRequest.ImageAttachmentConstraints"/>. Sent only when set. For an
+        ''' image-only answer use an empty <see cref="Answer"/> and <see cref="WasFreeform"/> = True.
+        ''' </summary>
+        Public Property Attachments As List(Of UserInputImageAttachment)
+
+        ''' <summary>Build the JSON-RPC result ({answer, wasFreeform, attachments?}).</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim wire As New Dictionary(Of String, Object) From {
+                {"answer", If(Answer, "")},
+                {"wasFreeform", WasFreeform}
+            }
+            If Attachments IsNot Nothing Then
+                wire("attachments") = Attachments.Select(Function(a) a.ToWire()).ToList()
+            End If
+            Return wire
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Result of <see cref="CopilotClient.McpSecretsSaveAsync"/> (<c>mcp.secrets.save</c>).
+    ''' </summary>
+    Public Class McpSecretsSaveResult
+
+        ''' <summary>True when the OS keychain stored the credential, False for the file backend.</summary>
+        <JsonPropertyName("usedKeychain")>
+        Public Property UsedKeychain As Boolean
+
+    End Class
+
+    ''' <summary>
+    ''' A user-scoped approval for one installed plugin extension.
+    ''' </summary>
+    Public Class PermissionsExtensionApproval
+
+        ''' <summary>Stable identity, for example "plugin:plugin-name:extension-name".</summary>
+        <JsonPropertyName("extensionName")>
+        Public Property ExtensionName As String
+
+        ''' <summary>The plugin that installed the extension.</summary>
+        <JsonPropertyName("pluginName")>
+        Public Property PluginName As String
+
+        ''' <summary>The exact privileged capabilities the user approved.</summary>
+        <JsonPropertyName("capabilities")>
+        Public Property Capabilities As List(Of String)
+
+        ''' <summary>When the approval was granted (RFC 3339 timestamp).</summary>
+        <JsonPropertyName("grantedAt")>
+        Public Property GrantedAt As String
+
+        ''' <summary>Opaque installation key; pass it back unchanged to revoke the approval.</summary>
+        <JsonPropertyName("installationKey")>
+        Public Property InstallationKey As String
+
+        ''' <summary>Optional human-readable installation label.</summary>
+        <JsonPropertyName("installationLabel")>
+        Public Property InstallationLabel As String
+
+    End Class
+
+    ''' <summary>
+    ''' Result of <see cref="CopilotClient.ExtensionApprovalsGrantAsync"/> (<c>permissions.extensionApprovals.grant</c>).
+    ''' </summary>
+    Public Class PermissionsExtensionApprovalsGrantResult
+
+        ''' <summary>Whether the pending request was eligible and the approval was persisted.</summary>
+        <JsonPropertyName("granted")>
+        Public Property Granted As Boolean
+
+        ''' <summary>The stored approval, when one was persisted.</summary>
+        <JsonPropertyName("approval")>
+        Public Property Approval As PermissionsExtensionApproval
+
+    End Class
+
+    ''' <summary>
+    ''' Result of <see cref="CopilotClient.ExtensionApprovalsListAsync"/> (<c>permissions.extensionApprovals.list</c>).
+    ''' </summary>
+    Public Class PermissionsExtensionApprovalsListResult
+
+        ''' <summary>The user-scoped plugin extension approvals.</summary>
+        <JsonPropertyName("approvals")>
+        Public Property Approvals As New List(Of PermissionsExtensionApproval)
+
+    End Class
+
+    ''' <summary>
+    ''' Result of <see cref="CopilotClient.ExtensionApprovalsRevokeAsync"/> (<c>permissions.extensionApprovals.revoke</c>).
+    ''' </summary>
+    Public Class PermissionsExtensionApprovalsRevokeResult
+
+        ''' <summary>Whether a matching approval was revoked.</summary>
+        <JsonPropertyName("revoked")>
+        Public Property Revoked As Boolean
 
     End Class
 

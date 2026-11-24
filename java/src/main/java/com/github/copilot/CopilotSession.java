@@ -692,6 +692,7 @@ public class CopilotSession {
         return permissionHandler.handle(req, sessionId);
     }
 
+    @SuppressWarnings("unchecked")
     UserInputResponse handleUserInputRequest(Map<String, Object> params) throws Exception {
         if (userInputHandler == null) {
             throw new RuntimeException("User input requested but no handler registered");
@@ -700,6 +701,9 @@ public class CopilotSession {
         req.question = (String) params.get("question");
         req.choices = params.containsKey("choices") ? (List<String>) params.get("choices") : null;
         req.allowFreeform = (Boolean) params.get("allowFreeform");
+        req.requestId = params.get("requestId") instanceof String ? (String) params.get("requestId") : null;
+        req.imageAttachmentConstraints = UserInputImageAttachmentConstraints.fromMap(params.get("imageAttachmentConstraints"));
+        req.meta = params.get("_meta") instanceof Map ? (Map<String, Object>) params.get("_meta") : null;
         return userInputHandler.handle(req, sessionId);
     }
 

@@ -109,6 +109,44 @@ public:
     /// Clears the runtime's managed-settings cache (`managedSettings.clearCache`).
     void clearManagedSettingsCache();
 
+    /// Saves a legacy MCP configuration credential in the runtime-owned secret store
+    /// (`mcp.secrets.save`). `value` is a credential and is never logged. `configDir`
+    /// selects the configuration directory (the runtime's default when std::nullopt).
+    /// McpSecretsSaveResult::usedKeychain is true when the OS keychain stored the
+    /// credential and false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+    McpSecretsSaveResult mcpSecretsSave(const std::string& secretId, const std::string& value,
+                                        const std::optional<std::string>& configDir = std::nullopt);
+
+    /// Deletes a legacy MCP configuration credential from the runtime-owned secret store
+    /// (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+    void mcpSecretsDelete(const std::string& secretId,
+                          const std::optional<std::string>& configDir = std::nullopt);
+
+    /// Deletes the legacy credentials indexed for an MCP server (`mcp.secrets.deleteServer`).
+    /// Requires Copilot CLI 1.0.116 or newer.
+    void mcpSecretsDeleteServer(const std::string& serverName,
+                                const std::optional<std::string>& configDir = std::nullopt);
+
+    /// Persists a pending plugin extension permission request as a user-scoped approval,
+    /// before the host answers that request normally (`permissions.extensionApprovals.grant`).
+    /// Returns whether the request was eligible and persisted, and the stored approval.
+    /// Requires Copilot CLI 1.0.116 or newer.
+    PermissionsExtensionApprovalsGrantResult extensionApprovalsGrant(const std::string& sessionId,
+                                                                     const std::string& requestId);
+
+    /// Lists the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+    /// `sessionId` selects an attached session whose configuration profile to list.
+    /// Requires Copilot CLI 1.0.116 or newer.
+    PermissionsExtensionApprovalsListResult extensionApprovalsList(
+        const std::optional<std::string>& sessionId = std::nullopt);
+
+    /// Revokes one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+    /// Pass the approval's extensionName and installationKey unchanged; `sessionId` selects an
+    /// attached session whose configuration profile to use. Requires Copilot CLI 1.0.116 or newer.
+    PermissionsExtensionApprovalsRevokeResult extensionApprovalsRevoke(
+        const std::string& extensionName, const std::string& installationKey,
+        const std::optional<std::string>& sessionId = std::nullopt);
+
     /// Subscribe to all session lifecycle events. Returns unsubscribe function.
     std::function<void()> onLifecycle(SessionLifecycleHandler handler);
 

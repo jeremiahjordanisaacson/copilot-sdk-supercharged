@@ -298,7 +298,7 @@ CopilotSession <- R6::R6Class(
 
     #' @description Handle a user input request from the CLI.
     #' @param request Named list. The user input request data.
-    #' @return Named list with answer and was_freeform.
+    #' @return Named list with answer, was_freeform and attachments.
     #' @keywords internal
     handle_user_input_request = function(request) {
       if (is.null(private$user_input_handler)) {
@@ -308,7 +308,12 @@ CopilotSession <- R6::R6Class(
       input_req <- UserInputRequest$new(
         question = request$question %||% "",
         choices = request$choices,
-        allow_freeform = if (!is.null(request$allowFreeform)) request$allowFreeform else TRUE
+        allow_freeform = if (!is.null(request$allowFreeform)) request$allowFreeform else TRUE,
+        image_attachment_constraints = user_input_image_attachment_constraints_from_list(
+          request[["imageAttachmentConstraints"]]
+        ),
+        request_id = request[["requestId"]],
+        meta = request[["_meta"]]
       )
 
       result <- private$user_input_handler(
@@ -317,9 +322,11 @@ CopilotSession <- R6::R6Class(
       )
 
       if (inherits(result, "UserInputResponse")) {
-        list(answer = result$answer, was_freeform = result$was_freeform)
+        list(answer = result$answer, was_freeform = result$was_freeform,
+             attachments = result$attachments)
       } else {
-        list(answer = result$answer, was_freeform = isTRUE(result$wasFreeform %||% result$was_freeform))
+        list(answer = result$answer, was_freeform = isTRUE(result$wasFreeform %||% result$was_freeform),
+             attachments = result[["attachments"]])
       }
     },
 
@@ -618,11 +625,13 @@ CopilotSession <- R6::R6Class(
       request_id <- data$requestId
       context <- list(
         session_id = self$session_id,
+        request_id = request_id,
         message = data$message,
         requested_schema = data$requestedSchema,
         mode = data$mode,
         elicitation_source = data$elicitationSource,
-        url = data$url
+        url = data$url,
+        meta = data[["_meta"]]
       )
 
       tryCatch(
@@ -630,7 +639,7 @@ CopilotSession <- R6::R6Class(
           result <- private$elicitation_handler(context)
           private$client$request("ui.handlePendingElicitation", list(
             requestId = request_id,
-            result = result
+            result = elicitation_result_to_wire(result)
           ))
         },
         error = function(e) {

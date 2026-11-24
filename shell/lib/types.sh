@@ -49,6 +49,16 @@ COPILOT_EVENT_EXTERNAL_TOOL_REQUESTED="external_tool.requested"
 # (see copilot_session_set_permission_mode).
 COPILOT_PERMISSION_MODE_REFUSAL_MANAGED_POLICY="managed_policy"
 
+# --- Plugin Extension Approval Types ---
+# A PermissionsExtensionApproval (a user-scoped approval for one installed plugin extension;
+# see copilot_client_extension_approvals_grant, _list, and _revoke) is a JSON object with:
+#   extensionName     - Stable identity (for example "plugin:plugin-name:extension-name")
+#   pluginName        - Plugin that contributed the extension
+#   capabilities      - JSON array of the exact privileged capabilities the user approved
+#   grantedAt         - RFC 3339 timestamp of the grant
+#   installationKey   - Opaque installation identity; pass it back unchanged to revoke
+#   installationLabel - Human-readable installation label (optional)
+
 # --- Slash Command Input Completion Constants ---
 COPILOT_SLASH_COMMAND_INPUT_COMPLETION_DIRECTORY="directory"
 
@@ -404,16 +414,26 @@ copilot_shell_output_event_data() {
 }
 
 # --- UserInput Types ---
+# A userInput.request (see COPILOT_USER_INPUT_HANDLER) carries "imageAttachmentConstraints"
+# ({"allowedMimeTypes","maxBytesPerImage","maxCount"}) when the runtime accepts images in the
+# answer, and may carry "requestId" (the pending request ID) and "_meta" (opaque metadata).
 
 # Build a UserInputRequest JSON object.
 # Arguments:
 #   $1 - Optional question
 #   $2 - Optional choices JSON array
 #   $3 - Optional allowFreeform JSON boolean
+#   $4 - Optional imageAttachmentConstraints JSON object
+#        (see copilot_user_input_image_attachment_constraints)
+#   $5 - Optional requestId
+#   $6 - Optional _meta JSON object
 copilot_user_input_request() {
     local question="${1:-}"
     local choices="${2:-}"
     local allow_freeform="${3:-}"
+    local image_attachment_constraints="${4:-}"
+    local request_id="${5:-}"
+    local meta="${6:-}"
 
     local json
     json=$(jq -c -n '{}')
@@ -426,18 +446,85 @@ copilot_user_input_request() {
     if [[ -n "$allow_freeform" ]]; then
         json=$(echo "$json" | jq -c --argjson allowFreeform "$allow_freeform" '. + {"allowFreeform":$allowFreeform}')
     fi
+    if [[ -n "$image_attachment_constraints" ]]; then
+        json=$(echo "$json" | jq -c --argjson iac "$image_attachment_constraints" '. + {"imageAttachmentConstraints":$iac}')
+    fi
+    if [[ -n "$request_id" ]]; then
+        json=$(echo "$json" | jq -c --arg rid "$request_id" '. + {"requestId":$rid}')
+    fi
+    if [[ -n "$meta" ]]; then
+        json=$(echo "$json" | jq -c --argjson meta "$meta" '. + {"_meta":$meta}')
+    fi
     echo "$json"
+}
+
+# Build a UserInputImageAttachmentConstraints JSON object (the image support a
+# userInput.request advertises; absent when the runtime does not accept images).
+# Arguments:
+#   $1 - Required allowedMimeTypes JSON array (for example '["image/png","image/jpeg"]')
+#   $2 - Optional maxBytesPerImage integer
+#   $3 - Optional maxCount integer
+copilot_user_input_image_attachment_constraints() {
+    local allowed_mime_types="${1:-[]}"
+    local max_bytes_per_image="${2:-}"
+    local max_count="${3:-}"
+
+    local json
+    json=$(jq -c -n --argjson amt "$allowed_mime_types" '{"allowedMimeTypes":$amt}')
+    if [[ -n "$max_bytes_per_image" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$max_bytes_per_image" '. + {"maxBytesPerImage":$v}')
+    fi
+    if [[ -n "$max_count" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$max_count" '. + {"maxCount":$v}')
+    fi
+    echo "$json"
+}
+
+# Build a UserInputImageAttachment JSON object: an image attached to an ask_user answer. Only
+# valid when the request advertised imageAttachmentConstraints; the runtime enforces the MIME
+# types, size, and count. The wire "type" is always "image". Line breaks in the base64 data
+# (for example from wrapped base64 output) are removed. The data is piped to jq (not passed as
+# an argument), so large images are not limited by the argument size.
+# Arguments:
+#   $1 - Required base64-encoded image bytes
+#   $2 - Required MIME type (for example "image/png")
+#   $3 - Optional description
+#   $4 - Optional display name
+# Example:
+#   image=$(copilot_user_input_image_attachment "$(base64 < shot.png)" image/png "" shot.png)
+copilot_user_input_image_attachment() {
+    local data="$1"
+    local mime_type="$2"
+    local description="${3:-}"
+    local display_name="${4:-}"
+
+    printf '%s' "$data" | tr -d '\r\n' | jq -c -R -s --arg mimeType "$mime_type" \
+        --arg description "$description" --arg displayName "$display_name" \
+        '{"type":"image","data":.,"mimeType":$mimeType}
+         + (if $description == "" then {} else {"description":$description} end)
+         + (if $displayName == "" then {} else {"displayName":$displayName} end)'
 }
 
 # Build a UserInputResponse JSON object.
 # Arguments:
-#   $1 - Required answer
+#   $1 - Required answer (use "" with wasFreeform true for an image-only answer)
 #   $2 - Optional wasFreeform JSON boolean (default: false)
+#   $3 - Optional attachments JSON array of UserInputImageAttachment objects (see
+#        copilot_user_input_image_attachment); sent only when non-empty
 copilot_user_input_response() {
     local answer="$1"
     local was_freeform="${2:-false}"
+    local attachments="${3:-}"
 
-    jq -c -n         --arg answer "$answer"         --argjson wasFreeform "$was_freeform"         '{"answer":$answer,"wasFreeform":$wasFreeform}'
+    if [[ -z "$attachments" ]]; then
+        jq -c -n --arg answer "$answer" --argjson wasFreeform "$was_freeform" \
+            '{"answer":$answer,"wasFreeform":$wasFreeform}'
+        return
+    fi
+
+    printf '%s' "$attachments" | jq -c --arg answer "$answer" --argjson wasFreeform "$was_freeform" \
+        '{"answer":$answer,"wasFreeform":$wasFreeform}
+         + (if length > 0 then {"attachments":.} else {} end)'
 }
 
 # --- ResponseFormat / ImageOptions Types ---

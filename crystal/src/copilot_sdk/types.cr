@@ -402,6 +402,10 @@ module CopilotSDK
     # Answers shell authentication prompts (sends `interaction.requestShellAuthentication`).
     @[JSON::Field(ignore: true)]
     property on_shell_authentication_request : ShellAuthenticationHandler? = nil
+    # Answers the agent's ask_user questions, including image answers
+    # (`userInput.request`; sends `interaction.requestUserInput`).
+    @[JSON::Field(ignore: true)]
+    property on_user_input_request : UserInputHandler? = nil
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -425,7 +429,7 @@ module CopilotSDK
                    @trust_working_directory = nil, @image_generation = nil, @autopilot = nil,
                    @providers = nil, @models = nil, @default_provider = nil, @capi = nil,
                    @hooks = nil, @github_token_provider = nil,
-                   @on_shell_authentication_request = nil)
+                   @on_shell_authentication_request = nil, @on_user_input_request = nil)
     end
   end
 
@@ -502,6 +506,8 @@ module CopilotSDK
     property github_token_provider : GitHubTokenProvider? = nil
     @[JSON::Field(ignore: true)]
     property on_shell_authentication_request : ShellAuthenticationHandler? = nil
+    @[JSON::Field(ignore: true)]
+    property on_user_input_request : UserInputHandler? = nil
 
     def initialize(@session_id, @model = nil, @streaming = nil, @instruction_directories = nil,
                    @available_tools = nil, @excluded_tools = nil, @tools = nil,
@@ -514,7 +520,8 @@ module CopilotSDK
                    @agent_directories = nil, @hook_directories = nil, @image_generation = nil,
                    @autopilot = nil, @providers = nil, @models = nil, @default_provider = nil,
                    @capi = nil, @clear_default_provider = nil, @hooks = nil,
-                   @github_token_provider = nil, @on_shell_authentication_request = nil)
+                   @github_token_provider = nil, @on_shell_authentication_request = nil,
+                   @on_user_input_request = nil)
     end
   end
 
@@ -1204,6 +1211,100 @@ module CopilotSDK
   # Stores a memory in the app. The agent's `store_memory` succeeds once this returns.
   alias MemoryStoreHandler = Proc(StoredMemory, Nil)
 
+  # Image limits a user-input request advertises when the runtime accepts image
+  # answers (`imageAttachmentConstraints`).
+  class UserInputImageAttachmentConstraints
+    include JSON::Serializable
+
+    # Accepted MIME types, for example `image/png`.
+    @[JSON::Field(key: "allowedMimeTypes")]
+    property allowed_mime_types : Array(String) = [] of String
+    # Largest accepted image, in bytes.
+    @[JSON::Field(key: "maxBytesPerImage")]
+    property max_bytes_per_image : Int64 = 0_i64
+    # Most images accepted in one answer.
+    @[JSON::Field(key: "maxCount")]
+    property max_count : Int64 = 0_i64
+
+    def initialize(@allowed_mime_types = [] of String, @max_bytes_per_image = 0_i64,
+                   @max_count = 0_i64)
+    end
+  end
+
+  # A question from the agent's ask_user tool (`userInput.request`).
+  class UserInputRequest
+    include JSON::Serializable
+
+    @[JSON::Field(key: "sessionId")]
+    property session_id : String = ""
+    property question : String = ""
+    property choices : Array(String)?
+    # Whether a freeform answer is allowed in addition to the choices.
+    @[JSON::Field(key: "allowFreeform")]
+    property allow_freeform : Bool = true
+    # Runtime ID of the pending request, when the runtime sends it.
+    @[JSON::Field(key: "requestId")]
+    property request_id : String?
+    # Image limits; nil when the runtime does not accept image answers.
+    @[JSON::Field(key: "imageAttachmentConstraints")]
+    property image_attachment_constraints : UserInputImageAttachmentConstraints?
+    # Opaque request metadata (`_meta`), passed through unchanged.
+    @[JSON::Field(key: "_meta")]
+    property meta : JSON::Any?
+
+    def initialize(@session_id = "", @question = "", @choices = nil, @allow_freeform = true,
+                   @request_id = nil, @image_attachment_constraints = nil, @meta = nil)
+    end
+  end
+
+  # An image in a `UserInputResponse`. Only valid when the request advertised
+  # `image_attachment_constraints`; the runtime enforces the limits.
+  class UserInputImageAttachment
+    include JSON::Serializable
+
+    # Always `"image"`.
+    property type : String = "image"
+    # Base64-encoded image bytes.
+    property data : String = ""
+    @[JSON::Field(key: "mimeType")]
+    property mime_type : String = ""
+    property description : String?
+    @[JSON::Field(key: "displayName")]
+    property display_name : String?
+
+    def initialize(@data = "", @mime_type = "", @description = nil, @display_name = nil)
+      @type = "image"
+    end
+  end
+
+  # Answer to a `UserInputRequest`. For an image-only answer, use an empty
+  # `answer` with `was_freeform` true.
+  class UserInputResponse
+    getter answer : String
+    # True when the user typed the answer instead of picking a choice.
+    getter was_freeform : Bool
+    # Images sent with the answer (`attachments`); omitted when nil.
+    getter attachments : Array(UserInputImageAttachment)?
+
+    def initialize(@answer : String, @was_freeform : Bool = true,
+                   @attachments : Array(UserInputImageAttachment)? = nil)
+    end
+
+    def to_json_any : JSON::Any
+      wire = {
+        "answer"      => JSON::Any.new(@answer),
+        "wasFreeform" => JSON::Any.new(@was_freeform),
+      }
+      if attachments = @attachments
+        wire["attachments"] = JSON.parse(attachments.to_json)
+      end
+      JSON::Any.new(wire)
+    end
+  end
+
+  # Answers the agent's ask_user questions (`userInput.request`).
+  alias UserInputHandler = Proc(UserInputRequest, UserInputResponse)
+
   # Request for `network.authenticateBasic`.
   class NetworkAuthenticateBasicRequest
     # Proxy URL that issued the Basic challenge.
@@ -1341,6 +1442,81 @@ module CopilotSDK
     property reason : String?
 
     def initialize(@success = false, @mode = "", @reason = nil)
+    end
+  end
+
+  # Result of `CopilotClient#mcp_secrets_save` (`mcp.secrets.save`).
+  class McpSecretsSaveResult
+    include JSON::Serializable
+
+    # True when the OS keychain stored the credential, false for the file backend.
+    @[JSON::Field(key: "usedKeychain")]
+    property used_keychain : Bool = false
+
+    def initialize(@used_keychain = false)
+    end
+  end
+
+  # A user-scoped approval for one installed plugin extension
+  # (`permissions.extensionApprovals.*`).
+  class PermissionsExtensionApproval
+    include JSON::Serializable
+
+    # Stable identity, for example `plugin:plugin-name:extension-name`.
+    @[JSON::Field(key: "extensionName")]
+    property extension_name : String = ""
+    @[JSON::Field(key: "pluginName")]
+    property plugin_name : String = ""
+    # Exact privileged capabilities the user approved.
+    property capabilities : Array(String) = [] of String
+    # When the approval was granted (RFC 3339 timestamp).
+    @[JSON::Field(key: "grantedAt")]
+    property granted_at : String = ""
+    # Opaque installation identity; pass it back unchanged to revoke.
+    @[JSON::Field(key: "installationKey")]
+    property installation_key : String = ""
+    @[JSON::Field(key: "installationLabel")]
+    property installation_label : String?
+
+    def initialize(@extension_name = "", @plugin_name = "", @capabilities = [] of String,
+                   @granted_at = "", @installation_key = "", @installation_label = nil)
+    end
+  end
+
+  # Result of `CopilotClient#extension_approvals_grant`
+  # (`permissions.extensionApprovals.grant`).
+  class PermissionsExtensionApprovalsGrantResult
+    include JSON::Serializable
+
+    # Whether the pending request was eligible and persisted.
+    property granted : Bool = false
+    # The persisted approval, when granted.
+    property approval : PermissionsExtensionApproval?
+
+    def initialize(@granted = false, @approval = nil)
+    end
+  end
+
+  # Result of `CopilotClient#extension_approvals_list`
+  # (`permissions.extensionApprovals.list`).
+  class PermissionsExtensionApprovalsListResult
+    include JSON::Serializable
+
+    property approvals : Array(PermissionsExtensionApproval) = [] of PermissionsExtensionApproval
+
+    def initialize(@approvals = [] of PermissionsExtensionApproval)
+    end
+  end
+
+  # Result of `CopilotClient#extension_approvals_revoke`
+  # (`permissions.extensionApprovals.revoke`).
+  class PermissionsExtensionApprovalsRevokeResult
+    include JSON::Serializable
+
+    # Whether a matching approval was revoked.
+    property revoked : Bool = false
+
+    def initialize(@revoked = false)
     end
   end
 

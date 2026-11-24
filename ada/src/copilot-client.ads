@@ -119,6 +119,60 @@ package Copilot.Client is
    --  (managedSettings.clearCache).
    procedure Clear_Managed_Settings_Cache (Self : in out Copilot_Client);
 
+   --  MCP secret store and plugin extension approvals (v3.1.0).  These
+   --  server-scoped requests need Copilot CLI 1.0.116 or newer; older CLIs
+   --  answer method-not-found, raised as Protocol_Error like any RPC error.
+
+   --  Save a legacy MCP configuration credential in the runtime-owned
+   --  secret store (mcp.secrets.save).  Value is a credential and is never
+   --  logged.  Config_Dir = "" uses the runtime's default configuration
+   --  directory.  Used_Keychain is True when the OS keychain stored it and
+   --  False for the file backend.
+   function Mcp_Secrets_Save
+     (Self       : in out Copilot_Client;
+      Secret_Id  : String;
+      Value      : String;
+      Config_Dir : String := "") return Mcp_Secrets_Save_Result;
+
+   --  Delete a legacy MCP configuration credential (mcp.secrets.delete).
+   procedure Mcp_Secrets_Delete
+     (Self       : in out Copilot_Client;
+      Secret_Id  : String;
+      Config_Dir : String := "");
+
+   --  Delete the legacy MCP credentials indexed for a server
+   --  (mcp.secrets.deleteServer).
+   procedure Mcp_Secrets_Delete_Server
+     (Self        : in out Copilot_Client;
+      Server_Name : String;
+      Config_Dir  : String := "");
+
+   --  Persist a pending plugin extension permission request as a user-scoped
+   --  approval, before answering that request normally
+   --  (permissions.extensionApprovals.grant).
+   function Extension_Approvals_Grant
+     (Self       : in out Copilot_Client;
+      Session_Id : String;
+      Request_Id : String) return Permissions_Extension_Approvals_Grant_Result;
+
+   --  List the user-scoped plugin extension approvals
+   --  (permissions.extensionApprovals.list).  Session_Id = "" lists the
+   --  server's configuration profile; otherwise the attached session's.
+   function Extension_Approvals_List
+     (Self       : in out Copilot_Client;
+      Session_Id : String := "") return Permissions_Extension_Approval_List;
+
+   --  Revoke one user-scoped plugin extension approval
+   --  (permissions.extensionApprovals.revoke).  Pass the approval's
+   --  Extension_Name and Installation_Key unchanged; Session_Id optionally
+   --  selects an attached session's configuration profile.
+   function Extension_Approvals_Revoke
+     (Self             : in out Copilot_Client;
+      Extension_Name   : String;
+      Installation_Key : String;
+      Session_Id       : String := "")
+      return Permissions_Extension_Approvals_Revoke_Result;
+
    --  Policy Helper failure attached to the last failed Create_Session or
    --  Resume_Session (error.data.policyHelperFailure).  Present is False
    --  when the last failure carried none.

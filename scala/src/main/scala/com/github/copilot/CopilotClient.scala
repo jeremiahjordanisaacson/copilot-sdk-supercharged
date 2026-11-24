@@ -597,6 +597,109 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     }
 
   /**
+   * Saves a legacy MCP configuration credential in the runtime-owned secret store
+   * (`mcp.secrets.save`). Requires Copilot CLI 1.0.116 or newer.
+   *
+   * @param secretId  Identifier of the credential
+   * @param value     The credential; it is never logged
+   * @param configDir Configuration directory, or None for the runtime's default
+   * @return The result; `usedKeychain` is true when the OS keychain stored the credential and
+   *         false when the runtime used its file backend
+   */
+  def mcpSecretsSave(secretId: String, value: String, configDir: Option[String] = None): Future[McpSecretsSaveResult] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("mcp.secrets.save", Json.obj(
+        "secretId" -> secretId.asJson,
+        "value" -> value.asJson,
+        "configDir" -> configDir.asJson
+      ).dropNullValues).map(McpSecretsSaveResult.fromJson)
+    }
+
+  /**
+   * Deletes a legacy MCP configuration credential from the runtime-owned secret store
+   * (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+   *
+   * @param secretId  Identifier of the credential
+   * @param configDir Configuration directory, or None for the runtime's default
+   */
+  def mcpSecretsDelete(secretId: String, configDir: Option[String] = None): Future[Unit] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("mcp.secrets.delete", Json.obj(
+        "secretId" -> secretId.asJson,
+        "configDir" -> configDir.asJson
+      ).dropNullValues).map(_ => ())
+    }
+
+  /**
+   * Deletes the legacy credentials indexed for an MCP server (`mcp.secrets.deleteServer`).
+   * Requires Copilot CLI 1.0.116 or newer.
+   *
+   * @param serverName The MCP server name
+   * @param configDir  Configuration directory, or None for the runtime's default
+   */
+  def mcpSecretsDeleteServer(serverName: String, configDir: Option[String] = None): Future[Unit] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("mcp.secrets.deleteServer", Json.obj(
+        "serverName" -> serverName.asJson,
+        "configDir" -> configDir.asJson
+      ).dropNullValues).map(_ => ())
+    }
+
+  /**
+   * Persists a pending plugin extension permission request as a user-scoped approval, before the
+   * host answers that request normally (`permissions.extensionApprovals.grant`). Requires Copilot
+   * CLI 1.0.116 or newer.
+   *
+   * @param sessionId Session that owns the pending request
+   * @param requestId ID of the pending extension permission request
+   * @return Whether the request was eligible and persisted, and the stored approval
+   */
+  def extensionApprovalsGrant(sessionId: String, requestId: String): Future[PermissionsExtensionApprovalsGrantResult] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("permissions.extensionApprovals.grant", Json.obj(
+        "sessionId" -> sessionId.asJson,
+        "requestId" -> requestId.asJson
+      )).map(PermissionsExtensionApprovalsGrantResult.fromJson)
+    }
+
+  /**
+   * Lists the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+   * Requires Copilot CLI 1.0.116 or newer.
+   *
+   * @param sessionId Attached session whose configuration profile to list, or None for the
+   *                  server's profile
+   */
+  def extensionApprovalsList(sessionId: Option[String] = None): Future[PermissionsExtensionApprovalsListResult] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("permissions.extensionApprovals.list", Json.obj(
+        "sessionId" -> sessionId.asJson
+      ).dropNullValues).map(PermissionsExtensionApprovalsListResult.fromJson)
+    }
+
+  /**
+   * Revokes one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+   * Requires Copilot CLI 1.0.116 or newer.
+   *
+   * @param extensionName   The approval's `extensionName`
+   * @param installationKey The approval's `installationKey`, unchanged
+   * @param sessionId       Attached session whose configuration profile to use, or None for the
+   *                        server's profile
+   * @return Whether a matching approval was revoked
+   */
+  def extensionApprovalsRevoke(
+    extensionName: String,
+    installationKey: String,
+    sessionId: Option[String] = None
+  ): Future[PermissionsExtensionApprovalsRevokeResult] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("permissions.extensionApprovals.revoke", Json.obj(
+        "extensionName" -> extensionName.asJson,
+        "installationKey" -> installationKey.asJson,
+        "sessionId" -> sessionId.asJson
+      ).dropNullValues).map(PermissionsExtensionApprovalsRevokeResult.fromJson)
+    }
+
+  /**
    * Subscribe to all session lifecycle events.
    *
    * @param handler Callback for lifecycle events
@@ -905,12 +1008,15 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     val question = cursor.get[String]("question").getOrElse("")
     val choices = cursor.get[List[String]]("choices").toOption
     val allowFreeform = cursor.get[Boolean]("allowFreeform").toOption
+    val requestId = cursor.get[String]("requestId").toOption
+    val imageAttachmentConstraints = cursor.get[UserInputImageAttachmentConstraints]("imageAttachmentConstraints").toOption
+    val meta = cursor.downField("_meta").focus.filter(_.isObject)
 
     val session = Option(sessions.get(sessionId)).getOrElse(
       throw new RuntimeException(s"Session not found: $sessionId")
     )
 
-    val request = UserInputRequest(Some(question), choices, allowFreeform)
+    val request = UserInputRequest(Some(question), choices, allowFreeform, requestId, imageAttachmentConstraints, meta)
     session.handleUserInputRequest(request).map(_.asJson)
 
   private def handleHooksInvoke(params: Json): Future[Json] =

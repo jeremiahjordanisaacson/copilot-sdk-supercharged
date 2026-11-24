@@ -107,23 +107,40 @@ use Moo;
 has question      => (is => 'ro', required => 1);
 has choices       => (is => 'ro', default => sub { [] });
 has allowFreeform => (is => 'ro', default => sub { 1 });
+# Pending request id, when the runtime sends it
+has request_id    => (is => 'ro', default => sub { undef });
+# UserInputImageAttachmentConstraints when the runtime accepts image attachments
+# in the answer, undef otherwise
+has image_attachment_constraints => (is => 'ro', default => sub { undef });
+# The request's opaque _meta hashref, when the runtime sends it
+has meta          => (is => 'ro', default => sub { undef });
 
 sub from_hashref {
     my ($class, $hr) = @_;
+    my $constraints = $hr->{imageAttachmentConstraints};
     return $class->new(
         question      => $hr->{question}      // '',
         choices       => $hr->{choices}        // [],
         allowFreeform => $hr->{allowFreeform}  // 1,
+        request_id    => $hr->{requestId},
+        image_attachment_constraints => (ref($constraints) eq 'HASH'
+            ? GitHub::Copilot::Types::UserInputImageAttachmentConstraints->from_hashref($constraints)
+            : undef),
+        meta          => (ref($hr->{_meta}) eq 'HASH' ? $hr->{_meta} : undef),
     );
 }
 
 sub TO_JSON {
     my ($self) = @_;
-    return {
+    my %h = (
         question      => $self->question,
         choices       => $self->choices,
         allowFreeform => $self->allowFreeform ? \1 : \0,
-    };
+    );
+    $h{requestId}                  = $self->request_id                   if defined $self->request_id;
+    $h{imageAttachmentConstraints} = $self->image_attachment_constraints if defined $self->image_attachment_constraints;
+    $h{_meta}                      = $self->meta                         if defined $self->meta;
+    return \%h;
 }
 
 # ============================================================================
@@ -134,21 +151,27 @@ use Moo;
 
 has answer      => (is => 'ro', required => 1);
 has wasFreeform => (is => 'ro', default => sub { 0 });
+# Optional arrayref of UserInputImageAttachment (or wire hashrefs), only valid when
+# the request advertised image_attachment_constraints; sent only when set
+has attachments => (is => 'ro', default => sub { undef });
 
 sub from_hashref {
     my ($class, $hr) = @_;
     return $class->new(
         answer      => $hr->{answer}      // '',
         wasFreeform => $hr->{wasFreeform} // 0,
+        attachments => $hr->{attachments},
     );
 }
 
 sub TO_JSON {
     my ($self) = @_;
-    return {
+    my %h = (
         answer      => $self->answer,
         wasFreeform => $self->wasFreeform ? \1 : \0,
-    };
+    );
+    $h{attachments} = [ @{ $self->attachments } ] if defined $self->attachments;
+    return \%h;
 }
 
 # ============================================================================
@@ -1783,6 +1806,160 @@ sub refused_by_managed_policy {
     my ($self) = @_;
     return defined $self->reason
         && $self->reason eq GitHub::Copilot::Types::PermissionModeRefusalReason::MANAGED_POLICY;
+}
+
+# ============================================================================
+# v3.1.0 types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+# ============================================================================
+
+# UserInputImageAttachmentConstraints - image support advertised by a
+# userInput.request (UserInputRequest->image_attachment_constraints). Absent
+# (undef) when the runtime does not accept images in the answer.
+package GitHub::Copilot::Types::UserInputImageAttachmentConstraints;
+use Moo;
+
+# Arrayref of MIME types accepted for this request
+has allowed_mime_types  => (is => 'ro', default => sub { [] });
+# Maximum decoded byte length of each image
+has max_bytes_per_image => (is => 'ro', default => sub { 0 });
+# Maximum number of images in one answer
+has max_count           => (is => 'ro', default => sub { 0 });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(
+        allowed_mime_types  => (ref($h->{allowedMimeTypes}) eq 'ARRAY' ? [ @{ $h->{allowedMimeTypes} } ] : []),
+        max_bytes_per_image => $h->{maxBytesPerImage} // 0,
+        max_count           => $h->{maxCount} // 0,
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return {
+        allowedMimeTypes => $self->allowed_mime_types,
+        maxBytesPerImage => $self->max_bytes_per_image + 0,
+        maxCount         => $self->max_count + 0,
+    };
+}
+
+# UserInputImageAttachment - an inline image attached to an ask_user answer (the
+# attachments of a user input response). data is the base64-encoded image (no data
+# URL prefix); the wire type is always 'image'. The runtime enforces the advertised
+# MIME types, size and count limits. Image-only answers use answer => '' and
+# wasFreeform => 1.
+package GitHub::Copilot::Types::UserInputImageAttachment;
+use Moo;
+
+has data         => (is => 'ro', required => 1);
+has mime_type    => (is => 'ro', required => 1);
+has description  => (is => 'ro', default => sub { undef });
+has display_name => (is => 'ro', default => sub { undef });
+
+# Always 'image'
+sub type { return 'image' }
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (type => 'image', data => $self->data, mimeType => $self->mime_type);
+    $h{description} = $self->description  if defined $self->description;
+    $h{displayName} = $self->display_name if defined $self->display_name;
+    return \%h;
+}
+
+# McpSecretsSaveResult - result of Client->mcp_secrets_save. used_keychain is true
+# when the OS keychain stored the credential and false when the runtime used its
+# file backend.
+package GitHub::Copilot::Types::McpSecretsSaveResult;
+use Moo;
+
+has used_keychain => (is => 'ro', default => sub { 0 });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(used_keychain => ($h->{usedKeychain} ? 1 : 0));
+}
+
+# PermissionsExtensionApproval - a user-scoped approval for one installed plugin
+# extension. extension_name is the stable identity (for example
+# 'plugin:plugin-name:extension-name'), capabilities the exact privileged
+# capabilities the user approved and granted_at an RFC 3339 timestamp. Pass
+# installation_key back unchanged to Client->extension_approvals_revoke.
+package GitHub::Copilot::Types::PermissionsExtensionApproval;
+use Moo;
+
+has extension_name     => (is => 'ro', default => sub { undef });
+has plugin_name        => (is => 'ro', default => sub { undef });
+has capabilities       => (is => 'ro', default => sub { [] });
+has granted_at         => (is => 'ro', default => sub { undef });
+has installation_key   => (is => 'ro', default => sub { undef });
+has installation_label => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(
+        extension_name     => $h->{extensionName},
+        plugin_name        => $h->{pluginName},
+        capabilities       => (ref($h->{capabilities}) eq 'ARRAY' ? [ @{ $h->{capabilities} } ] : []),
+        granted_at         => $h->{grantedAt},
+        installation_key   => $h->{installationKey},
+        installation_label => $h->{installationLabel},
+    );
+}
+
+# PermissionsExtensionApprovalsGrantResult - result of
+# Client->extension_approvals_grant: whether the pending request was eligible and
+# persisted, and the stored approval (a PermissionsExtensionApproval) when it was.
+package GitHub::Copilot::Types::PermissionsExtensionApprovalsGrantResult;
+use Moo;
+
+has granted  => (is => 'ro', default => sub { 0 });
+has approval => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(
+        granted  => ($h->{granted} ? 1 : 0),
+        approval => (ref($h->{approval}) eq 'HASH'
+            ? GitHub::Copilot::Types::PermissionsExtensionApproval->from_hashref($h->{approval})
+            : undef),
+    );
+}
+
+# PermissionsExtensionApprovalsListResult - result of
+# Client->extension_approvals_list: an arrayref of PermissionsExtensionApproval.
+package GitHub::Copilot::Types::PermissionsExtensionApprovalsListResult;
+use Moo;
+
+has approvals => (is => 'ro', default => sub { [] });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    my $approvals = ref($h->{approvals}) eq 'ARRAY' ? $h->{approvals} : [];
+    return $class->new(
+        approvals => [
+            map { GitHub::Copilot::Types::PermissionsExtensionApproval->from_hashref($_) }
+            grep { ref($_) eq 'HASH' } @$approvals
+        ],
+    );
+}
+
+# PermissionsExtensionApprovalsRevokeResult - result of
+# Client->extension_approvals_revoke: whether a matching approval was revoked.
+package GitHub::Copilot::Types::PermissionsExtensionApprovalsRevokeResult;
+use Moo;
+
+has revoked => (is => 'ro', default => sub { 0 });
+
+sub from_hashref {
+    my ($class, $h) = @_;
+    $h //= {};
+    return $class->new(revoked => ($h->{revoked} ? 1 : 0));
 }
 
 1;

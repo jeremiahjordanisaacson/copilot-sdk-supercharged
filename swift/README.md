@@ -56,6 +56,82 @@ try await session.destroy()
 await client.stop()
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a
+JSON-RPC method-not-found error, thrown as `JsonRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store
+(`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). Each method takes an
+optional `configDir:`. The secret value is never logged.
+
+```swift
+let saved = try await client.mcpSecretsSave(
+    secretId: "my-server-token",
+    value: ProcessInfo.processInfo.environment["MY_SERVER_TOKEN"] ?? ""
+)
+print(saved.usedKeychain ? "Stored in the OS keychain" : "Stored in the file backend")
+
+try await client.mcpSecretsDelete(secretId: "my-server-token")
+try await client.mcpSecretsDeleteServer(serverName: "my-server")  // every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant` / `.list` / `.revoke`). `extensionApprovalsList` and
+`extensionApprovalsRevoke` take an optional `sessionId:` to use an attached session's
+configuration profile.
+
+```swift
+// Persist a pending extension permission request before answering it normally.
+let grant = try await client.extensionApprovalsGrant(sessionId: sessionId, requestId: requestId)
+if grant.granted, let approval = grant.approval {
+    print("Approved \(approval.extensionName)")
+}
+
+for approval in try await client.extensionApprovalsList().approvals {
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    try await client.extensionApprovalsRevoke(
+        extensionName: approval.extensionName,
+        installationKey: approval.installationKey
+    )
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the `UserInputRequest` carries
+`imageAttachmentConstraints` (`UserInputImageAttachmentConstraints` with `allowedMimeTypes`,
+`maxBytesPerImage`, `maxCount`); it is nil otherwise. The request also exposes `requestId`
+and `meta` (the opaque `_meta` object) when sent. Answer with
+`UserInputResponse(answer:wasFreeform:attachments:)`, an array of `UserInputImageAttachment`
+(base64 `data`, `mimeType`, optional `description` and `displayName`; the wire `type` is
+always `"image"`). `attachments` is sent only when set. Image-only answers use `answer: ""`
+and `wasFreeform: true`; the runtime enforces the limits.
+
+```swift
+let session = try await client.createSession(SessionConfig(
+    onUserInputRequest: { request, _ in
+        if let constraints = request.imageAttachmentConstraints,
+            constraints.allowedMimeTypes.contains("image/png")
+        {
+            let png = try Data(contentsOf: URL(fileURLWithPath: "screenshot.png"))
+            let image = UserInputImageAttachment(
+                data: png.base64EncodedString(),
+                mimeType: "image/png",
+                displayName: "screenshot.png"
+            )
+            return UserInputResponse(answer: "", wasFreeform: true, attachments: [image])
+        }
+        return UserInputResponse(answer: "No screenshot available", wasFreeform: true)
+    }
+))
+```
+
 ## What's New in v3.0.0
 
 SDK protocol 4 support (the upstream SDK 2.0 wire format). **Requires Copilot CLI 1.0.113
@@ -609,6 +685,12 @@ Content-Length: 123\r\n
 | `models.list` | List available models |
 | `network.setProvider` | Register network callbacks (sent only when configured) |
 | `managedSettings.clearCache` | Clear cached managed settings |
+| `mcp.secrets.save` | Save an MCP credential (`mcpSecretsSave`, CLI 1.0.116+) |
+| `mcp.secrets.delete` | Delete an MCP credential (`mcpSecretsDelete`, CLI 1.0.116+) |
+| `mcp.secrets.deleteServer` | Delete an MCP server's credentials (`mcpSecretsDeleteServer`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.grant` | Persist a pending plugin extension approval (`extensionApprovalsGrant`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.list` | List plugin extension approvals (`extensionApprovalsList`, CLI 1.0.116+) |
+| `permissions.extensionApprovals.revoke` | Revoke a plugin extension approval (`extensionApprovalsRevoke`, CLI 1.0.116+) |
 | `session.create` | Create a new session (grouped protocol 4 options) |
 | `session.resume` | Resume an existing session (grouped protocol 4 options) |
 | `session.send` | Send a message to a session |

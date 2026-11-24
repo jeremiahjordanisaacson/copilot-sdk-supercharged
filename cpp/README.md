@@ -56,6 +56,59 @@ int main() {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, thrown as `copilot::JsonRpcException` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store (`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). Each method takes an optional `configDir` as its last argument. The secret value is never logged:
+
+```cpp
+copilot::McpSecretsSaveResult saved = client.mcpSecretsSave("my-server-token", readToken());
+std::cout << (saved.usedKeychain ? "Stored in the OS keychain" : "Stored in the file backend") << "\n";
+
+client.mcpSecretsDelete("my-server-token");
+client.mcpSecretsDeleteServer("my-server");  // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list, and revoke user-scoped approvals for installed plugin extensions (`permissions.extensionApprovals.grant`, `.list`, `.revoke`). `extensionApprovalsList()` and `extensionApprovalsRevoke()` take an optional session ID to use an attached session's configuration profile:
+
+```cpp
+// Persist a pending extension permission request before answering it normally
+auto grant = client.extensionApprovalsGrant(session->sessionId, requestId);
+if (grant.granted && grant.approval) {
+    std::cout << "Approved " << grant.approval->extensionName << "\n";
+}
+
+for (const auto& approval : client.extensionApprovalsList().approvals) {
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey);
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, `UserInputRequest::imageAttachmentConstraints` is set (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is `std::nullopt` otherwise. The request also carries `requestId` and `meta` (the opaque `_meta` object) when the runtime sends them. Answer with `UserInputResponse::attachments`, a list of `copilot::UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`; the wire `type` is always `"image"`). Attachments are sent only when set; image-only answers use an empty `answer` and `wasFreeform = true`, and the runtime enforces the limits:
+
+```cpp
+config.onUserInputRequest = [](const copilot::UserInputRequest& req, const std::string& sessionId) {
+    copilot::UserInputResponse response{"No screenshot available", true};
+    const auto& constraints = req.imageAttachmentConstraints;
+    if (constraints && std::find(constraints->allowedMimeTypes.begin(), constraints->allowedMimeTypes.end(),
+                                 "image/png") != constraints->allowedMimeTypes.end()) {
+        copilot::UserInputImageAttachment image;
+        image.data = base64Encode(readFile("screenshot.png"));
+        image.mimeType = "image/png";
+        image.displayName = "screenshot.png";
+        response = copilot::UserInputResponse{"", true, std::vector<copilot::UserInputImageAttachment>{image}};
+    }
+    return response;
+};
+```
+
 ## What's New in v3.0.0
 
 The SDK now speaks **SDK protocol 4** (the protocol of the Microsoft Copilot SDK 2.0 runtime) and requires **Copilot CLI 1.0.113 or newer**. Older CLIs are rejected during `start()` with an "SDK protocol version mismatch" error.
@@ -256,6 +309,7 @@ session->destroy();  // session.detach: the session can be resumed later
 
 * The runtime-supervised AHP host (`startAhpHost` and the `ahp.*` / `host.*` RPC families) is not implemented. It is an experimental upstream surface that depends on the runtime's in-process hosting library.
 * In-process native runtime hosting is not the default connection. The C++ SDK keeps spawning the CLI over stdio (`inProcess` is unchanged).
+* Elicitation requests are not dispatched to `onElicitationRequest`, so the elicitation `requestId` / `_meta` passthrough added upstream in 2.0.3-preview.0 does not apply to this SDK.
 
 ## Architecture
 
@@ -419,6 +473,8 @@ config.onUserInputRequest = [](const copilot::UserInputRequest& req,
     return {answer, true};
 };
 ```
+
+When `req.imageAttachmentConstraints` is set, the answer may also carry image `attachments` (see [Ask-user image attachments](#ask-user-image-attachments)).
 
 ### Hooks
 

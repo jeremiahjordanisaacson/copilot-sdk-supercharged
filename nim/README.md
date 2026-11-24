@@ -44,6 +44,59 @@ proc main() {.async.} =
 waitFor main()
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client procedures below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, raised as `CopilotRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged.
+
+```nim
+let saved = await client.mcpSecretsSave("my-server-token", getEnv("MY_SERVER_TOKEN"))  # optional configDir
+echo(if saved.usedKeychain: "Stored in the OS keychain" else: "Stored in the file backend")
+
+await client.mcpSecretsDelete("my-server-token")
+await client.mcpSecretsDeleteServer("my-server")  # every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extensionApprovalsList` and `extensionApprovalsRevoke` take an optional `sessionId` to use an attached session's configuration profile.
+
+```nim
+# Persist a pending extension permission request before answering it normally
+let grant = await client.extensionApprovalsGrant(session.sessionId, requestId)
+if grant.granted and grant.approval.isSome:
+  echo "Approved ", grant.approval.get().extensionName
+
+let listed = await client.extensionApprovalsList()
+for approval in listed.approvals:
+  # extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+  discard await client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey)
+```
+
+### Ask-user image attachments
+
+Set `onUserInputRequest` on the session (it sends `requestUserInput`) to answer the agent's ask_user questions with a `UserInputResponse`. When the runtime accepts images in the answer, the `UserInputRequest` carries `imageAttachmentConstraints` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`); it is `none` otherwise. The request also exposes `requestId` and `meta` (the opaque `_meta` object) when sent. Answer with `attachments`, a seq of `UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`; the wire `type` is always `"image"`). Image-only answers use an empty `answer` with `wasFreeform: true`; the runtime enforces the limits.
+
+```nim
+import std/base64
+
+let session = await client.createSession(newSessionConfig(
+  onUserInputRequest = proc(req: UserInputRequest): UserInputResponse =
+    let constraints = req.imageAttachmentConstraints
+    if constraints.isSome and "image/png" in constraints.get().allowedMimeTypes:
+      UserInputResponse(answer: "", wasFreeform: true, attachments: @[
+        UserInputImageAttachment(data: encode(readFile("screenshot.png")),
+                                 mimeType: "image/png", displayName: "screenshot.png")])
+    else:
+      UserInputResponse(answer: "No screenshot available", wasFreeform: true)
+))
+```
+
+Elicitation requests also pass `requestId` and the opaque `meta` (`_meta`) through to the `ElicitationRequest` your `elicitationHandler` receives.
+
 ## What's New in v3.0.0
 
 **SDK protocol 4.** The SDK now speaks SDK protocol 4 (`SdkProtocolVersion == 4`), which requires Copilot CLI 1.0.113 or newer. Older CLIs are rejected at `start` with an `SDK protocol version mismatch` error. Existing options keep working: you pass the same `newSessionConfig` options as before, and the SDK translates the flat payload into the grouped protocol 4 shape (`groupSessionParams`) right before `session.create` and `session.resume`. A legacy single `provider` is translated into a named `"default"` provider automatically.
@@ -568,6 +621,10 @@ See the [cookbook/](cookbook/) directory for practical recipes:
 | `PolicyHelperFailure` | Structured Policy Helper failure |
 | `PermissionModeResult` | Result of `setPermissionMode`, with refusal `reason` |
 | `ShellOutputData` | Data of a `tool.shell_output` event |
+| `UserInputRequest` / `UserInputResponse` | ask_user question (with `imageAttachmentConstraints`) and answer (with image `attachments`) |
+| `UserInputImageAttachment` | Image attached to an ask_user answer |
+| `McpSecretsSaveResult` | Result of `mcpSecretsSave` (`usedKeychain`) |
+| `PermissionsExtensionApproval` | A user-scoped plugin extension approval |
 
 ### Key Procedures
 
@@ -581,6 +638,12 @@ See the [cookbook/](cookbook/) directory for practical recipes:
 | `client.registerTools` | Register tools for the model |
 | `client.defineTool` | Define and register a tool |
 | `client.clearManagedSettingsCache` | Clear cached managed settings |
+| `client.mcpSecretsSave` | Save an MCP credential in the runtime secret store |
+| `client.mcpSecretsDelete` | Delete an MCP credential |
+| `client.mcpSecretsDeleteServer` | Delete the MCP credentials indexed for a server |
+| `client.extensionApprovalsGrant` | Persist a pending plugin extension approval |
+| `client.extensionApprovalsList` | List plugin extension approvals |
+| `client.extensionApprovalsRevoke` | Revoke a plugin extension approval |
 | `session.send` | Send a message (non-blocking) |
 | `session.sendAndWait` | Send and wait for idle |
 | `session.on` | Subscribe to events |

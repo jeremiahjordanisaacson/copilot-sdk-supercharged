@@ -279,6 +279,143 @@ classdef CopilotClient < handle
             obj.RpcClient.request('managedSettings.clearCache', struct(), 15);
         end
 
+        function result = mcpSecretsSave(obj, secretId, value, configDir)
+            %mcpSecretsSave  Save a legacy MCP credential in the runtime secret store.
+            %
+            %   result = client.mcpSecretsSave('my-server-token', token);
+            %   result = client.mcpSecretsSave('my-server-token', token, configDir);
+            %
+            %   Calls mcp.secrets.save (Copilot CLI 1.0.116 or newer).  VALUE is
+            %   a credential and is never logged.  CONFIGDIR defaults to the
+            %   runtime's configuration directory.  Returns a
+            %   copilot.McpSecretsSaveResult: UsedKeychain is true when the OS
+            %   keychain stored the credential and false for the file backend.
+            arguments
+                obj
+                secretId (1,:) char
+                value (1,:) char
+                configDir (1,:) char = ''
+            end
+            obj.assertRunning();
+            params = struct('secretId', secretId, 'value', value);
+            if ~isempty(configDir)
+                params.configDir = configDir;
+            end
+            result = copilot.McpSecretsSaveResult.fromStruct( ...
+                obj.RpcClient.request('mcp.secrets.save', params, 15));
+        end
+
+        function mcpSecretsDelete(obj, secretId, configDir)
+            %mcpSecretsDelete  Delete a legacy MCP credential from the secret store.
+            %
+            %   client.mcpSecretsDelete('my-server-token');   % mcp.secrets.delete
+            %
+            %   Requires Copilot CLI 1.0.116 or newer.
+            arguments
+                obj
+                secretId (1,:) char
+                configDir (1,:) char = ''
+            end
+            obj.assertRunning();
+            params = struct('secretId', secretId);
+            if ~isempty(configDir)
+                params.configDir = configDir;
+            end
+            obj.RpcClient.request('mcp.secrets.delete', params, 15);
+        end
+
+        function mcpSecretsDeleteServer(obj, serverName, configDir)
+            %mcpSecretsDeleteServer  Delete the legacy credentials of an MCP server.
+            %
+            %   client.mcpSecretsDeleteServer('my-server');   % mcp.secrets.deleteServer
+            %
+            %   Deletes every credential indexed for the server.  Requires
+            %   Copilot CLI 1.0.116 or newer.
+            arguments
+                obj
+                serverName (1,:) char
+                configDir (1,:) char = ''
+            end
+            obj.assertRunning();
+            params = struct('serverName', serverName);
+            if ~isempty(configDir)
+                params.configDir = configDir;
+            end
+            obj.RpcClient.request('mcp.secrets.deleteServer', params, 15);
+        end
+
+        function result = extensionApprovalsGrant(obj, sessionId, requestId)
+            %extensionApprovalsGrant  Persist a pending plugin extension approval.
+            %
+            %   result = client.extensionApprovalsGrant(session.SessionId, requestId);
+            %
+            %   Calls permissions.extensionApprovals.grant (Copilot CLI 1.0.116
+            %   or newer) to store the pending extension permission request
+            %   REQUESTID as a user-scoped approval before the host answers it.
+            %   Returns a copilot.PermissionsExtensionApprovalsGrantResult
+            %   (Granted, Approval).
+            arguments
+                obj
+                sessionId (1,:) char
+                requestId (1,:) char
+            end
+            obj.assertRunning();
+            result = copilot.PermissionsExtensionApprovalsGrantResult.fromStruct( ...
+                obj.RpcClient.request('permissions.extensionApprovals.grant', ...
+                    struct('sessionId', sessionId, 'requestId', requestId), 15));
+        end
+
+        function result = extensionApprovalsList(obj, sessionId)
+            %extensionApprovalsList  List user-scoped plugin extension approvals.
+            %
+            %   result = client.extensionApprovalsList();
+            %   result = client.extensionApprovalsList(session.SessionId);
+            %
+            %   Calls permissions.extensionApprovals.list (Copilot CLI 1.0.116 or
+            %   newer).  SESSIONID selects an attached session whose configuration
+            %   profile to list.  Returns a
+            %   copilot.PermissionsExtensionApprovalsListResult whose Approvals
+            %   is a cell of copilot.PermissionsExtensionApproval.
+            arguments
+                obj
+                sessionId (1,:) char = ''
+            end
+            obj.assertRunning();
+            params = struct();
+            if ~isempty(sessionId)
+                params.sessionId = sessionId;
+            end
+            result = copilot.PermissionsExtensionApprovalsListResult.fromStruct( ...
+                obj.RpcClient.request('permissions.extensionApprovals.list', params, 15));
+        end
+
+        function result = extensionApprovalsRevoke(obj, extensionName, installationKey, sessionId)
+            %extensionApprovalsRevoke  Revoke one plugin extension approval.
+            %
+            %   result = client.extensionApprovalsRevoke(approval.ExtensionName, ...
+            %       approval.InstallationKey);
+            %
+            %   Calls permissions.extensionApprovals.revoke (Copilot CLI 1.0.116
+            %   or newer).  Pass the approval's InstallationKey unchanged.
+            %   SESSIONID selects an attached session's configuration profile.
+            %   Returns a copilot.PermissionsExtensionApprovalsRevokeResult
+            %   (Revoked).
+            arguments
+                obj
+                extensionName (1,:) char
+                installationKey (1,:) char
+                sessionId (1,:) char = ''
+            end
+            obj.assertRunning();
+            params = struct('extensionName', extensionName, ...
+                'installationKey', installationKey);
+            if ~isempty(sessionId)
+                params.sessionId = sessionId;
+            end
+            result = copilot.PermissionsExtensionApprovalsRevokeResult.fromStruct( ...
+                obj.RpcClient.request('permissions.extensionApprovals.revoke', params, 15));
+        end
+
         function metadata = getSessionMetadata(obj, sessionId)
             %getSessionMetadata  Retrieve metadata for a session.
             %
@@ -585,6 +722,7 @@ classdef CopilotClient < handle
             %attachSession  Track a session and its callbacks.
             obj.SessionCallbacks(sessionId) = struct( ...
                 'ShellAuthentication', {config.OnShellAuthenticationRequest}, ...
+                'UserInput',           {config.OnUserInputRequest}, ...
                 'StoreMemory',         {config.StoreMemory}, ...
                 'SubagentStart',       {config.OnSubagentStart}, ...
                 'SubagentStop',        {config.OnSubagentStop});
@@ -618,6 +756,7 @@ classdef CopilotClient < handle
         function registerRequestHandlers(obj)
             rpc = obj.RpcClient;
             rpc.onRequest('gitHubToken.getToken', @(p) obj.handleGitHubToken(p));
+            rpc.onRequest('userInput.request', @(p) obj.handleUserInput(p));
             rpc.onRequest('shellAuthentication.request', ...
                 @(p) obj.handleShellAuthentication(p));
             % Prompts are answered synchronously, so nothing is pending.
@@ -650,6 +789,24 @@ classdef CopilotClient < handle
                 if ~isfield(result, 'kind')
                     result.kind = 'token';
                 end
+            end
+        end
+
+        function result = handleUserInput(obj, params)
+            %handleUserInput  Answer userInput.request (the ask_user tool).
+            %
+            %   The handler receives a copilot.UserInputRequest and returns a
+            %   copilot.UserInputResponse (or a struct with the wire fields).
+            handler = obj.sessionCallback(params, 'UserInput');
+            if isempty(handler)
+                error('copilot:noUserInputHandler', ...
+                    'User input requested but no handler registered.');
+            end
+            reply = handler(copilot.UserInputRequest.fromStruct(params));
+            if isa(reply, 'copilot.UserInputResponse')
+                result = reply.toStruct();
+            else
+                result = reply;
             end
         end
 

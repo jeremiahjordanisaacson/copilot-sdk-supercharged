@@ -52,6 +52,59 @@ session.destroy
 client.stop
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, raised as `Copilot::JsonRpcError` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged.
+
+```ruby
+result = client.mcp_secrets_save("my-server-token", ENV["MY_SERVER_TOKEN"]) # optional config_dir:
+puts(result.used_keychain ? "Stored in the OS keychain" : "Stored in the file backend")
+
+client.mcp_secrets_delete("my-server-token")
+client.mcp_secrets_delete_server("my-server") # every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extension_approvals_list` and `extension_approvals_revoke` take an optional `session_id:` to use an attached session's configuration profile.
+
+```ruby
+# Persist a pending extension permission request before answering it normally
+grant = client.extension_approvals_grant(session.session_id, request_id)
+puts "Approved #{grant.approval.extension_name}" if grant.granted
+
+client.extension_approvals_list.approvals.each do |approval|
+  # extension_name, plugin_name, capabilities, granted_at, installation_key, installation_label
+  client.extension_approvals_revoke(approval.extension_name, approval.installation_key)
+end
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the user input request carries `image_attachment_constraints` (`allowed_mime_types`, `max_bytes_per_image`, `max_count`); it is `nil` otherwise. The request also exposes `request_id` and `meta` (the opaque `_meta` object) when sent. Answer with `attachments:`, an array of `Copilot::UserInputImageAttachment` (base64 `data`, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). Image-only answers use `answer: ""` and `was_freeform: true`; the runtime enforces the limits.
+
+```ruby
+session = client.create_session(
+  on_user_input_request: ->(request, _ctx) {
+    constraints = request.image_attachment_constraints
+    if constraints&.allowed_mime_types&.include?("image/png")
+      image = Copilot::UserInputImageAttachment.new(
+        data: [File.binread("screenshot.png")].pack("m0"), # base64
+        mime_type: "image/png",
+        display_name: "screenshot.png"
+      )
+      Copilot::UserInputResponse.new(answer: "", was_freeform: true, attachments: [image])
+    else
+      Copilot::UserInputResponse.new(answer: "No screenshot available", was_freeform: true)
+    end
+  }
+)
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected at `start` with an `SDK protocol version mismatch` error.
@@ -523,6 +576,12 @@ session.send_and_wait(
 | `get_foreground_session_id` | Get TUI foreground session |
 | `set_foreground_session_id(id)` | Set TUI foreground session |
 | `clear_managed_settings_cache` | Clear cached managed (enterprise policy) settings |
+| `mcp_secrets_save(secret_id, value, config_dir: nil)` | Save an MCP credential (returns `McpSecretsSaveResult`) |
+| `mcp_secrets_delete(secret_id, config_dir: nil)` | Delete an MCP credential |
+| `mcp_secrets_delete_server(server_name, config_dir: nil)` | Delete the MCP credentials indexed for a server |
+| `extension_approvals_grant(session_id, request_id)` | Persist a pending plugin extension approval |
+| `extension_approvals_list(session_id: nil)` | List plugin extension approvals |
+| `extension_approvals_revoke(extension_name, installation_key, session_id: nil)` | Revoke a plugin extension approval |
 | `on(event_type = nil, &block)` | Subscribe to lifecycle events |
 
 ### `Copilot::CopilotSession`
@@ -548,6 +607,7 @@ session.send_and_wait(
 - `Copilot::ProviderConfig` - Custom API provider config
 - `Copilot::SessionHooks` - Hook handlers
 - `Copilot::InfiniteSessionConfig` - Infinite session settings
+- `Copilot::UserInputImageAttachment` - Image attached to an ask_user answer
 
 ## Threading Model
 

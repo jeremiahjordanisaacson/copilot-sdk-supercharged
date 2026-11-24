@@ -442,6 +442,97 @@ class CopilotClient {
         rpcClient.request('managedSettings.clearCache', [:] as Map<String, Object>)
     }
 
+    /**
+     * Saves a legacy MCP configuration credential in the runtime-owned secret store
+     * ({@code mcp.secrets.save}). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param secretId identifier of the credential
+     * @param value the credential; it is never logged
+     * @param configDir configuration directory (the runtime's default when null)
+     * @return the result; {@code usedKeychain} is true when the OS keychain stored the credential
+     *         and false for the file backend
+     */
+    McpSecretsSaveResult mcpSecretsSave(String secretId, String value, String configDir = null) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [secretId: secretId, value: value] as Map<String, Object>
+        if (configDir != null) params.configDir = configDir
+        McpSecretsSaveResult.fromMap(rpcClient.request('mcp.secrets.save', params))
+    }
+
+    /**
+     * Deletes a legacy MCP configuration credential from the runtime-owned secret store
+     * ({@code mcp.secrets.delete}). Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param secretId identifier of the credential
+     * @param configDir configuration directory (the runtime's default when null)
+     */
+    void mcpSecretsDelete(String secretId, String configDir = null) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [secretId: secretId] as Map<String, Object>
+        if (configDir != null) params.configDir = configDir
+        rpcClient.request('mcp.secrets.delete', params)
+    }
+
+    /**
+     * Deletes every legacy credential indexed for an MCP server ({@code mcp.secrets.deleteServer}).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param serverName the MCP server name
+     * @param configDir configuration directory (the runtime's default when null)
+     */
+    void mcpSecretsDeleteServer(String serverName, String configDir = null) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [serverName: serverName] as Map<String, Object>
+        if (configDir != null) params.configDir = configDir
+        rpcClient.request('mcp.secrets.deleteServer', params)
+    }
+
+    /**
+     * Persists a pending plugin extension permission request as a user-scoped approval, before the
+     * host answers that request normally ({@code permissions.extensionApprovals.grant}).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param sessionId session that owns the pending request
+     * @param requestId ID of the pending extension permission request
+     * @return whether the request was eligible and persisted, and the stored approval
+     */
+    PermissionsExtensionApprovalsGrantResult extensionApprovalsGrant(String sessionId, String requestId) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [sessionId: sessionId, requestId: requestId] as Map<String, Object>
+        PermissionsExtensionApprovalsGrantResult.fromMap(rpcClient.request('permissions.extensionApprovals.grant', params))
+    }
+
+    /**
+     * Lists the user-scoped plugin extension approvals ({@code permissions.extensionApprovals.list}).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param sessionId attached session whose configuration profile to list (the server's when null)
+     * @return the approvals
+     */
+    PermissionsExtensionApprovalsListResult extensionApprovalsList(String sessionId = null) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [:] as Map<String, Object>
+        if (sessionId != null) params.sessionId = sessionId
+        PermissionsExtensionApprovalsListResult.fromMap(rpcClient.request('permissions.extensionApprovals.list', params))
+    }
+
+    /**
+     * Revokes one user-scoped plugin extension approval ({@code permissions.extensionApprovals.revoke}).
+     * Requires Copilot CLI 1.0.116 or newer.
+     *
+     * @param extensionName the approval's {@code extensionName}
+     * @param installationKey the approval's {@code installationKey}, unchanged
+     * @param sessionId attached session whose configuration profile to use (the server's when null)
+     * @return whether a matching approval was revoked
+     */
+    PermissionsExtensionApprovalsRevokeResult extensionApprovalsRevoke(String extensionName, String installationKey,
+                                                                       String sessionId = null) throws Exception {
+        ensureConnected()
+        Map<String, Object> params = [extensionName: extensionName, installationKey: installationKey] as Map<String, Object>
+        if (sessionId != null) params.sessionId = sessionId
+        PermissionsExtensionApprovalsRevokeResult.fromMap(rpcClient.request('permissions.extensionApprovals.revoke', params))
+    }
+
     /** Gets the current connection state. */
     ConnectionState getState() { state }
 
@@ -1572,7 +1663,7 @@ class CopilotClient {
         if (!session) throw new RuntimeException("Unknown session ${sessionId}")
 
         UserInputResponse result = session.handleUserInputRequest(params)
-        [answer: result.answer, wasFreeform: result.wasFreeform] as Map<String, Object>
+        result.toMap()
     }
 
     private Object normalizeToolResult(Object result) {

@@ -93,6 +93,15 @@ pub const NetworkBasicCredentials = types.NetworkBasicCredentials;
 pub const PolicyHelperFailure = types.PolicyHelperFailure;
 pub const RpcErrorInfo = jsonrpc.RpcErrorInfo;
 
+// v3.1.0 types
+pub const UserInputImageAttachmentConstraints = types.UserInputImageAttachmentConstraints;
+pub const UserInputImageAttachment = types.UserInputImageAttachment;
+pub const McpSecretsSaveResult = types.McpSecretsSaveResult;
+pub const PermissionsExtensionApproval = types.PermissionsExtensionApproval;
+pub const PermissionsExtensionApprovalsGrantResult = types.PermissionsExtensionApprovalsGrantResult;
+pub const PermissionsExtensionApprovalsListResult = types.PermissionsExtensionApprovalsListResult;
+pub const PermissionsExtensionApprovalsRevokeResult = types.PermissionsExtensionApprovalsRevokeResult;
+
 pub const EventCallback = session.EventCallback;
 pub const EventSubscription = session.EventSubscription;
 pub const PermissionHandlerFn = session.PermissionHandlerFn;

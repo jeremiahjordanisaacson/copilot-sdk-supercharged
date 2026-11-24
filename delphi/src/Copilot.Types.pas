@@ -26,14 +26,47 @@ type
   end;
   TPermissionHandler = reference to function(const Request: TPermissionRequest): TPermissionResult;
 
+  // Image support advertised by a userInput.request (ask_user). Present is
+  // False when the runtime does not accept images in the answer; the runtime
+  // enforces the limits.
+  TUserInputImageAttachmentConstraints = record
+    Present: Boolean;
+    AllowedMimeTypes: TArray<string>;
+    MaxBytesPerImage: Int64;
+    MaxCount: Integer;
+  end;
+
+  // An inline image attached to an ask_user answer. Data is the base64
+  // encoded image; the wire type is always 'image'.
+  TUserInputImageAttachment = record
+    Data: string;
+    MimeType: string;
+    Description: string;  // optional ('' = not sent)
+    DisplayName: string;  // optional ('' = not sent)
+  end;
+
   // User input handler callback
   TUserInputRequest = record
     Question: string;
     SessionId: string;
+    // Offered choices (empty when the question has none).
+    Choices: TArray<string>;
+    // Whether a freeform answer is allowed.
+    AllowFreeform: Boolean;
+    // Id of the pending request ('' when the runtime omits it).
+    RequestId: string;
+    // Image support; Present is False when images are not accepted.
+    ImageAttachmentConstraints: TUserInputImageAttachmentConstraints;
+    // The request's opaque _meta object as JSON text ('' when absent).
+    MetaJson: string;
   end;
   TUserInputResponse = record
     Answer: string;
     Accepted: Boolean;
+    // Optional images, only valid when the request advertised
+    // ImageAttachmentConstraints; sent only when not empty. An image-only
+    // answer uses an empty Answer.
+    Attachments: TArray<TUserInputImageAttachment>;
   end;
   TUserInputHandler = reference to function(const Request: TUserInputRequest): TUserInputResponse;
 
@@ -407,6 +440,44 @@ type
     Text: string;
     Sequence: Integer;
     Stream: string; // 'stdout', 'stderr' or '' when omitted
+  end;
+
+  // --- v3.1.0 types (Microsoft Copilot SDK 2.0.3-preview.0) ---
+
+  // Result of TCopilotClient.McpSecretsSave (mcp.secrets.save).
+  TMcpSecretsSaveResult = record
+    // True when the OS keychain stored the credential, False for the file
+    // backend.
+    UsedKeychain: Boolean;
+  end;
+
+  // A user-scoped approval for one installed plugin extension.
+  TPermissionsExtensionApproval = record
+    // Stable identity, for example 'plugin:plugin-name:extension-name'.
+    ExtensionName: string;
+    PluginName: string;
+    // The exact privileged capabilities the user approved.
+    Capabilities: TArray<string>;
+    // RFC 3339 timestamp.
+    GrantedAt: string;
+    // Opaque; pass it back unchanged to ExtensionApprovalsRevoke.
+    InstallationKey: string;
+    InstallationLabel: string; // optional ('' when absent)
+  end;
+
+  // Result of TCopilotClient.ExtensionApprovalsGrant
+  // (permissions.extensionApprovals.grant). HasApproval is False when the
+  // runtime returned no stored approval.
+  TPermissionsExtensionApprovalsGrantResult = record
+    Granted: Boolean;
+    HasApproval: Boolean;
+    Approval: TPermissionsExtensionApproval;
+  end;
+
+  // Result of TCopilotClient.ExtensionApprovalsRevoke
+  // (permissions.extensionApprovals.revoke).
+  TPermissionsExtensionApprovalsRevokeResult = record
+    Revoked: Boolean;
   end;
 
   // BYOK bearer token provider: mint a per-session bearer token on demand.

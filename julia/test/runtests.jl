@@ -423,6 +423,88 @@ using CopilotSDK
                 SessionConfig(on_permission_request=approve_all); resume=false)
             @test group_session_params(p)["permissions"] == Dict{String, Any}("request" => true)
         end
+
+        @testset "user input requests" begin
+            rpc = CopilotSDK.JsonRpcClient(nothing, IOBuffer(), IOBuffer())
+            c = CopilotClient()
+            received = Ref{Any}(nothing)
+            cfg = SessionConfig(on_user_input_request = req -> begin
+                received[] = req
+                UserInputResponse(answer = "", was_freeform = true, attachments = [UserInputImageAttachment(
+                    data = "aGk=", mime_type = "image/png", display_name = "shot.png")])
+            end)
+            c.sessions["s1"] = CopilotSession("s1", rpc, cfg)
+            params = Dict{String, Any}("sessionId" => "s1", "question" => "Screenshot?",
+                "requestId" => "ui-1", "_meta" => Dict{String, Any}("k" => "v"),
+                "imageAttachmentConstraints" => Dict{String, Any}("allowedMimeTypes" => Any["image/png"],
+                    "maxBytesPerImage" => 1048576, "maxCount" => 2))
+            @test CopilotSDK._handle_user_input_request(c, params) == Dict{String, Any}(
+                "answer" => "", "wasFreeform" => true, "attachments" => Any[Dict{String, Any}(
+                    "type" => "image", "data" => "aGk=", "mimeType" => "image/png", "displayName" => "shot.png")])
+            req = received[]
+            @test (req.session_id, req.question, req.request_id, req.allow_freeform) ==
+                ("s1", "Screenshot?", "ui-1", true)
+            @test req.meta == Dict{String, Any}("k" => "v")
+            @test req.image_attachment_constraints.allowed_mime_types == ["image/png"]
+            @test req.image_attachment_constraints.max_bytes_per_image == 1048576
+            @test CopilotSDK._user_input_response_wire(UserInputResponse(answer = "yes")) ==
+                Dict{String, Any}("answer" => "yes", "wasFreeform" => false)
+            p = CopilotSDK._session_flat_params(c, cfg; resume=false)
+            @test group_session_params(p)["interaction"] == Dict{String, Any}("requestUserInput" => true)
+        end
+
+        @testset "MCP secrets and extension approvals" begin
+            # Run f(client) against an in-memory transport that answers its single request with
+            # `result`; returns f's value and the request's method and params.
+            function mock_request(f, result)
+                input = IOBuffer()
+                rpc = CopilotSDK.JsonRpcClient(nothing, input, IOBuffer())
+                c = CopilotClient()
+                c.rpc = rpc
+                c.state = CONNECTED
+                @async begin
+                    deadline = time() + 10
+                    while isempty(rpc.pending) && time() < deadline
+                        sleep(0.01)
+                    end
+                    isempty(rpc.pending) || put!(first(values(rpc.pending)), result)
+                end
+                value = f(c)
+                body = split(String(take!(input)), "\r\n\r\n"; limit=2)[2]
+                msg = CopilotSDK.JSON3.read(String(body), Dict{String, Any})
+                return value, msg["method"], msg["params"]
+            end
+
+            saved, method, params = mock_request(Dict{String, Any}("usedKeychain" => true)) do c
+                mcp_secrets_save(c, "my-token", "s3cret"; config_dir="/cfg")
+            end
+            @test method == "mcp.secrets.save"
+            @test params == Dict{String, Any}("secretId" => "my-token", "value" => "s3cret", "configDir" => "/cfg")
+            @test saved.used_keychain
+
+            _, method, params = mock_request(nothing) do c
+                mcp_secrets_delete_server(c, "my-server")
+            end
+            @test (method, params) == ("mcp.secrets.deleteServer", Dict{String, Any}("serverName" => "my-server"))
+
+            revoked, method, params = mock_request(Dict{String, Any}("revoked" => true)) do c
+                extension_approvals_revoke(c, "plugin:p:e", "key-1"; session_id="s1")
+            end
+            @test method == "permissions.extensionApprovals.revoke"
+            @test params == Dict{String, Any}("extensionName" => "plugin:p:e",
+                "installationKey" => "key-1", "sessionId" => "s1")
+            @test revoked.revoked
+
+            approval = Dict{String, Any}("extensionName" => "plugin:p:e", "pluginName" => "p",
+                "capabilities" => Any["network"], "grantedAt" => "2026-11-24T00:00:00Z",
+                "installationKey" => "key-1")
+            listed, method, params = mock_request(Dict{String, Any}("approvals" => Any[approval])) do c
+                extension_approvals_list(c)
+            end
+            @test (method, params) == ("permissions.extensionApprovals.list", Dict{String, Any}())
+            @test listed.approvals[1].capabilities == ["network"]
+            @test listed.approvals[1].installation_label === nothing
+        end
     end
 
     # -- Module exports ----------------------------------------------------------

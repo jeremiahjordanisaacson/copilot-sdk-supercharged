@@ -103,6 +103,7 @@ pub mut:
 	capi                                ?CapiConfig // wire: github.capi
 	on_shell_authentication_request     ShellAuthenticationHandler = unsafe { nil } // answers shellAuthentication.request
 	on_store_memory                     StoreMemoryHandler = unsafe { nil } // answers memoryStore.store
+	on_user_input_request               UserInputHandler = unsafe { nil } // answers userInput.request, including image answers (wire: interaction.requestUserInput)
 }
 
 // ResumeSessionOptions configures `resume_session_with`.
@@ -737,4 +738,92 @@ pub:
 	text         string
 	sequence     int
 	stream       string // 'stdout', 'stderr', or empty
+}
+
+// ---------------------------------------------------------------------------
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ---------------------------------------------------------------------------
+
+// UserInputImageAttachmentConstraints are the image limits a user input request
+// advertises (`imageAttachmentConstraints`) when the runtime accepts images.
+pub struct UserInputImageAttachmentConstraints {
+pub mut:
+	allowed_mime_types  []string // accepted MIME types, for example 'image/png'
+	max_bytes_per_image int
+	max_count           int // most images accepted in one answer
+}
+
+// UserInputRequest is a question from the agent's ask_user tool (`userInput.request`).
+pub struct UserInputRequest {
+pub mut:
+	session_id                   string
+	question                     string
+	choices                      []string
+	allow_freeform               bool = true // a freeform answer is allowed in addition to the choices
+	request_id                   string // runtime id of the pending request, when sent
+	image_attachment_constraints ?UserInputImageAttachmentConstraints // none when images are not accepted
+	meta                         string // raw JSON of the opaque `_meta` object ('' when absent)
+}
+
+// UserInputImageAttachment is an image sent with a UserInputResponse (the wire
+// `type` is always "image"). Only valid when the request advertised
+// `image_attachment_constraints`; the runtime enforces the limits.
+pub struct UserInputImageAttachment {
+pub mut:
+	data         string // base64-encoded image bytes
+	mime_type    string
+	description  string
+	display_name string
+}
+
+// UserInputResponse answers a UserInputRequest. For an image-only answer, use an
+// empty `answer` with `was_freeform` true.
+pub struct UserInputResponse {
+pub mut:
+	answer       string
+	was_freeform bool // true when the user typed the answer instead of picking a choice
+	attachments  []UserInputImageAttachment // sent as `attachments` only when non-empty
+}
+
+// UserInputHandler answers the agent's ask_user questions (userInput.request).
+pub type UserInputHandler = fn (UserInputRequest) UserInputResponse
+
+// McpSecretsSaveResult is the result of `CopilotClient.mcp_secrets_save`.
+pub struct McpSecretsSaveResult {
+pub:
+	used_keychain bool // true when the OS keychain stored the credential, false for the file backend
+}
+
+// PermissionsExtensionApproval is a user-scoped approval for one installed
+// plugin extension (`permissions.extensionApprovals.*`).
+pub struct PermissionsExtensionApproval {
+pub:
+	extension_name     string // stable identity, for example 'plugin:plugin-name:extension-name'
+	plugin_name        string
+	capabilities       []string // exact privileged capabilities the user approved
+	granted_at         string   // RFC 3339 timestamp
+	installation_key   string   // opaque; pass it back unchanged to revoke
+	installation_label string
+}
+
+// PermissionsExtensionApprovalsGrantResult is the result of
+// `CopilotClient.extension_approvals_grant`.
+pub struct PermissionsExtensionApprovalsGrantResult {
+pub:
+	granted  bool // whether the pending request was eligible and persisted
+	approval ?PermissionsExtensionApproval // the persisted approval, when granted
+}
+
+// PermissionsExtensionApprovalsListResult is the result of
+// `CopilotClient.extension_approvals_list`.
+pub struct PermissionsExtensionApprovalsListResult {
+pub:
+	approvals []PermissionsExtensionApproval
+}
+
+// PermissionsExtensionApprovalsRevokeResult is the result of
+// `CopilotClient.extension_approvals_revoke`.
+pub struct PermissionsExtensionApprovalsRevokeResult {
+pub:
+	revoked bool // whether a matching approval was revoked
 }

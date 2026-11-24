@@ -90,6 +90,13 @@ export detach_session, switch_auto_tier, get_managed_settings, recheck_policy_he
 export set_permission_mode, clear_managed_settings_cache, policy_helper_failure
 export shell_output_event_data
 
+# v3.1.0 features (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+export UserInputImageAttachment, UserInputImageAttachmentConstraints
+export McpSecretsSaveResult, PermissionsExtensionApproval, PermissionsExtensionApprovalsGrantResult
+export PermissionsExtensionApprovalsListResult, PermissionsExtensionApprovalsRevokeResult
+export mcp_secrets_save, mcp_secrets_delete, mcp_secrets_delete_server
+export extension_approvals_grant, extension_approvals_list, extension_approvals_revoke
+
 # Enum values & constants used by tests and consumers
 export DISCONNECTED, CONNECTING, CONNECTED, CONNECTION_ERROR
 export LOG_NONE, LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_DEBUG, LOG_ALL

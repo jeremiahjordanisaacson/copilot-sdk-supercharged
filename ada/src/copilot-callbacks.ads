@@ -6,15 +6,16 @@
 --  JSON-RPC requests (SDK protocol 4).
 --
 --  The client registers session callbacks (shell authentication, memory
---  store, sub-agent hooks), GitHub token providers and network callbacks
---  here, and installs Dispatch as the connection's Server_Request_Handler.
---  Requests handled:
+--  store, sub-agent hooks, user input), GitHub token providers and network
+--  callbacks here, and installs Dispatch as the connection's
+--  Server_Request_Handler.  Requests handled:
 --
 --    gitHubToken.getToken        -> GitHub token provider
 --    shellAuthentication.request -> shell authentication handler
 --    shellAuthentication.cancel  -> acknowledged with {}
 --    memoryStore.store           -> memory store handler
 --    hooks.invoke                -> subagentStart / subagentStop hooks
+--    userInput.request           -> user input (ask_user) handler
 --    network.resolveProxy        -> proxy resolver
 --    network.authenticateNegotiate / network.authenticateBasic
 --
@@ -32,9 +33,15 @@ package Copilot.Callbacks is
       Shell_Auth        : Shell_Authentication_Handler_Access;
       Store_Memory      : Memory_Store_Handler_Access;
       On_Subagent_Start : Subagent_Start_Hook_Access;
-      On_Subagent_Stop  : Subagent_Stop_Hook_Access);
+      On_Subagent_Stop  : Subagent_Stop_Hook_Access;
+      User_Input        : User_Input_Handler := null);
 
    procedure Unregister_Session (Session_Id : String);
+
+   --  Replace the user input (ask_user) handler of a session.
+   procedure Set_User_Input_Handler
+     (Session_Id : String;
+      Handler    : User_Input_Handler);
 
    --  GitHub token providers are keyed by their registration id.
    procedure Register_Token_Provider

@@ -277,6 +277,100 @@ Base.@kwdef struct PolicyHelperFailure
     remediation::Union{String, Nothing} = nothing
 end
 
+# --- v3.1.0 (parity with the Microsoft Copilot SDK 2.0.3-preview.0) ---
+
+"""
+Image support advertised by a user input request (wire `imageAttachmentConstraints`).
+`UserInputRequest.image_attachment_constraints` is `nothing` when the runtime does not accept
+images in the answer.
+"""
+Base.@kwdef struct UserInputImageAttachmentConstraints
+    allowed_mime_types::Vector{String} = String[]
+    max_bytes_per_image::Union{Int, Nothing} = nothing
+    max_count::Union{Int, Nothing} = nothing
+end
+
+"""
+An image attached to an ask_user answer (`UserInputResponse.attachments`): `data` is the
+base64-encoded image and `mime_type` its MIME type; the wire `type` is always `"image"`. Only
+valid when the request advertised `image_attachment_constraints`; the runtime enforces the MIME
+types, size, and count.
+"""
+Base.@kwdef struct UserInputImageAttachment
+    data::String
+    mime_type::String
+    description::Union{String, Nothing} = nothing
+    display_name::Union{String, Nothing} = nothing
+end
+
+"""
+A question from the `ask_user` tool (`userInput.request`), passed to a session's
+`on_user_input_request` handler. `request_id` is the pending request ID and `meta` the
+request's opaque `_meta` object, when the runtime sends them.
+"""
+Base.@kwdef struct UserInputRequest
+    session_id::String = ""
+    question::String = ""
+    choices::Union{Vector{String}, Nothing} = nothing
+    allow_freeform::Bool = true
+    request_id::Union{String, Nothing} = nothing
+    image_attachment_constraints::Union{UserInputImageAttachmentConstraints, Nothing} = nothing
+    meta::Union{Dict{String, Any}, Nothing} = nothing
+end
+
+"""
+Answer to a `UserInputRequest`, returned by an `on_user_input_request` handler. `attachments`
+is sent only when set and non-empty; image-only answers use `answer=""` and
+`was_freeform=true`.
+"""
+Base.@kwdef struct UserInputResponse
+    answer::String = ""
+    was_freeform::Bool = false
+    attachments::Union{Vector{UserInputImageAttachment}, Nothing} = nothing
+end
+
+"""
+Result of `mcp_secrets_save`: `used_keychain` is true when the OS keychain stored the
+credential and false when the runtime used its file backend.
+"""
+Base.@kwdef struct McpSecretsSaveResult
+    used_keychain::Bool = false
+end
+
+"""
+A user-scoped approval for one installed plugin extension. `extension_name` is the stable
+identity (for example `"plugin:plugin-name:extension-name"`), `capabilities` the exact
+privileged capabilities the user approved, and `granted_at` an RFC 3339 timestamp. Pass
+`installation_key` back unchanged to `extension_approvals_revoke`.
+"""
+Base.@kwdef struct PermissionsExtensionApproval
+    extension_name::String = ""
+    plugin_name::String = ""
+    capabilities::Vector{String} = String[]
+    granted_at::String = ""
+    installation_key::String = ""
+    installation_label::Union{String, Nothing} = nothing
+end
+
+"""
+Result of `extension_approvals_grant`: whether the pending request was eligible and its
+approval persisted, and the stored `approval` when it was.
+"""
+Base.@kwdef struct PermissionsExtensionApprovalsGrantResult
+    granted::Bool = false
+    approval::Union{PermissionsExtensionApproval, Nothing} = nothing
+end
+
+"""Result of `extension_approvals_list`."""
+Base.@kwdef struct PermissionsExtensionApprovalsListResult
+    approvals::Vector{PermissionsExtensionApproval} = PermissionsExtensionApproval[]
+end
+
+"""Result of `extension_approvals_revoke`: whether a matching approval was revoked."""
+Base.@kwdef struct PermissionsExtensionApprovalsRevokeResult
+    revoked::Bool = false
+end
+
 # Message sources for `MessageOptions.source`.
 const MESSAGE_SOURCE_USER = "user"
 const MESSAGE_SOURCE_SYSTEM = "system"
@@ -408,6 +502,8 @@ Base.@kwdef mutable struct SessionConfig
     capi::Union{Dict{String, Any}, Nothing} = nothing                   # wire: github.capi
     on_shell_authentication_request::Union{Function, Nothing} = nothing # answers shellAuthentication.request
     store_memory::Union{Function, Nothing} = nothing                    # answers memoryStore.store
+    # --- v3.1.0 ---
+    on_user_input_request::Union{Function, Nothing} = nothing           # answers userInput.request
 end
 
 """Payload for sending a message to a session."""

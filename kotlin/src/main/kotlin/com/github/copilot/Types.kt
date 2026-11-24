@@ -272,7 +272,11 @@ data class ElicitationContext(
     val requestedSchema: Map<String, Any?>? = null,
     val mode: String? = null,
     val elicitationSource: String? = null,
-    val url: String? = null
+    val url: String? = null,
+    /** ID of the pending elicitation request, when the runtime sends one. */
+    val requestId: String? = null,
+    /** The request's opaque `_meta` object (negotiated extensions), when the runtime sends one. */
+    val meta: JsonObject? = null
 )
 
 /**
@@ -280,7 +284,9 @@ data class ElicitationContext(
  */
 data class ElicitationResult(
     val action: String,
-    val content: Map<String, Any?>? = null
+    val content: Map<String, Any?>? = null,
+    /** Opaque `_meta` object sent back to the runtime unchanged, when set. */
+    val meta: JsonObject? = null
 )
 
 /**
@@ -599,16 +605,29 @@ typealias PermissionHandler = suspend (request: PermissionRequest, sessionId: St
 data class UserInputRequest(
     val question: String,
     val choices: List<String>? = null,
-    val allowFreeform: Boolean? = null
+    val allowFreeform: Boolean? = null,
+    /** ID of the pending user input request, when the runtime sends one. */
+    val requestId: String? = null,
+    /**
+     * Image support advertised by the runtime; null when the runtime does not accept images in the
+     * answer. When set, the answer may carry [UserInputResponse.attachments].
+     */
+    val imageAttachmentConstraints: UserInputImageAttachmentConstraints? = null,
+    /** The request's opaque `_meta` object, when the runtime sends one. */
+    @SerialName("_meta") val meta: JsonObject? = null
 )
 
 /**
- * Response to a user input request.
+ * Response to a user input request. [attachments] is only valid when the request advertised
+ * [UserInputRequest.imageAttachmentConstraints] and is sent only when set; for an image-only answer
+ * use an empty [answer] and `wasFreeform = true`. The runtime enforces the advertised limits.
  */
 @Serializable
 data class UserInputResponse(
     val answer: String,
-    val wasFreeform: Boolean
+    val wasFreeform: Boolean,
+    /** Images attached to the answer. */
+    val attachments: List<UserInputImageAttachment>? = null
 )
 
 /**
@@ -1603,6 +1622,168 @@ data class PermissionModeResult(
     /** Why the mode was refused, when known (see [PermissionModeRefusalReason]). */
     val reason: String? = null
 )
+
+// ============================================================================
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ============================================================================
+
+/**
+ * Image support advertised by a `userInput.request` ([UserInputRequest.imageAttachmentConstraints]).
+ * Absent (null) when the runtime does not accept images in the answer.
+ */
+@Serializable
+data class UserInputImageAttachmentConstraints(
+    /** MIME types accepted by the request. */
+    val allowedMimeTypes: List<String> = emptyList(),
+    /** Maximum decoded byte length of each image. */
+    val maxBytesPerImage: Long = 0L,
+    /** Maximum number of images accepted in one answer. */
+    val maxCount: Int = 0
+) {
+    companion object {
+        /** Parses the constraints from their wire shape, or returns null when [element] is not an object. */
+        fun fromJson(element: JsonElement?): UserInputImageAttachmentConstraints? {
+            val obj = element as? JsonObject ?: return null
+            return UserInputImageAttachmentConstraints(
+                allowedMimeTypes = obj.stringListOrEmpty("allowedMimeTypes"),
+                maxBytesPerImage = (obj["maxBytesPerImage"] as? JsonPrimitive)?.longOrNull ?: 0L,
+                maxCount = (obj["maxCount"] as? JsonPrimitive)?.longOrNull?.toInt() ?: 0
+            )
+        }
+    }
+}
+
+/**
+ * An inline image attached to an ask_user answer ([UserInputResponse.attachments]). The wire
+ * `type` is always "image"; the runtime enforces the advertised MIME types, size and count limits.
+ */
+@Serializable
+data class UserInputImageAttachment(
+    /** Image bytes encoded as standard padded base64, without a data URL prefix. */
+    val data: String,
+    /** MIME type of the image, matching an advertised allowed MIME type. */
+    val mimeType: String,
+    /** Optional description of the image. */
+    val description: String? = null,
+    /** Optional client-facing name of the image. */
+    val displayName: String? = null
+) {
+    /** The attachment's wire `type`, always "image". */
+    val type: String get() = TYPE
+
+    /** Returns the wire shape, omitting unset optional fields. */
+    fun toJson(): JsonObject = JsonObject(buildMap<String, JsonElement> {
+        put("type", JsonPrimitive(TYPE))
+        put("data", JsonPrimitive(data))
+        put("mimeType", JsonPrimitive(mimeType))
+        description?.let { put("description", JsonPrimitive(it)) }
+        displayName?.let { put("displayName", JsonPrimitive(it)) }
+    })
+
+    companion object {
+        /** The attachment's wire `type`. */
+        const val TYPE = "image"
+    }
+}
+
+/** Result of [CopilotClient.mcpSecretsSave]. */
+data class McpSecretsSaveResult(
+    /** True when the OS keychain stored the credential, false when the runtime used its file backend. */
+    val usedKeychain: Boolean
+) {
+    companion object {
+        /** Parses an `mcp.secrets.save` result from its wire shape. */
+        fun fromJson(element: JsonElement?): McpSecretsSaveResult {
+            val obj = element as? JsonObject ?: JsonObject(emptyMap())
+            return McpSecretsSaveResult(usedKeychain = (obj["usedKeychain"] as? JsonPrimitive)?.booleanOrNull ?: false)
+        }
+    }
+}
+
+/**
+ * A user-scoped approval for one installed plugin extension. Pass [installationKey] back unchanged
+ * to [CopilotClient.extensionApprovalsRevoke].
+ */
+data class PermissionsExtensionApproval(
+    /** Stable extension identity, for example "plugin:plugin-name:extension-name". */
+    val extensionName: String,
+    /** Name of the plugin that provides the extension. */
+    val pluginName: String,
+    /** Exact privileged capabilities the user approved. */
+    val capabilities: List<String>,
+    /** When the approval was granted (RFC 3339 timestamp). */
+    val grantedAt: String,
+    /** Opaque installation identity; pass it back unchanged to revoke. */
+    val installationKey: String,
+    /** Human-readable installation label. */
+    val installationLabel: String? = null
+) {
+    companion object {
+        /** Parses an approval from its wire shape, or returns null when [element] is not an object. */
+        fun fromJson(element: JsonElement?): PermissionsExtensionApproval? {
+            val obj = element as? JsonObject ?: return null
+            return PermissionsExtensionApproval(
+                extensionName = obj.stringOrNull("extensionName") ?: "",
+                pluginName = obj.stringOrNull("pluginName") ?: "",
+                capabilities = obj.stringListOrEmpty("capabilities"),
+                grantedAt = obj.stringOrNull("grantedAt") ?: "",
+                installationKey = obj.stringOrNull("installationKey") ?: "",
+                installationLabel = obj.stringOrNull("installationLabel")
+            )
+        }
+    }
+}
+
+/** Result of [CopilotClient.extensionApprovalsGrant]. */
+data class PermissionsExtensionApprovalsGrantResult(
+    /** Whether the pending request was eligible and persisted. */
+    val granted: Boolean,
+    /** The stored approval when it was persisted. */
+    val approval: PermissionsExtensionApproval? = null
+) {
+    companion object {
+        /** Parses a `permissions.extensionApprovals.grant` result from its wire shape. */
+        fun fromJson(element: JsonElement?): PermissionsExtensionApprovalsGrantResult {
+            val obj = element as? JsonObject ?: JsonObject(emptyMap())
+            return PermissionsExtensionApprovalsGrantResult(
+                granted = (obj["granted"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                approval = PermissionsExtensionApproval.fromJson(obj["approval"])
+            )
+        }
+    }
+}
+
+/** Result of [CopilotClient.extensionApprovalsList]: every user-scoped plugin extension approval. */
+data class PermissionsExtensionApprovalsListResult(
+    val approvals: List<PermissionsExtensionApproval>
+) {
+    companion object {
+        /** Parses a `permissions.extensionApprovals.list` result from its wire shape. */
+        fun fromJson(element: JsonElement?): PermissionsExtensionApprovalsListResult {
+            val approvals = ((element as? JsonObject)?.get("approvals") as? JsonArray)
+                ?.mapNotNull { PermissionsExtensionApproval.fromJson(it) } ?: emptyList()
+            return PermissionsExtensionApprovalsListResult(approvals)
+        }
+    }
+}
+
+/** Result of [CopilotClient.extensionApprovalsRevoke]. */
+data class PermissionsExtensionApprovalsRevokeResult(
+    /** Whether a matching approval was revoked. */
+    val revoked: Boolean
+) {
+    companion object {
+        /** Parses a `permissions.extensionApprovals.revoke` result from its wire shape. */
+        fun fromJson(element: JsonElement?): PermissionsExtensionApprovalsRevokeResult {
+            val obj = element as? JsonObject ?: JsonObject(emptyMap())
+            return PermissionsExtensionApprovalsRevokeResult(revoked = (obj["revoked"] as? JsonPrimitive)?.booleanOrNull ?: false)
+        }
+    }
+}
+
+/** Returns the string elements of the array member [key], or an empty list when it is absent. */
+private fun JsonObject.stringListOrEmpty(key: String): List<String> =
+    (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content } ?: emptyList()
 
 /** Returns the string member [key], or null when it is absent or not a string. */
 private fun JsonObject.stringOrNull(key: String): String? =

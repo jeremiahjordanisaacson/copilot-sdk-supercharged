@@ -21,7 +21,10 @@ namespace eval ::copilot::client {
                      delete_session list_sessions destroy_session \
                      define_tool get_status get_auth_status ping \
                      list_models get_last_session_id get_session_metadata \
-                     set_session_fs_provider clear_managed_settings_cache
+                     set_session_fs_provider clear_managed_settings_cache \
+                     mcp_secrets_save mcp_secrets_delete mcp_secrets_delete_server \
+                     extension_approvals_grant extension_approvals_list \
+                     extension_approvals_revoke
 }
 
 # ---- Resolve the CLI path ---------------------------------------------------
@@ -256,6 +259,115 @@ proc ::copilot::client::_client_rpc {handle method params} {
 # Clear the runtime's cached managed (enterprise) settings so they are re-read.
 proc ::copilot::client::clear_managed_settings_cache {handle} {
     return [_client_rpc $handle "managedSettings.clearCache" [::copilot::jsonrpc::json_raw "\{\}"]]
+}
+
+# ---- MCP secret store and plugin extension approvals ------------------------
+#
+# Server-scoped requests that require Copilot CLI 1.0.116 or newer; older CLIs
+# answer with a JSON-RPC method-not-found error, raised like any other RPC error.
+
+# Internal: raw JSON object params from a dict of wire key -> JSON text.
+proc ::copilot::client::_object_params {members} {
+    return [::copilot::jsonrpc::json_raw [::copilot::jsonrpc::json_object $members]]
+}
+
+# Internal: 1 when the result member key is JSON true, else 0.
+proc ::copilot::client::_result_flag {result key} {
+    if {[catch {dict exists $result $key} exists] || !$exists} {
+        return 0
+    }
+    return [string is true -strict [dict get $result $key]]
+}
+
+# Save a legacy MCP configuration credential in the runtime-owned secret store
+# (mcp.secrets.save). The value is a credential: it is sent only to the runtime and
+# never logged. config_dir is the configuration directory ("" uses the runtime
+# default). Returns a dict with used_keychain: 1 when the OS keychain stored the
+# credential, 0 for the file backend.
+proc ::copilot::client::mcp_secrets_save {handle secret_id value {config_dir ""}} {
+    set members [dict create \
+        secretId [::copilot::jsonrpc::json_string $secret_id] \
+        value    [::copilot::jsonrpc::json_string $value] \
+    ]
+    if {$config_dir ne ""} {
+        dict set members configDir [::copilot::jsonrpc::json_string $config_dir]
+    }
+    set result [_client_rpc $handle "mcp.secrets.save" [_object_params $members]]
+    return [dict create used_keychain [_result_flag $result usedKeychain]]
+}
+
+# Delete a legacy MCP configuration credential from the runtime-owned secret store
+# (mcp.secrets.delete).
+proc ::copilot::client::mcp_secrets_delete {handle secret_id {config_dir ""}} {
+    set members [dict create secretId [::copilot::jsonrpc::json_string $secret_id]]
+    if {$config_dir ne ""} {
+        dict set members configDir [::copilot::jsonrpc::json_string $config_dir]
+    }
+    _client_rpc $handle "mcp.secrets.delete" [_object_params $members]
+    return
+}
+
+# Delete every legacy credential indexed for an MCP server (mcp.secrets.deleteServer).
+proc ::copilot::client::mcp_secrets_delete_server {handle server_name {config_dir ""}} {
+    set members [dict create serverName [::copilot::jsonrpc::json_string $server_name]]
+    if {$config_dir ne ""} {
+        dict set members configDir [::copilot::jsonrpc::json_string $config_dir]
+    }
+    _client_rpc $handle "mcp.secrets.deleteServer" [_object_params $members]
+    return
+}
+
+# Persist a pending plugin extension permission request as a user-scoped approval,
+# before answering that request normally (permissions.extensionApprovals.grant).
+# Returns a dict with granted (1 when the request was eligible and its approval
+# persisted) and approval (a ::copilot::types::make_permissions_extension_approval
+# dict, or "" when none was returned).
+proc ::copilot::client::extension_approvals_grant {handle session_id request_id} {
+    set result [_client_rpc $handle "permissions.extensionApprovals.grant" [_object_params \
+        [dict create \
+            sessionId [::copilot::jsonrpc::json_string $session_id] \
+            requestId [::copilot::jsonrpc::json_string $request_id] \
+        ]]]
+    set approval ""
+    if {![catch {dict get $result approval} data] && $data ne "" && $data ne "null"} {
+        set approval [::copilot::types::make_permissions_extension_approval $data]
+    }
+    return [dict create granted [_result_flag $result granted] approval $approval]
+}
+
+# List the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+# session_id selects an attached session whose configuration profile to list ("" lists
+# the server profile). Returns a dict with approvals: a list of
+# ::copilot::types::make_permissions_extension_approval dicts.
+proc ::copilot::client::extension_approvals_list {handle {session_id ""}} {
+    set members [dict create]
+    if {$session_id ne ""} {
+        dict set members sessionId [::copilot::jsonrpc::json_string $session_id]
+    }
+    set result [_client_rpc $handle "permissions.extensionApprovals.list" [_object_params $members]]
+    set approvals [list]
+    if {![catch {dict get $result approvals} items] && $items ne "null"} {
+        foreach approval $items {
+            lappend approvals [::copilot::types::make_permissions_extension_approval $approval]
+        }
+    }
+    return [dict create approvals $approvals]
+}
+
+# Revoke one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+# installation_key is the approval's installation_key, passed back unchanged; session_id
+# selects an attached session whose configuration profile holds the approval. Returns a
+# dict with revoked (1 when a matching approval was removed).
+proc ::copilot::client::extension_approvals_revoke {handle extension_name installation_key {session_id ""}} {
+    set members [dict create \
+        extensionName   [::copilot::jsonrpc::json_string $extension_name] \
+        installationKey [::copilot::jsonrpc::json_string $installation_key] \
+    ]
+    if {$session_id ne ""} {
+        dict set members sessionId [::copilot::jsonrpc::json_string $session_id]
+    }
+    set result [_client_rpc $handle "permissions.extensionApprovals.revoke" [_object_params $members]]
+    return [dict create revoked [_result_flag $result revoked]]
 }
 
 # The PolicyHelperFailure dict carried by a failed create_session/resume_session

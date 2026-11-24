@@ -874,25 +874,52 @@ case class PermissionInvocation(sessionId: String)
 // User Input Types
 // ============================================================================
 
-/** Request for user input from the agent (enables ask_user tool). */
+/**
+ * Request for user input from the agent (enables ask_user tool).
+ *
+ * @param requestId                  ID of the pending user input request, when the runtime sends one
+ * @param imageAttachmentConstraints Image support advertised by the runtime; None when the runtime does
+ *                                   not accept images in the answer. When set, the answer may carry
+ *                                   [[UserInputResponse.attachments]]
+ * @param meta                       The request's opaque `_meta` object, when the runtime sends one
+ */
 case class UserInputRequest(
   question: Option[String] = None,
   choices: Option[List[String]] = None,
-  allowFreeform: Option[Boolean] = None
+  allowFreeform: Option[Boolean] = None,
+  requestId: Option[String] = None,
+  imageAttachmentConstraints: Option[UserInputImageAttachmentConstraints] = None,
+  meta: Option[Json] = None
 )
 
 object UserInputRequest:
-  given Encoder[UserInputRequest] = deriveEncoder
-  given Decoder[UserInputRequest] = deriveDecoder
+  // `meta` travels as `_meta` on the wire.
+  given Encoder[UserInputRequest] = deriveEncoder[UserInputRequest].mapJsonObject(o =>
+    o("meta").fold(o)(m => o.remove("meta").add("_meta", m))
+  )
+  given Decoder[UserInputRequest] = deriveDecoder[UserInputRequest].prepare(cursor =>
+    cursor.withFocus(json => json.mapObject(o => o("_meta").fold(o)(m => o.remove("_meta").add("meta", m))))
+  )
 
-/** Response to a user input request. */
+/**
+ * Response to a user input request.
+ *
+ * @param attachments Images attached to the answer, sent only when set. Only valid when the request
+ *                    advertised [[UserInputRequest.imageAttachmentConstraints]]; for an image-only
+ *                    answer use an empty `answer` and `wasFreeform = true`. The runtime enforces the
+ *                    advertised limits.
+ */
 case class UserInputResponse(
   answer: String,
-  wasFreeform: Boolean
+  wasFreeform: Boolean,
+  attachments: Option[List[UserInputImageAttachment]] = None
 )
 
 object UserInputResponse:
-  given Encoder[UserInputResponse] = deriveEncoder
+  given Encoder[UserInputResponse] = Encoder.instance { r =>
+    val base = Json.obj("answer" -> r.answer.asJson, "wasFreeform" -> r.wasFreeform.asJson)
+    r.attachments.fold(base)(images => base.deepMerge(Json.obj("attachments" -> images.asJson)))
+  }
   given Decoder[UserInputResponse] = deriveDecoder
 
 /** User input handler function type. */
@@ -2302,3 +2329,156 @@ case class PermissionModeResult(
   mode: Option[String],
   reason: Option[String] = None
 )
+
+// ============================================================================
+// v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ============================================================================
+
+/**
+ * Image support advertised by a `userInput.request` ([[UserInputRequest.imageAttachmentConstraints]]).
+ * Absent (None) when the runtime does not accept images in the answer.
+ *
+ * @param allowedMimeTypes MIME types accepted by the request
+ * @param maxBytesPerImage Maximum decoded byte length of each image
+ * @param maxCount         Maximum number of images accepted in one answer
+ */
+case class UserInputImageAttachmentConstraints(
+  allowedMimeTypes: List[String] = Nil,
+  maxBytesPerImage: Long = 0L,
+  maxCount: Int = 0
+)
+
+object UserInputImageAttachmentConstraints:
+  given Encoder[UserInputImageAttachmentConstraints] = deriveEncoder
+  given Decoder[UserInputImageAttachmentConstraints] = Decoder.instance { c =>
+    if !c.value.isObject then Left(DecodingFailure("Expected an imageAttachmentConstraints object", c.history))
+    else
+      Right(UserInputImageAttachmentConstraints(
+        allowedMimeTypes = c.get[List[String]]("allowedMimeTypes").getOrElse(Nil),
+        maxBytesPerImage = c.get[Long]("maxBytesPerImage").getOrElse(0L),
+        maxCount = c.get[Int]("maxCount").getOrElse(0)
+      ))
+  }
+
+/**
+ * An inline image attached to an ask_user answer ([[UserInputResponse.attachments]]). The wire
+ * `type` is always "image"; the runtime enforces the advertised MIME types, size and count limits.
+ *
+ * @param data        Image bytes encoded as standard padded base64, without a data URL prefix
+ * @param mimeType    MIME type of the image, matching an advertised allowed MIME type
+ * @param description Optional description of the image
+ * @param displayName Optional client-facing name of the image
+ */
+case class UserInputImageAttachment(
+  data: String,
+  mimeType: String,
+  description: Option[String] = None,
+  displayName: Option[String] = None
+):
+  /** The attachment's wire `type`, always "image". */
+  def `type`: String = UserInputImageAttachment.Type
+
+object UserInputImageAttachment:
+  /** The attachment's wire `type`. */
+  val Type: String = "image"
+
+  given Encoder[UserInputImageAttachment] = Encoder.instance { a =>
+    Json.obj(
+      "type" -> Type.asJson,
+      "data" -> a.data.asJson,
+      "mimeType" -> a.mimeType.asJson,
+      "description" -> a.description.asJson,
+      "displayName" -> a.displayName.asJson
+    ).dropNullValues
+  }
+  given Decoder[UserInputImageAttachment] = deriveDecoder
+
+/**
+ * Result of [[CopilotClient.mcpSecretsSave]].
+ *
+ * @param usedKeychain True when the OS keychain stored the credential, false when the runtime used
+ *                     its file backend
+ */
+case class McpSecretsSaveResult(usedKeychain: Boolean)
+
+object McpSecretsSaveResult:
+  /** Parses an `mcp.secrets.save` result from its wire shape. */
+  def fromJson(json: Json): McpSecretsSaveResult =
+    McpSecretsSaveResult(usedKeychain = json.hcursor.get[Boolean]("usedKeychain").getOrElse(false))
+
+/**
+ * A user-scoped approval for one installed plugin extension. Pass `installationKey` back unchanged
+ * to [[CopilotClient.extensionApprovalsRevoke]].
+ *
+ * @param extensionName     Stable extension identity, for example "plugin:plugin-name:extension-name"
+ * @param pluginName        Name of the plugin that provides the extension
+ * @param capabilities      Exact privileged capabilities the user approved
+ * @param grantedAt         When the approval was granted (RFC 3339 timestamp)
+ * @param installationKey   Opaque installation identity; pass it back unchanged to revoke
+ * @param installationLabel Human-readable installation label
+ */
+case class PermissionsExtensionApproval(
+  extensionName: String,
+  pluginName: String,
+  capabilities: List[String],
+  grantedAt: String,
+  installationKey: String,
+  installationLabel: Option[String] = None
+)
+
+object PermissionsExtensionApproval:
+  /** Parses an approval from its wire shape, or None when `json` is not an object. */
+  def fromJson(json: Json): Option[PermissionsExtensionApproval] =
+    json.asObject.map { _ =>
+      val c = json.hcursor
+      PermissionsExtensionApproval(
+        extensionName = c.get[String]("extensionName").getOrElse(""),
+        pluginName = c.get[String]("pluginName").getOrElse(""),
+        capabilities = c.get[List[String]]("capabilities").getOrElse(Nil),
+        grantedAt = c.get[String]("grantedAt").getOrElse(""),
+        installationKey = c.get[String]("installationKey").getOrElse(""),
+        installationLabel = c.get[String]("installationLabel").toOption
+      )
+    }
+
+/**
+ * Result of [[CopilotClient.extensionApprovalsGrant]].
+ *
+ * @param granted  Whether the pending request was eligible and persisted
+ * @param approval The stored approval when it was persisted
+ */
+case class PermissionsExtensionApprovalsGrantResult(
+  granted: Boolean,
+  approval: Option[PermissionsExtensionApproval] = None
+)
+
+object PermissionsExtensionApprovalsGrantResult:
+  /** Parses a `permissions.extensionApprovals.grant` result from its wire shape. */
+  def fromJson(json: Json): PermissionsExtensionApprovalsGrantResult =
+    val c = json.hcursor
+    PermissionsExtensionApprovalsGrantResult(
+      granted = c.get[Boolean]("granted").getOrElse(false),
+      approval = c.downField("approval").focus.flatMap(PermissionsExtensionApproval.fromJson)
+    )
+
+/** Result of [[CopilotClient.extensionApprovalsList]]: every user-scoped plugin extension approval. */
+case class PermissionsExtensionApprovalsListResult(approvals: List[PermissionsExtensionApproval])
+
+object PermissionsExtensionApprovalsListResult:
+  /** Parses a `permissions.extensionApprovals.list` result from its wire shape. */
+  def fromJson(json: Json): PermissionsExtensionApprovalsListResult =
+    PermissionsExtensionApprovalsListResult(
+      json.hcursor.get[List[Json]]("approvals").getOrElse(Nil).flatMap(PermissionsExtensionApproval.fromJson)
+    )
+
+/**
+ * Result of [[CopilotClient.extensionApprovalsRevoke]].
+ *
+ * @param revoked Whether a matching approval was revoked
+ */
+case class PermissionsExtensionApprovalsRevokeResult(revoked: Boolean)
+
+object PermissionsExtensionApprovalsRevokeResult:
+  /** Parses a `permissions.extensionApprovals.revoke` result from its wire shape. */
+  def fromJson(json: Json): PermissionsExtensionApprovalsRevokeResult =
+    PermissionsExtensionApprovalsRevokeResult(revoked = json.hcursor.get[Boolean]("revoked").getOrElse(false))

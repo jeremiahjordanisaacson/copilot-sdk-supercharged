@@ -295,22 +295,60 @@ public struct UserInputRequest: Codable, Sendable {
     public let question: String
     public let choices: [String]?
     public let allowFreeform: Bool?
+    /// Runtime ID of the pending request, when the runtime sends it.
+    public let requestId: String?
+    /// Image support advertised by the runtime; nil when the answer cannot carry images
+    /// (see `UserInputResponse.attachments`).
+    public let imageAttachmentConstraints: UserInputImageAttachmentConstraints?
+    /// The request's opaque `_meta` object, forwarded unchanged when the runtime sends it.
+    public let meta: [String: AnyCodable]?
 
-    public init(question: String, choices: [String]? = nil, allowFreeform: Bool? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case question, choices, allowFreeform, requestId, imageAttachmentConstraints
+        case meta = "_meta"
+    }
+
+    public init(
+        question: String,
+        choices: [String]? = nil,
+        allowFreeform: Bool? = nil,
+        requestId: String? = nil,
+        imageAttachmentConstraints: UserInputImageAttachmentConstraints? = nil,
+        meta: [String: AnyCodable]? = nil
+    ) {
         self.question = question
         self.choices = choices
         self.allowFreeform = allowFreeform
+        self.requestId = requestId
+        self.imageAttachmentConstraints = imageAttachmentConstraints
+        self.meta = meta
     }
 }
 
 /// The user's response to an input request.
+///
+/// `attachments` is only valid when the request advertised `imageAttachmentConstraints` and
+/// is sent only when set. Image-only answers use an empty `answer` and `wasFreeform: true`;
+/// the runtime enforces the advertised MIME types, size and count limits.
 public struct UserInputResponse: Codable, Sendable {
     public let answer: String
     public let wasFreeform: Bool
+    /// Images attached to the answer, or nil to send none.
+    public let attachments: [UserInputImageAttachment]?
 
-    public init(answer: String, wasFreeform: Bool) {
+    public init(answer: String, wasFreeform: Bool, attachments: [UserInputImageAttachment]? = nil) {
         self.answer = answer
         self.wasFreeform = wasFreeform
+        self.attachments = attachments
+    }
+
+    /// The `userInput.request` result; `attachments` is included only when set.
+    func toWireFormat() -> [String: Any] {
+        var wire: [String: Any] = ["answer": answer, "wasFreeform": wasFreeform]
+        if let attachments = attachments {
+            wire["attachments"] = attachments.map { $0.toWireFormat() }
+        }
+        return wire
     }
 }
 
@@ -2594,6 +2632,156 @@ public struct PermissionModeSetResult: Sendable {
         self.success = success
         self.mode = mode
         self.reason = reason
+    }
+}
+
+// MARK: - v3.1.0 Types (Microsoft Copilot SDK 2.0.3-preview.0 parity)
+
+/// Image support advertised by a `userInput.request` (`UserInputRequest.imageAttachmentConstraints`).
+/// Absent (nil) when the runtime does not accept images in the answer.
+public struct UserInputImageAttachmentConstraints: Codable, Sendable {
+    /// MIME types accepted by the request.
+    public let allowedMimeTypes: [String]
+    /// Maximum decoded byte length of each image.
+    public let maxBytesPerImage: Int
+    /// Maximum number of images accepted in one answer.
+    public let maxCount: Int
+
+    public init(allowedMimeTypes: [String], maxBytesPerImage: Int, maxCount: Int) {
+        self.allowedMimeTypes = allowedMimeTypes
+        self.maxBytesPerImage = maxBytesPerImage
+        self.maxCount = maxCount
+    }
+
+    static func from(_ dict: [String: Any]) -> UserInputImageAttachmentConstraints {
+        let maxBytes = dict["maxBytesPerImage"]
+        let maxCount = dict["maxCount"]
+        return UserInputImageAttachmentConstraints(
+            allowedMimeTypes: dict["allowedMimeTypes"] as? [String] ?? [],
+            maxBytesPerImage: (maxBytes as? Int) ?? (maxBytes as? Double).map { Int($0) } ?? 0,
+            maxCount: (maxCount as? Int) ?? (maxCount as? Double).map { Int($0) } ?? 0
+        )
+    }
+}
+
+/// An inline image attached to an ask_user answer (`UserInputResponse.attachments`).
+/// `data` is the base64-encoded image without a data URL prefix; the wire `type` is always
+/// `"image"`.
+public struct UserInputImageAttachment: Codable, Sendable {
+    /// Attachment type; always `"image"`.
+    public let type: String
+    /// Base64-encoded image bytes.
+    public let data: String
+    /// MIME type of the image, matching one of the request's `allowedMimeTypes`.
+    public let mimeType: String
+    /// Optional description of the image.
+    public let description: String?
+    /// Optional client-facing name of the image.
+    public let displayName: String?
+
+    public init(data: String, mimeType: String, description: String? = nil, displayName: String? = nil) {
+        self.type = "image"
+        self.data = data
+        self.mimeType = mimeType
+        self.description = description
+        self.displayName = displayName
+    }
+
+    func toWireFormat() -> [String: Any] {
+        var wire: [String: Any] = ["type": "image", "data": data, "mimeType": mimeType]
+        if let description = description { wire["description"] = description }
+        if let displayName = displayName { wire["displayName"] = displayName }
+        return wire
+    }
+}
+
+/// Result of `CopilotClient.mcpSecretsSave(secretId:value:configDir:)` (`mcp.secrets.save`).
+public struct McpSecretsSaveResult: Sendable {
+    /// True when the OS keychain stored the credential, false for the file backend.
+    public let usedKeychain: Bool
+
+    public init(usedKeychain: Bool) {
+        self.usedKeychain = usedKeychain
+    }
+}
+
+/// A user-scoped approval for one installed plugin extension.
+public struct PermissionsExtensionApproval: Codable, Sendable {
+    /// Stable identity, for example `"plugin:plugin-name:extension-name"`.
+    public let extensionName: String
+    /// Name of the plugin that contributes the extension.
+    public let pluginName: String
+    /// Exact privileged capabilities the user approved.
+    public let capabilities: [String]
+    /// When the approval was granted (RFC 3339 timestamp).
+    public let grantedAt: String
+    /// Opaque installation key; pass it back unchanged to
+    /// `CopilotClient.extensionApprovalsRevoke(extensionName:installationKey:sessionId:)`.
+    public let installationKey: String
+    /// Human-readable installation label, when known.
+    public let installationLabel: String?
+
+    public init(
+        extensionName: String,
+        pluginName: String,
+        capabilities: [String],
+        grantedAt: String,
+        installationKey: String,
+        installationLabel: String? = nil
+    ) {
+        self.extensionName = extensionName
+        self.pluginName = pluginName
+        self.capabilities = capabilities
+        self.grantedAt = grantedAt
+        self.installationKey = installationKey
+        self.installationLabel = installationLabel
+    }
+
+    static func from(_ dict: [String: Any]) -> PermissionsExtensionApproval {
+        PermissionsExtensionApproval(
+            extensionName: dict["extensionName"] as? String ?? "",
+            pluginName: dict["pluginName"] as? String ?? "",
+            capabilities: dict["capabilities"] as? [String] ?? [],
+            grantedAt: dict["grantedAt"] as? String ?? "",
+            installationKey: dict["installationKey"] as? String ?? "",
+            installationLabel: dict["installationLabel"] as? String
+        )
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsGrant(sessionId:requestId:)`
+/// (`permissions.extensionApprovals.grant`).
+public struct PermissionsExtensionApprovalsGrantResult: Sendable {
+    /// Whether the pending request was eligible and its approval was persisted.
+    public let granted: Bool
+    /// The stored approval, when one was persisted.
+    public let approval: PermissionsExtensionApproval?
+
+    public init(granted: Bool, approval: PermissionsExtensionApproval? = nil) {
+        self.granted = granted
+        self.approval = approval
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsList(sessionId:)`
+/// (`permissions.extensionApprovals.list`).
+public struct PermissionsExtensionApprovalsListResult: Sendable {
+    /// The persisted plugin extension approvals.
+    public let approvals: [PermissionsExtensionApproval]
+
+    public init(approvals: [PermissionsExtensionApproval]) {
+        self.approvals = approvals
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsRevoke(extensionName:installationKey:sessionId:)`
+/// (`permissions.extensionApprovals.revoke`).
+public struct PermissionsExtensionApprovalsRevokeResult: Sendable {
+    /// Whether a matching approval was revoked.
+    public let revoked: Bool
+
+    public init(revoked: Bool) {
+        self.revoked = revoked
     }
 }
 

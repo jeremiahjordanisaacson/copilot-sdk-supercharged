@@ -127,17 +127,46 @@ final class Types {
         String question
         List<String> choices
         Boolean allowFreeform
+        /** ID of the pending request ({@code requestId}), when the runtime sends it. */
+        String requestId
+        /** Image limits; null when the runtime does not accept image attachments in the answer. */
+        UserInputImageAttachmentConstraints imageAttachmentConstraints
+        /** The request's opaque {@code _meta} object, forwarded unchanged; null when absent. */
+        Map<String, Object> meta
     }
 
-    /** User input response. */
+    /**
+     * User input response. For an image-only answer, use an empty {@code answer} with
+     * {@code wasFreeform} true.
+     */
     @ToString(includeNames = true)
     static class UserInputResponse {
         String answer
         boolean wasFreeform
+        /**
+         * Images sent with the answer ({@code attachments}), omitted from the response when null.
+         * Only valid when the request advertised {@code imageAttachmentConstraints}; the runtime
+         * enforces the limits.
+         */
+        List<UserInputImageAttachment> attachments
 
         UserInputResponse(String answer, boolean wasFreeform) {
             this.answer = answer
             this.wasFreeform = wasFreeform
+        }
+
+        UserInputResponse(String answer, boolean wasFreeform, List<UserInputImageAttachment> attachments) {
+            this(answer, wasFreeform)
+            this.attachments = attachments
+        }
+
+        /** Wire shape: {@code answer}, {@code wasFreeform}, and {@code attachments} when set. */
+        Map<String, Object> toMap() {
+            Map<String, Object> map = [answer: answer, wasFreeform: wasFreeform] as Map<String, Object>
+            if (attachments != null) {
+                map.attachments = attachments.collect { UserInputImageAttachment attachment -> attachment.toMap() }
+            }
+            map
         }
     }
 
@@ -389,6 +418,10 @@ final class Types {
         String mode
         String elicitationSource
         String url
+        /** ID of the pending elicitation request ({@code requestId}). */
+        String requestId
+        /** The request's opaque {@code _meta} object (negotiated extensions), forwarded unchanged; null when absent. */
+        Map<String, Object> meta
     }
 
     /** Result returned from an elicitation request. */
@@ -396,6 +429,11 @@ final class Types {
     static class ElicitationResult {
         String action
         Map<String, Object> content
+        /**
+         * Private negotiated extensions, sent back unchanged as {@code _meta} when set. Never put
+         * image bytes in primitive {@code content}.
+         */
+        Map<String, Object> meta
 
         ElicitationResult() {}
         ElicitationResult(String action, Map<String, Object> content = null) {
@@ -1346,6 +1384,188 @@ final class Types {
             Object reason = map.get('reason')
             result.mode = mode instanceof String ? (String) mode : null
             result.reason = reason instanceof String ? (String) reason : null
+            result
+        }
+    }
+
+    // --- v3.1.0 feature types (ask-user images, MCP secret store, plugin extension approvals) ---
+
+    /**
+     * Image limits a user input request advertises when the runtime accepts image attachments in
+     * the answer ({@code imageAttachmentConstraints}).
+     */
+    @ToString(includeNames = true)
+    static class UserInputImageAttachmentConstraints {
+        /** Accepted MIME types, for example {@code 'image/png'}. */
+        List<String> allowedMimeTypes = []
+        /** Largest accepted image, in bytes. */
+        long maxBytesPerImage
+        /** Most images accepted in one answer. */
+        int maxCount
+
+        /**
+         * Parses the constraints from their wire shape.
+         *
+         * @param value the wire value
+         * @return the constraints, or null when {@code value} is not an object
+         */
+        @SuppressWarnings('unchecked')
+        static UserInputImageAttachmentConstraints fromMap(Object value) {
+            if (!(value instanceof Map)) return null
+            Map<String, Object> map = (Map<String, Object>) value
+            UserInputImageAttachmentConstraints constraints = new UserInputImageAttachmentConstraints()
+            Object mimeTypes = map.get('allowedMimeTypes')
+            if (mimeTypes instanceof List) {
+                List<String> allowed = []
+                for (Object mimeType : (List<Object>) mimeTypes) {
+                    if (mimeType instanceof String) allowed.add((String) mimeType)
+                }
+                constraints.allowedMimeTypes = allowed
+            }
+            Object maxBytes = map.get('maxBytesPerImage')
+            Object maxCount = map.get('maxCount')
+            constraints.maxBytesPerImage = maxBytes instanceof Number ? ((Number) maxBytes).longValue() : 0L
+            constraints.maxCount = maxCount instanceof Number ? ((Number) maxCount).intValue() : 0
+            constraints
+        }
+    }
+
+    /**
+     * An image attached to an ask-user answer ({@link UserInputResponse#attachments}). The wire
+     * {@code type} is always {@code 'image'}.
+     */
+    @ToString(includeNames = true, excludes = ['data'])
+    static class UserInputImageAttachment {
+        /** Base64-encoded image bytes. */
+        String data
+        /** MIME type of the image, for example {@code 'image/png'}. */
+        String mimeType
+        String description
+        String displayName
+
+        UserInputImageAttachment() {}
+        UserInputImageAttachment(String data, String mimeType) {
+            this.data = data
+            this.mimeType = mimeType
+        }
+
+        /** Always {@code 'image'}. */
+        String getType() { 'image' }
+
+        /** Wire shape: {@code type}, {@code data}, {@code mimeType}, and the optional fields when set. */
+        Map<String, Object> toMap() {
+            Map<String, Object> map = [type: 'image', data: data, mimeType: mimeType] as Map<String, Object>
+            if (description != null) map.description = description
+            if (displayName != null) map.displayName = displayName
+            map
+        }
+    }
+
+    /** Result of {@code CopilotClient.mcpSecretsSave} ({@code mcp.secrets.save}). */
+    @ToString(includeNames = true)
+    static class McpSecretsSaveResult {
+        /** True when the OS keychain stored the credential, false for the file backend. */
+        boolean usedKeychain
+
+        static McpSecretsSaveResult fromMap(Map<String, Object> map) {
+            McpSecretsSaveResult result = new McpSecretsSaveResult()
+            if (map != null) result.usedKeychain = map.get('usedKeychain') == Boolean.TRUE
+            result
+        }
+    }
+
+    /** A user-scoped approval for one installed plugin extension ({@code permissions.extensionApprovals.*}). */
+    @ToString(includeNames = true)
+    static class PermissionsExtensionApproval {
+        /** Stable identity, for example {@code 'plugin:plugin-name:extension-name'}. */
+        String extensionName
+        String pluginName
+        /** Exact privileged capabilities the user approved. */
+        List<String> capabilities = []
+        /** When the approval was granted (RFC 3339 timestamp). */
+        String grantedAt
+        /** Opaque installation identity; pass it back unchanged to revoke the approval. */
+        String installationKey
+        /** Display label of the installation, or null. */
+        String installationLabel
+
+        /**
+         * Parses an approval from its wire shape.
+         *
+         * @param value the wire value
+         * @return the approval, or null when {@code value} is not an object
+         */
+        @SuppressWarnings('unchecked')
+        static PermissionsExtensionApproval fromMap(Object value) {
+            if (!(value instanceof Map)) return null
+            Map<String, Object> map = (Map<String, Object>) value
+            PermissionsExtensionApproval approval = new PermissionsExtensionApproval()
+            approval.extensionName = stringOrNull(map.get('extensionName'))
+            approval.pluginName = stringOrNull(map.get('pluginName'))
+            Object capabilities = map.get('capabilities')
+            if (capabilities instanceof List) {
+                List<String> approved = []
+                for (Object capability : (List<Object>) capabilities) {
+                    if (capability instanceof String) approved.add((String) capability)
+                }
+                approval.capabilities = approved
+            }
+            approval.grantedAt = stringOrNull(map.get('grantedAt'))
+            approval.installationKey = stringOrNull(map.get('installationKey'))
+            approval.installationLabel = stringOrNull(map.get('installationLabel'))
+            approval
+        }
+
+        private static String stringOrNull(Object value) {
+            value instanceof String ? (String) value : null
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsGrant} ({@code permissions.extensionApprovals.grant}). */
+    @ToString(includeNames = true)
+    static class PermissionsExtensionApprovalsGrantResult {
+        /** Whether the pending request was eligible and persisted. */
+        boolean granted
+        /** The persisted approval when granted, or null. */
+        PermissionsExtensionApproval approval
+
+        static PermissionsExtensionApprovalsGrantResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsGrantResult result = new PermissionsExtensionApprovalsGrantResult()
+            if (map == null) return result
+            result.granted = map.get('granted') == Boolean.TRUE
+            result.approval = PermissionsExtensionApproval.fromMap(map.get('approval'))
+            result
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsList} ({@code permissions.extensionApprovals.list}). */
+    @ToString(includeNames = true)
+    static class PermissionsExtensionApprovalsListResult {
+        List<PermissionsExtensionApproval> approvals = []
+
+        @SuppressWarnings('unchecked')
+        static PermissionsExtensionApprovalsListResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsListResult result = new PermissionsExtensionApprovalsListResult()
+            Object approvals = map?.get('approvals')
+            if (approvals instanceof List) {
+                for (Object approval : (List<Object>) approvals) {
+                    PermissionsExtensionApproval parsed = PermissionsExtensionApproval.fromMap(approval)
+                    if (parsed != null) result.approvals.add(parsed)
+                }
+            }
+            result
+        }
+    }
+
+    /** Result of {@code CopilotClient.extensionApprovalsRevoke} ({@code permissions.extensionApprovals.revoke}). */
+    @ToString(includeNames = true)
+    static class PermissionsExtensionApprovalsRevokeResult {
+        /** Whether a matching approval was revoked. */
+        boolean revoked
+
+        static PermissionsExtensionApprovalsRevokeResult fromMap(Map<String, Object> map) {
+            PermissionsExtensionApprovalsRevokeResult result = new PermissionsExtensionApprovalsRevokeResult()
+            if (map != null) result.revoked = map.get('revoked') == Boolean.TRUE
             result
         }
     }

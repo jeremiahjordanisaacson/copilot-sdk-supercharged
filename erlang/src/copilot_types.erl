@@ -16,9 +16,11 @@
     permission_result/1,
     permission_result/2,
     user_input_response/2,
+    user_input_response/3,
     image_options/1,
     elicitation_result/1,
     elicitation_result/2,
+    elicitation_result/3,
     tool_defer/1,
     system_message_section/1,
     github_attachment/1,
@@ -52,7 +54,16 @@
     network_set_provider_params/1,
     policy_helper_failure/1,
     permission_mode_refusal/1,
-    permissions_set_mode_result/1
+    permissions_set_mode_result/1,
+    %% v3.1.0 helpers (ask-user images, MCP secret store, extension approvals)
+    user_input_image_attachment/1,
+    user_input_image_attachment/2,
+    image_attachment_constraints/1,
+    mcp_secrets_save_result/1,
+    extension_approval/1,
+    extension_approvals_grant_result/1,
+    extension_approvals_list_result/1,
+    extension_approvals_revoke_result/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -169,12 +180,17 @@
     requested_schema    :: map() | undefined,
     mode                :: binary() | undefined,
     elicitation_source  :: binary() | undefined,
-    url                 :: binary() | undefined
+    url                 :: binary() | undefined,
+    %% Pending request id and the request's opaque `_meta` (negotiated extensions)
+    request_id          :: binary() | undefined,
+    meta                :: map() | undefined
 }).
 
 -record(elicitation_result, {
     action  :: binary(),
-    content :: map() | undefined
+    content :: map() | undefined,
+    %% Opaque `_meta`, forwarded unchanged to the runtime
+    meta    :: map() | undefined
 }).
 
 -record(session_event, {
@@ -214,7 +230,9 @@
 
 -record(user_input_response, {
     answer       :: binary(),
-    was_freeform :: boolean()
+    was_freeform :: boolean(),
+    %% Image attachments (wire maps from user_input_image_attachment/1,2)
+    attachments  :: [map()] | undefined
 }).
 
 -record(image_options, {
@@ -354,6 +372,20 @@ user_input_response(Answer, WasFreeform) ->
         <<"wasFreeform">> => WasFreeform
     }.
 
+%% @doc User input reply with image attachments (ask_user). Each attachment is
+%% normalized with user_input_image_attachment/1; `undefined` sends no
+%% attachments. Attachments are only valid when the request carried
+%% <<"imageAttachmentConstraints">> (see image_attachment_constraints/1), and
+%% the runtime enforces the advertised limits. Image-only answers use an empty
+%% answer and `WasFreeform = true`.
+-spec user_input_response(binary(), boolean(), [map()] | undefined) -> map().
+user_input_response(Answer, WasFreeform, undefined) ->
+    user_input_response(Answer, WasFreeform);
+user_input_response(Answer, WasFreeform, Attachments) when is_list(Attachments) ->
+    (user_input_response(Answer, WasFreeform))#{
+        <<"attachments">> => [user_input_image_attachment(A) || A <- Attachments]
+    }.
+
 -spec image_options(map()) -> map().
 image_options(Opts) ->
     maps:filter(fun(_K, V) -> V =/= undefined end, #{
@@ -373,6 +405,15 @@ elicitation_result(Action, Content) ->
         undefined -> Base;
         _         -> Base#{<<"content">> => Content}
     end.
+
+%% @doc Elicitation reply carrying an opaque `_meta` map (negotiated
+%% extensions), forwarded unchanged to the runtime. Never put image bytes in
+%% `Content`; `undefined` omits `Content` or `Meta`.
+-spec elicitation_result(binary(), map() | undefined, map() | undefined) -> map().
+elicitation_result(Action, Content, undefined) ->
+    elicitation_result(Action, Content);
+elicitation_result(Action, Content, Meta) ->
+    (elicitation_result(Action, Content))#{<<"_meta">> => Meta}.
 
 %% ---------------------------------------------------------------------------
 %% Upstream-sync feature constants & helpers (parity with @github/copilot-sdk)
@@ -799,6 +840,104 @@ permissions_set_mode_result(Result) when is_map(Result) ->
         mode    => maps:get(<<"mode">>, Result, undefined),
         reason  => maps:get(<<"reason">>, Result, undefined)
     }.
+
+%% ---------------------------------------------------------------------------
+%% v3.1.0 helpers (Microsoft Copilot SDK 2.0.3-preview.0 parity)
+%% ---------------------------------------------------------------------------
+
+%% @doc Build an inline image for user_input_response/3 (UserInputImageAttachment)
+%% from base64 `Data` and its `MimeType`. The wire `type` is always <<"image">>.
+-spec user_input_image_attachment(binary(), binary()) -> map().
+user_input_image_attachment(Data, MimeType) ->
+    user_input_image_attachment(#{data => Data, mime_type => MimeType}).
+
+%% @doc Build an image attachment from #{data, mime_type, description,
+%% display_name}: `data` is the base64-encoded image, undefined fields are
+%% dropped, and wire-shaped maps pass through. The wire `type` is always
+%% <<"image">>.
+-spec user_input_image_attachment(map()) -> map().
+user_input_image_attachment(Opts) when is_map(Opts) ->
+    Wire = to_wire(Opts, [
+        {type,         <<"type">>},
+        {data,         <<"data">>},
+        {mime_type,    <<"mimeType">>},
+        {description,  <<"description">>},
+        {display_name, <<"displayName">>}
+    ]),
+    Wire#{<<"type">> => <<"image">>}.
+
+%% @doc Decode the image support advertised by a user input request (the map
+%% passed to `on_user_input_request`) from its <<"imageAttachmentConstraints">>:
+%% #{allowed_mime_types, max_bytes_per_image, max_count}, or `undefined` when
+%% the runtime does not accept images in the answer.
+-spec image_attachment_constraints(map()) -> map() | undefined.
+image_attachment_constraints(#{<<"imageAttachmentConstraints">> := Constraints})
+  when is_map(Constraints) ->
+    #{
+        allowed_mime_types  => maps:get(<<"allowedMimeTypes">>, Constraints, []),
+        max_bytes_per_image => maps:get(<<"maxBytesPerImage">>, Constraints, undefined),
+        max_count           => maps:get(<<"maxCount">>, Constraints, undefined)
+    };
+image_attachment_constraints(_) ->
+    undefined.
+
+%% @doc Decode a `mcp.secrets.save` result into #{used_keychain}: `true` when
+%% the OS keychain stored the secret, `false` for the file backend.
+-spec mcp_secrets_save_result(term()) -> map().
+mcp_secrets_save_result(Result) when is_map(Result) ->
+    #{used_keychain => maps:get(<<"usedKeychain">>, Result, false) =:= true};
+mcp_secrets_save_result(_) ->
+    #{used_keychain => false}.
+
+%% @doc Decode a PermissionsExtensionApproval (a user-scoped approval for one
+%% installed plugin extension) into #{extension_name, plugin_name,
+%% capabilities, granted_at, installation_key, installation_label}.
+%% `extension_name` is the stable identity (for example
+%% <<"plugin:plugin-name:extension-name">>), `capabilities` the exact
+%% privileged capabilities the user approved, `granted_at` an RFC 3339
+%% timestamp, and `installation_key` an opaque key to pass back unchanged to
+%% copilot_client:extension_approvals_revoke/3,4. Returns `undefined` when
+%% there is no approval.
+-spec extension_approval(term()) -> map() | undefined.
+extension_approval(Approval) when is_map(Approval) ->
+    #{
+        extension_name     => maps:get(<<"extensionName">>, Approval, <<>>),
+        plugin_name        => maps:get(<<"pluginName">>, Approval, <<>>),
+        capabilities       => maps:get(<<"capabilities">>, Approval, []),
+        granted_at         => maps:get(<<"grantedAt">>, Approval, <<>>),
+        installation_key   => maps:get(<<"installationKey">>, Approval, <<>>),
+        installation_label => maps:get(<<"installationLabel">>, Approval, undefined)
+    };
+extension_approval(_) ->
+    undefined.
+
+%% @doc Decode a `permissions.extensionApprovals.grant` result into
+%% #{granted, approval}: whether the pending request was eligible and
+%% persisted, and the stored approval (see extension_approval/1) or `undefined`.
+-spec extension_approvals_grant_result(term()) -> map().
+extension_approvals_grant_result(Result) when is_map(Result) ->
+    #{
+        granted  => maps:get(<<"granted">>, Result, false) =:= true,
+        approval => extension_approval(maps:get(<<"approval">>, Result, undefined))
+    };
+extension_approvals_grant_result(_) ->
+    #{granted => false, approval => undefined}.
+
+%% @doc Decode a `permissions.extensionApprovals.list` result into
+%% #{approvals => [Approval]} (see extension_approval/1).
+-spec extension_approvals_list_result(term()) -> map().
+extension_approvals_list_result(#{<<"approvals">> := Approvals}) when is_list(Approvals) ->
+    #{approvals => [extension_approval(A) || A <- Approvals, is_map(A)]};
+extension_approvals_list_result(_) ->
+    #{approvals => []}.
+
+%% @doc Decode a `permissions.extensionApprovals.revoke` result into
+%% #{revoked}: whether a matching approval was revoked.
+-spec extension_approvals_revoke_result(term()) -> map().
+extension_approvals_revoke_result(Result) when is_map(Result) ->
+    #{revoked => maps:get(<<"revoked">>, Result, false) =:= true};
+extension_approvals_revoke_result(_) ->
+    #{revoked => false}.
 
 %% Convert known atom keys to their wire keys (dropping undefined values);
 %% any other key passes through unchanged, so wire-shaped maps are accepted.

@@ -720,6 +720,19 @@ private long jsonLong(const ref JSONValue v, string key) @safe
     return 0;
 }
 
+/// Read the string items of an array member of a JSON object (empty when absent).
+private string[] jsonStrList(const ref JSONValue v, string key) @trusted
+{
+    string[] items;
+    if (v.type != JSONType.object) return items;
+    auto p = key in v;
+    if (p is null || (*p).type != JSONType.array) return items;
+    foreach (item; (*p).array)
+        if (item.type == JSONType.string)
+            items ~= item.str;
+    return items;
+}
+
 /// Serialize a string list as a JSON array.
 private JSONValue stringListJson(const string[] items) @safe
 {
@@ -801,6 +814,8 @@ private void putSharedSessionOptions(T)(ref JSONValue obj, ref const T cfg) @saf
         obj["requestShellAuthentication"] = true;
     if (cfg.onStoreMemory !is null)
         obj["hasMemoryStore"] = true;
+    if (cfg.onUserInputRequest !is null)
+        obj["requestUserInput"] = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,6 +1422,10 @@ struct SessionConfig
     /// Stores memories the agent asks to keep.
     StoreMemoryHandler onStoreMemory;
 
+    /// Answers the agent's ask_user questions, including image answers
+    /// (`userInput.request`; sends `requestUserInput`).
+    UserInputHandler onUserInputRequest;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -1690,6 +1709,10 @@ struct ResumeSessionConfig
 
     /// Stores memories the agent asks to keep.
     StoreMemoryHandler onStoreMemory;
+
+    /// Answers the agent's ask_user questions, including image answers
+    /// (`userInput.request`; sends `requestUserInput`).
+    UserInputHandler onUserInputRequest;
 
     JSONValue toJson() const @safe
     {
@@ -2068,5 +2091,232 @@ struct ExitPlanModeResponse
         if (!feedback.isNull)
             obj["feedback"] = feedback.get;
         return obj;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v3.1.0 types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ---------------------------------------------------------------------------
+
+/// Image limits a user input request advertises (`imageAttachmentConstraints`)
+/// when the runtime accepts images in the answer.
+struct UserInputImageAttachmentConstraints
+{
+    /// Accepted MIME types, for example "image/png".
+    string[] allowedMimeTypes;
+
+    /// Largest accepted image, in bytes.
+    long maxBytesPerImage;
+
+    /// Most images accepted in one answer.
+    long maxCount;
+
+    static UserInputImageAttachmentConstraints fromJson(JSONValue v) @safe
+    {
+        UserInputImageAttachmentConstraints c;
+        c.allowedMimeTypes = jsonStrList(v, "allowedMimeTypes");
+        c.maxBytesPerImage = jsonLong(v, "maxBytesPerImage");
+        c.maxCount = jsonLong(v, "maxCount");
+        return c;
+    }
+}
+
+/// A question from the agent's ask_user tool (`userInput.request`).
+struct UserInputRequest
+{
+    string sessionId;
+    string question;
+    string[] choices;
+
+    /// Whether a freeform answer is allowed in addition to the choices.
+    bool allowFreeform = true;
+
+    /// Runtime ID of the pending request, when the runtime sends it.
+    Nullable!string requestId;
+
+    /// Image limits; null when the runtime does not accept image answers.
+    Nullable!UserInputImageAttachmentConstraints imageAttachmentConstraints;
+
+    /// Opaque request metadata (`_meta`), passed through unchanged; JSON null when absent.
+    JSONValue meta;
+
+    static UserInputRequest fromJson(JSONValue v) @safe
+    {
+        UserInputRequest req;
+        if (v.type != JSONType.object) return req;
+        req.sessionId = jsonStr(v, "sessionId");
+        req.question = jsonStr(v, "question");
+        req.choices = jsonStrList(v, "choices");
+        req.requestId = jsonOptStr(v, "requestId");
+        auto pFreeform = "allowFreeform" in v;
+        if (pFreeform !is null && (*pFreeform).type == JSONType.false_)
+            req.allowFreeform = false;
+        auto pConstraints = "imageAttachmentConstraints" in v;
+        if (pConstraints !is null && (*pConstraints).type == JSONType.object)
+            req.imageAttachmentConstraints = UserInputImageAttachmentConstraints.fromJson(*pConstraints);
+        auto pMeta = "_meta" in v;
+        if (pMeta !is null) req.meta = *pMeta;
+        return req;
+    }
+}
+
+/// An image sent with a `UserInputResponse` (the wire `type` is always
+/// "image"). Only valid when the request advertised
+/// `imageAttachmentConstraints`; the runtime enforces the limits.
+struct UserInputImageAttachment
+{
+    /// Base64-encoded image bytes.
+    string data;
+    string mimeType;
+    Nullable!string description;
+    Nullable!string displayName;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["type"] = "image";
+        obj["data"] = data;
+        obj["mimeType"] = mimeType;
+        if (!description.isNull)
+            obj["description"] = description.get;
+        if (!displayName.isNull)
+            obj["displayName"] = displayName.get;
+        return obj;
+    }
+}
+
+/// Answer to a `UserInputRequest`. For an image-only answer, use an empty
+/// `answer` with `wasFreeform` true.
+struct UserInputResponse
+{
+    string answer;
+
+    /// True when the user typed the answer instead of picking a choice.
+    bool wasFreeform = true;
+
+    /// Images sent with the answer (`attachments`); omitted when empty.
+    UserInputImageAttachment[] attachments;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["answer"] = answer;
+        obj["wasFreeform"] = wasFreeform;
+        if (attachments.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (ref a; attachments) arr ~= a.toJson();
+            obj["attachments"] = JSONValue(arr);
+        }
+        return obj;
+    }
+}
+
+/// Answers the agent's ask_user questions for a session (`userInput.request`).
+alias UserInputHandler = UserInputResponse delegate(UserInputRequest request);
+
+/// Result of `CopilotClient.mcpSecretsSave` (`mcp.secrets.save`).
+struct McpSecretsSaveResult
+{
+    /// True when the OS keychain stored the credential, false for the file backend.
+    bool usedKeychain;
+
+    static McpSecretsSaveResult fromJson(JSONValue v) @safe
+    {
+        McpSecretsSaveResult r;
+        if (v.type != JSONType.object) return r;
+        auto p = "usedKeychain" in v;
+        r.usedKeychain = p !is null && (*p).type == JSONType.true_;
+        return r;
+    }
+}
+
+/// A user-scoped approval for one installed plugin extension
+/// (`permissions.extensionApprovals.*`).
+struct PermissionsExtensionApproval
+{
+    /// Stable identity, for example "plugin:plugin-name:extension-name".
+    string extensionName;
+    string pluginName;
+
+    /// Exact privileged capabilities the user approved.
+    string[] capabilities;
+
+    /// RFC 3339 timestamp of the grant.
+    string grantedAt;
+
+    /// Opaque installation identity; pass it back unchanged to revoke.
+    string installationKey;
+    Nullable!string installationLabel;
+
+    static PermissionsExtensionApproval fromJson(JSONValue v) @safe
+    {
+        PermissionsExtensionApproval a;
+        a.extensionName = jsonStr(v, "extensionName");
+        a.pluginName = jsonStr(v, "pluginName");
+        a.capabilities = jsonStrList(v, "capabilities");
+        a.grantedAt = jsonStr(v, "grantedAt");
+        a.installationKey = jsonStr(v, "installationKey");
+        a.installationLabel = jsonOptStr(v, "installationLabel");
+        return a;
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsGrant`
+/// (`permissions.extensionApprovals.grant`).
+struct PermissionsExtensionApprovalsGrantResult
+{
+    /// Whether the pending request was eligible and persisted.
+    bool granted;
+
+    /// The persisted approval, when granted.
+    Nullable!PermissionsExtensionApproval approval;
+
+    static PermissionsExtensionApprovalsGrantResult fromJson(JSONValue v) @safe
+    {
+        PermissionsExtensionApprovalsGrantResult r;
+        if (v.type != JSONType.object) return r;
+        auto pGranted = "granted" in v;
+        r.granted = pGranted !is null && (*pGranted).type == JSONType.true_;
+        auto pApproval = "approval" in v;
+        if (pApproval !is null && (*pApproval).type == JSONType.object)
+            r.approval = PermissionsExtensionApproval.fromJson(*pApproval);
+        return r;
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsList`
+/// (`permissions.extensionApprovals.list`).
+struct PermissionsExtensionApprovalsListResult
+{
+    PermissionsExtensionApproval[] approvals;
+
+    static PermissionsExtensionApprovalsListResult fromJson(JSONValue v) @trusted
+    {
+        PermissionsExtensionApprovalsListResult r;
+        if (v.type != JSONType.object) return r;
+        auto p = "approvals" in v;
+        if (p !is null && (*p).type == JSONType.array)
+            foreach (item; (*p).array)
+                if (item.type == JSONType.object)
+                    r.approvals ~= PermissionsExtensionApproval.fromJson(item);
+        return r;
+    }
+}
+
+/// Result of `CopilotClient.extensionApprovalsRevoke`
+/// (`permissions.extensionApprovals.revoke`).
+struct PermissionsExtensionApprovalsRevokeResult
+{
+    /// Whether a matching approval was revoked.
+    bool revoked;
+
+    static PermissionsExtensionApprovalsRevokeResult fromJson(JSONValue v) @safe
+    {
+        PermissionsExtensionApprovalsRevokeResult r;
+        if (v.type != JSONType.object) return r;
+        auto p = "revoked" in v;
+        r.revoked = p !is null && (*p).type == JSONType.true_;
+        return r;
     }
 }

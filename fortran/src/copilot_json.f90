@@ -15,6 +15,7 @@ module copilot_json
   public :: json_object_add, json_object_find, json_object_put
   public :: json_get_raw, json_get_path, json_get_string, json_get_logical, json_get_integer
   public :: json_is_null, json_is_string, json_is_object, json_string_array
+  public :: json_array_size, json_array_get, json_get_string_array
 
   character(len=1), parameter :: BACKSLASH = achar(92)
   character(len=1), parameter :: QUOTE = achar(34)
@@ -456,5 +457,111 @@ contains
     end do
     r = r // ']'
   end function json_string_array
+
+  !> Raw JSON text of element pos (1-based) of a JSON array. found is .false. when raw is not
+  !! an array or has fewer elements.
+  subroutine json_array_get(raw, pos, value, found)
+    character(len=*), intent(in) :: raw
+    integer, intent(in) :: pos
+    character(len=:), allocatable, intent(out) :: value
+    logical, intent(out) :: found
+    character(len=:), allocatable :: t
+    character(len=1) :: c
+    integer :: i, depth, start, finish, element
+    logical :: in_string, escaped
+
+    value = ''
+    found = .false.
+    t = json_trim(raw)
+    if (len(t) < 2 .or. pos < 1) return
+    if (t(1:1) /= '[' .or. t(len(t):len(t)) /= ']') return
+
+    depth = 0
+    in_string = .false.
+    escaped = .false.
+    element = 1
+    start = 2
+    finish = 0
+    do i = 2, len(t)
+      c = t(i:i)
+      if (in_string) then
+        if (escaped) then
+          escaped = .false.
+        else if (c == BACKSLASH) then
+          escaped = .true.
+        else if (c == QUOTE) then
+          in_string = .false.
+        end if
+        cycle
+      end if
+      select case (c)
+      case ('"')
+        in_string = .true.
+      case ('{', '[')
+        depth = depth + 1
+      case ('}', ']')
+        if (depth == 0) then
+          finish = i - 1
+          exit
+        end if
+        depth = depth - 1
+      case (',')
+        if (depth == 0) then
+          if (element == pos) then
+            finish = i - 1
+            exit
+          end if
+          element = element + 1
+          start = i + 1
+        end if
+      end select
+    end do
+    if (finish == 0 .or. element /= pos) return
+    value = json_trim(t(start:finish))
+    found = len(value) > 0
+  end subroutine json_array_get
+
+  !> Number of elements of a JSON array (0 when raw is not an array).
+  function json_array_size(raw) result(n)
+    character(len=*), intent(in) :: raw
+    integer :: n
+    character(len=:), allocatable :: item
+    logical :: found
+
+    n = 0
+    do
+      call json_array_get(raw, n + 1, item, found)
+      if (.not. found) exit
+      n = n + 1
+    end do
+  end function json_array_size
+
+  !> Decoded strings of a top-level array member, blank padded to the longest one (use trim).
+  !! items is a zero-size array when the member is absent or empty; found reports whether the
+  !! member is present.
+  subroutine json_get_string_array(json, name, items, found)
+    character(len=*), intent(in) :: json, name
+    character(len=:), allocatable, intent(out) :: items(:)
+    logical, intent(out), optional :: found
+    character(len=:), allocatable :: raw, item
+    integer :: i, n, width
+    logical :: is_set
+
+    call json_get_raw(json, name, raw, is_set)
+    if (present(found)) found = is_set
+    n = 0
+    if (is_set) n = json_array_size(raw)
+    width = 0
+    do i = 1, n
+      call json_array_get(raw, i, item, is_set)
+      if (json_is_string(item)) width = max(width, len(json_unescape(item(2:len(item) - 1))))
+    end do
+    allocate(character(len=width) :: items(n))
+    do i = 1, n
+      call json_array_get(raw, i, item, is_set)
+      items(i) = ''
+      if (json_is_string(item)) items(i) = json_unescape(item(2:len(item) - 1))
+    end do
+  end subroutine json_get_string_array
 
 end module copilot_json

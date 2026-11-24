@@ -42,6 +42,7 @@ final class CopilotSession
         SubagentStopHandler _onSubagentStop;
         ShellAuthenticationHandler _onShellAuthentication;
         StoreMemoryHandler _onStoreMemory;
+        UserInputHandler _onUserInput;
         void delegate(string sessionId) _onRelease;
     }
 
@@ -374,12 +375,14 @@ final class CopilotSession
         _onSubagentStop = onStop;
     }
 
-    /// Install the shell-authentication and memory-store callbacks (called by CopilotClient).
+    /// Install the shell-authentication, memory-store, and user-input callbacks
+    /// (called by CopilotClient).
     package void configureCallbacks(ShellAuthenticationHandler onShellAuthentication,
-        StoreMemoryHandler onStoreMemory) @safe
+        StoreMemoryHandler onStoreMemory, UserInputHandler onUserInput = null) @safe
     {
         _onShellAuthentication = onShellAuthentication;
         _onStoreMemory = onStoreMemory;
+        _onUserInput = onUserInput;
     }
 
     /// Answer a `shellAuthentication.request`; cancels when no handler is set
@@ -403,6 +406,15 @@ final class CopilotSession
     {
         enforce(_onStoreMemory !is null, "Memory store owner is unavailable");
         _onStoreMemory(StoredMemory.fromJson(params));
+    }
+
+    /// Answer a `userInput.request` (the ask_user tool) with the user-input
+    /// callback. The request carries `imageAttachmentConstraints` when the
+    /// runtime accepts image answers; `attachments` are sent only when set.
+    package JSONValue handleUserInput(JSONValue params) @trusted
+    {
+        enforce(_onUserInput !is null, "User input requested but no handler registered");
+        return _onUserInput(UserInputRequest.fromJson(params)).toJson();
     }
 
     /// Install the callback run when the session is released (called by CopilotClient).

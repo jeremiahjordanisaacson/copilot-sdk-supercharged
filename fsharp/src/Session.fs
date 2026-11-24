@@ -21,6 +21,7 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     let mutable subagentStopHook : SubagentStopHandler option = None
     let mutable shellAuthenticationHandler : ShellAuthenticationHandler option = None
     let mutable storeMemoryHandler : StoreMemoryHandler option = None
+    let mutable userInputHandler : UserInputHandler option = None
     let pendingShellAuthentications =
         System.Collections.Concurrent.ConcurrentDictionary<string, CancellationTokenSource>()
     let mutable disconnectCallbacks : (unit -> unit) list = []
@@ -281,6 +282,7 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
         subagentStopHook <- None
         shellAuthenticationHandler <- None
         storeMemoryHandler <- None
+        userInputHandler <- None
         for pending in pendingShellAuthentications.Values do
             try pending.Cancel()
             with _ -> ()
@@ -303,6 +305,18 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     /// Register the store-memory callback for this session.
     member internal _.SetMemoryStoreHandler(handler: StoreMemoryHandler option) =
         storeMemoryHandler <- handler
+
+    /// Register the user input (ask_user) handler for this session.
+    member internal _.SetUserInputHandler(handler: UserInputHandler option) =
+        userInputHandler <- handler
+
+    /// Answer a `userInput.request` with the registered handler. The request carries
+    /// ImageAttachmentConstraints, RequestId and Meta when the runtime sends them.
+    member internal _.HandleUserInputRequestAsync(request: UserInputRequest) : Async<UserInputResponse> = async {
+        match userInputHandler with
+        | Some handler -> return! handler request
+        | None -> return raise (InvalidOperationException("User input requested but no handler registered"))
+    }
 
     /// Answer a `shellAuthentication.request`. Returns ShellAuthenticationCancel
     /// when no handler is registered, the request id is already pending, the

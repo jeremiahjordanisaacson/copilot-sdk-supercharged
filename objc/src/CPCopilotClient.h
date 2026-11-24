@@ -108,6 +108,55 @@ NS_ASSUME_NONNULL_BEGIN
 /// session fetches them again.
 - (void)clearManagedSettingsCacheWithCompletion:(void (^)(NSError * _Nullable error))completion;
 
+#pragma mark - MCP Secrets / Plugin Extension Approvals (Copilot CLI 1.0.116 or newer)
+
+/// Saves a legacy MCP configuration credential in the runtime-owned secret store
+/// (`mcp.secrets.save`). `value` is a credential: it is sent to the runtime and never logged.
+/// `configDir` selects the configuration directory (the runtime's default when nil). The result's
+/// `usedKeychain` is YES when the OS keychain stored the credential, NO for the file backend.
+/// Requires Copilot CLI 1.0.116 or newer; older runtimes fail with a method-not-found error.
+- (void)mcpSecretsSave:(NSString *)secretId
+                 value:(NSString *)value
+             configDir:(nullable NSString *)configDir
+            completion:(void (^)(CPMcpSecretsSaveResult * _Nullable result,
+                                 NSError * _Nullable error))completion;
+
+/// Deletes a legacy MCP configuration credential from the runtime-owned secret store
+/// (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+- (void)mcpSecretsDelete:(NSString *)secretId
+               configDir:(nullable NSString *)configDir
+              completion:(void (^)(NSError * _Nullable error))completion;
+
+/// Deletes every legacy credential indexed for an MCP server (`mcp.secrets.deleteServer`).
+/// Requires Copilot CLI 1.0.116 or newer.
+- (void)mcpSecretsDeleteServer:(NSString *)serverName
+                     configDir:(nullable NSString *)configDir
+                    completion:(void (^)(NSError * _Nullable error))completion;
+
+/// Persists a pending plugin extension permission request as a user-scoped approval, before
+/// the host answers that request normally (`permissions.extensionApprovals.grant`).
+/// Requires Copilot CLI 1.0.116 or newer.
+- (void)extensionApprovalsGrantForSession:(NSString *)sessionId
+                                requestId:(NSString *)requestId
+                               completion:(void (^)(CPPermissionsExtensionApprovalsGrantResult * _Nullable result,
+                                                    NSError * _Nullable error))completion;
+
+/// Lists the user-scoped plugin extension approvals (`permissions.extensionApprovals.list`).
+/// `sessionId` selects an attached session's configuration profile (the server's when nil).
+/// Requires Copilot CLI 1.0.116 or newer.
+- (void)extensionApprovalsListForSession:(nullable NSString *)sessionId
+                              completion:(void (^)(CPPermissionsExtensionApprovalsListResult * _Nullable result,
+                                                   NSError * _Nullable error))completion;
+
+/// Revokes one user-scoped plugin extension approval (`permissions.extensionApprovals.revoke`).
+/// Pass the approval's `extensionName` and `installationKey` unchanged; `sessionId` selects an
+/// attached session's configuration profile. Requires Copilot CLI 1.0.116 or newer.
+- (void)extensionApprovalsRevoke:(NSString *)extensionName
+                 installationKey:(NSString *)installationKey
+                       sessionId:(nullable NSString *)sessionId
+                      completion:(void (^)(CPPermissionsExtensionApprovalsRevokeResult * _Nullable result,
+                                           NSError * _Nullable error))completion;
+
 @end
 
 NS_ASSUME_NONNULL_END

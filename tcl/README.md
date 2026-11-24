@@ -62,6 +62,46 @@ puts "Response: [dict get $response content]"
 ::copilot::client::stop $client
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The MCP secret store and plugin extension
+approval procs are server-scoped client calls that require Copilot CLI **1.0.116 or newer**; older
+CLIs answer with a JSON-RPC method-not-found error, raised like any other RPC error.
+
+- **MCP secret store**: `::copilot::client::mcp_secrets_save $client secret_id value ?config_dir?` returns a dict whose `used_keychain` is 1 when the OS keychain stored the credential (0 for the file backend). `::copilot::client::mcp_secrets_delete $client secret_id ?config_dir?` and `::copilot::client::mcp_secrets_delete_server $client server_name ?config_dir?` remove credentials. The value is a credential: the SDK never logs it.
+- **Plugin extension approvals**: `::copilot::client::extension_approvals_grant $client session_id request_id` persists a pending extension permission request before you answer it and returns a dict with `granted` and `approval`. `::copilot::client::extension_approvals_list $client ?session_id?` returns a dict whose `approvals` is a list of approval dicts (`extension_name`, `plugin_name`, `capabilities`, `granted_at`, `installation_key`, `installation_label`; see `::copilot::types::make_permissions_extension_approval`). `::copilot::client::extension_approvals_revoke $client extension_name installation_key ?session_id?` returns a dict with `revoked`.
+- **Ask-user image attachments**: the new `on_user_input_request` session option answers `userInput.request` (the `ask_user` tool). The handler gets a request dict (`question`, `choices`, `allow_freeform`, `request_id`, `image_attachment_constraints`, and `meta`, the request's opaque `_meta`) and a context dict (`session_id`). `image_attachment_constraints` is a dict with `allowed_mime_types`, `max_bytes_per_image`, and `max_count`, or `""` when the runtime does not accept images. Return a `::copilot::types::make_user_input_response` dict (`answer`, `was_freeform`, `attachments`) whose images are built with `::copilot::types::make_user_input_image_attachment` (`data` in base64, `mime_type`, optional `description` and `display_name`; the wire `type` is always `"image"`). `attachments` is sent only when non-empty, and the runtime enforces the limits. A plain string is sent as a freeform answer.
+- Elicitation `requestId` / `_meta` passthrough is not available in this SDK: the `elicitation_handler` option only advertises elicitation support, and elicitation requests are not dispatched to it.
+
+```tcl
+proc answer_question {request context} {
+    set limits [dict get $request image_attachment_constraints]
+    if {$limits ne "" && "image/png" in [dict get $limits allowed_mime_types]} {
+        set fh [open screenshot.png rb]
+        set png [read $fh]
+        close $fh
+        return [::copilot::types::make_user_input_response answer "" was_freeform 1 \
+            attachments [list [::copilot::types::make_user_input_image_attachment \
+                data [binary encode base64 $png] mime_type image/png display_name screenshot.png]]]
+    }
+    return [::copilot::types::make_user_input_response answer "No screenshot available" was_freeform 1]
+}
+set session [::copilot::client::create_session $client on_user_input_request answer_question]
+
+set saved [::copilot::client::mcp_secrets_save $client my-server-token $::env(MY_SERVER_TOKEN)]
+puts "Stored in the OS keychain: [dict get $saved used_keychain]"
+::copilot::client::mcp_secrets_delete_server $client my-server
+
+# request_id is the requestId of a pending extension permission request (from its
+# permission.requested event): persist it, then answer the request as usual.
+set sid [dict get [::copilot::session::session_info $session] session_id]
+set grant [::copilot::client::extension_approvals_grant $client $sid $request_id]
+foreach approval [dict get [::copilot::client::extension_approvals_list $client] approvals] {
+    ::copilot::client::extension_approvals_revoke $client \
+        [dict get $approval extension_name] [dict get $approval installation_key]
+}
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older

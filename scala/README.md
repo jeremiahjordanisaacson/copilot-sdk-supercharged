@@ -67,6 +67,73 @@ Await.result(session.destroy(), 10.seconds)
 client.stop()
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error, which fails the returned `Future` with a `JsonRpcException` like any other
+RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store
+(`mcp.secrets.save`, `mcp.secrets.delete`, `mcp.secrets.deleteServer`). The secret value is never
+logged. Each method takes an optional `configDir` (None selects the runtime's default).
+
+```scala
+client.mcpSecretsSave("my-server-token", sys.env("MY_SERVER_TOKEN")).foreach { saved =>
+  println(if saved.usedKeychain then "Stored in the OS keychain" else "Stored in the file backend")
+}
+
+client.mcpSecretsDelete("my-server-token")
+client.mcpSecretsDeleteServer("my-server")   // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`permissions.extensionApprovals.grant`, `list` and `revoke`). `extensionApprovalsList` and
+`extensionApprovalsRevoke` take an optional `sessionId` to use an attached session's configuration
+profile.
+
+```scala
+// Persist a pending extension permission request (its requestId) before answering it normally
+client.extensionApprovalsGrant(session.sessionId, requestId).foreach { grant =>
+  if grant.granted then grant.approval.foreach(a => println(s"Approved ${a.extensionName}"))
+}
+
+client.extensionApprovalsList().foreach(_.approvals.foreach { approval =>
+  // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+  client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey)
+    .foreach(result => if result.revoked then println(s"Revoked ${approval.extensionName}"))
+})
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, `UserInputRequest.imageAttachmentConstraints` carries
+`allowedMimeTypes`, `maxBytesPerImage` and `maxCount`; it is None otherwise. The request also exposes
+`requestId` and `meta` (the opaque `_meta` object) when the runtime sends them. Answer with
+`UserInputResponse(..., attachments = Some(List(...)))`, where each `UserInputImageAttachment` holds
+base64 `data`, a `mimeType`, and an optional `description` and `displayName` (the wire `type` is
+always `"image"`). Attachments are sent only when set; image-only answers use `answer = ""` and
+`wasFreeform = true`. The runtime enforces the limits.
+
+```scala
+SessionConfig(onUserInputRequest = Some((request, _) =>
+  Future.successful {
+    if request.imageAttachmentConstraints.exists(_.allowedMimeTypes.contains("image/png")) then
+      val bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("screenshot.png"))
+      val image = UserInputImageAttachment(
+        data = java.util.Base64.getEncoder.encodeToString(bytes),
+        mimeType = "image/png",
+        displayName = Some("screenshot.png")
+      )
+      UserInputResponse(answer = "", wasFreeform = true, attachments = Some(List(image)))
+    else UserInputResponse(answer = "No screenshot available", wasFreeform = true)
+  }))
+```
+
 ## What's New in v3.0.0
 
 This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
@@ -258,6 +325,12 @@ val client = CopilotClient(CopilotClientOptions(
 | `listModels(): Future[List[ModelInfo]]` | List available models (cached) |
 | `deleteSession(id): Future[Unit]` | Delete a session |
 | `listSessions(): Future[List[SessionMetadata]]` | List all sessions |
+| `mcpSecretsSave(secretId, value, configDir): Future[McpSecretsSaveResult]` | Save an MCP credential |
+| `mcpSecretsDelete(secretId, configDir): Future[Unit]` | Delete an MCP credential |
+| `mcpSecretsDeleteServer(serverName, configDir): Future[Unit]` | Delete the MCP credentials indexed for a server |
+| `extensionApprovalsGrant(sessionId, requestId): Future[PermissionsExtensionApprovalsGrantResult]` | Persist a pending plugin extension approval |
+| `extensionApprovalsList(sessionId): Future[PermissionsExtensionApprovalsListResult]` | List plugin extension approvals |
+| `extensionApprovalsRevoke(extensionName, installationKey, sessionId): Future[PermissionsExtensionApprovalsRevokeResult]` | Revoke a plugin extension approval |
 
 ### CopilotSession
 

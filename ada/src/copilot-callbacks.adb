@@ -13,6 +13,7 @@ package body Copilot.Callbacks is
       Store_Memory      : Memory_Store_Handler_Access := null;
       On_Subagent_Start : Subagent_Start_Hook_Access := null;
       On_Subagent_Stop  : Subagent_Stop_Hook_Access := null;
+      User_Input        : User_Input_Handler := null;
    end record;
 
    package Session_Maps is new Ada.Containers.Indefinite_Hashed_Maps
@@ -49,7 +50,8 @@ package body Copilot.Callbacks is
       Shell_Auth        : Shell_Authentication_Handler_Access;
       Store_Memory      : Memory_Store_Handler_Access;
       On_Subagent_Start : Subagent_Start_Hook_Access;
-      On_Subagent_Stop  : Subagent_Stop_Hook_Access) is
+      On_Subagent_Stop  : Subagent_Stop_Hook_Access;
+      User_Input        : User_Input_Handler := null) is
    begin
       if Session_Id'Length = 0 then
          return;
@@ -59,7 +61,8 @@ package body Copilot.Callbacks is
          (Shell_Auth        => Shell_Auth,
           Store_Memory      => Store_Memory,
           On_Subagent_Start => On_Subagent_Start,
-          On_Subagent_Stop  => On_Subagent_Stop));
+          On_Subagent_Stop  => On_Subagent_Stop,
+          User_Input        => User_Input));
    end Register_Session;
 
    procedure Unregister_Session (Session_Id : String) is
@@ -68,6 +71,22 @@ package body Copilot.Callbacks is
          Sessions.Delete (Session_Id);
       end if;
    end Unregister_Session;
+
+   procedure Set_User_Input_Handler
+     (Session_Id : String;
+      Handler    : User_Input_Handler)
+   is
+      Callbacks : Session_Callbacks;
+   begin
+      if Session_Id'Length = 0 then
+         return;
+      end if;
+      if Sessions.Contains (Session_Id) then
+         Callbacks := Sessions.Element (Session_Id);
+      end if;
+      Callbacks.User_Input := Handler;
+      Sessions.Include (Session_Id, Callbacks);
+   end Set_User_Input_Handler;
 
    procedure Register_Token_Provider
      (Registration_Id : String;
@@ -226,6 +245,79 @@ package body Copilot.Callbacks is
       return "{}";
    end Invoke_Hook;
 
+   --  Wire form of an ask_user answer: answer, wasFreeform and, only when
+   --  images were attached, attachments (each {"type":"image",...}).
+   function User_Input_Reply (Reply : User_Input_Response) return String is
+      Json           : Unbounded_String :=
+        U ("{""answer"":" & Quote (To_String (Reply.Answer))
+           & ",""wasFreeform"":"
+           & (if Reply.Was_Freeform then "true" else "false"));
+      Is_First_Image : Boolean := True;
+   begin
+      if not Reply.Attachments.Is_Empty then
+         Append (Json, ",""attachments"":[");
+         for Image_Attachment of Reply.Attachments loop
+            if not Is_First_Image then
+               Append (Json, ",");
+            end if;
+            Is_First_Image := False;
+            Append (Json, "{""type"":""image"",""data"":"
+                          & Quote (To_String (Image_Attachment.Data))
+                          & ",""mimeType"":"
+                          & Quote (To_String (Image_Attachment.Mime_Type)));
+            if Length (Image_Attachment.Description) > 0 then
+               Append (Json, ",""description"":"
+                             & Quote (To_String (Image_Attachment.Description)));
+            end if;
+            if Length (Image_Attachment.Display_Name) > 0 then
+               Append (Json, ",""displayName"":"
+                             & Quote (To_String (Image_Attachment.Display_Name)));
+            end if;
+            Append (Json, "}");
+         end loop;
+         Append (Json, "]");
+      end if;
+      Append (Json, "}");
+      return To_String (Json);
+   end User_Input_Reply;
+
+   --  Answer a userInput.request (ask_user) with the session's handler.  The
+   --  request's imageAttachmentConstraints, requestId and _meta are passed
+   --  through.
+   function Ask_User
+     (Params    : String;
+      Callbacks : Session_Callbacks;
+      Error     : in out Unbounded_String) return String
+   is
+      Constraints : constant String :=
+        Member (Params, "imageAttachmentConstraints");
+      Request     : User_Input_Request;
+   begin
+      if Callbacks.User_Input = null then
+         Error := U ("User input requested but no handler registered");
+         return "";
+      end if;
+
+      Request.Question       := U (String_Member (Params, "question"));
+      Request.Session_Id     := U (String_Member (Params, "sessionId"));
+      Request.Choices_Json   := U (Member (Params, "choices"));
+      Request.Allow_Freeform := Member (Params, "allowFreeform") /= "false";
+      Request.Request_Id     := U (String_Member (Params, "requestId"));
+      Request.Meta_Json      := U (Member (Params, "_meta"));
+      if Constraints'Length > 0 and then Constraints (Constraints'First) = '{'
+      then
+         Request.Image_Attachment_Constraints :=
+           (Present                 => True,
+            Allowed_Mime_Types_Json =>
+              U (Member (Constraints, "allowedMimeTypes")),
+            Max_Bytes_Per_Image     =>
+              Natural_Member (Constraints, "maxBytesPerImage"),
+            Max_Count               =>
+              Natural_Member (Constraints, "maxCount"));
+      end if;
+      return User_Input_Reply (Callbacks.User_Input.all (Request));
+   end Ask_User;
+
    function Network_Reply (Method : String; Params : String) return String is
    begin
       if Method = "network.resolveProxy"
@@ -323,6 +415,9 @@ package body Copilot.Callbacks is
 
       elsif Method = "hooks.invoke" then
          Result := U (Invoke_Hook (Params, Callbacks));
+
+      elsif Method = "userInput.request" then
+         Result := U (Ask_User (Params, Callbacks, Error));
 
       elsif Method = "network.resolveProxy"
         or else Method = "network.authenticateNegotiate"

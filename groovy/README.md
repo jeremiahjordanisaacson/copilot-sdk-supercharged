@@ -59,6 +59,72 @@ try {
 }
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new `CopilotClient` methods below call
+server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC
+method-not-found error that surfaces like any other RPC error
+(`JsonRpcClient.isMethodNotFound(e, 'mcp.secrets.save')` returns true).
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret
+value is never logged. Each method takes an optional `configDir` (the runtime's default when omitted).
+
+```groovy
+McpSecretsSaveResult saved = client.mcpSecretsSave('my-server-token', System.getenv('MY_SERVER_TOKEN'))
+println(saved.usedKeychain ? 'Stored in the OS keychain' : 'Stored in the file backend')
+
+client.mcpSecretsDelete('my-server-token')       // mcp.secrets.delete
+client.mcpSecretsDeleteServer('my-server')       // mcp.secrets.deleteServer: every credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions
+(`PermissionsExtensionApproval`: `extensionName`, `pluginName`, `capabilities`, `grantedAt`,
+`installationKey`, `installationLabel`). `extensionApprovalsList` and `extensionApprovalsRevoke`
+take an optional `sessionId` to use an attached session's configuration profile.
+
+```groovy
+// Persist a pending extension permission request before answering it normally
+def grant = client.extensionApprovalsGrant(session.sessionId, requestId)
+if (grant.granted) println "Approved ${grant.approval.extensionName}"
+
+client.extensionApprovalsList().approvals.each { PermissionsExtensionApproval approval ->
+    client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey)
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the `UserInputRequest` passed to `onUserInputRequest`
+carries `imageAttachmentConstraints` (`UserInputImageAttachmentConstraints`: `allowedMimeTypes`,
+`maxBytesPerImage`, `maxCount`); it is null otherwise. The request also exposes `requestId` and
+`meta` (the opaque `_meta` object) when sent. Answer with
+`new UserInputResponse(answer, wasFreeform, attachments)`, where `attachments` is a list of
+`UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`;
+the wire `type` is always `'image'`) that is sent only when set. Image-only answers use an empty
+`answer` with `wasFreeform` true; the runtime enforces the limits.
+
+```groovy
+def session = client.createSession(onUserInputRequest: { UserInputRequest request, String sessionId ->
+    if (request.imageAttachmentConstraints?.allowedMimeTypes?.contains('image/png')) {
+        def image = new UserInputImageAttachment(
+            data: new File('screenshot.png').bytes.encodeBase64().toString(),
+            mimeType: 'image/png',
+            displayName: 'screenshot.png')
+        new UserInputResponse('', true, [image])
+    } else {
+        new UserInputResponse('No screenshot available', true)
+    }
+})
+```
+
+Elicitation handlers (`onElicitationRequest`) now also receive the pending `requestId` and the
+request's opaque `meta` (`_meta`) on `ElicitationContext`; set `ElicitationResult.meta` to send
+`_meta` back unchanged.
+
 ## What's New in v3.0.0
 
 This release moves the SDK to **SDK protocol 4** (the protocol of upstream SDK 2.0).
@@ -397,6 +463,12 @@ def client = new CopilotClient(
 | `getStatus()` | Get CLI status |
 | `getAuthStatus()` | Get auth status |
 | `clearManagedSettingsCache()` | Clear cached enterprise managed settings |
+| `mcpSecretsSave(secretId, value, configDir)` | Save an MCP credential (`mcp.secrets.save`); returns `McpSecretsSaveResult` |
+| `mcpSecretsDelete(secretId, configDir)` | Delete an MCP credential (`mcp.secrets.delete`) |
+| `mcpSecretsDeleteServer(serverName, configDir)` | Delete a server's MCP credentials (`mcp.secrets.deleteServer`) |
+| `extensionApprovalsGrant(sessionId, requestId)` | Persist a pending plugin extension approval (`permissions.extensionApprovals.grant`) |
+| `extensionApprovalsList(sessionId)` | List plugin extension approvals (`permissions.extensionApprovals.list`) |
+| `extensionApprovalsRevoke(extensionName, installationKey, sessionId)` | Revoke a plugin extension approval (`permissions.extensionApprovals.revoke`) |
 | `on(handler)` | Subscribe to lifecycle events |
 | `on(type, handler)` | Subscribe to specific lifecycle event |
 

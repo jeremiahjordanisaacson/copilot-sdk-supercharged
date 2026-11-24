@@ -393,12 +393,51 @@ typedef NS_ENUM(NSInteger, CPRemoteSessionMode) {
 
 #pragma mark - User Input Types
 
+/// Image support advertised by a `userInput.request` (`CPUserInputRequest.imageAttachmentConstraints`).
+/// Absent (nil) when the runtime does not accept images in the answer.
+@interface CPUserInputImageAttachmentConstraints : NSObject
+
+/// MIME types accepted by the request.
+@property (nonatomic, copy, readonly) NSArray<NSString *> *allowedMimeTypes;
+/// Maximum decoded byte length of each image.
+@property (nonatomic, assign, readonly) NSInteger maxBytesPerImage;
+/// Maximum number of images accepted in one answer.
+@property (nonatomic, assign, readonly) NSInteger maxCount;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// An inline image attached to an ask_user answer (`CPUserInputResponse.attachments`).
+/// The wire `type` is always "image".
+@interface CPUserInputImageAttachment : NSObject
+
+/// Base64-encoded image bytes, without a data URL prefix.
+@property (nonatomic, copy) NSString *data;
+/// MIME type of the image, matching one of the request's `allowedMimeTypes`.
+@property (nonatomic, copy) NSString *mimeType;
+/// Optional description of the image (wire `description`).
+@property (nonatomic, copy, nullable) NSString *imageDescription;
+/// Optional client-facing name of the image.
+@property (nonatomic, copy, nullable) NSString *displayName;
+
++ (instancetype)attachmentWithData:(NSString *)data mimeType:(NSString *)mimeType;
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
 /// Request for user input from the agent.
 @interface CPUserInputRequest : NSObject
 
 @property (nonatomic, copy, nullable) NSString *question;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *choices;
 @property (nonatomic, strong, nullable) NSNumber *allowFreeform;
+/// Runtime ID of the pending request, when the runtime sends it.
+@property (nonatomic, copy, nullable) NSString *requestId;
+/// Image support advertised by the runtime; nil when the answer cannot carry images.
+@property (nonatomic, strong, nullable) CPUserInputImageAttachmentConstraints *imageAttachmentConstraints;
+/// The request's opaque `_meta` object, forwarded unchanged when the runtime sends it.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *meta;
 
 - (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
 
@@ -409,10 +448,20 @@ typedef NS_ENUM(NSInteger, CPRemoteSessionMode) {
 
 @property (nonatomic, copy) NSString *answer;
 @property (nonatomic, assign) BOOL wasFreeform;
+/// Images attached to the answer, sent only when set. Only valid when the request advertised
+/// `imageAttachmentConstraints`; the runtime enforces the advertised limits. Image-only
+/// answers use an empty `answer` and `wasFreeform = YES`.
+@property (nonatomic, copy, nullable) NSArray<CPUserInputImageAttachment *> *attachments;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 
 @end
+
+/// Answers the agent's ask_user questions (`userInput.request`). Call `completion` with nil to
+/// fail the request.
+typedef void (^CPUserInputHandler)(CPUserInputRequest *request,
+                                   NSString *sessionId,
+                                   void (^completion)(CPUserInputResponse * _Nullable response));
 
 #pragma mark - Response Format
 
@@ -802,6 +851,57 @@ typedef void (^CPNetworkAuthenticateBasicHandler)(CPNetworkBasicAuthRequest *req
 + (nullable instancetype)failureFromError:(nullable NSError *)error;
 @end
 
+#pragma mark - v3.1.0 Types (Microsoft Copilot SDK 2.0.3-preview.0 parity)
+
+/// Result of `-[CPCopilotClient mcpSecretsSave:value:configDir:completion:]` (`mcp.secrets.save`).
+@interface CPMcpSecretsSaveResult : NSObject
+/// YES when the OS keychain stored the credential, NO for the file backend.
+@property (nonatomic, assign, readonly) BOOL usedKeychain;
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+@end
+
+/// A user-scoped approval for one installed plugin extension.
+@interface CPPermissionsExtensionApproval : NSObject
+/// Stable identity, for example "plugin:plugin-name:extension-name".
+@property (nonatomic, copy, readonly) NSString *extensionName;
+/// Name of the plugin that contributes the extension.
+@property (nonatomic, copy, readonly) NSString *pluginName;
+/// Exact privileged capabilities the user approved.
+@property (nonatomic, copy, readonly) NSArray<NSString *> *capabilities;
+/// When the approval was granted (RFC 3339 timestamp).
+@property (nonatomic, copy, readonly) NSString *grantedAt;
+/// Opaque installation key; pass it back unchanged to revoke the approval.
+@property (nonatomic, copy, readonly) NSString *installationKey;
+/// Human-readable installation label, when known.
+@property (nonatomic, copy, readonly, nullable) NSString *installationLabel;
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+@end
+
+/// Result of `-[CPCopilotClient extensionApprovalsGrantForSession:requestId:completion:]`
+/// (`permissions.extensionApprovals.grant`).
+@interface CPPermissionsExtensionApprovalsGrantResult : NSObject
+/// YES when the pending request was eligible and its approval was persisted.
+@property (nonatomic, assign, readonly) BOOL granted;
+/// The stored approval, when one was persisted.
+@property (nonatomic, strong, readonly, nullable) CPPermissionsExtensionApproval *approval;
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+@end
+
+/// Result of `-[CPCopilotClient extensionApprovalsListForSession:completion:]`
+/// (`permissions.extensionApprovals.list`).
+@interface CPPermissionsExtensionApprovalsListResult : NSObject
+@property (nonatomic, copy, readonly) NSArray<CPPermissionsExtensionApproval *> *approvals;
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+@end
+
+/// Result of `-[CPCopilotClient extensionApprovalsRevoke:installationKey:sessionId:completion:]`
+/// (`permissions.extensionApprovals.revoke`).
+@interface CPPermissionsExtensionApprovalsRevokeResult : NSObject
+/// YES when a matching approval was revoked.
+@property (nonatomic, assign, readonly) BOOL revoked;
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+@end
+
 #pragma mark - Session Event
 
 /// An event received from the session.
@@ -1042,6 +1142,12 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) CPShellAuthenticationHandler onShellAuthentication;
 /// Persists memories the agent stores (`memoryStore.store`).
 @property (nonatomic, copy, nullable) CPMemoryStoreHandler onMemoryStore;
+
+// --- v3.1.0 session options ---
+/// Answers the agent's ask_user questions (`userInput.request`); setting it enables the
+/// ask_user tool (`requestUserInput`). The request carries `imageAttachmentConstraints` when
+/// the answer may include image `attachments`.
+@property (nonatomic, copy, nullable) CPUserInputHandler userInputHandler;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 

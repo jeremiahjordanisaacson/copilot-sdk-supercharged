@@ -66,6 +66,8 @@ module copilot_session_module
     procedure(shell_authentication_handler_interface), pointer, nopass :: on_shell_authentication_request => null()
     !> Memory store callback (memoryStore.store).
     procedure(store_memory_handler_interface), pointer, nopass :: on_store_memory => null()
+    !> Ask-user handler (userInput.request).
+    procedure(user_input_handler_interface), pointer, nopass :: on_user_input_request => null()
     !> The client's network callbacks, so network.* requests are answered while waiting.
     type(network_options) :: network
     !> Shell authentication request ids cancelled by the runtime (newline separated).
@@ -188,7 +190,7 @@ contains
 
   !> Send a message and block until session.idle is received.
   !! Server-to-client requests that arrive while waiting (hooks, shell authentication,
-  !! memory store, GitHub token, network) are answered with the session's callbacks.
+  !! memory store, ask-user, GitHub token, network) are answered with the session's callbacks.
   subroutine session_send_and_wait(self, opts, result_out, timeout_ms)
     class(copilot_session_type), intent(inout) :: self
     type(send_options), intent(in) :: opts
@@ -483,6 +485,7 @@ contains
       self%on_subagent_stop => config%on_subagent_stop
       self%on_shell_authentication_request => config%on_shell_authentication_request
       self%on_store_memory => config%on_store_memory
+      self%on_user_input_request => config%on_user_input_request
     end if
     if (present(network)) self%network = network
     if (present(github_token_registration_id)) then
@@ -508,7 +511,7 @@ contains
 
   !> Compute the reply to a server-to-client request addressed to this session:
   !! gitHubToken.getToken, hooks.invoke, shellAuthentication.request,
-  !! shellAuthentication.cancel, memoryStore.store, and network.* callbacks.
+  !! shellAuthentication.cancel, memoryStore.store, userInput.request, and network.* callbacks.
   !! handled is .false. for other methods or requests for another session.
   !! On a callback failure error_text is set instead of result_json.
   subroutine session_answer_request(self, method, params, handled, result_json, error_text)
@@ -525,7 +528,7 @@ contains
 
     select case (method)
     case ('hooks.invoke', 'shellAuthentication.request', 'shellAuthentication.cancel', &
-          'memoryStore.store')
+          'memoryStore.store', 'userInput.request')
       target_session = json_get_string(params, 'sessionId', found)
       if (found .and. allocated(self%session_id)) then
         if (target_session /= self%session_id) then
@@ -549,6 +552,8 @@ contains
       result_json = '{}'
     case ('memoryStore.store')
       call answer_memory_store(self, params, result_json, error_text)
+    case ('userInput.request')
+      call answer_user_input(self, params, result_json, error_text)
     case default
       call network_request_result(self%network, method, params, handled, result_json, error_text)
     end select
@@ -810,6 +815,24 @@ contains
     result_json = 'null'
   end subroutine answer_memory_store
 
+  !> Answer userInput.request (ask_user) with the session's handler. The request carries
+  !! image_attachment_constraints (when the runtime accepts images), request_id, and meta_json.
+  subroutine answer_user_input(self, params, result_json, error_text)
+    class(copilot_session_type), intent(inout) :: self
+    character(len=*), intent(in) :: params
+    character(len=:), allocatable, intent(inout) :: result_json, error_text
+    type(user_input_request) :: request
+    type(user_input_response) :: response
+
+    if (.not. associated(self%on_user_input_request)) then
+      error_text = 'No user input handler is registered for session ' // self%session_id
+      return
+    end if
+    call parse_user_input_request(params, request)
+    response = self%on_user_input_request(request)
+    result_json = user_input_response_json(response)
+  end subroutine answer_user_input
+
   !> Send a request for this session and read its response; a JSON-RPC error is reported
   !! as iostat = COPILOT_IOSTAT_RPC_ERROR with the message in self%last_error.
   subroutine session_request(self, method, params, response, iostat)
@@ -858,6 +881,7 @@ contains
     self%on_subagent_stop => null()
     self%on_shell_authentication_request => null()
     self%on_store_memory => null()
+    self%on_user_input_request => null()
   end subroutine release_session
 
   !> True for a JSON-RPC request (top-level method and id members).

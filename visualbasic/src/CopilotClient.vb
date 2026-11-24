@@ -295,7 +295,8 @@ Namespace GitHub.Copilot.SDK
             End If
 
             TrackSession(session, registrationId, cfg.OnSubagentStart, cfg.OnSubagentStop,
-                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory)
+                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory,
+                         ResolveUserInputHandler(cfg.OnUserInputRequest, cfg.OnUserInput))
             Return session
         End Function
 
@@ -344,7 +345,8 @@ Namespace GitHub.Copilot.SDK
                 cfg.OnSubagentStart IsNot Nothing OrElse cfg.OnSubagentStop IsNot Nothing,
                 registrationId, cfg.AvailableTools, cfg.ExcludedTools, cfg.Tools,
                 cfg.Providers, cfg.Models, cfg.DefaultProvider,
-                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing)
+                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing,
+                cfg.OnUserInputRequest IsNot Nothing OrElse cfg.OnUserInput IsNot Nothing)
 
             ' Resume-only options.
             If cfg.AllowTranscriptRecovery.HasValue Then
@@ -389,7 +391,8 @@ Namespace GitHub.Copilot.SDK
             End If
 
             TrackSession(session, registrationId, cfg.OnSubagentStart, cfg.OnSubagentStop,
-                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory)
+                         cfg.OnShellAuthenticationRequest, cfg.OnStoreMemory,
+                         ResolveUserInputHandler(cfg.OnUserInputRequest, cfg.OnUserInput))
             Return session
         End Function
 
@@ -400,6 +403,146 @@ Namespace GitHub.Copilot.SDK
             Await EnsureStartedAsync(cancellationToken)
             Await _rpcClient.InvokeAsync(Of Object)(
                 "managedSettings.clearCache", New Dictionary(Of String, Object)(), cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Saves a legacy MCP configuration credential in the runtime-owned secret store
+        ''' (<c>mcp.secrets.save</c>). Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="secretId">Identifier of the credential.</param>
+        ''' <param name="value">The credential. It is never logged.</param>
+        ''' <param name="configDir">Configuration directory (the runtime's default when Nothing).</param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        ''' <returns>
+        ''' A <see cref="McpSecretsSaveResult"/> whose <c>UsedKeychain</c> is True when the OS keychain
+        ''' stored the credential and False for the file backend.
+        ''' </returns>
+        Public Async Function McpSecretsSaveAsync(
+            secretId As String,
+            value As String,
+            Optional configDir As String = Nothing,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of McpSecretsSaveResult)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object) From {
+                {"secretId", secretId},
+                {"value", value}
+            }
+            If configDir IsNot Nothing Then request("configDir") = configDir
+            Dim result = Await _rpcClient.InvokeAsync(Of McpSecretsSaveResult)("mcp.secrets.save", request, cancellationToken)
+            Return If(result, New McpSecretsSaveResult())
+        End Function
+
+        ''' <summary>
+        ''' Deletes a legacy MCP configuration credential from the runtime-owned secret store
+        ''' (<c>mcp.secrets.delete</c>). Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="secretId">Identifier of the credential.</param>
+        ''' <param name="configDir">Configuration directory (the runtime's default when Nothing).</param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        Public Async Function McpSecretsDeleteAsync(
+            secretId As String,
+            Optional configDir As String = Nothing,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object) From {{"secretId", secretId}}
+            If configDir IsNot Nothing Then request("configDir") = configDir
+            Await _rpcClient.InvokeAsync(Of Object)("mcp.secrets.delete", request, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Deletes the legacy MCP configuration credentials indexed for a server
+        ''' (<c>mcp.secrets.deleteServer</c>). Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="serverName">The MCP server name.</param>
+        ''' <param name="configDir">Configuration directory (the runtime's default when Nothing).</param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        Public Async Function McpSecretsDeleteServerAsync(
+            serverName As String,
+            Optional configDir As String = Nothing,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object) From {{"serverName", serverName}}
+            If configDir IsNot Nothing Then request("configDir") = configDir
+            Await _rpcClient.InvokeAsync(Of Object)("mcp.secrets.deleteServer", request, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Persists a pending plugin extension permission request as a user-scoped approval, before
+        ''' the host answers that request normally (<c>permissions.extensionApprovals.grant</c>).
+        ''' Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="sessionId">Session that owns the pending request.</param>
+        ''' <param name="requestId">Id of the pending extension permission request.</param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        ''' <returns>Whether the request was eligible and persisted, and the stored approval.</returns>
+        Public Async Function ExtensionApprovalsGrantAsync(
+            sessionId As String,
+            requestId As String,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of PermissionsExtensionApprovalsGrantResult)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object) From {
+                {"sessionId", sessionId},
+                {"requestId", requestId}
+            }
+            Dim result = Await _rpcClient.InvokeAsync(Of PermissionsExtensionApprovalsGrantResult)(
+                "permissions.extensionApprovals.grant", request, cancellationToken)
+            Return If(result, New PermissionsExtensionApprovalsGrantResult())
+        End Function
+
+        ''' <summary>
+        ''' Lists the user-scoped plugin extension approvals (<c>permissions.extensionApprovals.list</c>).
+        ''' Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="sessionId">
+        ''' Attached session whose configuration profile to list (the server's profile when Nothing).
+        ''' </param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        Public Async Function ExtensionApprovalsListAsync(
+            Optional sessionId As String = Nothing,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of PermissionsExtensionApprovalsListResult)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object)
+            If sessionId IsNot Nothing Then request("sessionId") = sessionId
+            Dim result = Await _rpcClient.InvokeAsync(Of PermissionsExtensionApprovalsListResult)(
+                "permissions.extensionApprovals.list", request, cancellationToken)
+            Return If(result, New PermissionsExtensionApprovalsListResult())
+        End Function
+
+        ''' <summary>
+        ''' Revokes one user-scoped plugin extension approval (<c>permissions.extensionApprovals.revoke</c>).
+        ''' Requires Copilot CLI 1.0.116 or newer.
+        ''' </summary>
+        ''' <param name="extensionName">The approval's <c>ExtensionName</c>.</param>
+        ''' <param name="installationKey">The approval's <c>InstallationKey</c>, unchanged.</param>
+        ''' <param name="sessionId">Attached session whose configuration profile to use (optional).</param>
+        ''' <param name="cancellationToken">Cancellation token.</param>
+        ''' <returns>Whether a matching approval was revoked.</returns>
+        Public Async Function ExtensionApprovalsRevokeAsync(
+            extensionName As String,
+            installationKey As String,
+            Optional sessionId As String = Nothing,
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of PermissionsExtensionApprovalsRevokeResult)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim request As New Dictionary(Of String, Object) From {
+                {"extensionName", extensionName},
+                {"installationKey", installationKey}
+            }
+            If sessionId IsNot Nothing Then request("sessionId") = sessionId
+            Dim result = Await _rpcClient.InvokeAsync(Of PermissionsExtensionApprovalsRevokeResult)(
+                "permissions.extensionApprovals.revoke", request, cancellationToken)
+            Return If(result, New PermissionsExtensionApprovalsRevokeResult())
         End Function
 
         ''' <summary>
@@ -745,7 +888,8 @@ Namespace GitHub.Copilot.SDK
                 cfg.OnSubagentStart IsNot Nothing OrElse cfg.OnSubagentStop IsNot Nothing,
                 tokenProviderRegistrationId, cfg.AvailableTools, cfg.ExcludedTools, cfg.Tools,
                 cfg.Providers, cfg.Models, cfg.DefaultProvider,
-                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing)
+                cfg.OnShellAuthenticationRequest IsNot Nothing, cfg.OnStoreMemory IsNot Nothing,
+                cfg.OnUserInputRequest IsNot Nothing OrElse cfg.OnUserInput IsNot Nothing)
 
             ' Create-only options.
             If Not String.IsNullOrEmpty(cfg.Name) Then
@@ -791,7 +935,8 @@ Namespace GitHub.Copilot.SDK
             models As List(Of ProviderModelConfig),
             defaultProvider As String,
             hasShellAuthentication As Boolean,
-            hasMemoryStore As Boolean)
+            hasMemoryStore As Boolean,
+            hasUserInput As Boolean)
 
             ' autoTier, enableWebSocketResponses and enabled share "capi" (github.capi on the wire).
             Dim capi As New Dictionary(Of String, Object)
@@ -825,6 +970,7 @@ Namespace GitHub.Copilot.SDK
             If Not String.IsNullOrEmpty(defaultProvider) Then request("defaultProvider") = defaultProvider
             If hasShellAuthentication Then request("requestShellAuthentication") = True
             If hasMemoryStore Then request("hasMemoryStore") = True
+            If hasUserInput Then request("requestUserInput") = True
         End Sub
 
         ''' <summary>
@@ -875,7 +1021,8 @@ Namespace GitHub.Copilot.SDK
             onSubagentStart As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput)),
             onSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput)),
             onShellAuthentication As ShellAuthenticationHandler,
-            onStoreMemory As Func(Of StoredMemory, Task))
+            onStoreMemory As Func(Of StoredMemory, Task),
+            onUserInput As Func(Of UserInputRequest, Task(Of UserInputResponse)))
 
             Dim registration As GitHubTokenRegistration = Nothing
             If registrationId IsNot Nothing AndAlso _gitHubTokenProviders.TryGetValue(registrationId, registration) Then
@@ -884,6 +1031,7 @@ Namespace GitHub.Copilot.SDK
             session.SetSubagentHooks(onSubagentStart, onSubagentStop)
             session.SetShellAuthenticationHandler(onShellAuthentication)
             session.SetMemoryStoreHandler(onStoreMemory)
+            session.SetUserInputHandler(onUserInput)
             session.SetDetachedCallback(Sub()
                                             RemoveGitHubTokenProvider(registrationId)
                                             ' Only forget the session if a later create/resume did not replace it.
@@ -892,6 +1040,25 @@ Namespace GitHub.Copilot.SDK
                                         End Sub)
             _sessions(session.SessionId) = session
         End Sub
+
+        ''' <summary>
+        ''' Picks the session's user input handler: <c>OnUserInputRequest</c> when set, otherwise the
+        ''' answer-only <c>OnUserInput</c> adapted to a <see cref="UserInputResponse"/> (freeform unless
+        ''' the answer is one of the offered choices).
+        ''' </summary>
+        Private Shared Function ResolveUserInputHandler(
+            onUserInputRequest As Func(Of UserInputRequest, Task(Of UserInputResponse)),
+            onUserInput As Func(Of UserInputRequest, Task(Of String))) As Func(Of UserInputRequest, Task(Of UserInputResponse))
+
+            If onUserInputRequest IsNot Nothing OrElse onUserInput Is Nothing Then Return onUserInputRequest
+            Return Async Function(request As UserInputRequest) As Task(Of UserInputResponse)
+                       Dim answer = If(Await onUserInput(request), "")
+                       Return New UserInputResponse With {
+                           .Answer = answer,
+                           .WasFreeform = request.Choices Is Nothing OrElse Not request.Choices.Contains(answer)
+                       }
+                   End Function
+        End Function
 
         ' -----------------------------------------------------------------------
         '  Server-to-client requests
@@ -904,6 +1071,7 @@ Namespace GitHub.Copilot.SDK
             _rpcClient.OnRequest("shellAuthentication.request", AddressOf HandleShellAuthenticationRequestAsync)
             _rpcClient.OnRequest("shellAuthentication.cancel", AddressOf HandleShellAuthenticationCancelAsync)
             _rpcClient.OnRequest("memoryStore.store", AddressOf HandleMemoryStoreAsync)
+            _rpcClient.OnRequest("userInput.request", AddressOf HandleUserInputRequestAsync)
             If _options.Network IsNot Nothing Then
                 If _options.Network.ResolveProxy IsNot Nothing Then
                     _rpcClient.OnRequest("network.resolveProxy", AddressOf HandleResolveProxyAsync)
@@ -1009,6 +1177,23 @@ Namespace GitHub.Copilot.SDK
                 .Reason = If(ReadString(params, "reason"), "")
             })
             Return Nothing
+        End Function
+
+        ''' <summary>
+        ''' Answers <c>userInput.request</c> (the ask_user tool) with the session's user input handler.
+        ''' The request's <c>imageAttachmentConstraints</c>, <c>requestId</c> and <c>_meta</c> are passed
+        ''' through; the reply carries <c>attachments</c> only when the handler set them.
+        ''' </summary>
+        Private Async Function HandleUserInputRequestAsync(params As JsonElement) As Task(Of Object)
+            Dim sessionId = ReadString(params, "sessionId")
+            Dim session As CopilotSession = Nothing
+            If sessionId Is Nothing OrElse Not _sessions.TryGetValue(sessionId, session) Then
+                Throw New InvalidOperationException($"Session not found: {sessionId}")
+            End If
+            Dim request = JsonSerializer.Deserialize(Of UserInputRequest)(params.GetRawText())
+            If request.Prompt Is Nothing Then request.Prompt = request.Question
+            Dim response = Await session.HandleUserInputRequestAsync(request)
+            Return response.ToWire()
         End Function
 
         ''' <summary>Answers <c>network.resolveProxy</c> {url} with {proxy?}.</summary>

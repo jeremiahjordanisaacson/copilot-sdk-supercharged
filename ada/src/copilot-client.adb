@@ -335,6 +335,7 @@ package body Copilot.Client is
       Add_Flag ("requestShellAuthentication",
                 Config.On_Shell_Authentication /= null);
       Add_Flag ("hasMemoryStore", Config.On_Store_Memory /= null);
+      Add_Flag ("requestUserInput", Config.On_User_Input_Request /= null);
       return Params;
    end Build_Flat_Params;
 
@@ -370,7 +371,8 @@ package body Copilot.Client is
          Shell_Auth        => Config.On_Shell_Authentication,
          Store_Memory      => Config.On_Store_Memory,
          On_Subagent_Start => Config.On_Subagent_Start,
-         On_Subagent_Stop  => Config.On_Subagent_Stop);
+         On_Subagent_Stop  => Config.On_Subagent_Stop,
+         User_Input        => Config.On_User_Input_Request);
    end Register_Session_Callbacks;
 
    --  Decode error.data.policyHelperFailure from a JSON-RPC error object.
@@ -899,6 +901,141 @@ package body Copilot.Client is
    begin
       null;
    end Clear_Managed_Settings_Cache;
+
+   --  ,"configDir":... for the MCP secret store requests ("" = omitted).
+   function Config_Dir_Field (Config_Dir : String) return String is
+     (if Config_Dir'Length > 0
+      then ",""configDir"":" & Copilot.Wire.Quote (Config_Dir)
+      else "");
+
+   --  Decode one PermissionsExtensionApproval object.
+   function Parse_Extension_Approval
+     (Json : String) return Permissions_Extension_Approval
+   is
+      function S (Key : String) return UString is
+        (To_Unbounded_String (Copilot.Wire.String_Member (Json, Key)));
+   begin
+      return (Extension_Name     => S ("extensionName"),
+              Plugin_Name        => S ("pluginName"),
+              Capabilities_Json  =>
+                To_Unbounded_String (Copilot.Wire.Member (Json, "capabilities")),
+              Granted_At         => S ("grantedAt"),
+              Installation_Key   => S ("installationKey"),
+              Installation_Label => S ("installationLabel"));
+   end Parse_Extension_Approval;
+
+   function Mcp_Secrets_Save
+     (Self       : in out Copilot_Client;
+      Secret_Id  : String;
+      Value      : String;
+      Config_Dir : String := "") return Mcp_Secrets_Save_Result
+   is
+      Resp : constant String :=
+        Send_Request
+          (Self.Conn, "mcp.secrets.save",
+           "{""secretId"":" & Copilot.Wire.Quote (Secret_Id)
+           & ",""value"":" & Copilot.Wire.Quote (Value)
+           & Config_Dir_Field (Config_Dir) & "}");
+   begin
+      return (Used_Keychain =>
+                Copilot.Wire.Bool_Member
+                  (Copilot.Wire.Member (Resp, "result"), "usedKeychain"));
+   end Mcp_Secrets_Save;
+
+   procedure Mcp_Secrets_Delete
+     (Self       : in out Copilot_Client;
+      Secret_Id  : String;
+      Config_Dir : String := "")
+   is
+      Ignore : constant String :=
+        Send_Request
+          (Self.Conn, "mcp.secrets.delete",
+           "{""secretId"":" & Copilot.Wire.Quote (Secret_Id)
+           & Config_Dir_Field (Config_Dir) & "}");
+   begin
+      null;
+   end Mcp_Secrets_Delete;
+
+   procedure Mcp_Secrets_Delete_Server
+     (Self        : in out Copilot_Client;
+      Server_Name : String;
+      Config_Dir  : String := "")
+   is
+      Ignore : constant String :=
+        Send_Request
+          (Self.Conn, "mcp.secrets.deleteServer",
+           "{""serverName"":" & Copilot.Wire.Quote (Server_Name)
+           & Config_Dir_Field (Config_Dir) & "}");
+   begin
+      null;
+   end Mcp_Secrets_Delete_Server;
+
+   function Extension_Approvals_Grant
+     (Self       : in out Copilot_Client;
+      Session_Id : String;
+      Request_Id : String) return Permissions_Extension_Approvals_Grant_Result
+   is
+      Resp     : constant String :=
+        Send_Request
+          (Self.Conn, "permissions.extensionApprovals.grant",
+           "{""sessionId"":" & Copilot.Wire.Quote (Session_Id)
+           & ",""requestId"":" & Copilot.Wire.Quote (Request_Id) & "}");
+      Result   : constant String := Copilot.Wire.Member (Resp, "result");
+      Approval : constant String := Copilot.Wire.Member (Result, "approval");
+   begin
+      return (Granted  => Copilot.Wire.Bool_Member (Result, "granted"),
+              Approval =>
+                (if Approval'Length > 0 and then Approval (Approval'First) = '{'
+                 then Parse_Extension_Approval (Approval)
+                 else (others => <>)));
+   end Extension_Approvals_Grant;
+
+   function Extension_Approvals_List
+     (Self       : in out Copilot_Client;
+      Session_Id : String := "") return Permissions_Extension_Approval_List
+   is
+      Resp      : constant String :=
+        Send_Request
+          (Self.Conn, "permissions.extensionApprovals.list",
+           (if Session_Id'Length > 0
+            then "{""sessionId"":" & Copilot.Wire.Quote (Session_Id) & "}"
+            else "{}"));
+      Approvals : Permissions_Extension_Approval_List;
+
+      procedure Add (Value : String) is
+      begin
+         if Value'Length > 0 and then Value (Value'First) = '{' then
+            Approvals.Append (Parse_Extension_Approval (Value));
+         end if;
+      end Add;
+   begin
+      Copilot.Wire.For_Each_Element
+        (Copilot.Wire.Member (Copilot.Wire.Member (Resp, "result"), "approvals"),
+         Add'Access);
+      return Approvals;
+   end Extension_Approvals_List;
+
+   function Extension_Approvals_Revoke
+     (Self             : in out Copilot_Client;
+      Extension_Name   : String;
+      Installation_Key : String;
+      Session_Id       : String := "")
+      return Permissions_Extension_Approvals_Revoke_Result
+   is
+      Resp : constant String :=
+        Send_Request
+          (Self.Conn, "permissions.extensionApprovals.revoke",
+           "{""extensionName"":" & Copilot.Wire.Quote (Extension_Name)
+           & ",""installationKey"":" & Copilot.Wire.Quote (Installation_Key)
+           & (if Session_Id'Length > 0
+              then ",""sessionId"":" & Copilot.Wire.Quote (Session_Id)
+              else "")
+           & "}");
+   begin
+      return (Revoked =>
+                Copilot.Wire.Bool_Member
+                  (Copilot.Wire.Member (Resp, "result"), "revoked"));
+   end Extension_Approvals_Revoke;
 
    function Last_Policy_Helper_Failure
      (Self : Copilot_Client) return Policy_Helper_Failure is

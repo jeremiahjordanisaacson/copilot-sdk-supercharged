@@ -30,6 +30,7 @@ module CopilotSDK
     @trace_context_provider : TraceContextProvider?
     @hooks : SessionHooks?
     @shell_authentication_handler : ShellAuthenticationHandler?
+    @user_input_handler : UserInputHandler?
     @memory_store_handler : MemoryStoreHandler?
     @pending_shell_authentications : Hash(String, Channel(ShellAuthenticationResponse))
     @mutex : Mutex
@@ -44,6 +45,7 @@ module CopilotSDK
       @exit_plan_mode_handler = nil
       @hooks = nil
       @shell_authentication_handler = nil
+      @user_input_handler = nil
       @memory_store_handler = nil
       @pending_shell_authentications = {} of String => Channel(ShellAuthenticationResponse)
       @mutex = Mutex.new
@@ -360,6 +362,20 @@ module CopilotSDK
       @memory_store_handler = handler
     end
 
+    # Register the ask_user handler (called by CopilotClient).
+    def register_user_input_handler(handler : UserInputHandler?) : Nil
+      @user_input_handler = handler
+    end
+
+    # Answer a `userInput.request` with the registered handler. The request
+    # carries `image_attachment_constraints` when the runtime accepts image
+    # answers; the response's `attachments` are sent only when set.
+    def handle_user_input_request(request : UserInputRequest) : UserInputResponse
+      handler = @user_input_handler
+      raise CopilotError.new("User input requested but no handler registered") if handler.nil? || @destroyed
+      handler.call(request)
+    end
+
     # Store a memory with the registered handler (`memoryStore.store`).
     def handle_memory_store(memory : StoredMemory) : Nil
       handler = @memory_store_handler
@@ -436,6 +452,7 @@ module CopilotSDK
       end
       @hooks = nil
       @shell_authentication_handler = nil
+      @user_input_handler = nil
       @memory_store_handler = nil
       if close = @on_close
         @on_close = nil

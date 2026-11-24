@@ -97,3 +97,48 @@ val negotiated_protocol_version : t -> int option
 
 val mode : t -> string
 (** [mode t] is the client mode in effect: ["coding-agent"] or ["empty"]. *)
+
+(** {1 v3.1.0: MCP secret store and plugin extension approvals}
+
+    Server-scoped requests that require Copilot CLI 1.0.116 or newer. An older
+    runtime answers with a method-not-found [Jsonrpc.Jsonrpc_error], raised like
+    any other RPC error. *)
+
+val mcp_secrets_save :
+  ?config_dir:string -> t -> secret_id:string -> value:string ->
+  Types.mcp_secrets_save_result Lwt.t
+(** [mcp_secrets_save ?config_dir t ~secret_id ~value] saves a legacy MCP
+    configuration credential in the runtime-owned secret store
+    ([mcp.secrets.save]). [value] is a credential: it is sent to the runtime
+    and never logged. [config_dir] overrides the runtime's configuration root.
+    [mss_used_keychain] is [true] when the OS keychain stored the credential
+    and [false] for the file backend. *)
+
+val mcp_secrets_delete : ?config_dir:string -> t -> secret_id:string -> unit Lwt.t
+(** [mcp_secrets_delete ?config_dir t ~secret_id] deletes a legacy MCP
+    configuration credential ([mcp.secrets.delete]). *)
+
+val mcp_secrets_delete_server : ?config_dir:string -> t -> server_name:string -> unit Lwt.t
+(** [mcp_secrets_delete_server ?config_dir t ~server_name] deletes the legacy
+    credentials indexed for an MCP server ([mcp.secrets.deleteServer]). *)
+
+val extension_approvals_grant :
+  t -> session_id:string -> request_id:string ->
+  Types.permissions_extension_approvals_grant_result Lwt.t
+(** [extension_approvals_grant t ~session_id ~request_id] persists the pending
+    plugin extension permission request [request_id] of session [session_id]
+    as a user-scoped approval, before you answer that request normally
+    ([permissions.extensionApprovals.grant]). *)
+
+val extension_approvals_list :
+  ?session_id:string -> t -> Types.permissions_extension_approvals_list_result Lwt.t
+(** [extension_approvals_list ?session_id t] lists the user-scoped plugin
+    extension approvals ([permissions.extensionApprovals.list]); [session_id]
+    selects an attached session's configuration profile. *)
+
+val extension_approvals_revoke :
+  ?session_id:string -> t -> extension_name:string -> installation_key:string ->
+  Types.permissions_extension_approvals_revoke_result Lwt.t
+(** [extension_approvals_revoke ?session_id t ~extension_name ~installation_key]
+    revokes one approval ([permissions.extensionApprovals.revoke]). Pass the
+    approval's [pea_extension_name] and [pea_installation_key] unchanged. *)

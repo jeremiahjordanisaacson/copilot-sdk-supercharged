@@ -168,6 +168,19 @@ let register_server_handlers (t : t) (rpc : Jsonrpc.t) : unit =
         (match output with
          | Some value -> `Assoc [ ("output", value) ]
          | None -> `Assoc []));
+  (* ask_user: the request carries imageAttachmentConstraints (when the
+     runtime accepts images), requestId and _meta through to the handler. *)
+  Jsonrpc.register_handler rpc "userInput.request" (fun _method params ->
+    let open Lwt.Syntax in
+    match Types.user_input_request_of_yojson params with
+    | None -> Lwt.fail_with "Invalid user input request payload"
+    | Some request ->
+      (match Hashtbl.find_opt t.sessions request.Types.uir_session_id with
+       | None ->
+         Lwt.fail_with (Printf.sprintf "Session not found: %s" request.Types.uir_session_id)
+       | Some session ->
+         let* response = Session.handle_user_input_request session request in
+         Lwt.return (Types.user_input_response_to_yojson response)));
   Jsonrpc.register_handler rpc "shellAuthentication.request" (fun _method params ->
     let open Lwt.Syntax in
     let cancel = Types.shell_authentication_response_to_yojson Types.Shell_auth_cancel in
@@ -520,6 +533,88 @@ let policy_helper_failure (exn : exn) : Types.policy_helper_failure option =
 let negotiated_protocol_version (t : t) : int option = t.negotiated_protocol_version
 
 let mode (t : t) : string = t.mode
+
+(* ========================================================================== *)
+(* v3.1.0: MCP secret store and plugin extension approvals                    *)
+(* ========================================================================== *)
+
+(* [(key, `String value)] when [value] is set. *)
+let optional_member (key : string) (value : string option) : (string * Yojson.Safe.t) list =
+  match value with Some v -> [ (key, `String v) ] | None -> []
+
+(* Saves a legacy MCP configuration credential in the runtime-owned secret
+   store (mcp.secrets.save). [value] is a credential: it is sent to the
+   runtime and never logged. Requires Copilot CLI 1.0.116 or newer. *)
+let mcp_secrets_save ?config_dir (t : t) ~secret_id ~value
+    : Types.mcp_secrets_save_result Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params =
+    `Assoc
+      ([ ("secretId", `String secret_id); ("value", `String value) ]
+       @ optional_member "configDir" config_dir)
+  in
+  let* result = Jsonrpc.send_request rpc "mcp.secrets.save" params in
+  Lwt.return (Types.mcp_secrets_save_result_of_yojson result)
+
+(* Deletes a legacy MCP configuration credential (mcp.secrets.delete). *)
+let mcp_secrets_delete ?config_dir (t : t) ~secret_id : unit Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params =
+    `Assoc ([ ("secretId", `String secret_id) ] @ optional_member "configDir" config_dir)
+  in
+  let* _result = Jsonrpc.send_request rpc "mcp.secrets.delete" params in
+  Lwt.return_unit
+
+(* Deletes the legacy credentials indexed for an MCP server
+   (mcp.secrets.deleteServer). *)
+let mcp_secrets_delete_server ?config_dir (t : t) ~server_name : unit Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params =
+    `Assoc ([ ("serverName", `String server_name) ] @ optional_member "configDir" config_dir)
+  in
+  let* _result = Jsonrpc.send_request rpc "mcp.secrets.deleteServer" params in
+  Lwt.return_unit
+
+(* Persists a pending plugin extension permission request as a user-scoped
+   approval before the host answers it (permissions.extensionApprovals.grant). *)
+let extension_approvals_grant (t : t) ~session_id ~request_id
+    : Types.permissions_extension_approvals_grant_result Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params =
+    `Assoc [ ("sessionId", `String session_id); ("requestId", `String request_id) ]
+  in
+  let* result = Jsonrpc.send_request rpc "permissions.extensionApprovals.grant" params in
+  Lwt.return (Types.permissions_extension_approvals_grant_result_of_yojson result)
+
+(* Lists the user-scoped plugin extension approvals of the server profile, or
+   of an attached session's profile (permissions.extensionApprovals.list). *)
+let extension_approvals_list ?session_id (t : t)
+    : Types.permissions_extension_approvals_list_result Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = `Assoc (optional_member "sessionId" session_id) in
+  let* result = Jsonrpc.send_request rpc "permissions.extensionApprovals.list" params in
+  Lwt.return (Types.permissions_extension_approvals_list_result_of_yojson result)
+
+(* Revokes one user-scoped plugin extension approval
+   (permissions.extensionApprovals.revoke). *)
+let extension_approvals_revoke ?session_id (t : t) ~extension_name ~installation_key
+    : Types.permissions_extension_approvals_revoke_result Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params =
+    `Assoc
+      ([ ("extensionName", `String extension_name)
+       ; ("installationKey", `String installation_key)
+       ]
+       @ optional_member "sessionId" session_id)
+  in
+  let* result = Jsonrpc.send_request rpc "permissions.extensionApprovals.revoke" params in
+  Lwt.return (Types.permissions_extension_approvals_revoke_result_of_yojson result)
 
 (* ========================================================================== *)
 (* Server queries                                                             *)

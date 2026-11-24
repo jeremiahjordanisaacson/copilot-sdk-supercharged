@@ -367,6 +367,10 @@
                MOVE "requestShellAuthentication" TO WS-PB-KEY
                PERFORM PB-MEMBER-TRUE
            END-IF
+           IF WS-USER-INPUT-PGM NOT = SPACES
+               MOVE "requestUserInput" TO WS-PB-KEY
+               PERFORM PB-MEMBER-TRUE
+           END-IF
            PERFORM PB-END-GROUP
            .
 

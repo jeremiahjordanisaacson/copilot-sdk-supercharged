@@ -557,6 +557,95 @@ sub clear_managed_settings_cache {
 }
 
 # --------------------------------------------------------------------------
+# MCP secret store and plugin extension approvals (Copilot CLI 1.0.116+)
+# --------------------------------------------------------------------------
+
+# Save a legacy MCP configuration credential in the runtime-owned secret store
+# (mcp.secrets.save). The value is never logged. Options: config_dir. Returns a
+# McpSecretsSaveResult (used_keychain is true for the OS keychain, false for the
+# file backend).
+sub mcp_secrets_save {
+    my ($self, $secret_id, $value, %opts) = @_;
+    $self->_ensure_connected();
+
+    my %params = (secretId => $secret_id, value => $value);
+    $params{configDir} = $opts{config_dir} if defined $opts{config_dir};
+    my $result = $self->{_client}->request('mcp.secrets.save', \%params);
+    return GitHub::Copilot::Types::McpSecretsSaveResult->from_hashref(
+        ref($result) eq 'HASH' ? $result : {},
+    );
+}
+
+# Delete a legacy MCP configuration credential from the runtime-owned secret store
+# (mcp.secrets.delete). Options: config_dir.
+sub mcp_secrets_delete {
+    my ($self, $secret_id, %opts) = @_;
+    $self->_ensure_connected();
+
+    my %params = (secretId => $secret_id);
+    $params{configDir} = $opts{config_dir} if defined $opts{config_dir};
+    $self->{_client}->request('mcp.secrets.delete', \%params);
+    return;
+}
+
+# Delete the legacy credentials indexed for an MCP server (mcp.secrets.deleteServer).
+# Options: config_dir.
+sub mcp_secrets_delete_server {
+    my ($self, $server_name, %opts) = @_;
+    $self->_ensure_connected();
+
+    my %params = (serverName => $server_name);
+    $params{configDir} = $opts{config_dir} if defined $opts{config_dir};
+    $self->{_client}->request('mcp.secrets.deleteServer', \%params);
+    return;
+}
+
+# Persist a pending plugin extension permission request as a user-scoped approval,
+# before the host answers that request normally (permissions.extensionApprovals.grant).
+# Returns a PermissionsExtensionApprovalsGrantResult.
+sub extension_approvals_grant {
+    my ($self, $session_id, $request_id) = @_;
+    $self->_ensure_connected();
+
+    my $result = $self->{_client}->request(
+        'permissions.extensionApprovals.grant',
+        { sessionId => $session_id, requestId => $request_id },
+    );
+    return GitHub::Copilot::Types::PermissionsExtensionApprovalsGrantResult->from_hashref(
+        ref($result) eq 'HASH' ? $result : {},
+    );
+}
+
+# List the user-scoped plugin extension approvals (permissions.extensionApprovals.list).
+# Options: session_id (attached session whose configuration profile to list). Returns a
+# PermissionsExtensionApprovalsListResult.
+sub extension_approvals_list {
+    my ($self, %opts) = @_;
+    $self->_ensure_connected();
+
+    my %params;
+    $params{sessionId} = $opts{session_id} if defined $opts{session_id};
+    my $result = $self->{_client}->request('permissions.extensionApprovals.list', \%params);
+    return GitHub::Copilot::Types::PermissionsExtensionApprovalsListResult->from_hashref(
+        ref($result) eq 'HASH' ? $result : {},
+    );
+}
+
+# Revoke one user-scoped plugin extension approval (permissions.extensionApprovals.revoke).
+# Options: session_id. Returns a PermissionsExtensionApprovalsRevokeResult.
+sub extension_approvals_revoke {
+    my ($self, $extension_name, $installation_key, %opts) = @_;
+    $self->_ensure_connected();
+
+    my %params = (extensionName => $extension_name, installationKey => $installation_key);
+    $params{sessionId} = $opts{session_id} if defined $opts{session_id};
+    my $result = $self->{_client}->request('permissions.extensionApprovals.revoke', \%params);
+    return GitHub::Copilot::Types::PermissionsExtensionApprovalsRevokeResult->from_hashref(
+        ref($result) eq 'HASH' ? $result : {},
+    );
+}
+
+# --------------------------------------------------------------------------
 # Internal: start CLI server process
 # --------------------------------------------------------------------------
 
@@ -878,10 +967,17 @@ sub _handle_user_input_request {
     croak "Unknown session $session_id" unless $session;
 
     my $result = $session->_handle_user_input_request($params);
-    return {
+    my $reply = {
         answer      => $result->{answer},
         wasFreeform => $result->{wasFreeform} ? \1 : \0,
     };
+    # Image attachments are sent only when the handler set them
+    if (defined $result->{attachments}) {
+        $reply->{attachments} = [
+            map { blessed($_) && $_->can('TO_JSON') ? $_->TO_JSON : $_ } @{ $result->{attachments} }
+        ];
+    }
+    return $reply;
 }
 
 sub _handle_hooks_invoke {
@@ -1466,6 +1562,48 @@ List available models. Returns arrayref of ModelInfo objects. Results are cached
 
 Clear the runtime's cached managed (enterprise policy) settings
 (C<managedSettings.clearCache>).
+
+=head2 mcp_secrets_save($secret_id, $value, %opts)
+
+Save a legacy MCP configuration credential in the runtime-owned secret store
+(C<mcp.secrets.save>). The value is never logged. Option C<config_dir> selects
+the configuration directory. Returns a C<GitHub::Copilot::Types::McpSecretsSaveResult>
+whose C<used_keychain> is true when the OS keychain stored the credential and
+false for the file backend. Requires Copilot CLI 1.0.116 or newer.
+
+=head2 mcp_secrets_delete($secret_id, %opts)
+
+Delete a legacy MCP configuration credential (C<mcp.secrets.delete>). Option
+C<config_dir>. Requires Copilot CLI 1.0.116 or newer.
+
+=head2 mcp_secrets_delete_server($server_name, %opts)
+
+Delete the legacy credentials indexed for an MCP server
+(C<mcp.secrets.deleteServer>). Option C<config_dir>. Requires Copilot CLI
+1.0.116 or newer.
+
+=head2 extension_approvals_grant($session_id, $request_id)
+
+Persist a pending plugin extension permission request as a user-scoped approval
+before answering it (C<permissions.extensionApprovals.grant>). Returns a
+C<GitHub::Copilot::Types::PermissionsExtensionApprovalsGrantResult> (C<granted>
+and the stored C<approval>). Requires Copilot CLI 1.0.116 or newer.
+
+=head2 extension_approvals_list(%opts)
+
+List the user-scoped plugin extension approvals
+(C<permissions.extensionApprovals.list>). Option C<session_id> selects an
+attached session's configuration profile. Returns a
+C<GitHub::Copilot::Types::PermissionsExtensionApprovalsListResult> whose
+C<approvals> is an arrayref of C<GitHub::Copilot::Types::PermissionsExtensionApproval>.
+Requires Copilot CLI 1.0.116 or newer.
+
+=head2 extension_approvals_revoke($extension_name, $installation_key, %opts)
+
+Revoke one plugin extension approval (C<permissions.extensionApprovals.revoke>).
+Pass the approval's C<installation_key> unchanged. Option C<session_id>. Returns a
+C<GitHub::Copilot::Types::PermissionsExtensionApprovalsRevokeResult> (C<revoked>).
+Requires Copilot CLI 1.0.116 or newer.
 
 =head2 get_state()
 

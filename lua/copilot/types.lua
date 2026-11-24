@@ -563,25 +563,35 @@ function M.PermissionRequestResult(fields)
 end
 
 --- Create a UserInputRequest table.
--- @param fields table with keys: question, choices, allowFreeform
+-- imageAttachmentConstraints (see UserInputImageAttachmentConstraints) is set when the
+-- runtime accepts image attachments in the answer and nil otherwise. requestId is the
+-- pending request id and _meta the request's opaque metadata, when the runtime sends them.
+-- @param fields table with keys: question, choices, allowFreeform, requestId,
+--   imageAttachmentConstraints, _meta
 -- @return table UserInputRequest
 function M.UserInputRequest(fields)
     fields = fields or {}
     return {
-        question      = fields.question or "",
-        choices       = fields.choices,
-        allowFreeform = fields.allowFreeform,
+        question                   = fields.question or "",
+        choices                    = fields.choices,
+        allowFreeform              = fields.allowFreeform,
+        requestId                  = fields.requestId,
+        imageAttachmentConstraints = fields.imageAttachmentConstraints,
+        _meta                      = fields._meta,
     }
 end
 
 --- Create a UserInputResponse table.
--- @param fields table with keys: answer, wasFreeform
+-- attachments is an optional array of UserInputImageAttachment, only valid when the
+-- request advertised imageAttachmentConstraints; it is sent only when non-empty.
+-- @param fields table with keys: answer, wasFreeform, attachments
 -- @return table UserInputResponse
 function M.UserInputResponse(fields)
     fields = fields or {}
     return {
         answer      = fields.answer or "",
         wasFreeform = fields.wasFreeform or false,
+        attachments = fields.attachments,
     }
 end
 
@@ -1266,6 +1276,125 @@ function M.PermissionModeSetResult(data)
         mode    = mode,
         reason  = reason,
     }
+end
+
+-- ---------------------------------------------------------------------------
+-- v3.1.0 feature types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+-- ---------------------------------------------------------------------------
+
+--- Copy the string elements of a wire array.
+local function string_list(value)
+    local list = {}
+    if type(value) == "table" then
+        for _, item in ipairs(value) do
+            if type(item) == "string" then
+                list[#list + 1] = item
+            end
+        end
+    end
+    return list
+end
+
+--- Parse the image support advertised by a userInput.request
+-- (UserInputRequest.imageAttachmentConstraints).
+-- @param data table|nil Wire imageAttachmentConstraints
+-- @return table|nil { allowedMimeTypes, maxBytesPerImage, maxCount }, or nil when the
+--   runtime does not accept images in the answer
+function M.UserInputImageAttachmentConstraints(data)
+    if type(data) ~= "table" then
+        return nil
+    end
+    return {
+        allowedMimeTypes = string_list(data.allowedMimeTypes),
+        maxBytesPerImage = type(data.maxBytesPerImage) == "number" and data.maxBytesPerImage or 0,
+        maxCount         = type(data.maxCount) == "number" and data.maxCount or 0,
+    }
+end
+
+--- Create a UserInputImageAttachment table: an inline image attached to an ask_user
+-- answer (UserInputResponse.attachments). data is the base64-encoded image (no data URL
+-- prefix); type is always "image". The runtime enforces the advertised MIME types, size
+-- and count limits. Image-only answers use answer = "" and wasFreeform = true.
+-- @param fields table with keys: data, mimeType, description, displayName
+-- @return table UserInputImageAttachment
+function M.UserInputImageAttachment(fields)
+    fields = fields or {}
+    return {
+        type        = "image",
+        data        = fields.data,
+        mimeType    = fields.mimeType,
+        description = fields.description,
+        displayName = fields.displayName,
+    }
+end
+
+--- Parse the result of client:mcp_secrets_save().
+-- @param data table Wire result
+-- @return table { usedKeychain } where usedKeychain is true when the OS keychain stored
+--   the credential and false when the runtime used its file backend
+function M.McpSecretsSaveResult(data)
+    data = data or {}
+    return { usedKeychain = data.usedKeychain == true }
+end
+
+--- Parse a user-scoped approval for one installed plugin extension. extensionName is the
+-- stable identity (for example "plugin:plugin-name:extension-name"), capabilities the
+-- exact privileged capabilities the user approved and grantedAt an RFC 3339 timestamp.
+-- Pass installationKey back unchanged to client:extension_approvals_revoke().
+-- @param data table Wire PermissionsExtensionApproval
+-- @return table { extensionName, pluginName, capabilities, grantedAt, installationKey,
+--   installationLabel }
+function M.PermissionsExtensionApproval(data)
+    data = data or {}
+    local function str(value)
+        if type(value) ~= "string" then return nil end
+        return value
+    end
+    return {
+        extensionName     = str(data.extensionName),
+        pluginName        = str(data.pluginName),
+        capabilities      = string_list(data.capabilities),
+        grantedAt         = str(data.grantedAt),
+        installationKey   = str(data.installationKey),
+        installationLabel = str(data.installationLabel),
+    }
+end
+
+--- Parse the result of client:extension_approvals_grant().
+-- @param data table Wire result
+-- @return table { granted, approval } where approval is the stored
+--   PermissionsExtensionApproval (nil when the request was not persisted)
+function M.PermissionsExtensionApprovalsGrantResult(data)
+    data = data or {}
+    local approval = nil
+    if type(data.approval) == "table" then
+        approval = M.PermissionsExtensionApproval(data.approval)
+    end
+    return { granted = data.granted == true, approval = approval }
+end
+
+--- Parse the result of client:extension_approvals_list().
+-- @param data table Wire result
+-- @return table { approvals } where approvals is an array of PermissionsExtensionApproval
+function M.PermissionsExtensionApprovalsListResult(data)
+    data = data or {}
+    local approvals = {}
+    if type(data.approvals) == "table" then
+        for _, approval in ipairs(data.approvals) do
+            if type(approval) == "table" then
+                approvals[#approvals + 1] = M.PermissionsExtensionApproval(approval)
+            end
+        end
+    end
+    return { approvals = approvals }
+end
+
+--- Parse the result of client:extension_approvals_revoke().
+-- @param data table Wire result
+-- @return table { revoked } where revoked is true when a matching approval was revoked
+function M.PermissionsExtensionApprovalsRevokeResult(data)
+    data = data or {}
+    return { revoked = data.revoked == true }
 end
 
 return M

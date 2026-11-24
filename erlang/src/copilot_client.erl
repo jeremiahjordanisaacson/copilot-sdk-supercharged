@@ -34,6 +34,17 @@
     get_foreground_session_id/1,
     set_foreground_session_id/2,
     clear_managed_settings_cache/1,
+    mcp_secrets_save/3,
+    mcp_secrets_save/4,
+    mcp_secrets_delete/2,
+    mcp_secrets_delete/3,
+    mcp_secrets_delete_server/2,
+    mcp_secrets_delete_server/3,
+    extension_approvals_grant/3,
+    extension_approvals_list/1,
+    extension_approvals_list/2,
+    extension_approvals_revoke/3,
+    extension_approvals_revoke/4,
     state/1
 ]).
 
@@ -157,6 +168,83 @@ set_foreground_session_id(Pid, SessionId) ->
 -spec clear_managed_settings_cache(pid()) -> {ok, term()} | {error, term()}.
 clear_managed_settings_cache(Pid) ->
     gen_server:call(Pid, clear_managed_settings_cache, ?DEFAULT_TIMEOUT).
+
+%% @doc Save an MCP server secret in the runtime-owned secret store
+%% (`mcp.secrets.save`). `Value` is a credential: it is sent to the runtime and
+%% never logged. Returns {ok, #{used_keychain => boolean()}}: `true` when the
+%% OS keychain stored the secret, `false` for the file backend. Requires
+%% Copilot CLI 1.0.116 or newer; older runtimes answer with a JSON-RPC
+%% method-not-found error, returned as {error, Error}.
+-spec mcp_secrets_save(pid(), binary(), binary()) -> {ok, map()} | {error, term()}.
+mcp_secrets_save(Pid, SecretId, Value) ->
+    mcp_secrets_save(Pid, SecretId, Value, #{}).
+
+%% @doc Like mcp_secrets_save/3; `Opts` may set `config_dir` (the configuration
+%% directory, the runtime's default otherwise).
+-spec mcp_secrets_save(pid(), binary(), binary(), map()) -> {ok, map()} | {error, term()}.
+mcp_secrets_save(Pid, SecretId, Value, Opts) ->
+    gen_server:call(Pid, {mcp_secrets_save, SecretId, Value, Opts}, ?DEFAULT_TIMEOUT).
+
+%% @doc Delete one secret from the runtime-owned MCP secret store
+%% (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+-spec mcp_secrets_delete(pid(), binary()) -> ok | {error, term()}.
+mcp_secrets_delete(Pid, SecretId) ->
+    mcp_secrets_delete(Pid, SecretId, #{}).
+
+%% @doc Like mcp_secrets_delete/2; `Opts` may set `config_dir`.
+-spec mcp_secrets_delete(pid(), binary(), map()) -> ok | {error, term()}.
+mcp_secrets_delete(Pid, SecretId, Opts) ->
+    gen_server:call(Pid, {mcp_secrets_delete, SecretId, Opts}, ?DEFAULT_TIMEOUT).
+
+%% @doc Delete every stored secret of one MCP server
+%% (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+-spec mcp_secrets_delete_server(pid(), binary()) -> ok | {error, term()}.
+mcp_secrets_delete_server(Pid, ServerName) ->
+    mcp_secrets_delete_server(Pid, ServerName, #{}).
+
+%% @doc Like mcp_secrets_delete_server/2; `Opts` may set `config_dir`.
+-spec mcp_secrets_delete_server(pid(), binary(), map()) -> ok | {error, term()}.
+mcp_secrets_delete_server(Pid, ServerName, Opts) ->
+    gen_server:call(Pid, {mcp_secrets_delete_server, ServerName, Opts}, ?DEFAULT_TIMEOUT).
+
+%% @doc Persist a pending plugin extension permission request as a user-scoped
+%% approval, before answering that request normally
+%% (`permissions.extensionApprovals.grant`). Returns {ok, #{granted, approval}}
+%% (see copilot_types:extension_approval/1). Requires Copilot CLI 1.0.116 or
+%% newer.
+-spec extension_approvals_grant(pid(), binary(), binary()) -> {ok, map()} | {error, term()}.
+extension_approvals_grant(Pid, SessionId, RequestId) ->
+    gen_server:call(Pid, {extension_approvals_grant, SessionId, RequestId}, ?DEFAULT_TIMEOUT).
+
+%% @doc List the persisted plugin extension approvals
+%% (`permissions.extensionApprovals.list`). Returns {ok, #{approvals => [Approval]}}
+%% (see copilot_types:extension_approval/1). Requires Copilot CLI 1.0.116 or
+%% newer.
+-spec extension_approvals_list(pid()) -> {ok, map()} | {error, term()}.
+extension_approvals_list(Pid) ->
+    extension_approvals_list(Pid, #{}).
+
+%% @doc Like extension_approvals_list/1; `Opts` may set `session_id` to list
+%% the configuration profile of that attached session.
+-spec extension_approvals_list(pid(), map()) -> {ok, map()} | {error, term()}.
+extension_approvals_list(Pid, Opts) ->
+    gen_server:call(Pid, {extension_approvals_list, Opts}, ?DEFAULT_TIMEOUT).
+
+%% @doc Revoke a persisted plugin extension approval
+%% (`permissions.extensionApprovals.revoke`). Pass the approval's
+%% `extension_name` and `installation_key` unchanged. Returns
+%% {ok, #{revoked => boolean()}}. Requires Copilot CLI 1.0.116 or newer.
+-spec extension_approvals_revoke(pid(), binary(), binary()) -> {ok, map()} | {error, term()}.
+extension_approvals_revoke(Pid, ExtensionName, InstallationKey) ->
+    extension_approvals_revoke(Pid, ExtensionName, InstallationKey, #{}).
+
+%% @doc Like extension_approvals_revoke/3; `Opts` may set `session_id` to use
+%% the attached session's configuration profile.
+-spec extension_approvals_revoke(pid(), binary(), binary(), map()) ->
+    {ok, map()} | {error, term()}.
+extension_approvals_revoke(Pid, ExtensionName, InstallationKey, Opts) ->
+    gen_server:call(Pid, {extension_approvals_revoke, ExtensionName, InstallationKey, Opts},
+                    ?DEFAULT_TIMEOUT).
 
 -spec state(pid()) -> disconnected | connecting | connected | error.
 state(Pid) ->
@@ -366,6 +454,45 @@ handle_call(clear_managed_settings_cache, _From, #state{rpc = Rpc} = State)
   when Rpc =/= undefined ->
     Result = copilot_jsonrpc:request(Rpc, <<"managedSettings.clearCache">>, #{}),
     {reply, Result, State};
+
+handle_call({mcp_secrets_save, SecretId, Value, Opts}, _From, #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = with_config_dir(Opts, #{<<"secretId">> => SecretId, <<"value">> => Value}),
+    Result = copilot_jsonrpc:request(Rpc, <<"mcp.secrets.save">>, Params),
+    {reply, decode_reply(Result, fun copilot_types:mcp_secrets_save_result/1), State};
+
+handle_call({mcp_secrets_delete, SecretId, Opts}, _From, #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = with_config_dir(Opts, #{<<"secretId">> => SecretId}),
+    Result = copilot_jsonrpc:request(Rpc, <<"mcp.secrets.delete">>, Params),
+    {reply, ok_reply(Result), State};
+
+handle_call({mcp_secrets_delete_server, ServerName, Opts}, _From, #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = with_config_dir(Opts, #{<<"serverName">> => ServerName}),
+    Result = copilot_jsonrpc:request(Rpc, <<"mcp.secrets.deleteServer">>, Params),
+    {reply, ok_reply(Result), State};
+
+handle_call({extension_approvals_grant, SessionId, RequestId}, _From,
+            #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = #{<<"sessionId">> => SessionId, <<"requestId">> => RequestId},
+    Result = copilot_jsonrpc:request(Rpc, <<"permissions.extensionApprovals.grant">>, Params),
+    {reply, decode_reply(Result, fun copilot_types:extension_approvals_grant_result/1), State};
+
+handle_call({extension_approvals_list, Opts}, _From, #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = with_session_id(Opts, #{}),
+    Result = copilot_jsonrpc:request(Rpc, <<"permissions.extensionApprovals.list">>, Params),
+    {reply, decode_reply(Result, fun copilot_types:extension_approvals_list_result/1), State};
+
+handle_call({extension_approvals_revoke, ExtensionName, InstallationKey, Opts}, _From,
+            #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    Params = with_session_id(Opts, #{<<"extensionName">>   => ExtensionName,
+                                     <<"installationKey">> => InstallationKey}),
+    Result = copilot_jsonrpc:request(Rpc, <<"permissions.extensionApprovals.revoke">>, Params),
+    {reply, decode_reply(Result, fun copilot_types:extension_approvals_revoke_result/1), State};
 
 handle_call(get_state, _From, #state{conn_state = ConnState} = State) ->
     {reply, ConnState, State};
@@ -1399,6 +1526,23 @@ with_registration_id(undefined, Params) ->
     Params;
 with_registration_id(RegId, Params) ->
     Params#{<<"gitHubTokenProviderRegistrationId">> => RegId}.
+
+%% Optional `config_dir` / `session_id` of the server-scoped mcp.secrets.* and
+%% permissions.extensionApprovals.* requests.
+with_config_dir(Opts, Params) ->
+    put_optional(<<"configDir">>, maps:get(config_dir, Opts, undefined), Params).
+
+with_session_id(Opts, Params) ->
+    put_optional(<<"sessionId">>, maps:get(session_id, Opts, undefined), Params).
+
+put_optional(_Key, undefined, Params) -> Params;
+put_optional(Key, Value, Params)      -> Params#{Key => Value}.
+
+decode_reply({ok, Result}, Decode)     -> {ok, Decode(Result)};
+decode_reply({error, _} = Err, _Decode) -> Err.
+
+ok_reply({ok, _})          -> ok;
+ok_reply({error, _} = Err) -> Err.
 
 track_registration(undefined, _SessionPid, #state{token_registrations = Regs}) ->
     Regs;

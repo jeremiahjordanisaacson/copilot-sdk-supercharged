@@ -66,6 +66,75 @@ for (const f of report.findings) {
 await client.stop();
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods
+below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**;
+older CLIs answer with a JSON-RPC method-not-found error, which rejects like any
+other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned
+secret store. The secret value is never logged. Each method takes an optional
+trailing `configDir` (the runtime's configuration root when omitted).
+
+```typescript
+const { usedKeychain } = await client.mcpSecretsSave("my-server-token", process.env.MY_SERVER_TOKEN!);
+console.log(usedKeychain ? "Stored in the OS keychain" : "Stored in the file backend");
+
+await client.mcpSecretsDelete("my-server-token");   // mcp.secrets.delete
+await client.mcpSecretsDeleteServer("my-server");   // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions.
+`extensionApprovalsList` and `extensionApprovalsRevoke` take an optional
+trailing `sessionId` to use an attached session's configuration profile.
+
+```typescript
+// Persist a pending extension permission request before answering it normally
+const grant = await client.extensionApprovalsGrant(session.sessionId, requestId);
+if (grant.granted) console.log(`Approved ${grant.approval?.extensionName}`);
+
+const { approvals } = await client.extensionApprovalsList();
+for (const approval of approvals) {
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    await client.extensionApprovalsRevoke(approval.extensionName, approval.installationKey);
+}
+```
+
+### Ask-user image attachments
+
+`onUserInputRequest` receives `request.imageAttachmentConstraints`
+(`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`) when the runtime accepts
+images in the answer; it is `undefined` otherwise. Answer with `attachments`, an
+array of `UserInputImageAttachment` (`type: "image"`, base64 `data`, `mimeType`,
+optional `description` and `displayName`), sent only when set. Image-only
+answers use `answer: ""` and `wasFreeform: true`; the runtime enforces the
+limits. Elicitation handlers (`onElicitationRequest`) receive the request's
+`requestId` and `_meta` from the base SDK, and a `_meta` in their result is
+forwarded unchanged.
+
+```typescript
+import { readFile } from "node:fs/promises";
+
+const session = await client.createSession({
+    onUserInputRequest: async (request) => {
+        if (request.imageAttachmentConstraints?.allowedMimeTypes.includes("image/png")) {
+            const data = (await readFile("screenshot.png")).toString("base64");
+            return {
+                answer: "",
+                wasFreeform: true,
+                attachments: [{ type: "image", data, mimeType: "image/png", displayName: "screenshot.png" }],
+            };
+        }
+        return { answer: "No screenshot available", wasFreeform: true };
+    },
+});
+```
+
 ## What's New in v3.0.0
 
 SDK protocol 4 support, matching the upstream SDK 2.0 (Microsoft Copilot SDK)

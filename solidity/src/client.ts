@@ -45,8 +45,12 @@ import {
     type GasReport,
     type GeneratedTestSuite,
     type GitHubTokenProvider,
+    type McpSecretsSaveResult,
     type ModelSwitchAutoTierResult,
     type PermissionModeSetResult,
+    type PermissionsExtensionApprovalsGrantResult,
+    type PermissionsExtensionApprovalsListResult,
+    type PermissionsExtensionApprovalsRevokeResult,
     type PolicyHelperFailure,
     type SessionStartError,
     type SolidityClientMode,
@@ -141,6 +145,98 @@ export class CopilotSolidityClient {
      */
     async clearManagedSettingsCache(): Promise<void> {
         await this.client.rpc.managedSettings.clearCache();
+    }
+
+    // -----------------------------------------------------------------------
+    // MCP secret store and plugin extension approvals (Copilot CLI 1.0.116+)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Save a legacy MCP configuration credential in the runtime-owned secret
+     * store (`mcp.secrets.save`). `value` is a credential and is never logged.
+     * `configDir` defaults to the runtime's configuration root. Resolves
+     * `usedKeychain: true` when the OS keychain stored the credential and
+     * `false` for the file backend. Requires Copilot CLI 1.0.116 or newer.
+     */
+    async mcpSecretsSave(
+        secretId: string,
+        value: string,
+        configDir?: string,
+    ): Promise<McpSecretsSaveResult> {
+        return this.client.rpc.mcp.secrets.save({
+            secretId,
+            value,
+            ...(configDir !== undefined ? { configDir } : {}),
+        });
+    }
+
+    /**
+     * Delete a legacy MCP configuration credential from the runtime-owned
+     * secret store (`mcp.secrets.delete`). Requires Copilot CLI 1.0.116 or newer.
+     */
+    async mcpSecretsDelete(secretId: string, configDir?: string): Promise<void> {
+        await this.client.rpc.mcp.secrets.delete({
+            secretId,
+            ...(configDir !== undefined ? { configDir } : {}),
+        });
+    }
+
+    /**
+     * Delete every legacy credential indexed for an MCP server
+     * (`mcp.secrets.deleteServer`). Requires Copilot CLI 1.0.116 or newer.
+     */
+    async mcpSecretsDeleteServer(serverName: string, configDir?: string): Promise<void> {
+        await this.client.rpc.mcp.secrets.deleteServer({
+            serverName,
+            ...(configDir !== undefined ? { configDir } : {}),
+        });
+    }
+
+    /**
+     * Persist a pending plugin extension permission request as a user-scoped
+     * approval before answering that request normally
+     * (`permissions.extensionApprovals.grant`). Resolves whether the request was
+     * eligible and persisted, and the stored `approval`. Requires Copilot CLI
+     * 1.0.116 or newer.
+     */
+    async extensionApprovalsGrant(
+        sessionId: string,
+        requestId: string,
+    ): Promise<PermissionsExtensionApprovalsGrantResult> {
+        return this.client.rpc.permissions.extensionApprovals.grant({ sessionId, requestId });
+    }
+
+    /**
+     * List the user-scoped plugin extension approvals
+     * (`permissions.extensionApprovals.list`). `sessionId` selects an attached
+     * session whose configuration profile to list (the server's profile when
+     * omitted). Requires Copilot CLI 1.0.116 or newer.
+     */
+    async extensionApprovalsList(
+        sessionId?: string,
+    ): Promise<PermissionsExtensionApprovalsListResult> {
+        return this.client.rpc.permissions.extensionApprovals.list(
+            sessionId !== undefined ? { sessionId } : {},
+        );
+    }
+
+    /**
+     * Revoke one user-scoped plugin extension approval
+     * (`permissions.extensionApprovals.revoke`). Pass the approval's
+     * `installationKey` back unchanged; `sessionId` selects an attached
+     * session's configuration profile. Resolves `revoked: true` when a matching
+     * approval was removed. Requires Copilot CLI 1.0.116 or newer.
+     */
+    async extensionApprovalsRevoke(
+        extensionName: string,
+        installationKey: string,
+        sessionId?: string,
+    ): Promise<PermissionsExtensionApprovalsRevokeResult> {
+        return this.client.rpc.permissions.extensionApprovals.revoke({
+            extensionName,
+            installationKey,
+            ...(sessionId !== undefined ? { sessionId } : {}),
+        });
     }
 
     // -----------------------------------------------------------------------

@@ -867,6 +867,184 @@ let tool_shell_output_of_yojson (data : Yojson.Safe.t) : tool_shell_output optio
       }
   | _ -> None
 
+(* ========================================================================== *)
+(* v3.1.0 Feature Types (Microsoft Copilot SDK 2.0.3-preview.0 parity)        *)
+(* ========================================================================== *)
+
+let string_list_field (json : Yojson.Safe.t) (key : string) : string list option =
+  match json_field json key with
+  | Some (`List items) ->
+    Some (List.filter_map (function `String s -> Some s | _ -> None) items)
+  | _ -> None
+
+let bool_field (json : Yojson.Safe.t) (key : string) : bool =
+  match json_field json key with Some (`Bool b) -> b | _ -> false
+
+(** Image support advertised by a [userInput.request]; absent when the
+    runtime does not accept images in the answer. *)
+type user_input_image_attachment_constraints = {
+  uiac_allowed_mime_types : string list;
+  uiac_max_bytes_per_image : int;
+  uiac_max_count : int;
+}
+
+let user_input_image_attachment_constraints_of_yojson (json : Yojson.Safe.t)
+    : user_input_image_attachment_constraints option =
+  match json with
+  | `Assoc _ ->
+    let int_field key = match json_field json key with Some (`Int n) -> n | _ -> 0 in
+    Some
+      { uiac_allowed_mime_types =
+          Option.value (string_list_field json "allowedMimeTypes") ~default:[]
+      ; uiac_max_bytes_per_image = int_field "maxBytesPerImage"
+      ; uiac_max_count = int_field "maxCount"
+      }
+  | _ -> None
+
+(** A [userInput.request] (the ask_user flow). *)
+type user_input_request = {
+  uir_session_id : string;
+  uir_question : string;
+  uir_choices : string list option;
+  uir_allow_freeform : bool option;
+  uir_request_id : string option;
+  uir_image_attachment_constraints : user_input_image_attachment_constraints option;
+  uir_meta : Yojson.Safe.t option;
+}
+
+let user_input_request_of_yojson (json : Yojson.Safe.t) : user_input_request option =
+  match json_string_field json "sessionId", json_string_field json "question" with
+  | Some session_id, Some question ->
+    Some
+      { uir_session_id = session_id
+      ; uir_question = question
+      ; uir_choices = string_list_field json "choices"
+      ; uir_allow_freeform =
+          (match json_field json "allowFreeform" with Some (`Bool b) -> Some b | _ -> None)
+      ; uir_request_id = json_string_field json "requestId"
+      ; uir_image_attachment_constraints =
+          Option.bind (json_field json "imageAttachmentConstraints")
+            user_input_image_attachment_constraints_of_yojson
+      ; uir_meta = json_field json "_meta"
+      }
+  | _ -> None
+
+(** An inline image attached to an ask_user answer. [uia_data] is the
+    base64-encoded image; the wire [type] is always "image". *)
+type user_input_image_attachment = {
+  uia_data : string;
+  uia_mime_type : string;
+  uia_description : string option;
+  uia_display_name : string option;
+}
+
+let make_user_input_image_attachment ?description ?display_name ~mime_type data
+    : user_input_image_attachment =
+  { uia_data = data
+  ; uia_mime_type = mime_type
+  ; uia_description = description
+  ; uia_display_name = display_name
+  }
+
+let user_input_image_attachment_to_yojson (a : user_input_image_attachment) : Yojson.Safe.t =
+  `Assoc
+    (List.rev
+       ([ ("mimeType", `String a.uia_mime_type)
+        ; ("data", `String a.uia_data)
+        ; ("type", `String "image")
+        ]
+        |> add_string "description" a.uia_description
+        |> add_string "displayName" a.uia_display_name))
+
+(** Answer to a [userInput.request]. [attachments] is only valid when the
+    request advertised [uir_image_attachment_constraints] and is sent only
+    when set; an image-only answer uses an empty [answer] and
+    [was_freeform = true]. *)
+type user_input_response = {
+  answer : string;
+  was_freeform : bool;
+  attachments : user_input_image_attachment list option;
+}
+
+let make_user_input_response ?attachments ~was_freeform answer : user_input_response =
+  { answer; was_freeform; attachments }
+
+let user_input_response_to_yojson (r : user_input_response) : Yojson.Safe.t =
+  `Assoc
+    (List.rev
+       ([ ("wasFreeform", `Bool r.was_freeform); ("answer", `String r.answer) ]
+        |> add_json "attachments"
+             (Option.map
+                (fun items -> `List (List.map user_input_image_attachment_to_yojson items))
+                r.attachments)))
+
+(** Answers ask_user questions (sends [requestUserInput]). *)
+type user_input_handler = user_input_request -> user_input_response Lwt.t
+
+(** Result of [mcp.secrets.save]. *)
+type mcp_secrets_save_result = { mss_used_keychain : bool }
+
+let mcp_secrets_save_result_of_yojson (json : Yojson.Safe.t) : mcp_secrets_save_result =
+  { mss_used_keychain = bool_field json "usedKeychain" }
+
+(** A user-scoped approval for one installed plugin extension. *)
+type permissions_extension_approval = {
+  pea_extension_name : string;
+  pea_plugin_name : string;
+  pea_capabilities : string list;
+  pea_granted_at : string;
+  pea_installation_key : string;
+  pea_installation_label : string option;
+}
+
+let permissions_extension_approval_of_yojson (json : Yojson.Safe.t)
+    : permissions_extension_approval option =
+  match json with
+  | `Assoc _ ->
+    let required key = Option.value (json_string_field json key) ~default:"" in
+    Some
+      { pea_extension_name = required "extensionName"
+      ; pea_plugin_name = required "pluginName"
+      ; pea_capabilities = Option.value (string_list_field json "capabilities") ~default:[]
+      ; pea_granted_at = required "grantedAt"
+      ; pea_installation_key = required "installationKey"
+      ; pea_installation_label = json_string_field json "installationLabel"
+      }
+  | _ -> None
+
+(** Result of [permissions.extensionApprovals.grant]. *)
+type permissions_extension_approvals_grant_result = {
+  peag_granted : bool;
+  peag_approval : permissions_extension_approval option;
+}
+
+let permissions_extension_approvals_grant_result_of_yojson (json : Yojson.Safe.t)
+    : permissions_extension_approvals_grant_result =
+  { peag_granted = bool_field json "granted"
+  ; peag_approval =
+      Option.bind (json_field json "approval") permissions_extension_approval_of_yojson
+  }
+
+(** Result of [permissions.extensionApprovals.list]. *)
+type permissions_extension_approvals_list_result = {
+  peal_approvals : permissions_extension_approval list;
+}
+
+let permissions_extension_approvals_list_result_of_yojson (json : Yojson.Safe.t)
+    : permissions_extension_approvals_list_result =
+  { peal_approvals =
+      (match json_field json "approvals" with
+       | Some (`List items) -> List.filter_map permissions_extension_approval_of_yojson items
+       | _ -> [])
+  }
+
+(** Result of [permissions.extensionApprovals.revoke]. *)
+type permissions_extension_approvals_revoke_result = { pear_revoked : bool }
+
+let permissions_extension_approvals_revoke_result_of_yojson (json : Yojson.Safe.t)
+    : permissions_extension_approvals_revoke_result =
+  { pear_revoked = bool_field json "revoked" }
+
 type session_config = {
   model : string option;
   system_prompt : string option;
@@ -936,6 +1114,8 @@ type session_config = {
   capi_enabled : bool option;
   on_shell_authentication_request : shell_authentication_handler option;
   on_store_memory : store_memory_handler option;
+  (* v3.1.0: ask_user handler (sends requestUserInput) *)
+  on_user_input_request : user_input_handler option;
 }
 
 let default_session_config () =
@@ -1005,6 +1185,7 @@ let default_session_config () =
   ; capi_enabled = None
   ; on_shell_authentication_request = None
   ; on_store_memory = None
+  ; on_user_input_request = None
   }
 
 let session_base_fields (c : session_config) : (string * Yojson.Safe.t) list =
@@ -1232,6 +1413,7 @@ let session_extra_fields ~resume (c : session_config) : (string * Yojson.Safe.t)
     |> add_bool "requestShellAuthentication"
          (flag (Option.is_some c.on_shell_authentication_request))
     |> add_bool "hasMemoryStore" (flag (Option.is_some c.on_store_memory))
+    |> add_bool "requestUserInput" (flag (Option.is_some c.on_user_input_request))
   in
   let fields =
     if resume then

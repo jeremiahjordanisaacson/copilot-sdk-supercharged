@@ -231,6 +231,92 @@ defmodule Copilot.Client do
     GenServer.call(client, :clear_managed_settings_cache, 10_000)
   end
 
+  @doc """
+  Save an MCP server secret in the runtime-owned secret store
+  (`mcp.secrets.save`). `value` is a credential: it is sent to the runtime and
+  never logged. Pass `config_dir: dir` to select the configuration directory
+  (the runtime's default otherwise).
+
+  Returns `{:ok, %Types.McpSecretsSaveResult{used_keychain: bool}}`:
+  `used_keychain` is `true` when the OS keychain stored the secret and `false`
+  for the file backend. Requires Copilot CLI 1.0.116 or newer; older runtimes
+  answer with a JSON-RPC method-not-found error, returned as `{:error, error}`.
+  """
+  @spec mcp_secrets_save(GenServer.server(), String.t(), String.t(), keyword()) ::
+          {:ok, Types.McpSecretsSaveResult.t()} | {:error, any()}
+  def mcp_secrets_save(client, secret_id, value, opts \\ []) do
+    GenServer.call(client, {:mcp_secrets_save, secret_id, value, opts}, 30_000)
+  end
+
+  @doc """
+  Delete one secret from the runtime-owned MCP secret store
+  (`mcp.secrets.delete`). Pass `config_dir: dir` to select the configuration
+  directory. Requires Copilot CLI 1.0.116 or newer.
+  """
+  @spec mcp_secrets_delete(GenServer.server(), String.t(), keyword()) :: :ok | {:error, any()}
+  def mcp_secrets_delete(client, secret_id, opts \\ []) do
+    GenServer.call(client, {:mcp_secrets_delete, secret_id, opts}, 30_000)
+  end
+
+  @doc """
+  Delete every stored secret of one MCP server (`mcp.secrets.deleteServer`).
+  Pass `config_dir: dir` to select the configuration directory. Requires
+  Copilot CLI 1.0.116 or newer.
+  """
+  @spec mcp_secrets_delete_server(GenServer.server(), String.t(), keyword()) ::
+          :ok | {:error, any()}
+  def mcp_secrets_delete_server(client, server_name, opts \\ []) do
+    GenServer.call(client, {:mcp_secrets_delete_server, server_name, opts}, 30_000)
+  end
+
+  @doc """
+  Persist a pending plugin extension permission request as a user-scoped
+  approval, before answering that request normally
+  (`permissions.extensionApprovals.grant`).
+
+  Returns `{:ok, %Types.PermissionsExtensionApprovalsGrantResult{granted: bool,
+  approval: %Types.PermissionsExtensionApproval{} | nil}}`. Requires Copilot CLI
+  1.0.116 or newer.
+  """
+  @spec extension_approvals_grant(GenServer.server(), String.t(), String.t()) ::
+          {:ok, Types.PermissionsExtensionApprovalsGrantResult.t()} | {:error, any()}
+  def extension_approvals_grant(client, session_id, request_id) do
+    GenServer.call(client, {:extension_approvals_grant, session_id, request_id}, 30_000)
+  end
+
+  @doc """
+  List the persisted plugin extension approvals
+  (`permissions.extensionApprovals.list`). Pass `session_id: id` to list the
+  configuration profile of that attached session.
+
+  Returns `{:ok, %Types.PermissionsExtensionApprovalsListResult{approvals: [...]}}`.
+  Requires Copilot CLI 1.0.116 or newer.
+  """
+  @spec extension_approvals_list(GenServer.server(), keyword()) ::
+          {:ok, Types.PermissionsExtensionApprovalsListResult.t()} | {:error, any()}
+  def extension_approvals_list(client, opts \\ []) do
+    GenServer.call(client, {:extension_approvals_list, opts}, 30_000)
+  end
+
+  @doc """
+  Revoke a persisted plugin extension approval
+  (`permissions.extensionApprovals.revoke`). Pass the approval's
+  `extension_name` and `installation_key` unchanged; `session_id: id` selects
+  the attached session's configuration profile.
+
+  Returns `{:ok, %Types.PermissionsExtensionApprovalsRevokeResult{revoked: bool}}`.
+  Requires Copilot CLI 1.0.116 or newer.
+  """
+  @spec extension_approvals_revoke(GenServer.server(), String.t(), String.t(), keyword()) ::
+          {:ok, Types.PermissionsExtensionApprovalsRevokeResult.t()} | {:error, any()}
+  def extension_approvals_revoke(client, extension_name, installation_key, opts \\ []) do
+    GenServer.call(
+      client,
+      {:extension_approvals_revoke, extension_name, installation_key, opts},
+      30_000
+    )
+  end
+
   # ---------------------------------------------------------------------------
   # GenServer Callbacks
   # ---------------------------------------------------------------------------
@@ -519,6 +605,95 @@ defmodule Copilot.Client do
     case JsonRpcClient.request(state.rpc, "managedSettings.clearCache", %{}) do
       {:ok, _} -> {:reply, :ok, state}
       {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call({:mcp_secrets_save, secret_id, value, opts}, _from, state) do
+    state = maybe_auto_start(state)
+
+    params =
+      Types.compact(%{
+        "secretId" => secret_id,
+        "value" => value,
+        "configDir" => Keyword.get(opts, :config_dir)
+      })
+
+    case JsonRpcClient.request(state.rpc, "mcp.secrets.save", params) do
+      {:ok, result} -> {:reply, {:ok, Types.McpSecretsSaveResult.from_map(result)}, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call({:mcp_secrets_delete, secret_id, opts}, _from, state) do
+    state = maybe_auto_start(state)
+
+    params =
+      Types.compact(%{"secretId" => secret_id, "configDir" => Keyword.get(opts, :config_dir)})
+
+    case JsonRpcClient.request(state.rpc, "mcp.secrets.delete", params) do
+      {:ok, _} -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call({:mcp_secrets_delete_server, server_name, opts}, _from, state) do
+    state = maybe_auto_start(state)
+
+    params =
+      Types.compact(%{"serverName" => server_name, "configDir" => Keyword.get(opts, :config_dir)})
+
+    case JsonRpcClient.request(state.rpc, "mcp.secrets.deleteServer", params) do
+      {:ok, _} -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call({:extension_approvals_grant, session_id, request_id}, _from, state) do
+    state = maybe_auto_start(state)
+    params = %{"sessionId" => session_id, "requestId" => request_id}
+
+    case JsonRpcClient.request(state.rpc, "permissions.extensionApprovals.grant", params) do
+      {:ok, result} ->
+        {:reply, {:ok, Types.PermissionsExtensionApprovalsGrantResult.from_map(result)}, state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call({:extension_approvals_list, opts}, _from, state) do
+    state = maybe_auto_start(state)
+    params = Types.compact(%{"sessionId" => Keyword.get(opts, :session_id)})
+
+    case JsonRpcClient.request(state.rpc, "permissions.extensionApprovals.list", params) do
+      {:ok, result} ->
+        {:reply, {:ok, Types.PermissionsExtensionApprovalsListResult.from_map(result)}, state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call(
+        {:extension_approvals_revoke, extension_name, installation_key, opts},
+        _from,
+        state
+      ) do
+    state = maybe_auto_start(state)
+
+    params =
+      Types.compact(%{
+        "extensionName" => extension_name,
+        "installationKey" => installation_key,
+        "sessionId" => Keyword.get(opts, :session_id)
+      })
+
+    case JsonRpcClient.request(state.rpc, "permissions.extensionApprovals.revoke", params) do
+      {:ok, result} ->
+        {:reply, {:ok, Types.PermissionsExtensionApprovalsRevokeResult.from_map(result)}, state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
     end
   end
 

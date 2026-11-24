@@ -2565,6 +2565,40 @@ const session = await client.resumeSession("session-id", {
 
 To let a specific custom tool bypass the permission prompt entirely, set `skipPermission: true` on the tool definition. See [Skipping Permission Prompts](#skipping-permission-prompts) under Tools.
 
+## MCP Secret Store and Plugin Extension Approvals
+
+Hosts that manage MCP credentials or plugin extensions can call these server-scoped RPCs on the client. They are experimental and need Copilot CLI 1.0.116 or newer; older runtimes reject them as unknown methods.
+
+```typescript
+// Save a legacy MCP configuration credential. usedKeychain is false when the
+// runtime used its file backend instead of the OS keychain. Never log the value.
+const { usedKeychain } = await client.rpc.mcp.secrets.save({
+    secretId: "github-mcp-token",
+    value: process.env.GITHUB_MCP_TOKEN ?? "",
+});
+
+// Remove one secret, or every credential indexed for a legacy MCP server.
+await client.rpc.mcp.secrets.delete({ secretId: "github-mcp-token" });
+await client.rpc.mcp.secrets.deleteServer({ serverName: "github" });
+
+// List persisted plugin extension approvals, then revoke one.
+const { approvals } = await client.rpc.permissions.extensionApprovals.list({});
+for (const approval of approvals) {
+    console.log(`${approval.pluginName}/${approval.extensionName}: ${approval.capabilities.join(", ")}`);
+}
+const stale = approvals.find((approval) => approval.extensionName === "legacy-extension");
+if (stale) {
+    const { revoked } = await client.rpc.permissions.extensionApprovals.revoke({
+        extensionName: stale.extensionName,
+        installationKey: stale.installationKey,
+    });
+}
+```
+
+- `mcp.secrets.save`, `delete`, and `deleteServer` accept an optional `configDir`, the expected `mcp-secrets` directory. Omit it to use the runtime configuration root.
+- `permissions.extensionApprovals.grant({ sessionId, requestId })` persists the approval for a live extension permission request before your permission handler answers it normally. It returns `{ granted, approval }`; `granted` is false when the request isn't eligible.
+- `list` and `revoke` accept an optional `sessionId` to target an attached session's configuration profile instead of the server profile. Each approval has `extensionName`, `pluginName`, `capabilities`, `grantedAt`, `installationKey`, and an optional `installationLabel`.
+
 ## User Input Requests
 
 Enable the legacy question-and-answer `ask_user` tool by providing an `interaction.onUserInputRequest` handler:
@@ -2595,6 +2629,41 @@ const session = await client.createSession({
     },
 });
 ```
+
+### Image Attachments
+
+When the runtime can accept images in an answer, the request carries `imageAttachmentConstraints` (`allowedMimeTypes`, `maxBytesPerImage`, `maxCount`). It is absent when images are unsupported, so answer with text only. Return images as base64 `attachments`; for an image-only answer, use an empty `answer` with `wasFreeform: true`:
+
+```typescript
+import { readFile } from "node:fs/promises";
+
+const session = await client.createSession({
+    model: "gpt-5",
+    interaction: {
+        onUserInputRequest: async (request) => {
+            const limits = request.imageAttachmentConstraints;
+            const png = await readFile("screenshot.png");
+            if (!limits || !limits.allowedMimeTypes.includes("image/png") || png.byteLength > limits.maxBytesPerImage) {
+                return { answer: "The screenshot shows the login error.", wasFreeform: true };
+            }
+            return {
+                answer: "",
+                wasFreeform: true,
+                attachments: [
+                    {
+                        type: "image",
+                        data: png.toString("base64"),
+                        mimeType: "image/png",
+                        displayName: "screenshot.png",
+                    },
+                ],
+            };
+        },
+    },
+});
+```
+
+Send at most `maxCount` images, each within `maxBytesPerImage` decoded bytes. Images need readable, nonzero dimensions, and GIF or WebP images can't exceed 2,000 pixels per side.
 
 ### Reporting a person's answers
 

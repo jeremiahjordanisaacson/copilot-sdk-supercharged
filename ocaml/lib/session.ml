@@ -311,3 +311,9 @@ let handle_memory_store (t : t) (memory : Types.stored_memory) : unit Lwt.t =
   match t.config.Types.on_store_memory with
   | Some store -> store memory
   | None -> Lwt.fail_with "No memory store is registered for this session"
+
+let handle_user_input_request (t : t) (request : Types.user_input_request)
+    : Types.user_input_response Lwt.t =
+  match t.config.Types.on_user_input_request with
+  | Some handler -> handler request
+  | None -> Lwt.fail_with "No user input handler registered"

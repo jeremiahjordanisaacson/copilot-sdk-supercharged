@@ -138,6 +138,13 @@ module Copilot.Types
   , sessionEventToolShellOutput
   , ShellOutputData (..)
 
+    -- * v3.1.0 MCP secret store & plugin extension approval types
+  , McpSecretsSaveResult (..)
+  , PermissionsExtensionApproval (..)
+  , PermissionsExtensionApprovalsGrantResult (..)
+  , PermissionsExtensionApprovalsListResult (..)
+  , PermissionsExtensionApprovalsRevokeResult (..)
+
     -- * Response format & image types
   , ResponseFormat (..)
   , ImageOptions (..)
@@ -157,6 +164,10 @@ module Copilot.Types
     -- * User input types
   , UserInputRequest (..)
   , UserInputResponse (..)
+  , defaultUserInputResponse
+  , UserInputImageAttachmentConstraints (..)
+  , UserInputImageAttachment (..)
+  , defaultUserInputImageAttachment
   , UserInputHandler
 
     -- * Exit plan mode types
@@ -1589,6 +1600,76 @@ instance FromJSON ShellOutputData where
       <*> o .:? "stream"
 
 -- ============================================================================
+-- v3.1.0 MCP Secret Store & Plugin Extension Approval Types
+-- ============================================================================
+
+-- | Result of 'Copilot.Client.mcpSecretsSave'.
+newtype McpSecretsSaveResult = McpSecretsSaveResult
+  { mssrUsedKeychain :: Bool
+    -- ^ 'True' when the OS keychain stored the credential, 'False' when the
+    -- runtime used its file backend
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON McpSecretsSaveResult where
+  parseJSON = withObject "McpSecretsSaveResult" $ \o ->
+    McpSecretsSaveResult <$> o .:? "usedKeychain" .!= False
+
+-- | A user-scoped approval for one installed plugin extension.
+data PermissionsExtensionApproval = PermissionsExtensionApproval
+  { peaExtensionName     :: !Text
+    -- ^ Stable identity, for example @plugin:plugin-name:extension-name@
+  , peaPluginName        :: !Text
+  , peaCapabilities      :: ![Text]
+    -- ^ Exact privileged capabilities the user approved
+  , peaGrantedAt         :: !Text          -- ^ RFC 3339 timestamp
+  , peaInstallationKey   :: !Text
+    -- ^ Opaque; pass it back unchanged to 'Copilot.Client.extensionApprovalsRevoke'
+  , peaInstallationLabel :: !(Maybe Text)  -- ^ Human-readable installation source
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PermissionsExtensionApproval where
+  parseJSON = withObject "PermissionsExtensionApproval" $ \o ->
+    PermissionsExtensionApproval
+      <$> o .:? "extensionName" .!= ""
+      <*> o .:? "pluginName" .!= ""
+      <*> o .:? "capabilities" .!= []
+      <*> o .:? "grantedAt" .!= ""
+      <*> o .:? "installationKey" .!= ""
+      <*> o .:? "installationLabel"
+
+-- | Result of 'Copilot.Client.extensionApprovalsGrant'.
+data PermissionsExtensionApprovalsGrantResult = PermissionsExtensionApprovalsGrantResult
+  { peagGranted  :: !Bool
+    -- ^ Whether the pending request was eligible and its approval persisted
+  , peagApproval :: !(Maybe PermissionsExtensionApproval)
+    -- ^ The persisted approval when 'peagGranted' is 'True'
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PermissionsExtensionApprovalsGrantResult where
+  parseJSON = withObject "PermissionsExtensionApprovalsGrantResult" $ \o ->
+    PermissionsExtensionApprovalsGrantResult
+      <$> o .:? "granted" .!= False
+      <*> o .:? "approval"
+
+-- | Result of 'Copilot.Client.extensionApprovalsList'.
+newtype PermissionsExtensionApprovalsListResult = PermissionsExtensionApprovalsListResult
+  { pealApprovals :: [PermissionsExtensionApproval]
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PermissionsExtensionApprovalsListResult where
+  parseJSON = withObject "PermissionsExtensionApprovalsListResult" $ \o ->
+    PermissionsExtensionApprovalsListResult <$> o .:? "approvals" .!= []
+
+-- | Result of 'Copilot.Client.extensionApprovalsRevoke'.
+newtype PermissionsExtensionApprovalsRevokeResult = PermissionsExtensionApprovalsRevokeResult
+  { pearRevoked :: Bool  -- ^ Whether a matching approval existed and was removed
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON PermissionsExtensionApprovalsRevokeResult where
+  parseJSON = withObject "PermissionsExtensionApprovalsRevokeResult" $ \o ->
+    PermissionsExtensionApprovalsRevokeResult <$> o .:? "revoked" .!= False
+
+-- ============================================================================
 -- Response Format & Image Types
 -- ============================================================================
 
@@ -1795,17 +1876,29 @@ type PermissionHandler = PermissionRequest -> Text -> IO PermissionRequestResult
 -- ============================================================================
 
 -- | Request for user input from the agent.
+--
+-- 'uirImageAttachmentConstraints' is set when the runtime accepts image
+-- attachments in the answer ('uirAttachments') and 'Nothing' otherwise.
+-- 'uirRequestId' is the pending request ID and 'uirMeta' the request's opaque
+-- @_meta@ object, when the runtime sends them.
 data UserInputRequest = UserInputRequest
-  { uirQuestion      :: !Text
-  , uirChoices       :: !(Maybe [Text])
-  , uirAllowFreeform :: !(Maybe Bool)
+  { uirQuestion                   :: !Text
+  , uirChoices                    :: !(Maybe [Text])
+  , uirAllowFreeform              :: !(Maybe Bool)
+  , uirRequestId                  :: !(Maybe Text)
+  , uirImageAttachmentConstraints :: !(Maybe UserInputImageAttachmentConstraints)
+  , uirMeta                       :: !(Maybe Value)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON UserInputRequest where
-  toJSON UserInputRequest{..} = object
+  toJSON UserInputRequest{..} = object $
     [ "question"      .= uirQuestion
     , "choices"       .= uirChoices
     , "allowFreeform" .= uirAllowFreeform
+    ] ++ catMaybes
+    [ ("requestId" .=) <$> uirRequestId
+    , ("imageAttachmentConstraints" .=) <$> uirImageAttachmentConstraints
+    , ("_meta" .=) <$> uirMeta
     ]
 
 instance FromJSON UserInputRequest where
@@ -1814,17 +1907,30 @@ instance FromJSON UserInputRequest where
       <$> o .:  "question"
       <*> o .:? "choices"
       <*> o .:? "allowFreeform"
+      <*> o .:? "requestId"
+      <*> o .:? "imageAttachmentConstraints"
+      <*> o .:? "_meta"
 
--- | Response to a user input request.
+-- | Response to a user input request. 'uirAttachments' is only valid when the
+-- request advertised 'uirImageAttachmentConstraints' and is sent only when
+-- set; for an image-only answer use an empty 'uirAnswer' and 'uirWasFreeform'
+-- 'True'. Build one with 'defaultUserInputResponse'.
 data UserInputResponse = UserInputResponse
   { uirAnswer      :: !Text
   , uirWasFreeform :: !Bool
+  , uirAttachments :: !(Maybe [UserInputImageAttachment])
   } deriving (Show, Eq, Generic)
 
+-- | A response with the given answer and freeform flag and no attachments.
+defaultUserInputResponse :: Text -> Bool -> UserInputResponse
+defaultUserInputResponse answer wasFreeform = UserInputResponse answer wasFreeform Nothing
+
 instance ToJSON UserInputResponse where
-  toJSON UserInputResponse{..} = object
+  toJSON UserInputResponse{..} = object $
     [ "answer"      .= uirAnswer
     , "wasFreeform" .= uirWasFreeform
+    ] ++ catMaybes
+    [ ("attachments" .=) <$> uirAttachments
     ]
 
 instance FromJSON UserInputResponse where
@@ -1832,9 +1938,66 @@ instance FromJSON UserInputResponse where
     UserInputResponse
       <$> o .:  "answer"
       <*> o .:  "wasFreeform"
+      <*> o .:? "attachments"
 
 -- | User input handler callback.
 type UserInputHandler = UserInputRequest -> Text -> IO UserInputResponse
+
+-- | Image support advertised by a @userInput.request@
+-- ('uirImageAttachmentConstraints'). Absent when the runtime does not accept
+-- images in the answer.
+data UserInputImageAttachmentConstraints = UserInputImageAttachmentConstraints
+  { uiacAllowedMimeTypes :: ![Text]
+  , uiacMaxBytesPerImage :: !Int
+  , uiacMaxCount         :: !Int
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON UserInputImageAttachmentConstraints where
+  toJSON UserInputImageAttachmentConstraints{..} = object
+    [ "allowedMimeTypes" .= uiacAllowedMimeTypes
+    , "maxBytesPerImage" .= uiacMaxBytesPerImage
+    , "maxCount"         .= uiacMaxCount
+    ]
+
+instance FromJSON UserInputImageAttachmentConstraints where
+  parseJSON = withObject "UserInputImageAttachmentConstraints" $ \o ->
+    UserInputImageAttachmentConstraints
+      <$> o .:? "allowedMimeTypes" .!= []
+      <*> o .:? "maxBytesPerImage" .!= 0
+      <*> o .:? "maxCount" .!= 0
+
+-- | An inline image attached to an ask_user answer ('uirAttachments'). The
+-- wire @type@ is always @image@ and 'uiaData' is the base64-encoded image.
+-- The runtime enforces the advertised MIME types, size, and count limits.
+data UserInputImageAttachment = UserInputImageAttachment
+  { uiaData        :: !Text
+  , uiaMimeType    :: !Text
+  , uiaDescription :: !(Maybe Text)
+  , uiaDisplayName :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+-- | An image attachment with the given base64 data and MIME type and no
+-- description or display name.
+defaultUserInputImageAttachment :: Text -> Text -> UserInputImageAttachment
+defaultUserInputImageAttachment imageData mimeType =
+  UserInputImageAttachment imageData mimeType Nothing Nothing
+
+instance ToJSON UserInputImageAttachment where
+  toJSON UserInputImageAttachment{..} = object $ catMaybes
+    [ Just ("type" .= ("image" :: Text))
+    , Just ("data" .= uiaData)
+    , Just ("mimeType" .= uiaMimeType)
+    , ("description" .=) <$> uiaDescription
+    , ("displayName" .=) <$> uiaDisplayName
+    ]
+
+instance FromJSON UserInputImageAttachment where
+  parseJSON = withObject "UserInputImageAttachment" $ \o ->
+    UserInputImageAttachment
+      <$> o .:  "data"
+      <*> o .:  "mimeType"
+      <*> o .:? "description"
+      <*> o .:? "displayName"
 
 -- ============================================================================
 -- Exit Plan Mode Types

@@ -64,6 +64,64 @@ client$stop()
 - Protocol version verification
 - R6 class-based API throughout
 
+## What's New in v3.1.0
+
+This release adds parity with Microsoft Copilot SDK 2.0.3-preview.0. The MCP secret store and
+plugin extension approval methods are server-scoped `CopilotClient` methods that require Copilot
+CLI **1.0.116 or newer**; older CLIs answer them with a JSON-RPC method-not-found error, raised
+as a `json_rpc_error` like any other RPC failure.
+
+- **MCP secret store**: `client$mcp_secrets_save(secret_id, value, config_dir = NULL)` returns an `McpSecretsSaveResult` whose `used_keychain` is `TRUE` when the OS keychain stored the credential (`FALSE` for the file backend). `client$mcp_secrets_delete(secret_id, config_dir = NULL)` and `client$mcp_secrets_delete_server(server_name, config_dir = NULL)` remove credentials. The value is a credential: the SDK never logs it.
+- **Plugin extension approvals**: `client$extension_approvals_grant(session_id, request_id)` persists a pending extension permission request before you answer it and returns a `PermissionsExtensionApprovalsGrantResult` (`granted`, `approval`). `client$extension_approvals_list(session_id = NULL)` returns a list of `PermissionsExtensionApproval` objects (`extension_name`, `plugin_name`, `capabilities`, `granted_at`, `installation_key`, `installation_label`). `client$extension_approvals_revoke(extension_name, installation_key, session_id = NULL)` returns a `PermissionsExtensionApprovalsRevokeResult` (`revoked`).
+- **Ask-user image attachments**: the `UserInputRequest` passed to `on_user_input_request` has `image_attachment_constraints`, a `UserInputImageAttachmentConstraints` (`allowed_mime_types`, `max_bytes_per_image`, `max_count`) that is `NULL` when the runtime does not accept images, plus `request_id` and `meta` (the request's opaque `_meta`). Answer with `UserInputResponse$new(answer, was_freeform, attachments = list(UserInputImageAttachment$new(data, mime_type, description, display_name)))`; `attachments` is sent only when set.
+- **Elicitation metadata**: the `on_elicitation_request` context now includes `request_id` and `meta` (the request's opaque `_meta`). A `meta` (or `_meta`) member of the result, or `ElicitationResult$new(action, content, meta)`, is sent back as `_meta` unchanged.
+
+### MCP secrets and extension approvals
+
+```r
+saved <- client$mcp_secrets_save("example-mcp/api-key", Sys.getenv("EXAMPLE_API_KEY"))
+if (!saved$used_keychain) message("Stored with the file backend")
+client$mcp_secrets_delete("example-mcp/api-key")
+client$mcp_secrets_delete_server("example-mcp")
+
+# request_id is the requestId of a pending extension permission request (from its
+# permission.requested event); persist it, then answer the request as usual.
+grant <- client$extension_approvals_grant(session$session_id, request_id)
+if (grant$granted) cat("Saved approval for", grant$approval$extension_name, "\n")
+
+approvals <- client$extension_approvals_list()
+for (approval in approvals) {
+  cat(approval$extension_name, ":", paste(approval$capabilities, collapse = ", "), "\n")
+}
+if (length(approvals) > 0) {
+  result <- client$extension_approvals_revoke(
+    approvals[[1]]$extension_name, approvals[[1]]$installation_key
+  )
+  cat("Revoked:", result$revoked, "\n")
+}
+```
+
+### Ask-user image attachments
+
+```r
+session <- client$create_session(
+  on_user_input_request = function(request, context) {
+    limits <- request$image_attachment_constraints
+    if (is.null(limits) || !("image/png" %in% limits$allowed_mime_types)) {
+      return(UserInputResponse$new(answer = "No screenshot available", was_freeform = TRUE))
+    }
+    png <- readBin("screenshot.png", "raw", file.info("screenshot.png")$size)
+    UserInputResponse$new(
+      answer = "Screenshot attached",
+      was_freeform = TRUE,
+      attachments = list(UserInputImageAttachment$new(
+        data = jsonlite::base64_enc(png), mime_type = "image/png", display_name = "screenshot.png"
+      ))
+    )
+  }
+)
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, so it requires Copilot CLI **1.0.113 or newer**; older

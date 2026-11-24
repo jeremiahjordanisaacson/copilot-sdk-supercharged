@@ -64,6 +64,64 @@ $session->destroy();
 $client->stop();
 ```
 
+## What's New in v3.1.0
+
+Parity with the Microsoft Copilot SDK 2.0.3-preview.0. The new client methods below call server-scoped RPCs that require **Copilot CLI 1.0.116 or newer**; older CLIs answer with a JSON-RPC method-not-found error, thrown as `JsonRpcException` like any other RPC error.
+
+### MCP secret store
+
+Save and delete legacy MCP configuration credentials in the runtime-owned secret store. The secret value is never logged.
+
+```php
+$result = $client->mcpSecretsSave('my-server-token', getenv('MY_SERVER_TOKEN')); // optional configDir:
+echo $result->usedKeychain ? "Stored in the OS keychain\n" : "Stored in the file backend\n";
+
+$client->mcpSecretsDelete('my-server-token');
+$client->mcpSecretsDeleteServer('my-server'); // every legacy credential indexed for the server
+```
+
+### Plugin extension approvals
+
+Persist, list and revoke user-scoped approvals for installed plugin extensions. `extensionApprovalsList()` and `extensionApprovalsRevoke()` take an optional `sessionId:` to use an attached session's configuration profile.
+
+```php
+// Persist a pending extension permission request before answering it normally
+$grant = $client->extensionApprovalsGrant($session->sessionId, $requestId);
+if ($grant->granted) {
+    echo "Approved {$grant->approval->extensionName}\n";
+}
+
+foreach ($client->extensionApprovalsList()->approvals as $approval) {
+    // extensionName, pluginName, capabilities, grantedAt, installationKey, installationLabel
+    $client->extensionApprovalsRevoke($approval->extensionName, $approval->installationKey);
+}
+```
+
+### Ask-user image attachments
+
+When the runtime accepts images in an answer, the `UserInputRequest` carries `imageAttachmentConstraints` (a `UserInputImageAttachmentConstraints` with `allowedMimeTypes`, `maxBytesPerImage` and `maxCount`); it is `null` otherwise. The request also exposes `requestId` and `meta` (the opaque `_meta` object) when sent. Answer with `attachments:`, a list of `UserInputImageAttachment` (base64 `data`, `mimeType`, optional `description` and `displayName`; the wire `type` is always `"image"`). Image-only answers use `answer: ''` and `wasFreeform: true`; the runtime enforces the limits.
+
+```php
+use GitHub\Copilot\UserInputImageAttachment;
+use GitHub\Copilot\UserInputRequest;
+use GitHub\Copilot\UserInputResponse;
+
+$session = $client->createSession(new SessionConfig(
+    onUserInputRequest: function (UserInputRequest $request, array $context): UserInputResponse {
+        $constraints = $request->imageAttachmentConstraints;
+        if ($constraints !== null && in_array('image/png', $constraints->allowedMimeTypes, true)) {
+            $image = new UserInputImageAttachment(
+                data: base64_encode(file_get_contents('screenshot.png')),
+                mimeType: 'image/png',
+                displayName: 'screenshot.png',
+            );
+            return new UserInputResponse(answer: '', wasFreeform: true, attachments: [$image]);
+        }
+        return new UserInputResponse(answer: 'No screenshot available', wasFreeform: true);
+    },
+));
+```
+
 ## What's New in v3.0.0
 
 This release speaks **SDK protocol v4**, the protocol of the Microsoft Copilot SDK 2.0 runtime. It requires **Copilot CLI 1.0.113 or newer**; older CLIs are rejected by `start()` with an `SDK protocol version mismatch` error.
@@ -312,6 +370,12 @@ $client = new CopilotClient(new CopilotClientOptions(
 | `getForegroundSessionId(): ?string` | Get foreground session (TUI mode) |
 | `setForegroundSessionId(string)` | Set foreground session (TUI mode) |
 | `clearManagedSettingsCache()` | Clear cached managed (enterprise policy) settings |
+| `mcpSecretsSave(string, string, ?string): McpSecretsSaveResult` | Save an MCP credential (secret id, value, optional config dir) |
+| `mcpSecretsDelete(string, ?string)` | Delete an MCP credential |
+| `mcpSecretsDeleteServer(string, ?string)` | Delete the MCP credentials indexed for a server |
+| `extensionApprovalsGrant(string, string): PermissionsExtensionApprovalsGrantResult` | Persist a pending plugin extension approval (session id, request id) |
+| `extensionApprovalsList(?string): PermissionsExtensionApprovalsListResult` | List plugin extension approvals |
+| `extensionApprovalsRevoke(string, string, ?string): PermissionsExtensionApprovalsRevokeResult` | Revoke a plugin extension approval |
 | `onLifecycle(callable): callable` | Subscribe to all lifecycle events |
 | `onLifecycleEvent(string, callable): callable` | Subscribe to specific lifecycle event |
 | `processMessages(float)` | Process pending server messages |

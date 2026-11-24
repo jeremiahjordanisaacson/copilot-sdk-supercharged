@@ -649,31 +649,66 @@ class UserInputRequest {
   final List<String>? choices;
   final bool? allowFreeform;
 
+  /// Runtime ID of the pending request, when the runtime sends it.
+  final String? requestId;
+
+  /// Image support advertised by the runtime; null when the answer cannot
+  /// carry images (see [UserInputResponse.attachments]).
+  final UserInputImageAttachmentConstraints? imageAttachmentConstraints;
+
+  /// The request's opaque `_meta` object, forwarded unchanged when the
+  /// runtime sends it.
+  final Map<String, dynamic>? meta;
+
   const UserInputRequest({
     this.question,
     this.choices,
     this.allowFreeform,
+    this.requestId,
+    this.imageAttachmentConstraints,
+    this.meta,
   });
 
   factory UserInputRequest.fromJson(Map<String, dynamic> json) {
+    final constraints = json['imageAttachmentConstraints'];
+    final meta = json['_meta'];
     return UserInputRequest(
       question: json['question'] as String?,
       choices: (json['choices'] as List<dynamic>?)?.cast<String>(),
       allowFreeform: json['allowFreeform'] as bool?,
+      requestId: json['requestId'] as String?,
+      imageAttachmentConstraints: constraints is Map<String, dynamic>
+          ? UserInputImageAttachmentConstraints.fromJson(constraints)
+          : null,
+      meta: meta is Map<String, dynamic> ? meta : null,
     );
   }
 }
 
 /// Response to a user input request.
+///
+/// [attachments] is only valid when the request advertised
+/// [UserInputRequest.imageAttachmentConstraints] and is sent only when set.
+/// Image-only answers use an empty [answer] and `wasFreeform: true`; the
+/// runtime enforces the advertised MIME types, size and count limits.
 class UserInputResponse {
   final String answer;
   final bool wasFreeform;
 
-  const UserInputResponse({required this.answer, required this.wasFreeform});
+  /// Images attached to the answer, or null to send none.
+  final List<UserInputImageAttachment>? attachments;
+
+  const UserInputResponse({
+    required this.answer,
+    required this.wasFreeform,
+    this.attachments,
+  });
 
   Map<String, dynamic> toJson() => {
         'answer': answer,
         'wasFreeform': wasFreeform,
+        if (attachments != null)
+          'attachments': attachments!.map((a) => a.toJson()).toList(),
       };
 }
 
@@ -3667,6 +3702,202 @@ class PermissionModeSetResult {
       success: json['success'] as bool? ?? false,
       mode: json['mode'] as String? ?? '',
       reason: json['reason'] as String?,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v3.1.0 types (parity with the Microsoft Copilot SDK 2.0.3-preview.0)
+// ---------------------------------------------------------------------------
+
+/// Image support advertised by a `userInput.request`
+/// ([UserInputRequest.imageAttachmentConstraints]). Absent (null) when the
+/// runtime does not accept images in the answer.
+class UserInputImageAttachmentConstraints {
+  /// MIME types accepted by the request.
+  final List<String> allowedMimeTypes;
+
+  /// Maximum decoded byte length of each image.
+  final int maxBytesPerImage;
+
+  /// Maximum number of images accepted in one answer.
+  final int maxCount;
+
+  const UserInputImageAttachmentConstraints({
+    required this.allowedMimeTypes,
+    required this.maxBytesPerImage,
+    required this.maxCount,
+  });
+
+  factory UserInputImageAttachmentConstraints.fromJson(
+      Map<String, dynamic> json) {
+    final mimeTypes = json['allowedMimeTypes'];
+    return UserInputImageAttachmentConstraints(
+      allowedMimeTypes: mimeTypes is List
+          ? mimeTypes.whereType<String>().toList()
+          : const <String>[],
+      maxBytesPerImage: (json['maxBytesPerImage'] as num?)?.toInt() ?? 0,
+      maxCount: (json['maxCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// An inline image attached to an ask_user answer
+/// ([UserInputResponse.attachments]). [data] is the base64-encoded image
+/// without a data URL prefix; the wire `type` is always `"image"`.
+class UserInputImageAttachment {
+  /// Base64-encoded image bytes.
+  final String data;
+
+  /// MIME type of the image, matching one of the request's
+  /// [UserInputImageAttachmentConstraints.allowedMimeTypes].
+  final String mimeType;
+
+  /// Optional description of the image.
+  final String? description;
+
+  /// Optional client-facing name of the image.
+  final String? displayName;
+
+  const UserInputImageAttachment({
+    required this.data,
+    required this.mimeType,
+    this.description,
+    this.displayName,
+  });
+
+  /// Attachment type; always `"image"`.
+  String get type => 'image';
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'data': data,
+        'mimeType': mimeType,
+        if (description != null) 'description': description,
+        if (displayName != null) 'displayName': displayName,
+      };
+}
+
+/// Result of `CopilotClient.mcpSecretsSave` (`mcp.secrets.save`).
+class McpSecretsSaveResult {
+  /// True when the OS keychain stored the credential, false for the file
+  /// backend.
+  final bool usedKeychain;
+
+  const McpSecretsSaveResult({required this.usedKeychain});
+
+  factory McpSecretsSaveResult.fromJson(Map<String, dynamic> json) {
+    return McpSecretsSaveResult(
+      usedKeychain: json['usedKeychain'] as bool? ?? false,
+    );
+  }
+}
+
+/// A user-scoped approval for one installed plugin extension.
+class PermissionsExtensionApproval {
+  /// Stable identity, for example `plugin:plugin-name:extension-name`.
+  final String extensionName;
+
+  /// Name of the plugin that contributes the extension.
+  final String pluginName;
+
+  /// Exact privileged capabilities the user approved.
+  final List<String> capabilities;
+
+  /// When the approval was granted (RFC 3339 timestamp).
+  final String grantedAt;
+
+  /// Opaque installation key; pass it back unchanged to
+  /// `CopilotClient.extensionApprovalsRevoke`.
+  final String installationKey;
+
+  /// Human-readable installation label, when known.
+  final String? installationLabel;
+
+  const PermissionsExtensionApproval({
+    required this.extensionName,
+    required this.pluginName,
+    required this.capabilities,
+    required this.grantedAt,
+    required this.installationKey,
+    this.installationLabel,
+  });
+
+  factory PermissionsExtensionApproval.fromJson(Map<String, dynamic> json) {
+    final capabilities = json['capabilities'];
+    return PermissionsExtensionApproval(
+      extensionName: json['extensionName'] as String? ?? '',
+      pluginName: json['pluginName'] as String? ?? '',
+      capabilities: capabilities is List
+          ? capabilities.whereType<String>().toList()
+          : const <String>[],
+      grantedAt: json['grantedAt'] as String? ?? '',
+      installationKey: json['installationKey'] as String? ?? '',
+      installationLabel: json['installationLabel'] as String?,
+    );
+  }
+}
+
+/// Result of `CopilotClient.extensionApprovalsGrant`
+/// (`permissions.extensionApprovals.grant`).
+class PermissionsExtensionApprovalsGrantResult {
+  /// Whether the pending request was eligible and its approval was persisted.
+  final bool granted;
+
+  /// The stored approval, when one was persisted.
+  final PermissionsExtensionApproval? approval;
+
+  const PermissionsExtensionApprovalsGrantResult({
+    required this.granted,
+    this.approval,
+  });
+
+  factory PermissionsExtensionApprovalsGrantResult.fromJson(
+      Map<String, dynamic> json) {
+    final approval = json['approval'];
+    return PermissionsExtensionApprovalsGrantResult(
+      granted: json['granted'] as bool? ?? false,
+      approval: approval is Map<String, dynamic>
+          ? PermissionsExtensionApproval.fromJson(approval)
+          : null,
+    );
+  }
+}
+
+/// Result of `CopilotClient.extensionApprovalsList`
+/// (`permissions.extensionApprovals.list`).
+class PermissionsExtensionApprovalsListResult {
+  /// The persisted plugin extension approvals.
+  final List<PermissionsExtensionApproval> approvals;
+
+  const PermissionsExtensionApprovalsListResult({required this.approvals});
+
+  factory PermissionsExtensionApprovalsListResult.fromJson(
+      Map<String, dynamic> json) {
+    final approvals = json['approvals'];
+    return PermissionsExtensionApprovalsListResult(
+      approvals: approvals is List
+          ? approvals
+              .whereType<Map<String, dynamic>>()
+              .map(PermissionsExtensionApproval.fromJson)
+              .toList()
+          : const <PermissionsExtensionApproval>[],
+    );
+  }
+}
+
+/// Result of `CopilotClient.extensionApprovalsRevoke`
+/// (`permissions.extensionApprovals.revoke`).
+class PermissionsExtensionApprovalsRevokeResult {
+  /// Whether a matching approval was revoked.
+  final bool revoked;
+
+  const PermissionsExtensionApprovalsRevokeResult({required this.revoked});
+
+  factory PermissionsExtensionApprovalsRevokeResult.fromJson(
+      Map<String, dynamic> json) {
+    return PermissionsExtensionApprovalsRevokeResult(
+      revoked: json['revoked'] as bool? ?? false,
     );
   }
 }

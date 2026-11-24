@@ -126,6 +126,14 @@ const REQUIRED_FEATURES = [
   ['Network callbacks',             ['network.setProvider']],
   ['Policy helper failure',         ['policyHelperFailure', 'policy_helper_failure', 'PolicyHelperFailure']],
   ['Permission mode refusal reason', ['managed_policy']],
+  // --- Upstream-sync features (Microsoft Copilot SDK 2.0.3-preview.0, 2026-11 / v3.1.0) ---
+  ['MCP secrets save',              ['mcp.secrets.save']],
+  ['MCP secrets delete',            ['mcp.secrets.delete"', "mcp.secrets.delete'", 'mcp.secrets.delete`']],
+  ['MCP secrets delete server',     ['mcp.secrets.deleteServer']],
+  ['Extension approvals grant',     ['permissions.extensionApprovals.grant']],
+  ['Extension approvals list',      ['permissions.extensionApprovals.list']],
+  ['Extension approvals revoke',    ['permissions.extensionApprovals.revoke']],
+  ['Ask-user image attachments',    ['imageAttachmentConstraints', 'image_attachment_constraints', 'ImageAttachmentConstraints']],
 ];
 
 // Every SDK must speak this SDK protocol version (canonical source: sdk-protocol-version.json).
