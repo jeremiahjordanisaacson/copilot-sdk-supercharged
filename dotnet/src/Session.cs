@@ -1343,6 +1343,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
                             await HandleElicitationRequestAsync(
                                 new ElicitationContext
                                 {
+                                    RequestId = data.RequestId,
+                                    Meta = data.Meta?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
                                     SessionId = SessionId,
                                     Message = data.Message,
                                     RequestedSchema = schema,
@@ -1782,6 +1784,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
             var invocation = new PermissionInvocation
             {
                 SessionId = SessionId,
+                RequestId = requestId,
                 ManagedSettingsEnabled = _managedSettingsEnabled,
                 AssistedApprovalAssessment = assistedApprovalAssessment,
                 ProgramToolCallId = programToolCallId,
@@ -2385,7 +2388,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 Action = result.Action,
                 Content = result.Content?.ToDictionary(
                         kvp => kvp.Key,
-                        kvp => SerializeElicitationValue(kvp.Value))
+                        kvp => SerializeElicitationValue(kvp.Value)),
+                Meta = result.Meta,
             }, decisionContext: result.DecisionContext);
             LoggingHelpers.LogTiming(_logger, LogLevel.Debug, null,
                 "CopilotSession.HandleElicitationRequestAsync response sent successfully. Elapsed={Elapsed}, SessionId={SessionId}, RequestId={RequestId}",
@@ -2461,7 +2465,8 @@ public sealed partial class CopilotSession : IAsyncDisposable
             return new ElicitationResult
             {
                 Action = result.Action,
-                Content = result.Content?.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value)
+                Content = result.Content?.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value),
+                Meta = result.Meta,
             };
         }
 

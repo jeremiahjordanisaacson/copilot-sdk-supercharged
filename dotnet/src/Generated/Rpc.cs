@@ -14170,6 +14170,168 @@ internal sealed class SandboxSettingsPersistPathGrantRequest
     public PermissionSandboxPathGrant Grant { get; set; } = null!;
 }
 
+/// <summary>The policy questions a host asks before granting elevated permissions.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class PermissionsEvaluateManagedPolicyResult
+{
+    /// <summary>True when managed policy forbids bypass-permissions mode, so allow-all style flags must not take effect.</summary>
+    [JsonPropertyName("bypassPermissionsDisabled")]
+    public bool BypassPermissionsDisabled { get; set; }
+
+    /// <summary>True when the managed layer supplies permission rules that the session must enforce.</summary>
+    [JsonPropertyName("permissionRulesActive")]
+    public bool PermissionRulesActive { get; set; }
+
+    /// <summary>True when a managed policy exists but this build could not determine its meaning. Hosts fail closed on it rather than assuming permission was granted.</summary>
+    [JsonPropertyName("policyUndetermined")]
+    public bool PolicyUndetermined { get; set; }
+}
+
+/// <summary>The verbatim managed `permissions` slice to interpret.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class PermissionsEvaluateManagedPolicyParams
+{
+    /// <summary>The `permissions` object from a managed settings layer, for example `{"disableBypassPermissionsMode":"disable"}`. Omitted or null means no managed policy applies.</summary>
+    [JsonPropertyName("permissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Permissions { get; set; }
+}
+
+/// <summary>A user-scoped approval for one installed plugin extension and capability set.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsExtensionApproval
+{
+    /// <summary>Exact privileged capabilities the user approved. A later request is covered only when its capabilities are a subset.</summary>
+    [JsonPropertyName("capabilities")]
+    public IList<string> Capabilities { get => field ??= []; set; }
+
+    /// <summary>Stable extension identity, such as `plugin:plugin-name:extension-name`.</summary>
+    [JsonPropertyName("extensionName")]
+    public string ExtensionName { get; set; } = string.Empty;
+
+    /// <summary>RFC 3339 timestamp when the approval was last granted.</summary>
+    [JsonPropertyName("grantedAt")]
+    public string GrantedAt { get; set; } = string.Empty;
+
+    /// <summary>Opaque stable identity of the installed plugin source. Hosts must return it unchanged when revoking.</summary>
+    [JsonPropertyName("installationKey")]
+    public string InstallationKey { get; set; } = string.Empty;
+
+    /// <summary>Optional human-readable installation source label.</summary>
+    [JsonPropertyName("installationLabel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstallationLabel { get; set; }
+
+    /// <summary>Name of the plugin that contributed the extension.</summary>
+    [JsonPropertyName("pluginName")]
+    public string PluginName { get; set; } = string.Empty;
+}
+
+/// <summary>Whether the pending request was eligible and persisted.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsExtensionApprovalsGrantResult
+{
+    /// <summary>The persisted approval when `granted` is true.</summary>
+    [JsonPropertyName("approval")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PermissionsExtensionApproval? Approval { get; set; }
+
+    /// <summary>Whether the pending request was eligible and its approval was persisted.</summary>
+    [JsonPropertyName("granted")]
+    public bool Granted { get; set; }
+}
+
+/// <summary>Identifies a live extension permission request to persist before the host answers it normally.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class PermissionsExtensionApprovalsGrantRequest
+{
+    /// <summary>Identifier of the pending extension permission request.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Session that owns the pending extension permission request.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>All user-scoped plugin extension approvals.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsExtensionApprovalsListResult
+{
+    /// <summary>Stored user-scoped plugin extension approvals.</summary>
+    [JsonPropertyName("approvals")]
+    public IList<PermissionsExtensionApproval> Approvals { get => field ??= []; set; }
+}
+
+/// <summary>Lists user-scoped plugin extension approvals for the server profile or an attached session profile.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class PermissionsExtensionApprovalsListRequest
+{
+    /// <summary>Optional attached session whose configuration profile should be listed.</summary>
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+}
+
+/// <summary>Whether a matching approval was revoked.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsExtensionApprovalsRevokeResult
+{
+    /// <summary>Whether a matching approval existed and was removed.</summary>
+    [JsonPropertyName("revoked")]
+    public bool Revoked { get; set; }
+}
+
+/// <summary>Identifies one plugin extension installation approval to revoke.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class PermissionsExtensionApprovalsRevokeRequest
+{
+    /// <summary>Stable extension identity of the approval to revoke.</summary>
+    [JsonPropertyName("extensionName")]
+    public string ExtensionName { get; set; } = string.Empty;
+
+    /// <summary>Opaque installation identity returned by the list or grant operation.</summary>
+    [JsonPropertyName("installationKey")]
+    public string InstallationKey { get; set; } = string.Empty;
+
+    /// <summary>Optional attached session whose configuration profile contains the approval.</summary>
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+}
+
+/// <summary>Which stored location permissions were dropped because their directory is gone.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class LocationPermissionsCleanupResult
+{
+    /// <summary>Location keys whose grants were removed. Empty when every stored location still exists.</summary>
+    [JsonPropertyName("removedLocationKeys")]
+    public IList<string> RemovedLocationKeys { get => field ??= []; set; }
+}
+
+/// <summary>Folder trust check result.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class FolderTrustCheckResult
+{
+    /// <summary>Whether the folder is trusted.</summary>
+    [JsonPropertyName("trusted")]
+    public bool Trusted { get; set; }
+}
+
+/// <summary>A folder to check against a persisted trusted-folders list, and the configuration directory holding that list.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class FolderTrustIsTrustedParams
+{
+    /// <summary>Configuration directory to read the trusted-folders list from. Omit it to read the default location; supply it when the host has redirected its configuration, or the check answers from a list the host is not using.</summary>
+    [JsonPropertyName("configDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Folder to check. A folder counts as trusted when it is itself listed, when an ancestor is listed, or when its git root is listed.</summary>
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+}
+
 /// <summary>Terminal outcome. The saved local file is retained on every outcome.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class FeedbackUploadOutcome
@@ -15417,65 +15579,6 @@ internal sealed class FeatureFlagsResolveRequest
     [JsonPropertyName("workingDirectory")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? WorkingDirectory { get; set; }
-}
-
-/// <summary>The policy questions a host asks before granting elevated permissions.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class PermissionsEvaluateManagedPolicyResult
-{
-    /// <summary>True when managed policy forbids bypass-permissions mode, so allow-all style flags must not take effect.</summary>
-    [JsonPropertyName("bypassPermissionsDisabled")]
-    public bool BypassPermissionsDisabled { get; set; }
-
-    /// <summary>True when the managed layer supplies permission rules that the session must enforce.</summary>
-    [JsonPropertyName("permissionRulesActive")]
-    public bool PermissionRulesActive { get; set; }
-
-    /// <summary>True when a managed policy exists but this build could not determine its meaning. Hosts fail closed on it rather than assuming permission was granted.</summary>
-    [JsonPropertyName("policyUndetermined")]
-    public bool PolicyUndetermined { get; set; }
-}
-
-/// <summary>The verbatim managed `permissions` slice to interpret.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class PermissionsEvaluateManagedPolicyParams
-{
-    /// <summary>The `permissions` object from a managed settings layer, for example `{"disableBypassPermissionsMode":"disable"}`. Omitted or null means no managed policy applies.</summary>
-    [JsonPropertyName("permissions")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? Permissions { get; set; }
-}
-
-/// <summary>Which stored location permissions were dropped because their directory is gone.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class LocationPermissionsCleanupResult
-{
-    /// <summary>Location keys whose grants were removed. Empty when every stored location still exists.</summary>
-    [JsonPropertyName("removedLocationKeys")]
-    public IList<string> RemovedLocationKeys { get => field ??= []; set; }
-}
-
-/// <summary>Folder trust check result.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class FolderTrustCheckResult
-{
-    /// <summary>Whether the folder is trusted.</summary>
-    [JsonPropertyName("trusted")]
-    public bool Trusted { get; set; }
-}
-
-/// <summary>A folder to check against a persisted trusted-folders list, and the configuration directory holding that list.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-internal sealed class FolderTrustIsTrustedParams
-{
-    /// <summary>Configuration directory to read the trusted-folders list from. Omit it to read the default location; supply it when the host has redirected its configuration, or the check answers from a list the host is not using.</summary>
-    [JsonPropertyName("configDir")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ConfigDir { get; set; }
-
-    /// <summary>Folder to check. A folder counts as trusted when it is itself listed, when an ancestor is listed, or when its git root is listed.</summary>
-    [JsonPropertyName("path")]
-    public string Path { get; set; } = string.Empty;
 }
 
 /// <summary>The device-managed settings layer, with the sandbox floor and the load outcome a host needs to compose it into an effective policy.</summary>
@@ -20935,6 +21038,61 @@ internal sealed class McpConfigMergeSourcesRequest
     /// <summary>Working directory for workspace discovery and relative source references.</summary>
     [JsonPropertyName("workingDirectory")]
     public string WorkingDirectory { get; set; } = string.Empty;
+}
+
+/// <summary>Whether the OS keychain accepted the saved MCP credential.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class McpSecretsSaveResult
+{
+    /// <summary>True for keychain storage; false for the existing file backend.</summary>
+    [JsonPropertyName("usedKeychain")]
+    public bool UsedKeychain { get; set; }
+}
+
+/// <summary>A legacy MCP configuration credential to persist in the host's secret store.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpSecretsSaveRequest
+{
+    /// <summary>Expected mcp-secrets directory. Omit to use the runtime configuration root.</summary>
+    [JsonPropertyName("configDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Secret reference used by an MCP server configuration.</summary>
+    [JsonPropertyName("secretId")]
+    public string SecretId { get; set; } = string.Empty;
+
+    /// <summary>Credential value to persist.</summary>
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>An MCP configuration credential to remove from the host's secret store.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpSecretsDeleteRequest
+{
+    /// <summary>Expected mcp-secrets directory. Omit to use the runtime configuration root.</summary>
+    [JsonPropertyName("configDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Secret reference to remove.</summary>
+    [JsonPropertyName("secretId")]
+    public string SecretId { get; set; } = string.Empty;
+}
+
+/// <summary>A legacy MCP server whose configuration credentials must be removed.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class McpSecretsDeleteServerRequest
+{
+    /// <summary>Expected mcp-secrets directory. Omit to use the runtime configuration root.</summary>
+    [JsonPropertyName("configDir")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Server name used by the legacy credential index.</summary>
+    [JsonPropertyName("serverName")]
+    public string ServerName { get; set; } = string.Empty;
 }
 
 /// <summary>Request id naming a cancellable registry search.</summary>
@@ -44951,6 +45109,11 @@ public sealed class UIUserInputResponse
     [JsonPropertyName("answer")]
     public string Answer { get; set; } = string.Empty;
 
+    /// <summary>Optional images, accepted only when the request advertises image attachment constraints. For an image-only answer, use an empty answer and wasFreeform true.</summary>
+    [JsonPropertyName("attachments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<UserInputImageAttachment>? Attachments { get; set; }
+
     /// <summary>True if the user typed a freeform response, false if they selected a presented choice. Used by telemetry to differentiate between free text input and choice selection.</summary>
     [JsonPropertyName("wasFreeform")]
     public bool WasFreeform { get; set; }
@@ -62384,7 +62547,7 @@ public readonly struct DiscoveredExtensionSource : IEquatable<DiscoveredExtensio
 }
 
 
-/// <summary>Effective extension loading and agent-management mode.</summary>
+/// <summary>Compatibility mode for the persisted extension preference, not session activation. Current runtimes never return load_only and report disabled instead.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
@@ -62404,13 +62567,13 @@ public readonly struct DiscoveredExtensionMode : IEquatable<DiscoveredExtensionM
     /// <summary>Gets the value associated with this <see cref="DiscoveredExtensionMode"/>.</summary>
     public string Value => _value ?? string.Empty;
 
-    /// <summary>Extensions are not loaded.</summary>
+    /// <summary>The extension preference is disabled.</summary>
     public static DiscoveredExtensionMode Disabled { get; } = new("disabled");
 
-    /// <summary>Extensions are loaded, but the agent cannot create, reload, or manage them.</summary>
+    /// <summary>Legacy compatibility value. Current runtimes report disabled instead.</summary>
     public static DiscoveredExtensionMode LoadOnly { get; } = new("load_only");
 
-    /// <summary>Extensions are loaded and the agent can create, reload, and manage them.</summary>
+    /// <summary>The extension preference permits loading and management, subject to activation and permissions.</summary>
     public static DiscoveredExtensionMode LoadAndAugment { get; } = new("load_and_augment");
 
     /// <summary>Returns a value indicating whether two <see cref="DiscoveredExtensionMode"/> instances are equivalent.</summary>
@@ -75001,6 +75164,12 @@ public sealed class ServerRpc
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
+    /// <summary>Permissions APIs.</summary>
+    public ServerPermissionsApi Permissions =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Feedback APIs.</summary>
     internal ServerFeedbackApi Feedback =>
         field ??
@@ -75027,12 +75196,6 @@ public sealed class ServerRpc
 
     /// <summary>FeatureFlags APIs.</summary>
     public ServerFeatureFlagsApi FeatureFlags =>
-        field ??
-        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
-        field;
-
-    /// <summary>Permissions APIs.</summary>
-    public ServerPermissionsApi Permissions =>
         field ??
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
@@ -78905,6 +79068,142 @@ public sealed class ServerSandboxSettingsApi
     }
 }
 
+/// <summary>Provides server-scoped Permissions APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerPermissionsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerPermissionsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Interprets a verbatim managed `permissions` slice into the three policy questions a host asks before granting elevated permissions: whether bypass-permissions mode is forbidden, whether a policy exists that this build could not determine, and whether the layer supplies permission rules the session must enforce. An absent or empty slice means no managed policy applies. The runtime and its permission service share one policy type, so a new managed permission setting is interpreted in exactly one place; a host that reimplements the reading would silently diverge the first time that set grows. Hosts must fail closed on an undetermined policy rather than treating it as permission granted.</summary>
+    /// <param name="permissions">The `permissions` object from a managed settings layer, for example `{"disableBypassPermissionsMode":"disable"}`. Omitted or null means no managed policy applies.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The policy questions a host asks before granting elevated permissions.</returns>
+    internal async Task<PermissionsEvaluateManagedPolicyResult> EvaluateManagedPolicyAsync(object? permissions = null, CancellationToken cancellationToken = default)
+    {
+        var request = new PermissionsEvaluateManagedPolicyParams { Permissions = CopilotClient.ToJsonElementForWire(permissions) };
+        return await CopilotClient.InvokeRpcAsync<PermissionsEvaluateManagedPolicyResult>(_rpc, "permissions.evaluateManagedPolicy", [request], cancellationToken);
+    }
+
+    /// <summary>ExtensionApprovals APIs.</summary>
+    public ServerPermissionsExtensionApprovalsApi ExtensionApprovals =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>Locations APIs.</summary>
+    public ServerPermissionsLocationsApi Locations =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>FolderTrust APIs.</summary>
+    public ServerPermissionsFolderTrustApi FolderTrust =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+}
+
+/// <summary>Provides server-scoped PermissionsExtensionApprovals APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerPermissionsExtensionApprovalsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerPermissionsExtensionApprovalsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Persists an eligible live plugin extension permission request for the user before the host answers that request normally.</summary>
+    /// <param name="sessionId">Session that owns the pending extension permission request.</param>
+    /// <param name="requestId">Identifier of the pending extension permission request.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether the pending request was eligible and persisted.</returns>
+    public async Task<PermissionsExtensionApprovalsGrantResult> GrantAsync(string sessionId, string requestId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sessionId);
+        ArgumentNullException.ThrowIfNull(requestId);
+
+        var request = new PermissionsExtensionApprovalsGrantRequest { SessionId = sessionId, RequestId = requestId };
+        return await CopilotClient.InvokeRpcAsync<PermissionsExtensionApprovalsGrantResult>(_rpc, "permissions.extensionApprovals.grant", [request], cancellationToken);
+    }
+
+    /// <summary>Lists user-scoped plugin extension approvals across sessions.</summary>
+    /// <param name="sessionId">Optional attached session whose configuration profile should be listed.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>All user-scoped plugin extension approvals.</returns>
+    public async Task<PermissionsExtensionApprovalsListResult> ListAsync(string? sessionId = null, CancellationToken cancellationToken = default)
+    {
+        var request = new PermissionsExtensionApprovalsListRequest { SessionId = sessionId };
+        return await CopilotClient.InvokeRpcAsync<PermissionsExtensionApprovalsListResult>(_rpc, "permissions.extensionApprovals.list", [request], cancellationToken);
+    }
+
+    /// <summary>Revokes one user-scoped plugin extension approval by extension and installation identity.</summary>
+    /// <param name="extensionName">Stable extension identity of the approval to revoke.</param>
+    /// <param name="installationKey">Opaque installation identity returned by the list or grant operation.</param>
+    /// <param name="sessionId">Optional attached session whose configuration profile contains the approval.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether a matching approval was revoked.</returns>
+    public async Task<PermissionsExtensionApprovalsRevokeResult> RevokeAsync(string extensionName, string installationKey, string? sessionId = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(extensionName);
+        ArgumentNullException.ThrowIfNull(installationKey);
+
+        var request = new PermissionsExtensionApprovalsRevokeRequest { ExtensionName = extensionName, InstallationKey = installationKey, SessionId = sessionId };
+        return await CopilotClient.InvokeRpcAsync<PermissionsExtensionApprovalsRevokeResult>(_rpc, "permissions.extensionApprovals.revoke", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped PermissionsLocations APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerPermissionsLocationsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerPermissionsLocationsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Drops stored per-location permission grants whose directory no longer exists, and reports which location keys were removed. Runs against the permission store under the runtime's own Copilot home, the same store `session.permissions.locations.resolve` reads. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on. It can become public once an SDK consumer needs to prune its own permission store.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Which stored location permissions were dropped because their directory is gone.</returns>
+    internal async Task<LocationPermissionsCleanupResult> CleanupOrphanedAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<LocationPermissionsCleanupResult>(_rpc, "permissions.locations.cleanupOrphaned", [], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped PermissionsFolderTrust APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerPermissionsFolderTrustApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerPermissionsFolderTrustApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Reports whether a folder is trusted, reading the persisted trusted-folders list directly rather than through a session. Use this from a host that has no session yet, such as a one-shot command deciding whether to honor a checkout's own settings. It differs from the session-scoped check in two ways that matter: it takes the configuration directory to read the list from, instead of inheriting the session's, and it answers only from the persisted list, so trust a user granted for the lifetime of one session is not visible here. A host that has a session should prefer the session-scoped check, which also covers session-only trust.</summary>
+    /// <param name="path">Folder to check. A folder counts as trusted when it is itself listed, when an ancestor is listed, or when its git root is listed.</param>
+    /// <param name="configDir">Configuration directory to read the trusted-folders list from. Omit it to read the default location; supply it when the host has redirected its configuration, or the check answers from a list the host is not using.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Folder trust check result.</returns>
+    internal async Task<FolderTrustCheckResult> CheckTrustAsync(string path, string? configDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var request = new FolderTrustIsTrustedParams { Path = path, ConfigDir = configDir };
+        return await CopilotClient.InvokeRpcAsync<FolderTrustCheckResult>(_rpc, "permissions.folderTrust.checkTrust", [request], cancellationToken);
+    }
+}
+
 /// <summary>Provides server-scoped Feedback APIs.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 internal sealed class ServerFeedbackApi
@@ -79608,85 +79907,6 @@ public sealed class ServerFeatureFlagsApi
     {
         var request = new FeatureFlagsResolveRequest { IsStaff = isStaff, IsExperimental = isExperimental, IsTeam = isTeam, WorkingDirectory = workingDirectory, IsStaffGitHub = isStaffGithub, IsStaffMicrosoft = isStaffMicrosoft, BaseFlags = baseFlags, Environment = environment, Config = CopilotClient.ToJsonElementForWire(config), FlagOverrides = flagOverrides };
         return await CopilotClient.InvokeRpcAsync<IDictionary<string, bool>>(_rpc, "featureFlags.resolve", [request], cancellationToken);
-    }
-}
-
-/// <summary>Provides server-scoped Permissions APIs.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class ServerPermissionsApi
-{
-    private readonly JsonRpc _rpc;
-
-    internal ServerPermissionsApi(JsonRpc rpc)
-    {
-        _rpc = rpc;
-    }
-
-    /// <summary>Interprets a verbatim managed `permissions` slice into the three policy questions a host asks before granting elevated permissions: whether bypass-permissions mode is forbidden, whether a policy exists that this build could not determine, and whether the layer supplies permission rules the session must enforce. An absent or empty slice means no managed policy applies. The runtime and its permission service share one policy type, so a new managed permission setting is interpreted in exactly one place; a host that reimplements the reading would silently diverge the first time that set grows. Hosts must fail closed on an undetermined policy rather than treating it as permission granted.</summary>
-    /// <param name="permissions">The `permissions` object from a managed settings layer, for example `{"disableBypassPermissionsMode":"disable"}`. Omitted or null means no managed policy applies.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>The policy questions a host asks before granting elevated permissions.</returns>
-    internal async Task<PermissionsEvaluateManagedPolicyResult> EvaluateManagedPolicyAsync(object? permissions = null, CancellationToken cancellationToken = default)
-    {
-        var request = new PermissionsEvaluateManagedPolicyParams { Permissions = CopilotClient.ToJsonElementForWire(permissions) };
-        return await CopilotClient.InvokeRpcAsync<PermissionsEvaluateManagedPolicyResult>(_rpc, "permissions.evaluateManagedPolicy", [request], cancellationToken);
-    }
-
-    /// <summary>Locations APIs.</summary>
-    public ServerPermissionsLocationsApi Locations =>
-        field ??
-        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
-        field;
-
-    /// <summary>FolderTrust APIs.</summary>
-    public ServerPermissionsFolderTrustApi FolderTrust =>
-        field ??
-        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
-        field;
-}
-
-/// <summary>Provides server-scoped PermissionsLocations APIs.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class ServerPermissionsLocationsApi
-{
-    private readonly JsonRpc _rpc;
-
-    internal ServerPermissionsLocationsApi(JsonRpc rpc)
-    {
-        _rpc = rpc;
-    }
-
-    /// <summary>Drops stored per-location permission grants whose directory no longer exists, and reports which location keys were removed. Runs against the permission store under the runtime's own Copilot home, the same store `session.permissions.locations.resolve` reads. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on. It can become public once an SDK consumer needs to prune its own permission store.</summary>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Which stored location permissions were dropped because their directory is gone.</returns>
-    internal async Task<LocationPermissionsCleanupResult> CleanupOrphanedAsync(CancellationToken cancellationToken = default)
-    {
-        return await CopilotClient.InvokeRpcAsync<LocationPermissionsCleanupResult>(_rpc, "permissions.locations.cleanupOrphaned", [], cancellationToken);
-    }
-}
-
-/// <summary>Provides server-scoped PermissionsFolderTrust APIs.</summary>
-[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
-public sealed class ServerPermissionsFolderTrustApi
-{
-    private readonly JsonRpc _rpc;
-
-    internal ServerPermissionsFolderTrustApi(JsonRpc rpc)
-    {
-        _rpc = rpc;
-    }
-
-    /// <summary>Reports whether a folder is trusted, reading the persisted trusted-folders list directly rather than through a session. Use this from a host that has no session yet, such as a one-shot command deciding whether to honor a checkout's own settings. It differs from the session-scoped check in two ways that matter: it takes the configuration directory to read the list from, instead of inheriting the session's, and it answers only from the persisted list, so trust a user granted for the lifetime of one session is not visible here. A host that has a session should prefer the session-scoped check, which also covers session-only trust.</summary>
-    /// <param name="path">Folder to check. A folder counts as trusted when it is itself listed, when an ancestor is listed, or when its git root is listed.</param>
-    /// <param name="configDir">Configuration directory to read the trusted-folders list from. Omit it to read the default location; supply it when the host has redirected its configuration, or the check answers from a list the host is not using.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Folder trust check result.</returns>
-    internal async Task<FolderTrustCheckResult> CheckTrustAsync(string path, string? configDir = null, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(path);
-
-        var request = new FolderTrustIsTrustedParams { Path = path, ConfigDir = configDir };
-        return await CopilotClient.InvokeRpcAsync<FolderTrustCheckResult>(_rpc, "permissions.folderTrust.checkTrust", [request], cancellationToken);
     }
 }
 
@@ -80609,6 +80829,12 @@ public sealed class ServerMcpApi
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
+    /// <summary>Secrets APIs.</summary>
+    public ServerMcpSecretsApi Secrets =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Registry APIs.</summary>
     public ServerMcpRegistryApi Registry =>
         field ??
@@ -80815,6 +81041,57 @@ public sealed class ServerMcpConfigApi
 
         var request = new McpConfigMergeSourcesRequest { WorkingDirectory = workingDirectory, ConfigDir = configDir, RepoRoot = repoRoot, InstalledPlugins = installedPlugins?.Select(static v => CopilotClient.ToJsonElementForWire(v) ?? JsonElement.Parse("null")).ToList(), BuiltinPlugins = builtinPlugins?.Select(static v => CopilotClient.ToJsonElementForWire(v) ?? JsonElement.Parse("null")).ToList(), AdditionalConfig = CopilotClient.ToJsonElementForWire(additionalConfig), IncludeWorkspaceSources = includeWorkspaceSources };
         return await CopilotClient.InvokeRpcAsync<McpConfigMergeSourcesResult>(_rpc, "mcp.config.mergeSources", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped McpSecrets APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerMcpSecretsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerMcpSecretsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Persists a legacy MCP configuration credential in the runtime-owned store. Returns the selected backend; storage and installation-ownership errors propagate. Installation-owned credentials require the installation APIs.</summary>
+    /// <param name="secretId">Secret reference used by an MCP server configuration.</param>
+    /// <param name="value">Credential value to persist.</param>
+    /// <param name="configDir">Expected mcp-secrets directory. Omit to use the runtime configuration root.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether the OS keychain accepted the saved MCP credential.</returns>
+    public async Task<McpSecretsSaveResult> SaveAsync(string secretId, string value, string? configDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(secretId);
+        ArgumentNullException.ThrowIfNull(value);
+
+        var request = new McpSecretsSaveRequest { SecretId = secretId, Value = value, ConfigDir = configDir };
+        return await CopilotClient.InvokeRpcAsync<McpSecretsSaveResult>(_rpc, "mcp.secrets.save", [request], cancellationToken);
+    }
+
+    /// <summary>Deletes a legacy MCP configuration credential from the runtime-owned store. Installation-owned credentials require the installation APIs.</summary>
+    /// <param name="secretId">Secret reference to remove.</param>
+    /// <param name="configDir">Expected mcp-secrets directory. Omit to use the runtime configuration root.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task DeleteAsync(string secretId, string? configDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(secretId);
+
+        var request = new McpSecretsDeleteRequest { SecretId = secretId, ConfigDir = configDir };
+        await CopilotClient.InvokeRpcAsync(_rpc, "mcp.secrets.delete", [request], cancellationToken);
+    }
+
+    /// <summary>Deletes legacy credentials indexed for an MCP server. Slash-named servers require MCP configuration removal to preserve shared credential ownership.</summary>
+    /// <param name="serverName">Server name used by the legacy credential index.</param>
+    /// <param name="configDir">Expected mcp-secrets directory. Omit to use the runtime configuration root.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task DeleteServerAsync(string serverName, string? configDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(serverName);
+
+        var request = new McpSecretsDeleteServerRequest { ServerName = serverName, ConfigDir = configDir };
+        await CopilotClient.InvokeRpcAsync(_rpc, "mcp.secrets.deleteServer", [request], cancellationToken);
     }
 }
 
@@ -91047,6 +91324,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(Microsoft.Copilot.UsageMetricsTokenDetail), TypeInfoPropertyName = "SessionEventsUsageMetricsTokenDetail")]
 [JsonSerializable(typeof(Microsoft.Copilot.UserInputCompletedData), TypeInfoPropertyName = "SessionEventsUserInputCompletedData")]
 [JsonSerializable(typeof(Microsoft.Copilot.UserInputCompletedEvent), TypeInfoPropertyName = "SessionEventsUserInputCompletedEvent")]
+[JsonSerializable(typeof(Microsoft.Copilot.UserInputImageAttachment), TypeInfoPropertyName = "SessionEventsUserInputImageAttachment")]
+[JsonSerializable(typeof(Microsoft.Copilot.UserInputImageAttachmentConstraints), TypeInfoPropertyName = "SessionEventsUserInputImageAttachmentConstraints")]
 [JsonSerializable(typeof(Microsoft.Copilot.UserInputRequestedData), TypeInfoPropertyName = "SessionEventsUserInputRequestedData")]
 [JsonSerializable(typeof(Microsoft.Copilot.UserInputRequestedEvent), TypeInfoPropertyName = "SessionEventsUserInputRequestedEvent")]
 [JsonSerializable(typeof(Microsoft.Copilot.UserMessageAgentMode), TypeInfoPropertyName = "SessionEventsUserMessageAgentMode")]
@@ -91945,6 +92224,10 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpResourcesReadResult))]
 [JsonSerializable(typeof(McpRestartServerRequest))]
 [JsonSerializable(typeof(McpSamplingExecutionResult))]
+[JsonSerializable(typeof(McpSecretsDeleteRequest))]
+[JsonSerializable(typeof(McpSecretsDeleteServerRequest))]
+[JsonSerializable(typeof(McpSecretsSaveRequest))]
+[JsonSerializable(typeof(McpSecretsSaveResult))]
 [JsonSerializable(typeof(McpServer))]
 [JsonSerializable(typeof(McpServerCardReference))]
 [JsonSerializable(typeof(McpServerConfigLocal))]
@@ -92120,6 +92403,13 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(PermissionsConfigureResult))]
 [JsonSerializable(typeof(PermissionsEvaluateManagedPolicyParams))]
 [JsonSerializable(typeof(PermissionsEvaluateManagedPolicyResult))]
+[JsonSerializable(typeof(PermissionsExtensionApproval))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsGrantRequest))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsGrantResult))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsListRequest))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsListResult))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsRevokeRequest))]
+[JsonSerializable(typeof(PermissionsExtensionApprovalsRevokeResult))]
 [JsonSerializable(typeof(PermissionsFolderTrustAddTrustedResult))]
 [JsonSerializable(typeof(PermissionsGetModeRequest))]
 [JsonSerializable(typeof(PermissionsGetModeResult))]

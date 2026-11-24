@@ -699,6 +699,27 @@ unsubscribe()
 - `session.foreground` - A session became the foreground session in TUI
 - `session.background` - A session is no longer the foreground session
 
+### Agent usage metrics
+
+Call `await session.rpc.usage.get_metrics()` to read accumulated usage. Its
+`agent_metrics` dictionary aggregates invocations by configured agent name, not
+invocation ID. Plugin namespace separators `/` normalize to `:` first:
+`plugin/helper` is looked up as `plugin:helper`. The aggregate's `agent_name`
+uses that normalized spelling too.
+
+The `main` key is reserved for the parent conversation, and `unknown` for unnamed
+subagents. Configured names equal to either reserved key or beginning with
+`agent:` receive an additional `agent:` prefix: an agent named `main` uses
+`agent:main`, `unknown` uses `agent:unknown`, and `agent:reviewer` uses
+`agent:agent:reviewer`. Escaping follows normalization, so `agent/main` also uses
+`agent:agent:main`. Looking up `main` returns the parent, not an agent configured
+with that name.
+
+Each aggregate's `invocation_count` counts distinct launches, not model API
+requests. It is omitted for `main` and may be absent from legacy metrics, appearing
+as `None` in Python. `agent_display_name` remains readable for legacy data but is
+omitted from new aggregates because invocation task descriptions can differ.
+
 ### Tools
 
 Define tools with automatic JSON schema generation using the `@define_tool` decorator and Pydantic models:

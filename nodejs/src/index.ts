@@ -86,6 +86,15 @@ export type {
     DecisionViolation,
 } from "./generated/rpc.js";
 export type {
+    PermissionsExtensionApproval,
+    PermissionsExtensionApprovalsGrantRequest,
+    PermissionsExtensionApprovalsGrantResult,
+    PermissionsExtensionApprovalsListRequest,
+    PermissionsExtensionApprovalsListResult,
+    PermissionsExtensionApprovalsRevokeRequest,
+    PermissionsExtensionApprovalsRevokeResult,
+} from "./generated/rpc.js";
+export type {
     FileLogLevel,
     FileLogOpenRequest,
     FileLogOperation,
@@ -99,6 +108,14 @@ export type {
 } from "./generated/rpc.js";
 export type {
     ImportDiagnostic,
+    McpSecretDeleteRequest,
+    McpSecretDeleteServerRequest,
+    McpSecretSaveRequest,
+    McpSecretSaveResult,
+    McpSecretsDeleteRequest,
+    McpSecretsDeleteServerRequest,
+    McpSecretsSaveRequest,
+    McpSecretsSaveResult,
     MemoryImportCounts,
     MemoryImportItemResult,
     MemoryImportRequest,
@@ -455,6 +472,11 @@ export type {
     ShellAuthenticationHandler,
     ShellAuthenticationRequest,
     ShellAuthenticationResponse,
+    UserInputHandler,
+    UserInputImageAttachment,
+    UserInputImageAttachmentConstraints,
+    UserInputRequest,
+    UserInputResponse,
     SessionCapabilities,
     CreateSessionOptions,
     SessionOptionsBase,

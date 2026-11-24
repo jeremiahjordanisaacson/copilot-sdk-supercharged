@@ -19250,6 +19250,61 @@ type MCPSamplingExecutionResult struct {
 	Result *MCPExecuteSamplingResult `json:"result,omitempty"`
 }
 
+// An MCP configuration credential to remove from the host's secret store.
+// Experimental: MCPSecretDeleteRequest is part of an experimental API and may change or be
+// removed.
+type MCPSecretDeleteRequest struct {
+	// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Secret reference to remove.
+	SecretID string `json:"secretId"`
+}
+
+// A legacy MCP server whose configuration credentials must be removed.
+// Experimental: MCPSecretDeleteServerRequest is part of an experimental API and may change
+// or be removed.
+type MCPSecretDeleteServerRequest struct {
+	// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Server name used by the legacy credential index.
+	ServerName string `json:"serverName"`
+}
+
+// A legacy MCP configuration credential to persist in the host's secret store.
+// Experimental: MCPSecretSaveRequest is part of an experimental API and may change or be
+// removed.
+type MCPSecretSaveRequest struct {
+	// Expected mcp-secrets directory. Omit to use the runtime configuration root.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Secret reference used by an MCP server configuration.
+	SecretID string `json:"secretId"`
+	// Credential value to persist.
+	Value string `json:"value"`
+}
+
+// Whether the OS keychain accepted the saved MCP credential.
+// Experimental: MCPSecretSaveResult is part of an experimental API and may change or be
+// removed.
+type MCPSecretSaveResult struct {
+	// True for keychain storage; false for the existing file backend.
+	UsedKeychain bool `json:"usedKeychain"`
+}
+
+// Experimental: MCPSecretsDeleteResult is part of an experimental API and may change or be
+// removed.
+type MCPSecretsDeleteResult struct {
+}
+
+// Experimental: MCPSecretsDeleteServerResult is part of an experimental API and may change
+// or be removed.
+type MCPSecretsDeleteServerResult struct {
+}
+
+// MCPSecretsSaveResult is an alias for MCPSecretSaveResult.
+// Experimental: MCPSecretsSaveResult is part of an experimental API and may change or be
+// removed.
+type MCPSecretsSaveResult = MCPSecretSaveResult
+
 // Serializable MCP server configuration (stdio process or remote HTTP/SSE)
 // Experimental: MCPSerializableServerConfig is part of an experimental API and may change
 // or be removed.
@@ -22874,6 +22929,84 @@ type PermissionsEvaluateManagedPolicyResult struct {
 	// True when a managed policy exists but this build could not determine its meaning. Hosts
 	// fail closed on it rather than assuming permission was granted.
 	PolicyUndetermined bool `json:"policyUndetermined"`
+}
+
+// A user-scoped approval for one installed plugin extension and capability set.
+// Experimental: PermissionsExtensionApproval is part of an experimental API and may change
+// or be removed.
+type PermissionsExtensionApproval struct {
+	// Exact privileged capabilities the user approved. A later request is covered only when its
+	// capabilities are a subset.
+	Capabilities []string `json:"capabilities"`
+	// Stable extension identity, such as `plugin:plugin-name:extension-name`.
+	ExtensionName string `json:"extensionName"`
+	// RFC 3339 timestamp when the approval was last granted.
+	GrantedAt string `json:"grantedAt"`
+	// Opaque stable identity of the installed plugin source. Hosts must return it unchanged
+	// when revoking.
+	InstallationKey string `json:"installationKey"`
+	// Optional human-readable installation source label.
+	InstallationLabel *string `json:"installationLabel,omitempty"`
+	// Name of the plugin that contributed the extension.
+	PluginName string `json:"pluginName"`
+}
+
+// Identifies a live extension permission request to persist before the host answers it
+// normally.
+// Experimental: PermissionsExtensionApprovalsGrantRequest is part of an experimental API
+// and may change or be removed.
+type PermissionsExtensionApprovalsGrantRequest struct {
+	// Identifier of the pending extension permission request.
+	RequestID string `json:"requestId"`
+	// Session that owns the pending extension permission request.
+	SessionID string `json:"sessionId"`
+}
+
+// Whether the pending request was eligible and persisted.
+// Experimental: PermissionsExtensionApprovalsGrantResult is part of an experimental API and
+// may change or be removed.
+type PermissionsExtensionApprovalsGrantResult struct {
+	// The persisted approval when `granted` is true.
+	Approval *PermissionsExtensionApproval `json:"approval,omitempty"`
+	// Whether the pending request was eligible and its approval was persisted.
+	Granted bool `json:"granted"`
+}
+
+// Lists user-scoped plugin extension approvals for the server profile or an attached
+// session profile.
+// Experimental: PermissionsExtensionApprovalsListRequest is part of an experimental API and
+// may change or be removed.
+type PermissionsExtensionApprovalsListRequest struct {
+	// Optional attached session whose configuration profile should be listed.
+	SessionID *string `json:"sessionId,omitempty"`
+}
+
+// All user-scoped plugin extension approvals.
+// Experimental: PermissionsExtensionApprovalsListResult is part of an experimental API and
+// may change or be removed.
+type PermissionsExtensionApprovalsListResult struct {
+	// Stored user-scoped plugin extension approvals.
+	Approvals []PermissionsExtensionApproval `json:"approvals"`
+}
+
+// Identifies one plugin extension installation approval to revoke.
+// Experimental: PermissionsExtensionApprovalsRevokeRequest is part of an experimental API
+// and may change or be removed.
+type PermissionsExtensionApprovalsRevokeRequest struct {
+	// Stable extension identity of the approval to revoke.
+	ExtensionName string `json:"extensionName"`
+	// Opaque installation identity returned by the list or grant operation.
+	InstallationKey string `json:"installationKey"`
+	// Optional attached session whose configuration profile contains the approval.
+	SessionID *string `json:"sessionId,omitempty"`
+}
+
+// Whether a matching approval was revoked.
+// Experimental: PermissionsExtensionApprovalsRevokeResult is part of an experimental API
+// and may change or be removed.
+type PermissionsExtensionApprovalsRevokeResult struct {
+	// Whether a matching approval existed and was removed.
+	Revoked bool `json:"revoked"`
 }
 
 // Indicates whether the operation succeeded.
@@ -38040,6 +38173,22 @@ type UIHandlePendingUserInputRequest struct {
 	Response UIUserInputResponse `json:"response"`
 }
 
+// Request ID of a pending `user_input.requested` event and the user's response.
+// Experimental: UIHandlePendingUserInputWithImagesRequest is part of an experimental API
+// and may change or be removed.
+type UIHandlePendingUserInputWithImagesRequest struct {
+	// Who answered and how. When it says a person answered interactively (`source`
+	// `human_response` with `responseCapability` `interactive`), the runtime records the answer
+	// as the person's own authority for Assisted Permissions, but only from the session's
+	// authenticated owning connection or the in-process host; an answer from any other caller
+	// settles without it. The runtime decides which answers carry authority. Omit for automated
+	// answers.
+	DecisionContext *PermissionDecisionContext `json:"decisionContext,omitempty"`
+	// The unique request ID from the user_input.requested event
+	RequestID string                        `json:"requestId"`
+	Response  UIUserInputResponseWithImages `json:"response"`
+}
+
 // An unanswered elicitation request.
 // Experimental: UIPendingElicitation is part of an experimental API and may change or be
 // removed.
@@ -38376,6 +38525,19 @@ type UIUserInputResponse struct {
 	WasFreeform bool `json:"wasFreeform"`
 }
 
+// User response for a pending user-input request, with answer text and whether it was typed
+// freeform.
+type UIUserInputResponseWithImages struct {
+	// The user's answer text
+	Answer string `json:"answer"`
+	// Optional images, accepted only when the request advertises image attachment constraints.
+	// For an image-only answer, use an empty answer and wasFreeform true.
+	Attachments []UserInputImageAttachment `json:"attachments,omitzero"`
+	// True if the user typed a freeform response, false if they selected a presented choice.
+	// Used by telemetry to differentiate between free text input and choice selection.
+	WasFreeform bool `json:"wasFreeform"`
+}
+
 // Subagent settings to apply to the current session
 // Experimental: UpdateSubagentSettingsRequest is part of an experimental API and may change
 // or be removed.
@@ -38389,8 +38551,11 @@ type UpdateSubagentSettingsRequest struct {
 // Experimental: UsageGetMetricsResult is part of an experimental API and may change or be
 // removed.
 type UsageGetMetricsResult struct {
-	// Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses
-	// the stable key `main`.
+	// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/`
+	// normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys
+	// are `main` for the main conversation and `unknown` for unnamed subagents. After
+	// normalization, names equal to either reserved key or beginning with `agent:` are prefixed
+	// with `agent:`.
 	AgentMetrics map[string]UsageMetricsAgentMetric `json:"agentMetrics,omitzero"`
 	// Completeness of totalNanoAiu. Numeric totals remain the reported subtotal; zero is not a
 	// claim of free usage when unavailable.
@@ -38423,18 +38588,19 @@ type UsageGetMetricsResult struct {
 	TotalUserRequests int64 `json:"totalUserRequests"`
 }
 
-// Usage attributed to one agent instance, including its identity, API duration, AI units,
-// and per-model breakdown.
+// Usage summed across invocations of one configured agent.
 // Experimental: UsageMetricsAgentMetric is part of an experimental API and may change or be
 // removed.
 type UsageMetricsAgentMetric struct {
-	// Human-readable label for this subagent invocation, copied from the originating
-	// `subagent.started` event. For task-tool subagents this is the invocation's task
-	// description rather than the agent's configured display name, so group by `agentName` for
-	// stable per-agent labels.
+	// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions
+	// differ between invocations.
 	AgentDisplayName *string `json:"agentDisplayName,omitempty"`
-	// Configured agent name, when this is a subagent
+	// Configured agent name with plugin namespace separators normalized from `/` to `:`, when
+	// this is a subagent
 	AgentName *string `json:"agentName,omitempty"`
+	// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy
+	// instance-keyed metrics.
+	InvocationCount *int64 `json:"invocationCount,omitempty"`
 	// Per-model usage for this agent, keyed by model identifier
 	ModelMetrics map[string]UsageMetricsModelMetric `json:"modelMetrics"`
 	// Time spent in model API calls by this agent, in milliseconds
@@ -38548,6 +38714,22 @@ type UsageSetCodeChangesRequest struct {
 	LinesAdded float64 `json:"linesAdded"`
 	// Absolute removed-line total, replacing the previous reading.
 	LinesRemoved float64 `json:"linesRemoved"`
+}
+
+// An inline image supplied in an answer to a legacy ask_user request that advertises image
+// support.
+type UserInputImageAttachment struct {
+	// Nonempty image bytes encoded as strict padded standard base64, without a data URL prefix
+	// or whitespace.
+	Data string `json:"data"`
+	// Optional description of the image.
+	Description *string `json:"description,omitempty"`
+	// Optional client-facing name of the image.
+	DisplayName *string `json:"displayName,omitempty"`
+	// MIME type of the image, matching an advertised allowed MIME type.
+	MIMEType string `json:"mimeType"`
+	// Attachment type. Always image.
+	Type UserInputImageAttachmentType `json:"type"`
 }
 
 // Result of a user-requested shell command.
@@ -42790,17 +42972,19 @@ const (
 	DiagnosticSourceMCP DiagnosticSource = "mcp"
 )
 
-// Effective extension loading and agent-management mode
+// Compatibility mode for the persisted extension preference, not session activation.
+// Current runtimes never return load_only and report disabled instead.
 // Experimental: DiscoveredExtensionMode is part of an experimental API and may change or be
 // removed.
 type DiscoveredExtensionMode string
 
 const (
-	// Extensions are not loaded.
+	// The extension preference is disabled.
 	DiscoveredExtensionModeDisabled DiscoveredExtensionMode = "disabled"
-	// Extensions are loaded and the agent can create, reload, and manage them.
+	// The extension preference permits loading and management, subject to activation and
+	// permissions.
 	DiscoveredExtensionModeLoadAndAugment DiscoveredExtensionMode = "load_and_augment"
-	// Extensions are loaded, but the agent cannot create, reload, or manage them.
+	// Legacy compatibility value. Current runtimes report disabled instead.
 	DiscoveredExtensionModeLoadOnly DiscoveredExtensionMode = "load_only"
 )
 
@@ -48202,6 +48386,13 @@ const (
 	UISessionLimitsExhaustedResponseActionUnset UISessionLimitsExhaustedResponseAction = "unset"
 )
 
+// Attachment type. Always image.
+type UserInputImageAttachmentType string
+
+const (
+	UserInputImageAttachmentTypeImage UserInputImageAttachmentType = "image"
+)
+
 // What the one-time obsolete-settings cleanup did to the document.
 // Experimental: UserSettingsMigrateObsoleteOnDiskStatus is part of an experimental API and
 // may change or be removed.
@@ -50825,6 +51016,72 @@ func (s *ServerMCPAPI) Installations() *ServerMCPInstallationsAPI {
 	return (*ServerMCPInstallationsAPI)(s)
 }
 
+// Experimental: ServerMCPSecretsAPI contains experimental APIs that may change or be
+// removed.
+type ServerMCPSecretsAPI serverAPI
+
+// Deletes a legacy MCP configuration credential from the runtime-owned store.
+// Installation-owned credentials require the installation APIs.
+//
+// RPC method: mcp.secrets.delete.
+//
+// Parameters: An MCP configuration credential to remove from the host's secret store.
+func (a *ServerMCPSecretsAPI) Delete(ctx context.Context, params *MCPSecretDeleteRequest) (*MCPSecretsDeleteResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.secrets.delete", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPSecretsDeleteResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteServer deletes legacy credentials indexed for an MCP server. Slash-named servers
+// require MCP configuration removal to preserve shared credential ownership.
+//
+// RPC method: mcp.secrets.deleteServer.
+//
+// Parameters: A legacy MCP server whose configuration credentials must be removed.
+func (a *ServerMCPSecretsAPI) DeleteServer(ctx context.Context, params *MCPSecretDeleteServerRequest) (*MCPSecretsDeleteServerResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.secrets.deleteServer", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPSecretsDeleteServerResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Save persists a legacy MCP configuration credential in the runtime-owned store. Returns
+// the selected backend; storage and installation-ownership errors propagate.
+// Installation-owned credentials require the installation APIs.
+//
+// RPC method: mcp.secrets.save.
+//
+// Parameters: A legacy MCP configuration credential to persist in the host's secret store.
+//
+// Returns: Whether the OS keychain accepted the saved MCP credential.
+func (a *ServerMCPSecretsAPI) Save(ctx context.Context, params *MCPSecretSaveRequest) (*MCPSecretsSaveResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.secrets.save", params)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPSecretsSaveResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Secrets returns experimental APIs that may change or be removed.
+func (s *ServerMCPAPI) Secrets() *ServerMCPSecretsAPI {
+	return (*ServerMCPSecretsAPI)(s)
+}
+
 // Experimental: ServerMemoriesAPI contains experimental APIs that may change or be removed.
 type ServerMemoriesAPI serverAPI
 
@@ -50956,6 +51213,83 @@ func (a *ServerNetworkAPI) SetProvider(ctx context.Context, params *NetworkSetPr
 		return nil, err
 	}
 	return &result, nil
+}
+
+// Experimental: ServerPermissionsAPI contains experimental APIs that may change or be
+// removed.
+type ServerPermissionsAPI serverAPI
+
+// Experimental: ServerPermissionsExtensionApprovalsAPI contains experimental APIs that may
+// change or be removed.
+type ServerPermissionsExtensionApprovalsAPI serverAPI
+
+// Grant persists an eligible live plugin extension permission request for the user before
+// the host answers that request normally.
+//
+// RPC method: permissions.extensionApprovals.grant.
+//
+// Parameters: Identifies a live extension permission request to persist before the host
+// answers it normally.
+//
+// Returns: Whether the pending request was eligible and persisted.
+func (a *ServerPermissionsExtensionApprovalsAPI) Grant(ctx context.Context, params *PermissionsExtensionApprovalsGrantRequest) (*PermissionsExtensionApprovalsGrantResult, error) {
+	raw, err := a.client.Request(ctx, "permissions.extensionApprovals.grant", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PermissionsExtensionApprovalsGrantResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Lists user-scoped plugin extension approvals across sessions.
+//
+// RPC method: permissions.extensionApprovals.list.
+//
+// Parameters: Lists user-scoped plugin extension approvals for the server profile or an
+// attached session profile.
+//
+// Returns: All user-scoped plugin extension approvals.
+// Pass nil for params to use the default request options.
+func (a *ServerPermissionsExtensionApprovalsAPI) List(ctx context.Context, params *PermissionsExtensionApprovalsListRequest) (*PermissionsExtensionApprovalsListResult, error) {
+	if params == nil {
+		params = &PermissionsExtensionApprovalsListRequest{}
+	}
+	raw, err := a.client.Request(ctx, "permissions.extensionApprovals.list", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PermissionsExtensionApprovalsListResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Revokes one user-scoped plugin extension approval by extension and installation identity.
+//
+// RPC method: permissions.extensionApprovals.revoke.
+//
+// Parameters: Identifies one plugin extension installation approval to revoke.
+//
+// Returns: Whether a matching approval was revoked.
+func (a *ServerPermissionsExtensionApprovalsAPI) Revoke(ctx context.Context, params *PermissionsExtensionApprovalsRevokeRequest) (*PermissionsExtensionApprovalsRevokeResult, error) {
+	raw, err := a.client.Request(ctx, "permissions.extensionApprovals.revoke", params)
+	if err != nil {
+		return nil, err
+	}
+	var result PermissionsExtensionApprovalsRevokeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: ExtensionApprovals returns experimental APIs that may change or be removed.
+func (s *ServerPermissionsAPI) ExtensionApprovals() *ServerPermissionsExtensionApprovalsAPI {
+	return (*ServerPermissionsExtensionApprovalsAPI)(s)
 }
 
 // Experimental: ServerPluginsAPI contains experimental APIs that may change or be removed.
@@ -53425,6 +53759,7 @@ type ServerRPC struct {
 	Memories         *ServerMemoriesAPI
 	Models           *ServerModelsAPI
 	Network          *ServerNetworkAPI
+	Permissions      *ServerPermissionsAPI
 	Plugins          *ServerPluginsAPI
 	Providers        *ServerProvidersAPI
 	Runtime          *ServerRuntimeAPI
@@ -53510,6 +53845,7 @@ func NewServerRPC(client *jsonrpc2.Client) *ServerRPC {
 	r.Memories = (*ServerMemoriesAPI)(&r.common)
 	r.Models = (*ServerModelsAPI)(&r.common)
 	r.Network = (*ServerNetworkAPI)(&r.common)
+	r.Permissions = (*ServerPermissionsAPI)(&r.common)
 	r.Plugins = (*ServerPluginsAPI)(&r.common)
 	r.Providers = (*ServerProvidersAPI)(&r.common)
 	r.Runtime = (*ServerRuntimeAPI)(&r.common)
@@ -68592,6 +68928,34 @@ func (a *UIAPI) HandlePendingUserInput(ctx context.Context, params *UIHandlePend
 	return &result, nil
 }
 
+// HandlePendingUserInputWithImages resolves a pending `user_input.requested` event with the
+// user's response.
+//
+// RPC method: session.ui.handlePendingUserInput.
+//
+// Parameters: Request ID of a pending `user_input.requested` event and the user's response.
+//
+// Returns: Indicates whether the pending UI request was resolved by this call.
+func (a *UIAPI) HandlePendingUserInputWithImages(ctx context.Context, params *UIHandlePendingUserInputWithImagesRequest) (*UIHandlePendingResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.DecisionContext != nil {
+			req["decisionContext"] = *params.DecisionContext
+		}
+		req["requestId"] = params.RequestID
+		req["response"] = params.Response
+	}
+	raw, err := a.client.Request(ctx, "session.ui.handlePendingUserInput", req)
+	if err != nil {
+		return nil, err
+	}
+	var result UIHandlePendingResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // RegisterDirectAutoModeSwitchHandler registers an in-process handler for auto-mode-switch
 // requests so the server bridge skips dispatch. Set `autoModeRecovery` to also handle Auto
 // recovery consent offers.
@@ -72623,6 +72987,36 @@ func (a *InternalUIAPI) HandleHumanExitPlanMode(ctx context.Context, params *UIH
 // Internal: HandleHumanUserInput is part of the SDK's internal handshake/plumbing; external
 // callers should not use it.
 func (a *InternalUIAPI) HandleHumanUserInput(ctx context.Context, params *UIHandlePendingUserInputRequest) (*UIHandlePendingResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.DecisionContext != nil {
+			req["decisionContext"] = *params.DecisionContext
+		}
+		req["requestId"] = params.RequestID
+		req["response"] = params.Response
+	}
+	raw, err := a.client.Request(ctx, "session.ui.handleHumanUserInput", req)
+	if err != nil {
+		return nil, err
+	}
+	var result UIHandlePendingResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// HandleHumanUserInputWithImages resolves a pending `user_input.requested` event after
+// direct interaction in the trusted in-process client or authenticated owning host.
+//
+// RPC method: session.ui.handleHumanUserInput.
+//
+// Parameters: Request ID of a pending `user_input.requested` event and the user's response.
+//
+// Returns: Indicates whether the pending UI request was resolved by this call.
+// Internal: HandleHumanUserInputWithImages is part of the SDK's internal
+// handshake/plumbing; external callers should not use it.
+func (a *InternalUIAPI) HandleHumanUserInputWithImages(ctx context.Context, params *UIHandlePendingUserInputWithImagesRequest) (*UIHandlePendingResult, error) {
 	req := map[string]any{"sessionId": a.sessionID}
 	if params != nil {
 		if params.DecisionContext != nil {

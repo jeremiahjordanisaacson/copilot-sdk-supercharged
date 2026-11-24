@@ -11,6 +11,44 @@ namespace Microsoft.Copilot.Test.Unit;
 public sealed partial class ClientSessionLifetimeTests
 {
     [Fact]
+    public async Task Public_Elicitation_Preserves_Application_Result_Metadata()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.Capabilities = new Dictionary<string, object?>
+        {
+            ["ui"] = new Dictionary<string, object?> { ["elicitation"] = true },
+        };
+        server.ResponseFactory = request => request.Method == "session.ui.elicitation"
+            ? new Dictionary<string, object?>
+            {
+                ["action"] = "accept",
+                ["content"] = new Dictionary<string, object?> { ["name"] = "Ada" },
+                ["_meta"] = new Dictionary<string, object?>
+                {
+                    ["example.com/form"] = new Dictionary<string, object?> { ["receipt"] = new[] { "saved" } },
+                },
+            }
+            : throw new InvalidOperationException($"Unexpected request '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            Runtime = RuntimeConnection.ForTcp(server.Host, server.Port),
+        });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions());
+
+        var result = await session.Ui.ElicitAsync(new ElicitationParams
+        {
+            Message = "Name?",
+            RequestedSchema = new ElicitationSchema { Properties = new Dictionary<string, object>() },
+        });
+
+        Assert.Equal(UIElicitationResponseAction.Accept, result.Action);
+        Assert.Equal("Ada", Assert.IsType<System.Text.Json.JsonElement>(result.Content!["name"]).GetString());
+        Assert.NotNull(result.Meta);
+        Assert.Equal("saved", result.Meta["example.com/form"].GetProperty("receipt")[0].GetString());
+    }
+
+    [Fact]
     public async Task Prompt_Answers_Preserve_Positional_Calls_And_Carry_A_Label_Through_The_Request_Overload()
     {
         await using var server = await FakeCopilotServer.StartAsync();

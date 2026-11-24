@@ -147,6 +147,7 @@ async def test_permission_callback_receives_derived_prompt_context() -> None:
     )
 
     prompt_request = captured["prompt_request"]
+    assert captured["request_id"] == "permission-1"
     assert isinstance(prompt_request, PermissionPromptRequestCommands)
     assert prompt_request.managed_approval_required is None
     assert prompt_request.assisted_approval is not None

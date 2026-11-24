@@ -9693,6 +9693,14 @@ func (r *MCPRestartServerRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (r MCPSecretSaveRequest) String() string {
+	return fmt.Sprintf("MCPSecretSaveRequest{ConfigDir:%+v, SecretID:%+v, Value:<redacted>}", r.ConfigDir, r.SecretID)
+}
+
+func (r MCPSecretSaveRequest) GoString() string {
+	return fmt.Sprintf("MCPSecretSaveRequest{ConfigDir:%#v, SecretID:%#v, Value:<redacted>}", r.ConfigDir, r.SecretID)
+}
+
 func matchesMCPStartServerConfigMCPServerConfigHTTP(data []byte) bool {
 	var rawType struct {
 		Type json.RawMessage `json:"type"`

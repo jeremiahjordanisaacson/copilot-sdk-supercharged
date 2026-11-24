@@ -1045,6 +1045,9 @@ type SessionUsageCheckpointData struct {
 	// Complete accounting state captured atomically with the receipt watermarks.
 	// Internal: AccountingSnapshot is part of the SDK's internal API surface and is not intended for external use.
 	AccountingSnapshot *UsageGetMetricsResult `json:"accountingSnapshot,omitempty"`
+	// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+	// Internal: AgentInvocationCounts is part of the SDK's internal API surface and is not intended for external use.
+	AgentInvocationCounts map[string]int64 `json:"agentInvocationCounts,omitzero"`
 	// Internal per-model prompt-cache state used to restore expiration tracking on resume
 	// Internal: ModelCacheState is part of the SDK's internal API surface and is not intended for external use.
 	ModelCacheState []UsageCheckpointModelCacheState `json:"modelCacheState,omitzero"`
@@ -1131,6 +1134,8 @@ type ElicitationCompletedData struct {
 	Action *ElicitationCompletedAction `json:"action,omitempty"`
 	// The submitted form data when action is 'accept'; keys match the requested schema fields
 	Content map[string]any `json:"content,omitzero"`
+	// Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard.
+	Meta map[string]any `json:"_meta,omitzero"`
 	// Request ID of the resolved elicitation request; clients should dismiss any UI for this request
 	RequestID string `json:"requestId"`
 }
@@ -1146,6 +1151,8 @@ type ElicitationRequestedData struct {
 	ElicitationSourceDisplayName *string `json:"elicitationSourceDisplayName,omitempty"`
 	// Message describing what information is needed from the user
 	Message string `json:"message"`
+	// Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport.
+	Meta map[string]any `json:"_meta,omitzero"`
 	// Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
 	Mode *ElicitationRequestedMode `json:"mode,omitempty"`
 	// JSON Schema describing the form fields to present to the user (form mode only)
@@ -1491,6 +1498,9 @@ type SessionFusionResolvedData struct {
 	PolicyVersion *string `json:"policyVersion,omitempty"`
 	// Concrete model selected for the primary solver phase.
 	PrimaryModel string `json:"primaryModel"`
+	// Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none.
+	// Experimental: PrimaryReasoningEffort is part of an experimental API and may change or be removed.
+	PrimaryReasoningEffort *string `json:"primaryReasoningEffort,omitempty"`
 	// Concrete model selected for Cascade repair, when required.
 	// Experimental: RepairModel is part of an experimental API and may change or be removed.
 	RepairModel *string `json:"repairModel,omitempty"`
@@ -2720,8 +2730,12 @@ func (*SessionMCPServersLoadedData) Type() SessionEventType {
 
 // Payload of `session.skills_loaded` listing resolved skill metadata.
 type SessionSkillsLoadedData struct {
+	// Errors from the published skill catalog. Older hosts can omit this snapshot.
+	Errors []string `json:"errors,omitzero"`
 	// Array of resolved skill metadata
 	Skills []SkillsLoadedSkill `json:"skills"`
+	// Warnings from the published skill catalog. Older hosts can omit this snapshot.
+	Warnings []string `json:"warnings,omitzero"`
 }
 
 func (*SessionSkillsLoadedData) sessionEventData()      {}
@@ -3379,7 +3393,10 @@ type SessionShutdownData struct {
 	// Complete accounting state captured atomically with receipt watermarks.
 	// Internal: AccountingSnapshot is part of the SDK's internal API surface and is not intended for external use.
 	AccountingSnapshot *UsageGetMetricsResult `json:"accountingSnapshot,omitempty"`
-	// Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+	// Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+	// Internal: AgentInvocationCounts is part of the SDK's internal API surface and is not intended for external use.
+	AgentInvocationCounts map[string]int64 `json:"agentInvocationCounts,omitzero"`
+	// Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
 	AgentMetrics map[string]ShutdownAgentMetric `json:"agentMetrics,omitzero"`
 	// Aggregate code change metrics for the session
 	CodeChanges ShutdownCodeChanges `json:"codeChanges"`
@@ -3948,6 +3965,10 @@ func (*AssistantTurnStartData) Type() SessionEventType { return SessionEventType
 type UserInputCompletedData struct {
 	// The user's answer to the input request
 	Answer *string `json:"answer,omitempty"`
+	// Optional image payloads from completion sources that include them.
+	// Runtime notifications omit this field; accepted images are available
+	// in the associated canonical tool.execution_complete result.
+	Attachments []UserInputImageAttachment `json:"attachments,omitzero"`
 	// Request ID of the resolved user input request; clients should dismiss any UI for this request
 	RequestID string `json:"requestId"`
 	// Whether the answer was typed as free-form text rather than selected from choices
@@ -3963,6 +3984,8 @@ type UserInputRequestedData struct {
 	AllowFreeform *bool `json:"allowFreeform,omitempty"`
 	// Predefined choices for the user to select from, if applicable
 	Choices []string `json:"choices,omitzero"`
+	// Runtime-advertised image attachment support. Absent when images are unsupported.
+	ImageAttachmentConstraints *UserInputImageAttachmentConstraints `json:"imageAttachmentConstraints,omitempty"`
 	// The question or prompt to present to the user
 	Question string `json:"question"`
 	// Unique identifier for this input request; used to respond via session.respondToUserInput()
@@ -6054,12 +6077,14 @@ type SessionLimitsExhaustedResponse struct {
 	MaxAiCredits *float64 `json:"maxAiCredits,omitempty"`
 }
 
-// Usage attributed to one agent instance at session shutdown.
+// Usage summed across invocations of one configured agent at session shutdown.
 type ShutdownAgentMetric struct {
-	// Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+	// Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
 	AgentDisplayName *string `json:"agentDisplayName,omitempty"`
-	// Configured agent name, when this is a subagent
+	// Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
 	AgentName *string `json:"agentName,omitempty"`
+	// Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+	InvocationCount *int64 `json:"invocationCount,omitempty"`
 	// Per-model usage for this agent, keyed by model identifier
 	ModelMetrics map[string]ShutdownModelMetric `json:"modelMetrics"`
 	// Time spent in model API calls by this agent, in milliseconds
@@ -6728,6 +6753,17 @@ type UsageCheckpointModelCacheState struct {
 	CacheTtlSeconds int64 `json:"cacheTtlSeconds"`
 	// Model identifier associated with this cache state
 	ModelID string `json:"modelId"`
+}
+
+// Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images.
+type UserInputImageAttachmentConstraints struct {
+	// MIME types accepted by this request. Images must have readable nonzero
+	// dimensions; GIF and WebP images must not exceed 2,000 pixels per side.
+	AllowedMIMETypes []string `json:"allowedMimeTypes"`
+	// Maximum decoded byte length of each image.
+	MaxBytesPerImage int64 `json:"maxBytesPerImage"`
+	// Maximum number of images accepted in one answer.
+	MaxCount int64 `json:"maxCount"`
 }
 
 // A declared phase shown in a workflow permission prompt.

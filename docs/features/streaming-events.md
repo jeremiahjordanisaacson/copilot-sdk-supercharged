@@ -774,6 +774,7 @@ Ephemeral. The agent is asking the user a question.
 | `choices` | `string[]` | | Predefined choices for the user |
 | `allowFreeform` | `boolean` | | Whether free-form text input is allowed |
 | `toolCallId` | `string` | | The tool call that asked the question, for correlating the request with it |
+| `imageAttachmentConstraints` | `object` | | Advertises image answers with `allowedMimeTypes`, `maxCount`, and `maxBytesPerImage`; absent means images are unsupported |
 
 ### `user_input.completed`
 
@@ -784,6 +785,7 @@ Ephemeral. A user input request was resolved.
 | `requestId` | `string` | ✅ | Matches the corresponding `user_input.requested` |
 | `answer` | `string` | | The user's answer |
 | `wasFreeform` | `boolean` | | Whether the answer was typed as free-form text rather than selected from `choices` |
+| `attachments` | `object[]` | | Optional images with `type: "image"`, padded base64 `data`, `mimeType`, and optional `displayName` and `description`; image-only answers use `answer: ""` and `wasFreeform: true` |
 
 ### `elicitation.requested`
 
@@ -799,6 +801,7 @@ Ephemeral. The agent needs input from the user, either as structured form fields
 | `elicitationSource` | `string` | | The MCP server that initiated the request; absent when the agent initiated it |
 | `elicitationSourceDisplayName` | `string` | | Display label for a connector-owned MCP server; `elicitationSource` remains its identity |
 | `toolCallId` | `string` | | The tool call that triggered the request, for correlating the request with it |
+| `_meta` | `Record<string, JsonValue>` | | Optional extension metadata; only built-in `ask_user` advertises image constraints and eligible field names under `github.com/copilot/ask-user-images` version 1. Images also require a supported local SDK transport; this is not an MCP image-response standard |
 
 ### `elicitation.completed`
 
@@ -809,6 +812,7 @@ Ephemeral. An elicitation request was resolved.
 | `requestId` | `string` | ✅ | Matches the corresponding `elicitation.requested` |
 | `action` | `"accept" \| "decline" \| "cancel"` | | The user's choice: submitted the form, explicitly refused, or dismissed |
 | `content` | `Record<string, JsonValue>` | | The submitted form values when `action` is `"accept"`; keys match the `requestedSchema` fields |
+| `_meta` | `Record<string, JsonValue>` | | Optional extension metadata; negotiated built-in image answers retain per-field attachment descriptors without inline bytes. Original images remain in canonical tool results |
 
 ## Sub-agent and skill events
 

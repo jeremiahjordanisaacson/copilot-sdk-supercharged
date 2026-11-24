@@ -345,8 +345,12 @@ async def test_autopilot_terminal_isolates_concurrent_waits(structured):
 
 
 @pytest.mark.asyncio
-async def test_typed_output_buffers_pre_ack_events_and_infers_schema():
+async def test_typed_output_buffers_pre_ack_events_and_infers_schema(monkeypatch):
     session, client = fake_session([user(), assistant(), idle()])
+    loop = asyncio.get_running_loop()
+    now = loop.time()
+    # Schema inference and pre-ack buffering do not depend on scheduler time.
+    monkeypatch.setattr(loop, "time", lambda: now)
     result = await session.send_and_wait_typed("inventory", Inventory, timeout=1)
     assert result == Inventory(count=42, color="red")
     params = client.request.call_args.args[1]

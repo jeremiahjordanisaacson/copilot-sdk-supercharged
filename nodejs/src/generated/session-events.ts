@@ -4448,7 +4448,15 @@ export interface ShutdownData {
    */
   accountingSnapshot?: UsageGetMetricsResult;
   /**
-   * Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   * Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+   *
+   * @internal
+   */
+  agentInvocationCounts?: {
+    [k: string]: number | undefined;
+  };
+  /**
+   * Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
    */
   agentMetrics?: {
     [k: string]: ShutdownAgentMetric | undefined;
@@ -4543,7 +4551,7 @@ export interface ShutdownData {
  */
 export interface UsageGetMetricsResult {
   /**
-   * Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   * Usage summed by configured agent name, not invocation ID. Plugin namespace separators `/` normalize to `:` before key escaping; `plugin/helper` uses `plugin:helper`. Reserved keys are `main` for the main conversation and `unknown` for unnamed subagents. After normalization, names equal to either reserved key or beginning with `agent:` are prefixed with `agent:`.
    */
   agentMetrics?: {
     [k: string]: UsageMetricsAgentMetric | undefined;
@@ -4607,17 +4615,21 @@ export interface UsageGetMetricsResult {
   totalUserRequests: number;
 }
 /**
- * Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.
+ * Usage summed across invocations of one configured agent.
  */
 export interface UsageMetricsAgentMetric {
   /**
-   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   * Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
    */
   agentDisplayName?: string;
   /**
-   * Configured agent name, when this is a subagent
+   * Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
    */
   agentName?: string;
+  /**
+   * Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+   */
+  invocationCount?: number;
   /**
    * Per-model usage for this agent, keyed by model identifier
    */
@@ -4781,17 +4793,21 @@ export interface UsageMetricsTokenDetail {
   tokenCount: number;
 }
 /**
- * Usage attributed to one agent instance at session shutdown.
+ * Usage summed across invocations of one configured agent at session shutdown.
  */
 export interface ShutdownAgentMetric {
   /**
-   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   * Legacy invocation label. Omitted from name-aggregated metrics because task descriptions differ between invocations.
    */
   agentDisplayName?: string;
   /**
-   * Configured agent name, when this is a subagent
+   * Configured agent name with plugin namespace separators normalized from `/` to `:`, when this is a subagent
    */
   agentName?: string;
+  /**
+   * Number of distinct subagent starts in this aggregate. Omitted for main and in legacy instance-keyed metrics.
+   */
+  invocationCount?: number;
   /**
    * Per-model usage for this agent, keyed by model identifier
    */
@@ -4956,6 +4972,14 @@ export interface UsageCheckpointData {
    * @internal
    */
   accountingSnapshot?: UsageGetMetricsResult;
+  /**
+   * Name-keyed launch counts kept outside the strict legacy accounting-snapshot DTO.
+   *
+   * @internal
+   */
+  agentInvocationCounts?: {
+    [k: string]: number | undefined;
+  };
   /**
    * Internal per-model prompt-cache state used to restore expiration tracking on resume
    *
@@ -6909,6 +6933,12 @@ export interface FusionResolvedData {
    * Concrete model selected for the primary solver phase.
    */
   primaryModel: string;
+  /**
+   * Reasoning effort the route planned for the primary solver phase, before it is normalized to a level the model supports. Absent when the route planned none.
+   *
+   * @experimental
+   */
+  primaryReasoningEffort?: string;
   /**
    * Concrete model selected for Cascade repair, when required.
    *
@@ -14918,6 +14948,10 @@ export interface UserInputRequestedData {
    */
   choices?: string[];
   /**
+   * Runtime-advertised image attachment support. Absent when images are unsupported.
+   */
+  imageAttachmentConstraints?: UserInputImageAttachmentConstraints;
+  /**
    * The question or prompt to present to the user
    */
   question: string;
@@ -14929,6 +14963,24 @@ export interface UserInputRequestedData {
    * The LLM-assigned tool call ID that triggered this request; used by remote UIs to correlate responses
    */
   toolCallId?: string;
+}
+/**
+ * Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images.
+ */
+export interface UserInputImageAttachmentConstraints {
+  /**
+   * MIME types accepted by this request. Images must have readable nonzero
+   * dimensions; GIF and WebP images must not exceed 2,000 pixels per side.
+   */
+  allowedMimeTypes: string[];
+  /**
+   * Maximum decoded byte length of each image.
+   */
+  maxBytesPerImage: number;
+  /**
+   * Maximum number of images accepted in one answer.
+   */
+  maxCount: number;
 }
 /**
  * Session event "user_input.completed". User input request completion with the user's response
@@ -14976,6 +15028,12 @@ export interface UserInputCompletedData {
    */
   answer?: string;
   /**
+   * Optional image payloads from completion sources that include them.
+   * Runtime notifications omit this field; accepted images are available
+   * in the associated canonical tool.execution_complete result.
+   */
+  attachments?: UserInputImageAttachment[];
+  /**
    * Request ID of the resolved user input request; clients should dismiss any UI for this request
    */
   requestId: string;
@@ -14983,6 +15041,31 @@ export interface UserInputCompletedData {
    * Whether the answer was typed as free-form text rather than selected from choices
    */
   wasFreeform?: boolean;
+}
+/**
+ * An inline image supplied in an answer to a legacy ask_user request that advertises image support.
+ */
+export interface UserInputImageAttachment {
+  /**
+   * Nonempty image bytes encoded as strict padded standard base64, without a data URL prefix or whitespace.
+   */
+  data: string;
+  /**
+   * Optional description of the image.
+   */
+  description?: string;
+  /**
+   * Optional client-facing name of the image.
+   */
+  displayName?: string;
+  /**
+   * MIME type of the image, matching an advertised allowed MIME type.
+   */
+  mimeType: string;
+  /**
+   * Attachment type. Always image.
+   */
+  type: "image";
 }
 /**
  * Session event "elicitation.requested". Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
@@ -15025,6 +15108,12 @@ export interface ElicitationRequestedEvent {
  * Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
  */
 export interface ElicitationRequestedData {
+  /**
+   * Request metadata. Only built-in ask_user advertises github.com/copilot/ask-user-images version 1 with imageAttachmentConstraints and eligible fieldNames. Absence means image answers are unsupported. Hosts must also use a supported local SDK transport.
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
   /**
    * The source that initiated the request (MCP server name, or absent for agent-initiated)
    */
@@ -15118,6 +15207,12 @@ export interface ElicitationCompletedEvent {
  * Elicitation request completion with the user's response
  */
 export interface ElicitationCompletedData {
+  /**
+   * Response metadata. Built-in ask_user image answers use github.com/copilot/ask-user-images version 1 with attachments keyed by requested form property; primitive content is unchanged. Not an MCP image-response standard.
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
   /**
    * The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
    */
@@ -17482,9 +17577,17 @@ export interface SkillsLoadedEvent {
  */
 export interface SkillsLoadedData {
   /**
+   * Errors from the published skill catalog. Older hosts can omit this snapshot.
+   */
+  errors?: string[];
+  /**
    * Array of resolved skill metadata
    */
   skills: SkillsLoadedSkill[];
+  /**
+   * Warnings from the published skill catalog. Older hosts can omit this snapshot.
+   */
+  warnings?: string[];
 }
 /**
  * A single resolved skill in `session.skills_loaded`, including source, invocability, enabled state, path, and argument hint.

@@ -5,8 +5,10 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,64 @@ var _ interface {
 	List(context.Context) (*MCPServerList, error)
 	ListConfigured(context.Context) (*MCPConfiguredServerList, error)
 } = (*MCPAPI)(nil)
+
+func TestMCPSecretSaveResultAcceptsCanonicalConsumer(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	client := jsonrpc2.NewClient(clientConn, clientConn)
+	server := jsonrpc2.NewClient(serverConn, serverConn)
+	server.SetRequestHandler("mcp.secrets.save", func(params json.RawMessage) (json.RawMessage, *jsonrpc2.Error) {
+		return json.RawMessage(`{"usedKeychain":true}`), nil
+	})
+	client.Start()
+	server.Start()
+	t.Cleanup(func() {
+		client.Stop()
+		server.Stop()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+
+	result, err := NewServerRPC(client).MCP.Secrets().Save(t.Context(), &MCPSecretSaveRequest{
+		SecretID: "server/key",
+		Value:    "synthetic-mcp-credential",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usesKeychain := func(saved *MCPSecretSaveResult) bool {
+		return saved.UsedKeychain
+	}
+	if !usesKeychain(result) {
+		t.Fatal("canonical consumer did not receive the decoded save result")
+	}
+	usesLegacyKeychain := func(saved *MCPSecretsSaveResult) bool {
+		return usesKeychain(saved)
+	}
+	if !usesLegacyKeychain(result) {
+		t.Fatal("existing result name lost canonical DTO compatibility")
+	}
+}
+
+func TestMCPSecretSaveDisplayRedactsWithoutChangingWire(t *testing.T) {
+	request := MCPSecretSaveRequest{SecretID: "server/key", Value: "synthetic-mcp-credential"}
+	for _, format := range []string{"%v", "%+v", "%#v"} {
+		display := fmt.Sprintf(format, request)
+		if strings.Contains(display, request.Value) || !strings.Contains(display, "<redacted>") {
+			t.Errorf("%s exposes credential: %s", format, display)
+		}
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]string
+	if err := json.Unmarshal(data, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["value"] != request.Value || wire["secretId"] != request.SecretID {
+		t.Fatalf("wire fields changed: %s", data)
+	}
+}
 
 func TestMCPDiscoverNilRequestSendsEmptyObject(t *testing.T) {
 	clientConn, serverConn := net.Pipe()

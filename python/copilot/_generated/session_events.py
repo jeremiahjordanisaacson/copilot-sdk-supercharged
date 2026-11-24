@@ -2724,6 +2724,8 @@ class SessionFusionResolvedData:
     plan_version: str | None = None
     policy_version: str | None = None
     # Experimental: this field is part of an experimental API and may change or be removed.
+    primary_reasoning_effort: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
     repair_model: str | None = None
     route_source: str | None = None
     routing_latency_ms: float | None = None
@@ -2755,6 +2757,7 @@ class SessionFusionResolvedData:
         phase_plan = from_union([from_none, lambda x: from_list(FusionPhasePlanStep.from_dict, x)], obj.get("phasePlan"))
         plan_version = from_union([from_none, from_str], obj.get("planVersion"))
         policy_version = from_union([from_none, from_str], obj.get("policyVersion"))
+        primary_reasoning_effort = from_union([from_none, from_str], obj.get("primaryReasoningEffort"))
         repair_model = from_union([from_none, from_str], obj.get("repairModel"))
         route_source = from_union([from_none, from_str], obj.get("routeSource"))
         routing_latency_ms = from_union([from_none, from_float], obj.get("routingLatencyMs"))
@@ -2782,6 +2785,7 @@ class SessionFusionResolvedData:
             phase_plan=phase_plan,
             plan_version=plan_version,
             policy_version=policy_version,
+            primary_reasoning_effort=primary_reasoning_effort,
             repair_model=repair_model,
             route_source=route_source,
             routing_latency_ms=routing_latency_ms,
@@ -2820,6 +2824,8 @@ class SessionFusionResolvedData:
             result["planVersion"] = from_union([from_none, from_str], self.plan_version)
         if self.policy_version is not None:
             result["policyVersion"] = from_union([from_none, from_str], self.policy_version)
+        if self.primary_reasoning_effort is not None:
+            result["primaryReasoningEffort"] = from_union([from_none, from_str], self.primary_reasoning_effort)
         if self.repair_model is not None:
             result["repairModel"] = from_union([from_none, from_str], self.repair_model)
         if self.route_source is not None:
@@ -6287,6 +6293,7 @@ class ElicitationCompletedData:
     request_id: str
     action: ElicitationCompletedAction | None = None
     content: dict[str, Any] | None = None
+    _meta: dict[str, Any] | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "ElicitationCompletedData":
@@ -6294,10 +6301,12 @@ class ElicitationCompletedData:
         request_id = from_str(obj.get("requestId"))
         action = from_union([from_none, lambda x: parse_enum(ElicitationCompletedAction, x)], obj.get("action"))
         content = from_union([from_none, lambda x: from_dict(lambda x: x, x)], obj.get("content"))
+        _meta = from_union([from_none, lambda x: from_dict(lambda x: x, x)], obj.get("_meta"))
         return ElicitationCompletedData(
             request_id=request_id,
             action=action,
             content=content,
+            _meta=_meta,
         )
 
     def to_dict(self) -> dict:
@@ -6307,6 +6316,8 @@ class ElicitationCompletedData:
             result["action"] = from_union([from_none, lambda x: to_enum(ElicitationCompletedAction, x)], self.action)
         if self.content is not None:
             result["content"] = from_union([from_none, lambda x: from_dict(lambda x: x, x)], self.content)
+        if self._meta is not None:
+            result["_meta"] = from_union([from_none, lambda x: from_dict(lambda x: x, x)], self._meta)
         return result
 
 
@@ -6321,6 +6332,7 @@ class ElicitationRequestedData:
     requested_schema: ElicitationRequestedSchema | None = None
     tool_call_id: str | None = None
     url: str | None = None
+    _meta: dict[str, Any] | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "ElicitationRequestedData":
@@ -6333,6 +6345,7 @@ class ElicitationRequestedData:
         requested_schema = from_union([from_none, ElicitationRequestedSchema.from_dict], obj.get("requestedSchema"))
         tool_call_id = from_union([from_none, from_str], obj.get("toolCallId"))
         url = from_union([from_none, from_str], obj.get("url"))
+        _meta = from_union([from_none, lambda x: from_dict(lambda x: x, x)], obj.get("_meta"))
         return ElicitationRequestedData(
             message=message,
             request_id=request_id,
@@ -6342,6 +6355,7 @@ class ElicitationRequestedData:
             requested_schema=requested_schema,
             tool_call_id=tool_call_id,
             url=url,
+            _meta=_meta,
         )
 
     def to_dict(self) -> dict:
@@ -6360,6 +6374,8 @@ class ElicitationRequestedData:
             result["toolCallId"] = from_union([from_none, from_str], self.tool_call_id)
         if self.url is not None:
             result["url"] = from_union([from_none, from_str], self.url)
+        if self._meta is not None:
+            result["_meta"] = from_union([from_none, lambda x: from_dict(lambda x: x, x)], self._meta)
         return result
 
 
@@ -12865,6 +12881,8 @@ class SessionShutdownData:
     total_api_duration: timedelta
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _accounting_snapshot: UsageGetMetricsResult | None = None
+    # Internal: this field is an internal SDK API and is not part of the public surface.
+    _agent_invocation_counts: dict[str, int] | None = field(default=None, kw_only=True)
     agent_metrics: dict[str, ShutdownAgentMetric] | None = None
     conversation_tokens: int | None = None
     current_model: str | None = None
@@ -12892,6 +12910,7 @@ class SessionShutdownData:
         shutdown_type = parse_enum(ShutdownType, obj.get("shutdownType"))
         total_api_duration = from_timedelta(obj.get("totalApiDurationMs"))
         _accounting_snapshot = from_union([from_none, UsageGetMetricsResult.from_dict], obj.get("accountingSnapshot"))
+        _agent_invocation_counts = from_union([from_none, lambda x: from_dict(from_int, x)], obj.get("agentInvocationCounts"))
         agent_metrics = from_union([from_none, lambda x: from_dict(ShutdownAgentMetric.from_dict, x)], obj.get("agentMetrics"))
         conversation_tokens = from_union([from_none, from_int], obj.get("conversationTokens"))
         current_model = from_union([from_none, from_str], obj.get("currentModel"))
@@ -12913,6 +12932,7 @@ class SessionShutdownData:
             shutdown_type=shutdown_type,
             total_api_duration=total_api_duration,
             _accounting_snapshot=_accounting_snapshot,
+            _agent_invocation_counts=_agent_invocation_counts,
             agent_metrics=agent_metrics,
             conversation_tokens=conversation_tokens,
             current_model=current_model,
@@ -12938,6 +12958,8 @@ class SessionShutdownData:
         result["totalApiDurationMs"] = to_timedelta_int(self.total_api_duration)
         if self._accounting_snapshot is not None:
             result["accountingSnapshot"] = from_union([from_none, lambda x: to_class(UsageGetMetricsResult, x)], self._accounting_snapshot)
+        if self._agent_invocation_counts is not None:
+            result["agentInvocationCounts"] = from_union([from_none, lambda x: from_dict(to_int, x)], self._agent_invocation_counts)
         if self.agent_metrics is not None:
             result["agentMetrics"] = from_union([from_none, lambda x: from_dict(lambda x: to_class(ShutdownAgentMetric, x), x)], self.agent_metrics)
         if self.conversation_tokens is not None:
@@ -12973,18 +12995,28 @@ class SessionShutdownData:
 class SessionSkillsLoadedData:
     "Payload of `session.skills_loaded` listing resolved skill metadata."
     skills: list[SkillsLoadedSkill]
+    errors: list[str] | None = None
+    warnings: list[str] | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "SessionSkillsLoadedData":
         assert isinstance(obj, dict)
         skills = from_list(SkillsLoadedSkill.from_dict, obj.get("skills"))
+        errors = from_union([from_none, lambda x: from_list(from_str, x)], obj.get("errors"))
+        warnings = from_union([from_none, lambda x: from_list(from_str, x)], obj.get("warnings"))
         return SessionSkillsLoadedData(
             skills=skills,
+            errors=errors,
+            warnings=warnings,
         )
 
     def to_dict(self) -> dict:
         result: dict = {}
         result["skills"] = from_list(lambda x: to_class(SkillsLoadedSkill, x), self.skills)
+        if self.errors is not None:
+            result["errors"] = from_union([from_none, lambda x: from_list(from_str, x)], self.errors)
+        if self.warnings is not None:
+            result["warnings"] = from_union([from_none, lambda x: from_list(from_str, x)], self.warnings)
         return result
 
 
@@ -13300,6 +13332,8 @@ class SessionUsageCheckpointData:
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _accounting_snapshot: UsageGetMetricsResult | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
+    _agent_invocation_counts: dict[str, int] | None = field(default=None, kw_only=True)
+    # Internal: this field is an internal SDK API and is not part of the public surface.
     _model_cache_state: list[_UsageCheckpointModelCacheState] | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _prompt_cache_break_state: list[Any] | None = None
@@ -13315,6 +13349,7 @@ class SessionUsageCheckpointData:
         assert isinstance(obj, dict)
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         _accounting_snapshot = from_union([from_none, UsageGetMetricsResult.from_dict], obj.get("accountingSnapshot"))
+        _agent_invocation_counts = from_union([from_none, lambda x: from_dict(from_int, x)], obj.get("agentInvocationCounts"))
         _model_cache_state = from_union([from_none, lambda x: from_list(_UsageCheckpointModelCacheState.from_dict, x)], obj.get("modelCacheState"))
         _prompt_cache_break_state = from_union([from_none, lambda x: from_list(lambda x: x, x)], obj.get("promptCacheBreakState"))
         provider_model_metrics = from_union([from_none, lambda x: from_list(UsageMetricsProviderModelMetric.from_dict, x)], obj.get("providerModelMetrics"))
@@ -13324,6 +13359,7 @@ class SessionUsageCheckpointData:
         return SessionUsageCheckpointData(
             total_nano_aiu=total_nano_aiu,
             _accounting_snapshot=_accounting_snapshot,
+            _agent_invocation_counts=_agent_invocation_counts,
             _model_cache_state=_model_cache_state,
             _prompt_cache_break_state=_prompt_cache_break_state,
             provider_model_metrics=provider_model_metrics,
@@ -13337,6 +13373,8 @@ class SessionUsageCheckpointData:
         result["totalNanoAiu"] = to_float(self.total_nano_aiu)
         if self._accounting_snapshot is not None:
             result["accountingSnapshot"] = from_union([from_none, lambda x: to_class(UsageGetMetricsResult, x)], self._accounting_snapshot)
+        if self._agent_invocation_counts is not None:
+            result["agentInvocationCounts"] = from_union([from_none, lambda x: from_dict(to_int, x)], self._agent_invocation_counts)
         if self._model_cache_state is not None:
             result["modelCacheState"] = from_union([from_none, lambda x: from_list(lambda x: to_class(_UsageCheckpointModelCacheState, x), x)], self._model_cache_state)
         if self._prompt_cache_break_state is not None:
@@ -13462,12 +13500,13 @@ class SessionWorkspaceFileChangedData:
 
 @dataclass
 class ShutdownAgentMetric:
-    "Usage attributed to one agent instance at session shutdown."
+    "Usage summed across invocations of one configured agent at session shutdown."
     model_metrics: dict[str, ShutdownModelMetric]
     total_api_duration: timedelta
     total_nano_aiu: float
     agent_display_name: str | None = None
     agent_name: str | None = None
+    invocation_count: int | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "ShutdownAgentMetric":
@@ -13477,12 +13516,14 @@ class ShutdownAgentMetric:
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         agent_display_name = from_union([from_none, from_str], obj.get("agentDisplayName"))
         agent_name = from_union([from_none, from_str], obj.get("agentName"))
+        invocation_count = from_union([from_none, from_int], obj.get("invocationCount"))
         return ShutdownAgentMetric(
             model_metrics=model_metrics,
             total_api_duration=total_api_duration,
             total_nano_aiu=total_nano_aiu,
             agent_display_name=agent_display_name,
             agent_name=agent_name,
+            invocation_count=invocation_count,
         )
 
     def to_dict(self) -> dict:
@@ -13494,6 +13535,8 @@ class ShutdownAgentMetric:
             result["agentDisplayName"] = from_union([from_none, from_str], self.agent_display_name)
         if self.agent_name is not None:
             result["agentName"] = from_union([from_none, from_str], self.agent_name)
+        if self.invocation_count is not None:
+            result["invocationCount"] = from_union([from_none, to_int], self.invocation_count)
         return result
 
 
@@ -15943,12 +15986,13 @@ class UsageGetMetricsResult:
 
 @dataclass
 class UsageMetricsAgentMetric:
-    "Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown."
+    "Usage summed across invocations of one configured agent."
     model_metrics: dict[str, UsageMetricsModelMetric]
     total_api_duration: timedelta
     total_nano_aiu: float
     agent_display_name: str | None = None
     agent_name: str | None = None
+    invocation_count: int | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "UsageMetricsAgentMetric":
@@ -15958,12 +16002,14 @@ class UsageMetricsAgentMetric:
         total_nano_aiu = from_float(obj.get("totalNanoAiu"))
         agent_display_name = from_union([from_none, from_str], obj.get("agentDisplayName"))
         agent_name = from_union([from_none, from_str], obj.get("agentName"))
+        invocation_count = from_union([from_none, from_int], obj.get("invocationCount"))
         return UsageMetricsAgentMetric(
             model_metrics=model_metrics,
             total_api_duration=total_api_duration,
             total_nano_aiu=total_nano_aiu,
             agent_display_name=agent_display_name,
             agent_name=agent_name,
+            invocation_count=invocation_count,
         )
 
     def to_dict(self) -> dict:
@@ -15975,6 +16021,8 @@ class UsageMetricsAgentMetric:
             result["agentDisplayName"] = from_union([from_none, from_str], self.agent_display_name)
         if self.agent_name is not None:
             result["agentName"] = from_union([from_none, from_str], self.agent_name)
+        if self.invocation_count is not None:
+            result["invocationCount"] = from_union([from_none, to_int], self.invocation_count)
         return result
 
 
@@ -16187,6 +16235,7 @@ class UserInputCompletedData:
     request_id: str
     answer: str | None = None
     was_freeform: bool | None = None
+    attachments: list[UserInputImageAttachment] | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "UserInputCompletedData":
@@ -16194,10 +16243,12 @@ class UserInputCompletedData:
         request_id = from_str(obj.get("requestId"))
         answer = from_union([from_none, from_str], obj.get("answer"))
         was_freeform = from_union([from_none, from_bool], obj.get("wasFreeform"))
+        attachments = from_union([from_none, lambda x: from_list(UserInputImageAttachment.from_dict, x)], obj.get("attachments"))
         return UserInputCompletedData(
             request_id=request_id,
             answer=answer,
             was_freeform=was_freeform,
+            attachments=attachments,
         )
 
     def to_dict(self) -> dict:
@@ -16207,6 +16258,72 @@ class UserInputCompletedData:
             result["answer"] = from_union([from_none, from_str], self.answer)
         if self.was_freeform is not None:
             result["wasFreeform"] = from_union([from_none, from_bool], self.was_freeform)
+        if self.attachments is not None:
+            result["attachments"] = from_union([from_none, lambda x: from_list(lambda x: to_class(UserInputImageAttachment, x), x)], self.attachments)
+        return result
+
+
+@dataclass
+class UserInputImageAttachment:
+    "An inline image supplied in an answer to a legacy ask_user request that advertises image support."
+    data: str
+    mime_type: str
+    type: str
+    description: str | None = None
+    display_name: str | None = None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "UserInputImageAttachment":
+        assert isinstance(obj, dict)
+        data = from_str(obj.get("data"))
+        mime_type = from_str(obj.get("mimeType"))
+        type = from_str(obj.get("type"))
+        description = from_union([from_none, from_str], obj.get("description"))
+        display_name = from_union([from_none, from_str], obj.get("displayName"))
+        return UserInputImageAttachment(
+            data=data,
+            mime_type=mime_type,
+            type=type,
+            description=description,
+            display_name=display_name,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["data"] = from_str(self.data)
+        result["mimeType"] = from_str(self.mime_type)
+        result["type"] = from_str(self.type)
+        if self.description is not None:
+            result["description"] = from_union([from_none, from_str], self.description)
+        if self.display_name is not None:
+            result["displayName"] = from_union([from_none, from_str], self.display_name)
+        return result
+
+
+@dataclass
+class UserInputImageAttachmentConstraints:
+    "Runtime-advertised image support for a legacy ask_user request. Absent when the request cannot accept images."
+    allowed_mime_types: list[str]
+    max_bytes_per_image: int
+    max_count: int
+
+    @staticmethod
+    def from_dict(obj: Any) -> "UserInputImageAttachmentConstraints":
+        assert isinstance(obj, dict)
+        allowed_mime_types = from_list(from_str, obj.get("allowedMimeTypes"))
+        max_bytes_per_image = from_int(obj.get("maxBytesPerImage"))
+        max_count = from_int(obj.get("maxCount"))
+        return UserInputImageAttachmentConstraints(
+            allowed_mime_types=allowed_mime_types,
+            max_bytes_per_image=max_bytes_per_image,
+            max_count=max_count,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["allowedMimeTypes"] = from_list(from_str, self.allowed_mime_types)
+        result["maxBytesPerImage"] = to_int(self.max_bytes_per_image)
+        result["maxCount"] = to_int(self.max_count)
         return result
 
 
@@ -16218,6 +16335,7 @@ class UserInputRequestedData:
     allow_freeform: bool | None = None
     choices: list[str] | None = None
     tool_call_id: str | None = None
+    image_attachment_constraints: UserInputImageAttachmentConstraints | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "UserInputRequestedData":
@@ -16227,12 +16345,14 @@ class UserInputRequestedData:
         allow_freeform = from_union([from_none, from_bool], obj.get("allowFreeform"))
         choices = from_union([from_none, lambda x: from_list(from_str, x)], obj.get("choices"))
         tool_call_id = from_union([from_none, from_str], obj.get("toolCallId"))
+        image_attachment_constraints = from_union([from_none, UserInputImageAttachmentConstraints.from_dict], obj.get("imageAttachmentConstraints"))
         return UserInputRequestedData(
             question=question,
             request_id=request_id,
             allow_freeform=allow_freeform,
             choices=choices,
             tool_call_id=tool_call_id,
+            image_attachment_constraints=image_attachment_constraints,
         )
 
     def to_dict(self) -> dict:
@@ -16245,6 +16365,8 @@ class UserInputRequestedData:
             result["choices"] = from_union([from_none, lambda x: from_list(from_str, x)], self.choices)
         if self.tool_call_id is not None:
             result["toolCallId"] = from_union([from_none, from_str], self.tool_call_id)
+        if self.image_attachment_constraints is not None:
+            result["imageAttachmentConstraints"] = from_union([from_none, lambda x: to_class(UserInputImageAttachmentConstraints, x)], self.image_attachment_constraints)
         return result
 
 
@@ -19485,6 +19607,8 @@ __all__ = [
     "UsageMetricsProviderModelMetric",
     "UsageMetricsTokenDetail",
     "UserInputCompletedData",
+    "UserInputImageAttachment",
+    "UserInputImageAttachmentConstraints",
     "UserInputRequestedData",
     "UserMessageAgentMode",
     "UserMessageData",

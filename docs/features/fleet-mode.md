@@ -176,7 +176,7 @@ Java exposes the same binding as `session.getRpc().fleet.start(...)`. The method
 
 ### From plan mode
 
-Plan-mode UIs can start fleet deployment by returning the `autopilot_fleet` exit action. The generated session event types describe it as:
+Plan approval offers `autopilot`, `interactive`, and `exit_only`. Start fleet explicitly with `session.fleet.start` after approval. The `autopilot_fleet` exit action remains supported for existing SDK clients:
 
 ```typescript
 type ExitPlanModeAction =
@@ -187,7 +187,7 @@ type ExitPlanModeAction =
   | "autopilot_fleet";
 ```
 
-Use this when a user approves a plan that already contains independent work items. Use `autopilot` for a single autonomous worker and `interactive` when the user should stay in the loop.
+Use `autopilot` for autonomous implementation and `interactive` when the user should stay in the loop.
 
 ## How sub-agents coordinate
 

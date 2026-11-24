@@ -1385,12 +1385,10 @@ async def test_canonical_callback_rejects_wait_on_its_alias_permit():
         class Provider:
             async def write_file(self, _path, _content, _mode=None):
                 try:
-                    await asyncio.wait_for(
-                        client.resume_session(
-                            "abcdef12-9999-4789-abcd-0123456789ab",
-                            state={"create_session_fs_provider": lambda _session: Provider()},
-                        ),
-                        1,
+                    # Canonical admission follows a TCP response; the suite bounds deadlocks.
+                    await client.resume_session(
+                        "abcdef12-9999-4789-abcd-0123456789ab",
+                        state={"create_session_fs_provider": lambda _session: Provider()},
                     )
                 except Exception as error:
                     observed.append(error)

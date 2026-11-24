@@ -4702,6 +4702,7 @@ public sealed partial class ClientSessionLifetimeTests
             }
         });
         var invocation = await permissionInvocation.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("managed-permission", invocation.RequestId);
         Assert.True(invocation.ManagedSettingsEnabled);
         Assert.Equal(programToolCallId, invocation.ProgramToolCallId);
         var promptRequest = Assert.IsType<PermissionPromptRequestCommands>(invocation.PromptRequest);

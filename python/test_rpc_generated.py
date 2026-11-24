@@ -58,6 +58,7 @@ from copilot.rpc import (
     MCPDiscoverRequest,
     MCPDiscoverResult,
     MCPGrantType,
+    MCPSecretSaveRequest,
     MCPSerializableServerConfig,
     MCPServerConfigHTTP,
     MCPServerConfigLocal,
@@ -150,6 +151,15 @@ def test_mcp_discovery_repr_redacts_configuration_without_changing_wire(model):
     assert "fake-discovery-authorization" not in diagnostic
     assert ("disabled" if model is MCPDiscoverRequest else "configured") in diagnostic
     assert value.to_dict() == wire
+
+
+def test_mcp_secret_save_repr_hides_credential_without_changing_wire():
+    wire = {"secretId": "server/key", "value": "synthetic-mcp-credential"}
+    request = MCPSecretSaveRequest.from_dict(wire)
+
+    assert wire["value"] not in repr(request)
+    assert wire["secretId"] in repr(request)
+    assert request.to_dict() == wire
 
 
 @pytest.mark.asyncio

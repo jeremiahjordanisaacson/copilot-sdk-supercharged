@@ -2,13 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-import type {
+import { pathToFileURL } from "node:url";
+import {
     CopilotClient,
-    CopilotSession,
-    SessionsHasEventsRequest,
-    SessionsHasEventsResult,
-    ShellBuildInteractiveEnvironmentRequest,
-    ShellBuildInteractiveEnvironmentResult,
+    RuntimeConnection,
+    type CopilotSession,
+    type McpSecretsDeleteRequest,
+    type McpSecretsSaveRequest,
+    type McpSecretsSaveResult,
+    type SessionsHasEventsRequest,
+    type SessionsHasEventsResult,
+    type ShellBuildInteractiveEnvironmentRequest,
+    type ShellBuildInteractiveEnvironmentResult,
 } from "../src/index.js";
 import type { createInternalServerRpc, createInternalSessionRpc } from "../src/generated/rpc.js";
 
@@ -82,4 +87,39 @@ export async function inspectHostHelperServices(
         null,
         2
     );
+}
+
+/** Stage a credential for an MCP configuration UI, then remove the unused credential. */
+export async function stageMcpCredential(client: CopilotClient) {
+    const secretId = "example-mcp/api-key";
+    const result: McpSecretsSaveResult = await client.rpc.mcp.secrets.save({
+        secretId,
+        value: "example-credential",
+    } satisfies McpSecretsSaveRequest);
+    await client.rpc.mcp.secrets.delete({ secretId } satisfies McpSecretsDeleteRequest);
+    return {
+        placeholder: "${secret:example-mcp/api-key}",
+        usedKeychain: result.usedKeychain,
+        removed: true,
+    };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    const directory = process.argv[2];
+    if (!directory) {
+        throw new Error("Usage: tsx examples/host-helper-services.ts <isolated-config-directory>");
+    }
+    const client = new CopilotClient({
+        mode: "coding-agent",
+        runtime: RuntimeConnection.forSpawnedStdio({
+            path: process.env.COPILOT_CLI_PATH,
+            baseDirectory: directory,
+        }),
+    });
+    try {
+        await client.start();
+        console.log(JSON.stringify(await stageMcpCredential(client)));
+    } finally {
+        await client.stop();
+    }
 }

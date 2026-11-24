@@ -1032,6 +1032,9 @@ public sealed class PermissionInvocation
     /// </summary>
     public string SessionId { get; set; } = string.Empty;
 
+    /// <summary>Identifier of the pending request that the handler will answer.</summary>
+    public string? RequestId { get; set; }
+
     /// <summary>Whether managed settings are enabled for this session.</summary>
     public bool ManagedSettingsEnabled { get; set; }
 
@@ -1075,6 +1078,13 @@ public sealed class PermissionInvocation
 public sealed class UserInputRequest
 {
     /// <summary>
+    /// Runtime-advertised image support. Null when images are unsupported.
+    /// </summary>
+    [JsonPropertyName("imageAttachmentConstraints")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UserInputImageAttachmentConstraints? ImageAttachmentConstraints { get; set; }
+
+    /// <summary>
     /// The question to ask the user.
     /// </summary>
     [JsonPropertyName("question")]
@@ -1110,6 +1120,14 @@ public sealed class UserInputRequest
 /// </summary>
 public sealed class UserInputResponse
 {
+    /// <summary>
+    /// Optional images for a request that advertised image support.
+    /// For an image-only answer, use an empty Answer and WasFreeform true.
+    /// </summary>
+    [JsonPropertyName("attachments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<UserInputImageAttachment>? Attachments { get; set; }
+
     /// <summary>
     /// The user's answer.
     /// </summary>
@@ -1599,6 +1617,9 @@ public sealed class ElicitationParams
 /// </summary>
 public sealed class ElicitationResult
 {
+    /// <summary>Negotiated metadata, including private built-in ask_user image answers.</summary>
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
     /// <summary>
     /// User action: <c>"accept"</c> (submitted), <c>"decline"</c> (rejected), or <c>"cancel"</c> (dismissed).
     /// </summary>
@@ -1707,6 +1728,12 @@ public interface ISessionUiApi
 /// </summary>
 public sealed class ElicitationContext
 {
+    /// <summary>Pending request ID for correlated out-of-band elicitation answers.</summary>
+    public string? RequestId { get; set; }
+
+    /// <summary>Request metadata, including negotiated built-in ask_user image constraints.</summary>
+    public IDictionary<string, JsonElement>? Meta { get; set; }
+
     /// <summary>Identifier of the session that triggered the elicitation request.</summary>
     public string SessionId { get; set; } = string.Empty;
 
