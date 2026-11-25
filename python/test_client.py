@@ -4205,6 +4205,50 @@ class TestCreateSessionConfig:
             await client.force_stop()
 
     @pytest.mark.asyncio
+    async def test_create_and_resume_session_forward_mcp_server_defer_tools(self):
+        client = CopilotClient(
+            mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)
+        )
+        await client.start()
+        try:
+            captured = {}
+
+            async def mock_request(method, params, **kwargs):
+                captured[method] = params
+                if method in ("session.create", "session.resume"):
+                    result = {"sessionId": params.get("sessionId") or "session-1"}
+                    callback = kwargs.get("on_response_inline")
+                    if callback is not None:
+                        callback(result)
+                    return result
+                return {}
+
+            client._client.request = mock_request
+
+            mcp_servers = {
+                "local": {"command": "node", "tools": ["*"], "defer_tools": "never"},
+                "remote": {"type": "http", "url": "https://example.com/mcp", "defer_tools": "auto"},
+                "plain": {"command": "node", "tools": ["*"]},
+            }
+            session = await client.create_session(
+                permissions={"on_request": PermissionHandler.approve_all},
+                mcp={"servers": mcp_servers},
+            )
+            await client.resume_session(
+                session.session_id,
+                permissions={"on_request": PermissionHandler.approve_all},
+                mcp={"servers": mcp_servers},
+            )
+            for method in ("session.create", "session.resume"):
+                wire = captured[method]["mcp"]["servers"]
+                assert wire["local"]["deferTools"] == "never"
+                assert wire["remote"]["deferTools"] == "auto"
+                assert "deferTools" not in wire["plain"]
+                assert all("defer_tools" not in server for server in wire.values())
+        finally:
+            await client.force_stop()
+
+    @pytest.mark.asyncio
     async def test_create_and_resume_session_forward_explicit_empty_tools(self):
         client = CopilotClient(
             mode="coding-agent", runtime=RuntimeConnection.for_spawned_stdio(path=CLI_PATH)

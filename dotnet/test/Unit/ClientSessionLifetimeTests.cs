@@ -3019,10 +3019,10 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
             ? new Dictionary<string, object?> { ["success"] = true }
             : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        using var process = StartExitedProcess();
         await using var client = new CopilotClient(new CopilotClientOptions
         { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), SessionFs = new SessionFsConfig { InitialWorkingDirectory = "/", SessionStatePath = "/session-state", Conventions = SessionFsSetProviderConventions.Posix } });
         await client.StartAsync();
-        using var process = StartExitedProcess();
         await ReplaceConnectionResourcesAsync(client, process);
         using var releaseSetup = new ManualResetEventSlim();
         using var releaseCreation = new ManualResetEventSlim();
@@ -3566,46 +3566,15 @@ public sealed partial class ClientSessionLifetimeTests
         });
     }
 
-    internal static async Task RunWithDownlevelSdkAsync(Type fixtureType, string methodName, object?[] arguments, [CallerFilePath] string sourceFile = "")
+    internal static async Task RunWithDownlevelSdkAsync(Type fixtureType, string methodName, object?[] arguments)
     {
-        var project = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "../../src/Microsoft.Copilot.SDK.csproj"));
-        var output = Directory.CreateTempSubdirectory("copilot-downlevel-");
-        var context = new DownlevelSdkLoadContext(output.FullName);
+        var directory = Path.Combine(AppContext.BaseDirectory, "downlevel-sdk");
+        var sdkPath = Path.Combine(directory, "Microsoft.Copilot.SDK.dll");
+        Assert.True(File.Exists(sdkPath), $"Downlevel SDK fixture not found at '{sdkPath}'. Build the test project before running with --no-build.");
+        var context = new DownlevelSdkLoadContext(directory);
         try
         {
-            var startInfo = new ProcessStartInfo("dotnet")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            foreach (var argument in new[]
-            {
-                "build", project, "--framework", "netstandard2.0", "--no-restore",
-                "--output", output.FullName, "-p:CopilotSkipCliDownload=true",
-                "-p:CopyLocalLockFileAssemblies=true", "--verbosity", "quiet"
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-            using var build = Process.Start(startInfo)!;
-            var stdout = build.StandardOutput.ReadToEndAsync();
-            var stderr = build.StandardError.ReadToEndAsync();
-            try
-            {
-                await build.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
-            }
-            finally
-            {
-                if (!build.HasExited)
-                {
-                    build.Kill(entireProcessTree: true);
-                    await build.WaitForExitAsync();
-                }
-            }
-            Assert.True(build.ExitCode == 0, $"Downlevel SDK build failed:\n{await stdout}\n{await stderr}");
-
-            using var sdk = File.OpenRead(Path.Combine(output.FullName, "Microsoft.Copilot.SDK.dll"));
+            using var sdk = File.OpenRead(sdkPath);
             var sdkAssembly = context.LoadFromStream(sdk);
             Assert.Equal(".NETStandard,Version=v2.0", sdkAssembly.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName);
             var tests = context.LoadFromAssemblyPath(typeof(ClientSessionLifetimeTests).Assembly.Location);
@@ -3616,7 +3585,6 @@ public sealed partial class ClientSessionLifetimeTests
         finally
         {
             context.Unload();
-            output.Delete(recursive: true);
         }
     }
 
@@ -3804,6 +3772,44 @@ public sealed partial class ClientSessionLifetimeTests
                 Assert.Null(blankAgentCall.AgentId);
                 Assert.Equal("req-blank-agent", blankAgentCall.RequestId);
             });
+    }
+
+    [Fact]
+    public async Task ExternalTool_ReportProgress_Sends_Message_For_The_Pending_Request()
+    {
+        const string progressMessage = "  Step 1/3: \"indexing\" ✓\n";
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "session.tools.reportProgress"
+            ? null
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var tool = CopilotTool.DefineTool(
+            async (ToolInvocation invocation) =>
+            {
+                await invocation.ReportProgressAsync(progressMessage);
+                return "ok";
+            },
+            factoryOptions: new AIFunctionFactoryOptions { Name = "calc" });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [tool] } });
+        server.ClearRequests();
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = "req-progress",
+                SessionId = session.SessionId,
+                ToolCallId = "tc-progress",
+                ToolName = "calc"
+            }
+        });
+        await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+
+        var progress = Assert.Single(server.Requests, request => request.Method == "session.tools.reportProgress");
+        Assert.Equal(session.SessionId, progress.Params.GetProperty("sessionId").GetString());
+        Assert.Equal("req-progress", progress.Params.GetProperty("requestId").GetString());
+        Assert.Equal(progressMessage, progress.Params.GetProperty("message").GetString());
     }
 
     private static ExternalToolRequestedEvent ExternalToolRequested(string requestId, string toolName = "blocked_tool") =>

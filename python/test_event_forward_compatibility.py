@@ -189,6 +189,29 @@ class TestEventForwardCompatibility:
         else:
             assert wire["checkpoint"] is checkpoint
 
+    def test_occurred_at_round_trips_without_shifting_positional_arguments(self):
+        event = session_event_from_dict(
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-09-18T22:00:00+00:00",
+                "occurredAt": "2026-09-18T21:59:30+00:00",
+                "parentId": "22222222-2222-2222-2222-222222222222",
+                "type": "session.idle",
+                "data": {},
+            }
+        )
+        assert event.occurred_at == datetime.fromisoformat("2026-09-18T21:59:30+00:00")
+        assert (
+            session_event_from_dict(session_event_to_dict(event)).occurred_at == event.occurred_at
+        )
+
+        positional = SessionEvent(
+            event.data, event.id, event.timestamp, event.type, None, None, None, event.parent_id
+        )
+        assert positional.parent_id == event.parent_id
+        assert positional.occurred_at is None
+        assert "occurredAt" not in session_event_to_dict(positional)
+
     def test_future_file_edit_kind_preserves_tool_completion(self):
         wire = {
             "id": str(uuid4()),

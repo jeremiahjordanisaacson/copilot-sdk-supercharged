@@ -2043,7 +2043,7 @@ export type McpServerStatus =
   /** The server is not configured for this session. */
   | "not_configured";
 /**
- * Discovery source
+ * Extension provenance
  */
 export type ExtensionsLoadedExtensionSource =
   /** Extension discovered from the current project. */
@@ -2053,7 +2053,9 @@ export type ExtensionsLoadedExtensionSource =
   /** Extension contributed by an installed plugin. */
   | "plugin"
   /** Extension discovered from the current session's state directory. */
-  | "session";
+  | "session"
+  /** Standalone extension supplied by the SDK host through extensionPaths. */
+  | "explicit";
 /**
  * Current status: running, dormant, disabled, failed, or starting
  */
@@ -2093,6 +2095,10 @@ export interface SandboxStateChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -2163,6 +2169,10 @@ export interface IdeConnectionChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -2298,6 +2308,10 @@ export interface IdeSelectionChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -2343,6 +2357,10 @@ export interface IdeAddFileReferenceEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -2424,6 +2442,10 @@ export interface IdeElicitationCompleteEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -2469,6 +2491,10 @@ export interface JournalLinkEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -2523,6 +2549,10 @@ export interface StartEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -2729,6 +2759,10 @@ export interface ResumeEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -2863,6 +2897,10 @@ export interface RemoteSteerableChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -2908,6 +2946,10 @@ export interface ErrorEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3015,6 +3057,10 @@ export interface IdleEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3064,6 +3110,10 @@ export interface AutopilotStoppedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3115,6 +3165,10 @@ export interface TitleChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3160,6 +3214,10 @@ export interface ScheduleCreatedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3243,6 +3301,10 @@ export interface ScheduleCancelledEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3288,6 +3350,10 @@ export interface ScheduleRearmedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3338,6 +3404,10 @@ export interface AutopilotObjectiveChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3392,6 +3462,10 @@ export interface InfoEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3480,6 +3554,10 @@ export interface IndexedSearchEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3516,6 +3594,10 @@ export interface WarningEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3578,6 +3660,10 @@ export interface ModelChangeEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3705,6 +3791,10 @@ export interface ModelDeselectedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3756,6 +3846,10 @@ export interface AutoTierRecommendationEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3802,6 +3896,10 @@ export interface AutoTierSwitchFailedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3857,6 +3955,10 @@ export interface ModeChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -3906,6 +4008,10 @@ export interface ModeNoticeDeliveredEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -3961,6 +4067,10 @@ export interface SessionLimitsChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -4007,6 +4117,10 @@ export interface PermissionsChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -4069,6 +4183,10 @@ export interface PlanChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -4115,6 +4233,10 @@ export interface TodosChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -4155,6 +4277,10 @@ export interface WorkspaceFileChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -4205,6 +4331,10 @@ export interface HandoffEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -4293,6 +4423,10 @@ export interface TruncationEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -4371,6 +4505,10 @@ export interface SnapshotRewindEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -4424,6 +4562,10 @@ export interface ShutdownEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -4950,6 +5092,10 @@ export interface UsageCheckpointEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -5064,6 +5210,10 @@ export interface ProviderQuotaObservationEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -5282,6 +5432,10 @@ export interface SensitivityLabelObservationEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -5397,6 +5551,10 @@ export interface ContextChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -5433,6 +5591,10 @@ export interface UsageInfoEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -5504,6 +5666,10 @@ export interface ContextClearedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -5553,6 +5719,10 @@ export interface CompactionStartEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -5660,6 +5830,10 @@ export interface CompactionSummarizedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -5729,6 +5903,10 @@ export interface CompactionCompleteEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -6386,6 +6564,10 @@ export interface TaskCompleteEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -6602,6 +6784,10 @@ export interface CompletionReceiptEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -6712,6 +6898,10 @@ export interface FusionRouteStartedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -6771,6 +6961,10 @@ export interface FusionRouteFailedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -6847,6 +7041,10 @@ export interface FusionResolvedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -7093,6 +7291,10 @@ export interface FusionCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -7195,6 +7397,12 @@ export interface FusionCompletedData {
    */
   requestCount: number;
   /**
+   * Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.
+   *
+   * @experimental
+   */
+  reviewSkippedReason?: string;
+  /**
    * Synthetic HydraFusion model selected for the session.
    */
   syntheticModel: string;
@@ -7232,6 +7440,10 @@ export interface PermissionRecoveryEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -7268,6 +7480,10 @@ export interface UserMessageEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -7905,6 +8121,10 @@ export interface PendingMessagesModifiedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -7945,6 +8165,10 @@ export interface AssistantTurnStartEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8008,6 +8232,10 @@ export interface AssistantIntentEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -8054,6 +8282,10 @@ export interface AssistantFusionPhaseStartedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8132,6 +8364,10 @@ export interface AssistantFusionPhaseActivityEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8213,6 +8449,10 @@ export interface AssistantFusionPhaseCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -8276,6 +8516,12 @@ export interface FusionPhaseCompletedData {
    * @internal
    */
   projectionMode?: FusionProjectionMode;
+  /**
+   * True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.
+   *
+   * @experimental
+   */
+  readOnly?: boolean;
   /**
    * Explicit reasoning effort selected for this phase, if supplied.
    *
@@ -8372,6 +8618,10 @@ export interface AssistantFusionPhaseFailedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8470,6 +8720,10 @@ export interface AssistantServerToolProgressEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -8523,6 +8777,10 @@ export interface AssistantReasoningEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8600,6 +8858,10 @@ export interface AssistantReasoningDeltaEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -8655,6 +8917,10 @@ export interface AssistantToolCallDeltaEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -8720,6 +8986,10 @@ export interface AssistantStreamingDeltaEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -8765,6 +9035,10 @@ export interface AssistantMessageEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -9151,6 +9425,10 @@ export interface AssistantMessageStartEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -9206,6 +9484,10 @@ export interface AssistantMessageDeltaEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -9263,6 +9545,10 @@ export interface AssistantTurnEndEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -9317,6 +9603,10 @@ export interface AssistantIdleEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -9362,6 +9652,10 @@ export interface AssistantUsageEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -9504,13 +9798,13 @@ export interface AssistantUsageData {
    */
   inputTokens?: number;
   /**
-   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+   * No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
    *
    * @internal
    */
   instructionUpdateDeliveryId?: string;
   /**
-   * Event identifier of the latest canonical instruction update included in this model request.
+   * No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.
    *
    * @internal
    */
@@ -9902,6 +10196,10 @@ export interface ModelCallFailureEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -9973,13 +10271,13 @@ export interface ModelCallFailureData {
    */
   initiator?: string;
   /**
-   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+   * No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
    *
    * @internal
    */
   instructionUpdateDeliveryId?: string;
   /**
-   * Event identifier of the latest canonical instruction update included in this failed model request.
+   * No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.
    *
    * @internal
    */
@@ -10211,6 +10509,10 @@ export interface ModelCallFinishedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -10277,6 +10579,10 @@ export interface AbortEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -10322,6 +10628,10 @@ export interface ToolUserRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -10376,6 +10686,10 @@ export interface ToolExecutionStartEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -10557,6 +10871,10 @@ export interface ToolShellOutputEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -10621,6 +10939,10 @@ export interface ToolExecutionProgressEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -10676,6 +10998,10 @@ export interface ToolExecutionCompleteEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -11426,6 +11752,10 @@ export interface ToolSearchActivatedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -11475,6 +11805,10 @@ export interface SkillInvokedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -11578,6 +11912,10 @@ export interface SubagentStartedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -11672,6 +12010,10 @@ export interface SubagentConfiguredEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -11729,6 +12071,10 @@ export interface SubagentCompletedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -11836,6 +12182,10 @@ export interface SubagentFailedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -11942,6 +12292,10 @@ export interface SubagentSelectedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -11996,6 +12350,10 @@ export interface SubagentDeselectedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -12036,6 +12394,10 @@ export interface HookStartEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -12094,6 +12456,10 @@ export interface HookEndEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -12178,6 +12544,10 @@ export interface HookProgressEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -12228,6 +12598,10 @@ export interface BinaryAssetEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -12300,6 +12674,10 @@ export interface SystemMessageEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -12399,6 +12777,10 @@ export interface InstructionUpdateEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -12440,7 +12822,7 @@ export interface InstructionUpdateData {
    */
   name?: string;
   /**
-   * Whether this update was recorded after the conversation's initial user message.
+   * No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.
    *
    * @internal
    */
@@ -12470,6 +12852,10 @@ export interface SystemNotificationEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -12740,6 +13126,10 @@ export interface PermissionRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -14154,6 +14544,10 @@ export interface PermissionCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -14516,6 +14910,10 @@ export interface PermissionCarriedForwardEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -14583,6 +14981,10 @@ export interface PermissionMessageAuthorizationEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -14682,6 +15084,10 @@ export interface PermissionMessageAuthorizationReadEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -14738,6 +15144,10 @@ export interface PermissionMessageAuthorizationDegradedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -14787,6 +15197,10 @@ export interface PermissionAssentDetectedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -14843,6 +15257,10 @@ export interface PermissionContextualAuthorizationEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -14922,6 +15340,10 @@ export interface UserInputRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15007,6 +15429,10 @@ export interface UserInputCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15091,6 +15517,10 @@ export interface ElicitationRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15191,6 +15621,10 @@ export interface ElicitationCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15253,6 +15687,10 @@ export interface SamplingRequestedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15311,6 +15749,10 @@ export interface SamplingCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15356,6 +15798,10 @@ export interface McpOauthRequiredEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15507,6 +15953,10 @@ export interface McpOauthCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15556,6 +16006,10 @@ export interface McpOauthRecoveryCompletedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15610,6 +16064,10 @@ export interface McpHeadersRefreshRequiredEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15669,6 +16127,10 @@ export interface McpHeadersRefreshCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15718,6 +16180,10 @@ export interface CustomNotificationEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15788,6 +16254,10 @@ export interface UIEphemeralQueryEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15850,6 +16320,10 @@ export interface ExternalToolRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -15935,6 +16409,10 @@ export interface ExternalToolCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -15980,6 +16458,10 @@ export interface CommandQueuedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16034,6 +16516,10 @@ export interface CommandExecuteEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16093,6 +16579,10 @@ export interface CommandCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16138,6 +16628,10 @@ export interface AutoModeSwitchRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16193,6 +16687,10 @@ export interface AutoModeSwitchCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16242,6 +16740,10 @@ export interface AutoModeRecoveryConsentRequestedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16313,6 +16815,10 @@ export interface AutoModeRecoveryConsentCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16366,6 +16872,10 @@ export interface AutoModeRecoveryOutcomeEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16429,6 +16939,10 @@ export interface SessionLimitsExhaustedRequestedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16482,6 +16996,10 @@ export interface SessionLimitsExhaustedCompletedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16550,6 +17068,10 @@ export interface AutoModeResolvedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16665,6 +17187,10 @@ export interface ManagedPluginProgressEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16716,6 +17242,10 @@ export interface ManagedSettingsResolvedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -16922,6 +17452,10 @@ export interface ManagedSettingsEnforcedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -16985,6 +17519,10 @@ export interface CommandsChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17043,6 +17581,10 @@ export interface CapabilitiesChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -17111,6 +17653,10 @@ export interface ExitPlanModeRequestedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17177,6 +17723,10 @@ export interface ExitPlanModeCompletedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17239,6 +17789,10 @@ export interface HumanResponseRecordedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17297,6 +17851,10 @@ export interface ToolsUpdatedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17343,6 +17901,10 @@ export interface BackgroundTasksChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17384,6 +17946,10 @@ export interface WorkflowRunUpdatedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -17436,6 +18002,10 @@ export interface WorkflowRunStartedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -17492,6 +18062,10 @@ export interface WorkflowRunSettledEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -17559,6 +18133,10 @@ export interface SkillsLoadedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -17672,6 +18250,10 @@ export interface CustomAgentsUpdatedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17775,6 +18357,10 @@ export interface McpServersLoadedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17871,6 +18457,10 @@ export interface McpServerStatusChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17933,6 +18523,10 @@ export interface McpServerToolsLoadedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -17983,6 +18577,10 @@ export interface McpServerRemovedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18028,6 +18626,10 @@ export interface McpServerNeedsReconnectEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -18075,6 +18677,10 @@ export interface McpToolsListChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18121,6 +18727,10 @@ export interface McpResourcesListChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18158,6 +18768,10 @@ export interface McpPromptsListChangedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18194,6 +18808,10 @@ export interface ExtensionsLoadedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -18262,6 +18880,10 @@ export interface CanvasOpenedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -18342,6 +18964,10 @@ export interface CanvasRegistryChangedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -18447,6 +19073,10 @@ export interface CanvasClosedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18503,6 +19133,10 @@ export interface CanvasUnavailableEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18558,6 +19192,10 @@ export interface CanvasRecordedEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
@@ -18623,6 +19261,10 @@ export interface CanvasRemovedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18678,6 +19320,10 @@ export interface ExtensionsAttachmentsPushedEvent {
    */
   id: string;
   /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
+  /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */
   parentId: string | null;
@@ -18723,6 +19369,10 @@ export interface McpAppToolCallCompleteEvent {
    * Unique event identifier (UUID v4), generated when the event is emitted
    */
   id: string;
+  /**
+   * ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+   */
+  occurredAt?: string;
   /**
    * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
    */

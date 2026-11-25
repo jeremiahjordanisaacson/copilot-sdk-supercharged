@@ -5,10 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
+
+// ExtensionSources selects discovery sources, not activation or trust.
+// Requires a supporting runtime.
+type ExtensionSources = rpc.ExtensionSources
 
 // connectionState is the internal client connection state.
 type connectionState string
@@ -1600,9 +1605,15 @@ type MCPServerConfig interface {
 //   - []string{"*"}: explicit "all tools"
 //   - []string{}: no tools
 //   - []string{"foo","bar"}: only those tools
+//
+// DeferTools controls whether the server's tools may be deferred behind tool
+// search: [ToolDeferAuto] lets the runtime defer them when tool search is
+// enabled, and [ToolDeferNever] keeps them in the initial tool list even when
+// tool search is enabled. When empty, the runtime decides.
 type MCPStdioServerConfig struct {
 	Tools            []string          `json:"tools,omitzero"`
 	Timeout          int               `json:"timeout,omitempty"`
+	DeferTools       ToolDefer         `json:"deferTools,omitempty"`
 	Command          string            `json:"command"`
 	Args             []string          `json:"args,omitzero"`
 	Env              map[string]string `json:"env,omitzero"`
@@ -1625,10 +1636,11 @@ func (c MCPStdioServerConfig) MarshalJSON() ([]byte, error) {
 
 // MCPHTTPServerConfig configures a remote MCP server (HTTP or SSE).
 //
-// See [MCPStdioServerConfig] for the semantics of the Tools field.
+// See [MCPStdioServerConfig] for the semantics of the Tools and DeferTools fields.
 type MCPHTTPServerConfig struct {
 	Tools             []string                               `json:"tools,omitzero"`
 	Timeout           int                                    `json:"timeout,omitempty"`
+	DeferTools        ToolDefer                              `json:"deferTools,omitempty"`
 	URL               string                                 `json:"url"`
 	Headers           map[string]string                      `json:"headers,omitzero"`
 	OAuthClientID     *string                                `json:"oauthClientId,omitempty"`
@@ -1985,6 +1997,13 @@ type sessionOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
+	// ExtensionSources selects extension sources without enabling extensions.
+	// Warm resumes cannot change overrides. Cold omission restores existing defaults.
+	ExtensionSources *ExtensionSources
+	// ExtensionPaths adds standalone modules supplied and trusted by the host, without enabling extensions.
+	// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+	// Relative entries resolve against the request's working directory. Re-supply on owning resume.
+	ExtensionPaths []string
 	// TrustWorkingDirectory trusts the working directory for this session
 	// ("session") or persistently for the user ("user"). Empty leaves trust unchanged.
 	TrustWorkingDirectory WorkingDirectoryTrust
@@ -2577,6 +2596,39 @@ type ToolInvocation struct {
 	// deliveredContainers holds every object and array of Arguments as the
 	// SDK delivered it, so a caller's replacement is not mistaken for it.
 	deliveredContainers []any
+
+	// reportProgress sends progress for this call; nil when the invocation was
+	// not created by a session. It is a pointer so copies of an invocation
+	// stay equal under reflect.DeepEqual, which never treats funcs as equal.
+	reportProgress *toolProgressReporter
+}
+
+// toolProgressReporter is cleared when the handler returns, so an invocation
+// the handler retains does not keep the session alive.
+type toolProgressReporter struct {
+	report atomic.Pointer[func(ctx context.Context, message string)]
+}
+
+// ReportProgress reports progress for this call while it runs. The runtime
+// emits a tool.execution_progress session event with this call's ToolCallID
+// and message verbatim. Progress for a call that has already completed is
+// dropped, and delivery failures never fail the tool call. It does nothing
+// after the handler returns, when the session has disconnected, or when the
+// invocation was not created by a session.
+//
+// Experimental: this method may change or be removed.
+func (i ToolInvocation) ReportProgress(ctx context.Context, message string) {
+	if i.reportProgress == nil {
+		return
+	}
+	report := i.reportProgress.report.Load()
+	if report == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	(*report)(ctx, message)
 }
 
 // ToolHandler executes a tool invocation.
@@ -2927,6 +2979,11 @@ type resumeOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
+	// ExtensionSources must match a loaded session; cold omission restores defaults.
+	ExtensionSources *ExtensionSources
+	// ExtensionPaths replaces host-trusted standalone entries. Omission or an empty list removes them.
+	// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+	ExtensionPaths []string
 	// SkipEmbeddingRetrieval, when non-nil, controls embedding-based retrieval
 	// for this session. Use in multitenant deployments to prevent cross-session
 	// information leakage through the shared embedding cache.
@@ -3769,6 +3826,8 @@ type createSessionRequest struct {
 	Agent                              string                         `json:"agent,omitempty"`
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
+	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
+	ExtensionPaths                     []string                       `json:"extensionPaths,omitzero"`
 	TrustWorkingDirectory              string                         `json:"trustWorkingDirectory,omitempty"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
@@ -3875,6 +3934,8 @@ type resumeSessionRequest struct {
 	AdditionalDirectories              []string                       `json:"additionalDirectories,omitzero"`
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
+	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
+	ExtensionPaths                     []string                       `json:"extensionPaths,omitzero"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
 	OrganizationCustomInstructions     *string                        `json:"organizationCustomInstructions,omitempty"`

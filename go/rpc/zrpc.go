@@ -6010,6 +6010,12 @@ type CommandList struct {
 	Commands []SlashCommandInfo `json:"commands"`
 }
 
+// Slash commands available in the session, after applying any include/exclude filters.
+type CommandListWithMetadata struct {
+	// Commands available in this session
+	Commands []SlashCommandInfoWithMetadata `json:"commands"`
+}
+
 // The pending slash-command invocation effect to finalize, plus whether the host applied or
 // cancelled it.
 // Experimental: CommandsFinalizeInvocationEffectRequest is part of an experimental API and
@@ -6062,8 +6068,6 @@ type CommandsInvokeRequest struct {
 	Origin *CommandsInvocationOrigin `json:"origin,omitempty"`
 }
 
-// Experimental: CommandsListRequest is part of an experimental API and may change or be
-// removed.
 type CommandsListRequest struct {
 	// Include runtime built-in commands
 	IncludeBuiltins *bool `json:"includeBuiltins,omitempty"`
@@ -6668,6 +6672,14 @@ type ContentExclusionValidatePoliciesResult struct {
 	// Validated policy objects in input order. Raw JSON preserves every field returned by the
 	// runtime's policy parser.
 	Policies []any `json:"policies"`
+}
+
+// The runtime-owned prompt for a context-board consolidation agent.
+// Experimental: ContextBoardConsolidationPromptResult is part of an experimental API and
+// may change or be removed.
+type ContextBoardConsolidationPromptResult struct {
+	// Instructions for the rem-agent to consolidate the session context board.
+	Prompt string `json:"prompt"`
 }
 
 // A single large message currently in context.
@@ -8296,8 +8308,7 @@ type Extension struct {
 	Name string `json:"name"`
 	// Process ID if the extension is running
 	Pid *int64 `json:"pid,omitempty"`
-	// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin
-	// (installed plugin), or session (session-state/<id>/extensions/)
+	// Extension provenance: project, user, plugin, session, or explicit.
 	Source ExtensionSource `json:"source"`
 	// Current status: running, dormant, disabled, failed, or starting
 	Status ExtensionStatus `json:"status"`
@@ -8394,6 +8405,22 @@ type ExtensionsEnableRequest struct {
 // Experimental: ExtensionsEnableResult is part of an experimental API and may change or be
 // removed.
 type ExtensionsEnableResult struct {
+}
+
+// Session-owned extension source overrides. These do not enable extensions or activate
+// plugins.
+// Experimental: ExtensionSources is part of an experimental API and may change or be
+// removed.
+type ExtensionSources struct {
+	// Permit extensions from otherwise-active plugins, including bundles. Defaults to true;
+	// other plugin contributions are unaffected.
+	Plugins *bool `json:"plugins,omitempty"`
+	// Discover project extensions when true; exclude them when false. Omission preserves
+	// existing discovery and trust checks.
+	Project *bool `json:"project,omitempty"`
+	// Discover personal extensions when true; exclude them when false. Omission preserves
+	// existing discovery.
+	User *bool `json:"user,omitempty"`
 }
 
 // Tool call result (string or expanded result object)
@@ -12121,6 +12148,37 @@ type HostLocalServerOptions struct {
 type HostMaterializeSessionResult struct {
 	// Runtime session UUID materialized on the application's SDK connection.
 	SessionID string `json:"sessionId"`
+}
+
+// One non-prompting host-policy decision requested before the runtime invokes the Assisted
+// Permissions judge.
+// Experimental: HostPolicyPreCheckRequest is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckRequest struct {
+	// Agent mode captured for the request, when available.
+	AgentMode *SessionMode `json:"agentMode,omitempty"`
+	// Exact permission request being evaluated, with the same shape as
+	// `permission.requested.data.permissionRequest`.
+	PermissionRequest any `json:"permissionRequest"`
+	// Live host policy revision whose decision the runtime will accept.
+	PolicyRevision int64 `json:"policyRevision"`
+	// Exact user-facing gate the host may settle without prompting, with the same shape as
+	// `permission.requested.data.promptRequest`.
+	PromptRequest any `json:"promptRequest"`
+	// Runtime-generated correlation identifier for this permission request.
+	RequestID string `json:"requestId"`
+	// Session whose owning connection declared the host-policy pre-check.
+	SessionID string `json:"sessionId"`
+}
+
+// Host policy decision and the exact policy revision used to make it.
+// Experimental: HostPolicyPreCheckResult is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckResult struct {
+	// Whether host policy approves or defers this request.
+	Decision HostPolicyPreCheckDecision `json:"decision"`
+	// Policy revision used for the decision.
+	PolicyRevision int64 `json:"policyRevision"`
 }
 
 // Publishes a resident session attached to the listener's owning connection.
@@ -22766,6 +22824,9 @@ type PermissionsCapabilities struct {
 	// Whether managed policy currently permits unconditional approval.
 	// Stays true while managed policy is still resolving.
 	BypassPermissions bool `json:"bypassPermissions"`
+	// Whether this local session supports the owner-authenticated
+	// `hostPolicy.preCheck` capability.
+	HostPolicyPreCheck *bool `json:"hostPolicyPreCheck,omitempty"`
 }
 
 // No parameters.
@@ -22837,6 +22898,17 @@ type PermissionsConfigureAssistedApprovalContext struct {
 	Value any `json:"value"`
 }
 
+// Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime
+// accepts a decision only for the declared revision, which every SDK represents exactly.
+// Experimental: PermissionsConfigureHostPolicyPreCheck is part of an experimental API and
+// may change or be removed.
+type PermissionsConfigureHostPolicyPreCheck struct {
+	// Whether this connection declares the host-policy pre-check.
+	Enabled bool `json:"enabled"`
+	// Host policy revision from 0 through 2^53 - 1.
+	PolicyRevision int64 `json:"policyRevision"`
+}
+
 // Patch of permission policy fields to apply (omit a field to leave it unchanged).
 // Experimental: PermissionsConfigureParams is part of an experimental API and may change or
 // be removed.
@@ -22884,6 +22956,11 @@ type PermissionsConfigureParams struct {
 	// unchanged; false clears it. Without a declaration, registered handlers are not consulted
 	// during unattended Assisted Autopilot. Remote sessions are not supported.
 	HostPolicyPermissionHandler *bool `json:"hostPolicyPermissionHandler,omitempty"`
+	// Declares a non-prompting host-policy callback that the runtime may call before the
+	// Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the
+	// owning non-extension connection may set it. False disables the declaration. Hosts must
+	// reapply after resume. Remote sessions are not supported.
+	HostPolicyPreCheck *PermissionsConfigureHostPolicyPreCheck `json:"hostPolicyPreCheck,omitempty"`
 	// If specified, replaces the session's path-permission policy. The runtime constructs the
 	// appropriate PathManager based on these inputs (rooted at the session's working
 	// directory). Omit to leave the current path policy unchanged.
@@ -27328,6 +27405,16 @@ type ResponseFormat struct {
 	JSONSchema JSONSchemaResponseFormat `json:"jsonSchema"`
 	// Output format discriminator. Currently only json_schema is supported.
 	Type ResponseFormatType `json:"type"`
+}
+
+// Presentation flags for the complete built-in command catalog.
+// Experimental: RuntimeCommandCatalogRequest is part of an experimental API and may change
+// or be removed.
+type RuntimeCommandCatalogRequest struct {
+	// Show Forge chronicle choices. This affects metadata only, not command admission.
+	ForgeAgentEnabled *bool `json:"forgeAgentEnabled,omitempty"`
+	// Include commands unavailable before session creation. Defaults to false.
+	IncludeUnavailable *bool `json:"includeUnavailable,omitempty"`
 }
 
 // An authorization URL for the host browser.
@@ -34235,6 +34322,11 @@ type SessionTelemetryReloadResult struct {
 type SessionTelemetrySetFeatureOverridesResult struct {
 }
 
+// Experimental: SessionToolsReportProgressResult is part of an experimental API and may
+// change or be removed.
+type SessionToolsReportProgressResult struct {
+}
+
 // Experimental: SessionUIRegisterDirectAutoModeSwitchHandlerRequest is part of an
 // experimental API and may change or be removed.
 type SessionUIRegisterDirectAutoModeSwitchHandlerRequest struct {
@@ -36230,6 +36322,44 @@ type SlashCommandInfo struct {
 	Schedulable *bool `json:"schedulable,omitempty"`
 }
 
+// Slash-command metadata with name, aliases, description, kind, input hint, execution
+// allowance, and schedulability.
+type SlashCommandInfoWithMetadata struct {
+	// Canonical aliases without leading slashes
+	Aliases []string `json:"aliases,omitzero"`
+	// Whether the command may run while an agent turn is active
+	AllowDuringAgentExecution bool `json:"allowDuringAgentExecution"`
+	// Whether the command can be the first message in a session.
+	AvailableAtSessionStart *bool `json:"availableAtSessionStart,omitempty"`
+	// Nested terminal argument grammar, serialized as ArgsSpec JSON.
+	CLIArgsJSON *string `json:"cliArgsJson,omitempty"`
+	// Human-readable command description
+	Description string `json:"description"`
+	// Display name, including the leading slash.
+	DisplayName *string `json:"displayName,omitempty"`
+	// Whether the command is experimental
+	Experimental *bool `json:"experimental,omitempty"`
+	// Optional unstructured input hint
+	Input *SlashCommandInput `json:"input,omitempty"`
+	// Coarse command category for grouping and behavior: runtime built-in, skill-backed
+	// command, or SDK/client-owned command
+	Kind SlashCommandKind `json:"kind"`
+	// Canonical command name without a leading slash
+	Name string `json:"name"`
+	// Plugin that provides this command.
+	PluginName *string `json:"pluginName,omitempty"`
+	// Whether the command may be the target of `/every` / `/after` schedules. Resolution
+	// happens at every tick, so only set this when the command is safe to re-invoke and
+	// produces an agent prompt.
+	Schedulable *bool `json:"schedulable,omitempty"`
+	// Skill that provides this command.
+	SkillName *string `json:"skillName,omitempty"`
+	// Command source, such as runtime, skill, or protocol-client.
+	Source *string `json:"source,omitempty"`
+	// Whether invocation stops processing the queued commands.
+	StopsQueueProcessing *bool `json:"stopsQueueProcessing,omitempty"`
+}
+
 // Optional unstructured input hint
 // Experimental: SlashCommandInput is part of an experimental API and may change or be
 // removed.
@@ -37562,6 +37692,16 @@ type ToolsListRequest struct {
 	// Optional model ID — when provided, the returned tool list reflects model-specific
 	// overrides
 	Model *string `json:"model,omitempty"`
+}
+
+// Pending external tool call request ID and a progress message for its running tool call.
+// Experimental: ToolsReportProgressRequest is part of an experimental API and may change or
+// be removed.
+type ToolsReportProgressRequest struct {
+	// Progress message, emitted verbatim as the tool.execution_progress progressMessage
+	Message string `json:"message"`
+	// Request ID of the pending tool call
+	RequestID string `json:"requestId"`
 }
 
 // Complete externally implemented tool list for the calling connection. An empty list
@@ -43143,12 +43283,13 @@ const (
 	EventsReadViewReplay EventsReadView = "replay"
 )
 
-// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin
-// (installed plugin), or session (session-state/<id>/extensions/)
+// Extension provenance.
 // Experimental: ExtensionSource is part of an experimental API and may change or be removed.
 type ExtensionSource string
 
 const (
+	// Standalone extension supplied by the SDK host through extensionPaths.
+	ExtensionSourceExplicit ExtensionSource = "explicit"
 	// Extension contributed by an installed plugin.
 	ExtensionSourcePlugin ExtensionSource = "plugin"
 	// Extension discovered from the current project's .github/extensions directory.
@@ -43934,6 +44075,19 @@ const (
 	HostExitReasonOwnerDisconnected HostExitReason = "ownerDisconnected"
 	// The runtime is shutting down.
 	HostExitReasonRuntimeShutdown HostExitReason = "runtimeShutdown"
+)
+
+// Non-prompting host-policy decision. Defer preserves the runtime's existing judge and
+// permission-handler path.
+// Experimental: HostPolicyPreCheckDecision is part of an experimental API and may change or
+// be removed.
+type HostPolicyPreCheckDecision string
+
+const (
+	// Host policy settles the request as approved without prompting.
+	HostPolicyPreCheckDecisionApprove HostPolicyPreCheckDecision = "approve"
+	// The runtime continues through its existing judge and permission-handler path.
+	HostPolicyPreCheckDecisionDefer HostPolicyPreCheckDecision = "defer"
 )
 
 // Mode discriminator for HostSessionAuthentication.
@@ -49332,9 +49486,11 @@ func (a *ServerCatalogAPI) Select(ctx context.Context, params *CatalogSelectionR
 // Experimental: ServerCommandsAPI contains experimental APIs that may change or be removed.
 type ServerCommandsAPI serverAPI
 
-// Lists the well-known built-in slash commands that work as the first message in a new
-// session (e.g. /plan, /env), without requiring an active session. Commands that depend on
-// session state, authentication, or a synced session are omitted.
+// Lists well-known built-in slash commands without an active session. By default, commands
+// that need session state, authentication, or a synced session are omitted. Editors and
+// terminal hosts can request the complete catalog and its argument grammar with
+// includeUnavailable. Presentation flags never grant execution permissions. Use
+// ListWithOptions for catalog options and complete presentation metadata.
 //
 // RPC method: commands.list.
 //
@@ -49346,6 +49502,33 @@ func (a *ServerCommandsAPI) List(ctx context.Context) (*CommandList, error) {
 		return nil, err
 	}
 	var result CommandList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListWithOptions lists well-known built-in slash commands without an active session. By
+// default, commands that need session state, authentication, or a synced session are
+// omitted. Editors and terminal hosts can request the complete catalog and its argument
+// grammar with includeUnavailable. Presentation flags never grant execution permissions.
+//
+// RPC method: commands.list.
+//
+// Parameters: Presentation flags for the complete built-in command catalog.
+//
+// Returns: Slash commands available in the session, after applying any include/exclude
+// filters.
+// Pass nil for params to use the default request options.
+func (a *ServerCommandsAPI) ListWithOptions(ctx context.Context, params *RuntimeCommandCatalogRequest) (*CommandListWithMetadata, error) {
+	if params == nil {
+		params = &RuntimeCommandCatalogRequest{}
+	}
+	raw, err := a.client.Request(ctx, "commands.list", params)
+	if err != nil {
+		return nil, err
+	}
+	var result CommandListWithMetadata
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -49455,6 +49638,29 @@ func (a *ServerContentExclusionAPI) ValidatePolicies(ctx context.Context, params
 		return nil, err
 	}
 	var result ContentExclusionValidatePoliciesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: ServerContextBoardAPI contains experimental APIs that may change or be
+// removed.
+type ServerContextBoardAPI serverAPI
+
+// GetConsolidationPrompt returns the runtime-owned instructions for a rem-agent that
+// consolidates a session context board. Hosts that launch a consolidation agent use this
+// prompt rather than copy runtime instructions.
+//
+// RPC method: contextBoard.getConsolidationPrompt.
+//
+// Returns: The runtime-owned prompt for a context-board consolidation agent.
+func (a *ServerContextBoardAPI) GetConsolidationPrompt(ctx context.Context) (*ContextBoardConsolidationPromptResult, error) {
+	raw, err := a.client.Request(ctx, "contextBoard.getConsolidationPrompt", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ContextBoardConsolidationPromptResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -53743,6 +53949,7 @@ type ServerRPC struct {
 	Commands         *ServerCommandsAPI
 	Connectors       *ServerConnectorsAPI
 	ContentExclusion *ServerContentExclusionAPI
+	ContextBoard     *ServerContextBoardAPI
 	Decisions        *ServerDecisionsAPI
 	Environments     *ServerEnvironmentsAPI
 	Extensions       *ServerExtensionsAPI
@@ -53829,6 +54036,7 @@ func NewServerRPC(client *jsonrpc2.Client) *ServerRPC {
 	r.Commands = (*ServerCommandsAPI)(&r.common)
 	r.Connectors = (*ServerConnectorsAPI)(&r.common)
 	r.ContentExclusion = (*ServerContentExclusionAPI)(&r.common)
+	r.ContextBoard = (*ServerContextBoardAPI)(&r.common)
 	r.Decisions = (*ServerDecisionsAPI)(&r.common)
 	r.Environments = (*ServerEnvironmentsAPI)(&r.common)
 	r.Extensions = (*ServerExtensionsAPI)(&r.common)
@@ -61564,6 +61772,39 @@ func (a *CommandsAPI) List(ctx context.Context, params *SessionCommandsListReque
 	return &result, nil
 }
 
+// ListWithMetadata lists slash commands available in the session.
+//
+// RPC method: session.commands.list.
+//
+// Parameters: Optional filters controlling which command sources to include in the listing.
+//
+// Returns: Slash commands available in the session, after applying any include/exclude
+// filters.
+// Pass nil for params to use the default request options.
+func (a *CommandsAPI) ListWithMetadata(ctx context.Context, params *SessionCommandsListRequest) (*CommandListWithMetadata, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.IncludeBuiltins != nil {
+			req["includeBuiltins"] = *params.IncludeBuiltins
+		}
+		if params.IncludeClientCommands != nil {
+			req["includeClientCommands"] = *params.IncludeClientCommands
+		}
+		if params.IncludeSkills != nil {
+			req["includeSkills"] = *params.IncludeSkills
+		}
+	}
+	raw, err := a.client.Request(ctx, "session.commands.list", req)
+	if err != nil {
+		return nil, err
+	}
+	var result CommandListWithMetadata
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // RespondToQueuedCommand reports whether the host actually executed a queued command and
 // whether to continue processing.
 //
@@ -65474,6 +65715,9 @@ func (a *PermissionsAPI) Configure(ctx context.Context, params *PermissionsConfi
 		if params.HostPolicyPermissionHandler != nil {
 			req["hostPolicyPermissionHandler"] = *params.HostPolicyPermissionHandler
 		}
+		if params.HostPolicyPreCheck != nil {
+			req["hostPolicyPreCheck"] = *params.HostPolicyPreCheck
+		}
 		if params.Paths != nil {
 			req["paths"] = *params.Paths
 		}
@@ -68604,6 +68848,31 @@ func (a *ToolsAPI) ListPendingRequests(ctx context.Context) (*PendingExternalToo
 		return nil, err
 	}
 	var result PendingExternalToolRequestList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ReportProgress reports progress for a pending external tool call as a
+// tool.execution_progress event on its tool call. An empty message, or progress for an
+// unknown or already completed request, is ignored.
+//
+// RPC method: session.tools.reportProgress.
+//
+// Parameters: Pending external tool call request ID and a progress message for its running
+// tool call.
+func (a *ToolsAPI) ReportProgress(ctx context.Context, params *ToolsReportProgressRequest) (*SessionToolsReportProgressResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["message"] = params.Message
+		req["requestId"] = params.RequestID
+	}
+	raw, err := a.client.Request(ctx, "session.tools.reportProgress", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionToolsReportProgressResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import io
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -861,6 +861,35 @@ async def test_falsey_tool_handler_is_advertised_and_dispatched(has_handler):
     session._dispatch_event(_external_tool_request("lookup", has_handler=has_handler))
     result = await _wait_for_tool_result(session, client, "request-1")
     assert result["result"]["textResultForLlm"] == "falsey handler result"
+
+
+@pytest.mark.asyncio
+async def test_tool_handler_report_progress_sends_request_id_and_verbatim_message():
+    message = "  Step 1/2: indexing…\n"
+    serialized = []
+
+    async def handler(invocation):
+        serialized.append(asdict(invocation))
+
+        await invocation.report_progress(message)
+        return ToolResult(text_result_for_llm="done")
+
+    client = Mock()
+    client.request = AsyncMock(return_value={"success": True})
+    session = CopilotSession("session-1", client)
+    session._register_tools([Tool("lookup", "Lookup", handler)])
+
+    session._dispatch_event(_external_tool_request("lookup"))
+    await _wait_for_tool_result(session, client, "request-1")
+
+    progress = [
+        call.args[1]
+        for call in client.request.await_args_list
+        if call.args[0] == "session.tools.reportProgress"
+    ]
+    assert progress == [{"sessionId": "session-1", "requestId": "request-1", "message": message}]
+    assert len(serialized) == 1
+    assert "_report_progress" not in serialized[0]
 
 
 @pytest.mark.asyncio

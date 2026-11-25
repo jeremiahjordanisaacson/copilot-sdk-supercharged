@@ -1213,7 +1213,7 @@ var session = await client.CreateSessionAsync(new CreateSessionOptions
 });
 ```
 
-When Copilot invokes `lookup_issue`, the client automatically runs your handler and responds to the CLI. Handlers can return any JSON-serializable value (automatically wrapped), or a `ToolResultAIContent` wrapping a `ToolResultObject` for full control over result metadata. Include a `ToolInvocation` parameter in your handler if you need the session ID, tool call ID, tool name, or raw arguments.
+When Copilot invokes `lookup_issue`, the client automatically runs your handler and responds to the CLI. Handlers can return any JSON-serializable value (automatically wrapped), or a `ToolResultAIContent` wrapping a `ToolResultObject` for full control over result metadata. Include a `ToolInvocation` parameter in your handler if you need the session ID, tool call ID, tool name, or raw arguments. Long-running handlers can call the experimental `invocation.ReportProgressAsync(message)` to emit a `tool.execution_progress` event for the call; progress is best-effort and never fails the tool call.
 
 #### Overriding Built-in Tools
 

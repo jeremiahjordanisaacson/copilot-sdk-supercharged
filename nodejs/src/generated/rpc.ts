@@ -3642,7 +3642,7 @@ export type EventsCursorStatus =
   /** The requested continuation is unavailable; see the endpoint's recovery semantics. */
   | "expired";
 /**
- * Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/<id>/extensions/)
+ * Extension provenance.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "ExtensionSource".
@@ -3656,7 +3656,9 @@ export type ExtensionSource =
   /** Extension contributed by an installed plugin. */
   | "plugin"
   /** Extension discovered from the current session's state directory (loaded only for this session). */
-  | "session";
+  | "session"
+  /** Standalone extension supplied by the SDK host through extensionPaths. */
+  | "explicit";
 /**
  * Current status: running, dormant, disabled, failed, or starting
  *
@@ -4705,6 +4707,18 @@ export type HostExitReason =
   | "ownerDisconnected"
   /** The runtime is shutting down. */
   | "runtimeShutdown";
+/**
+ * Non-prompting host-policy decision. Defer preserves the runtime's existing judge and permission-handler path.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckDecision".
+ */
+/** @experimental */
+export type HostPolicyPreCheckDecision =
+  /** Host policy settles the request as approved without prompting. */
+  | "approve"
+  /** The runtime continues through its existing judge and permission-handler path. */
+  | "defer";
 /**
  * Trusted admission context, not inference authentication or session configuration.
  *
@@ -18686,6 +18700,34 @@ export interface SlashCommandInfo {
    */
   name: string;
   /**
+   * Display name, including the leading slash.
+   */
+  displayName?: string;
+  /**
+   * Command source, such as runtime, skill, or protocol-client.
+   */
+  source?: string;
+  /**
+   * Whether invocation stops processing the queued commands.
+   */
+  stopsQueueProcessing?: boolean;
+  /**
+   * Whether the command can be the first message in a session.
+   */
+  availableAtSessionStart?: boolean;
+  /**
+   * Nested terminal argument grammar, serialized as ArgsSpec JSON.
+   */
+  cliArgsJson?: string;
+  /**
+   * Skill that provides this command.
+   */
+  skillName?: string;
+  /**
+   * Plugin that provides this command.
+   */
+  pluginName?: string;
+  /**
    * Canonical aliases without leading slashes
    */
   aliases?: string[];
@@ -19790,6 +19832,19 @@ export interface ContentExclusionValidatePoliciesResult {
    * Validated policy objects in input order. Raw JSON preserves every field returned by the runtime's policy parser.
    */
   policies: JsonValue[];
+}
+/**
+ * The runtime-owned prompt for a context-board consolidation agent.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ContextBoardConsolidationPromptResult".
+ */
+/** @experimental */
+export interface ContextBoardConsolidationPromptResult {
+  /**
+   * Instructions for the rem-agent to consolidate the session context board.
+   */
+  prompt: string;
 }
 /**
  * A single large message currently in context.
@@ -21820,7 +21875,7 @@ export interface Extension {
    */
   name: string;
   /**
-   * Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/<id>/extensions/)
+   * Extension provenance: project, user, plugin, session, or explicit.
    */
   source: ExtensionSource;
   /**
@@ -21989,6 +22044,27 @@ export interface ExtensionsEnableRequest {
    * Source-qualified extension ID to enable
    */
   id: string;
+}
+/**
+ * Session-owned extension source overrides. These do not enable extensions or activate plugins.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ExtensionSources".
+ */
+/** @experimental */
+export interface ExtensionSources {
+  /**
+   * Discover personal extensions when true; exclude them when false. Omission preserves existing discovery.
+   */
+  user?: boolean;
+  /**
+   * Discover project extensions when true; exclude them when false. Omission preserves existing discovery and trust checks.
+   */
+  project?: boolean;
+  /**
+   * Permit extensions from otherwise-active plugins, including bundles. Defaults to true; other plugin contributions are unaffected.
+   */
+  plugins?: boolean;
 }
 /**
  * Expanded external tool result payload
@@ -26826,6 +26902,56 @@ export interface HostLocalServerOptions {
    * Require token authentication (default true). Cannot be false with a token.
    */
   requireConnectionToken?: boolean;
+}
+/**
+ * One non-prompting host-policy decision requested before the runtime invokes the Assisted Permissions judge.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckRequest".
+ */
+/** @experimental */
+export interface HostPolicyPreCheckRequest {
+  /**
+   * Session whose owning connection declared the host-policy pre-check.
+   */
+  sessionId: string;
+  /**
+   * Runtime-generated correlation identifier for this permission request.
+   */
+  requestId: string;
+  /**
+   * Exact permission request being evaluated, with the same shape as `permission.requested.data.permissionRequest`.
+   */
+  permissionRequest: JsonValue;
+  /**
+   * Exact user-facing gate the host may settle without prompting, with the same shape as `permission.requested.data.promptRequest`.
+   */
+  promptRequest: JsonValue;
+  /**
+   * Agent mode captured for the request, when available.
+   */
+  agentMode?: SessionMode;
+  /**
+   * Live host policy revision whose decision the runtime will accept.
+   */
+  policyRevision: number;
+}
+/**
+ * Host policy decision and the exact policy revision used to make it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HostPolicyPreCheckResult".
+ */
+/** @experimental */
+export interface HostPolicyPreCheckResult {
+  /**
+   * Whether host policy approves or defers this request.
+   */
+  decision: HostPolicyPreCheckDecision;
+  /**
+   * Policy revision used for the decision.
+   */
+  policyRevision: number;
 }
 /**
  * Publishes a resident session attached to the listener's owning connection.
@@ -38533,6 +38659,11 @@ export interface PermissionsCapabilities {
    * Stays true while managed policy is still resolving.
    */
   bypassPermissions: boolean;
+  /**
+   * Whether this local session supports the owner-authenticated
+   * `hostPolicy.preCheck` capability.
+   */
+  hostPolicyPreCheck?: boolean;
 }
 /**
  * No parameters.
@@ -38636,6 +38767,23 @@ export interface PermissionsConfigureAssistedApprovalContext {
   value: JsonValue;
 }
 /**
+ * Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime accepts a decision only for the declared revision, which every SDK represents exactly.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsConfigureHostPolicyPreCheck".
+ */
+/** @experimental */
+export interface PermissionsConfigureHostPolicyPreCheck {
+  /**
+   * Whether this connection declares the host-policy pre-check.
+   */
+  enabled: boolean;
+  /**
+   * Host policy revision from 0 through 2^53 - 1.
+   */
+  policyRevision: number;
+}
+/**
  * Patch of permission policy fields to apply (omit a field to leave it unchanged).
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -38683,6 +38831,10 @@ export interface PermissionsConfigureParams {
    * Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.
    */
   hostPolicyPermissionHandler?: boolean;
+  /**
+   * Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.
+   */
+  hostPolicyPreCheck?: PermissionsConfigureHostPolicyPreCheck;
 }
 /**
  * If specified, replaces the session's URL-permission policy. The runtime constructs a fresh DefaultUrlManager based on these inputs. Omit to leave the current URL policy unchanged.
@@ -43029,6 +43181,23 @@ export interface ResearchStoredReport {
    * The full report path on the runtime host.
    */
   filePath: string;
+}
+/**
+ * Presentation flags for the complete built-in command catalog.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RuntimeCommandCatalogRequest".
+ */
+/** @experimental */
+export interface RuntimeCommandCatalogRequest {
+  /**
+   * Include commands unavailable before session creation. Defaults to false.
+   */
+  includeUnavailable?: boolean;
+  /**
+   * Show Forge chronicle choices. This affects metadata only, not command admission.
+   */
+  forgeAgentEnabled?: boolean;
 }
 /**
  * An authorization URL for the host browser.
@@ -53258,6 +53427,23 @@ export interface ToolsListRequest {
    * Optional model ID — when provided, the returned tool list reflects model-specific overrides
    */
   model?: string;
+}
+/**
+ * Pending external tool call request ID and a progress message for its running tool call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsReportProgressRequest".
+ */
+/** @experimental */
+export interface ToolsReportProgressRequest {
+  /**
+   * Request ID of the pending tool call
+   */
+  requestId: string;
+  /**
+   * Progress message, emitted verbatim as the tool.execution_progress progressMessage
+   */
+  message: string;
 }
 /**
  * Complete externally implemented tool list for the calling connection. An empty list removes every tool previously supplied by that connection.
@@ -64138,12 +64324,24 @@ export function createServerRpc(connection: MessageConnection) {
         /** @experimental */
         commands: {
             /**
-             * Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.
+             * Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+             *
+             * @param params Presentation flags for the complete built-in command catalog.
              *
              * @returns Slash commands available in the session, after applying any include/exclude filters.
              */
-            list: async (): Promise<CommandList> =>
-                connection.sendRequest("commands.list", {}),
+            list: async (params?: RuntimeCommandCatalogRequest): Promise<CommandList> =>
+                connection.sendRequest("commands.list", params ?? {}),
+        },
+        /** @experimental */
+        contextBoard: {
+            /**
+             * Returns the runtime-owned instructions for a rem-agent that consolidates a session context board. Hosts that launch a consolidation agent use this prompt rather than copy runtime instructions.
+             *
+             * @returns The runtime-owned prompt for a context-board consolidation agent.
+             */
+            getConsolidationPrompt: async (): Promise<ContextBoardConsolidationPromptResult> =>
+                connection.sendRequest("contextBoard.getConsolidationPrompt", {}),
         },
         /** @experimental */
         runtime: {
@@ -68897,6 +69095,13 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             handlePendingToolCall: async (params: HandlePendingToolCallRequest): Promise<HandlePendingToolCallResult> =>
                 connection.sendRequest("session.tools.handlePendingToolCall", { ...params, sessionId }),
+            /**
+             * Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.
+             *
+             * @param params Pending external tool call request ID and a progress message for its running tool call.
+             */
+            reportProgress: async (params: ToolsReportProgressRequest): Promise<void> =>
+                connection.sendRequest("session.tools.reportProgress", { ...params, sessionId }),
             /**
              * Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.
              *

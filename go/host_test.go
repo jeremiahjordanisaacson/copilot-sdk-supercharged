@@ -393,6 +393,7 @@ func TestAhpFactoriesPreserveSettingsAndReleaseExactOriginal(t *testing.T) {
 			config := map[string]any{
 				"sessionId": "original", "workingDirectory": "/workspace",
 				"additionalDirectories":  []string{},
+				"extensionPaths":         []string{},
 				"gitHubToken":            "test-auth",
 				"mcpOAuthTokenStorage":   "in-memory",
 				"enableMcpApps":          enabled,

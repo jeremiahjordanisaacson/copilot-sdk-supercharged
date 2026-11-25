@@ -444,6 +444,7 @@ directories for different applications.
 | `workingDirectory` | `string` | No | Working directory for the server process |
 | `tools` | `string[]` | No | Tools to enable (`["*"]` for all, `[]` for none) |
 | `timeout` | `number` | No | Timeout in milliseconds |
+| `deferTools` | `"auto"` or `"never"` | No | Whether this server's tools may be deferred behind tool search. `"never"` keeps them in the model's initial tool list; `"auto"` lets them be deferred. When omitted, the runtime's default deferral policy applies |
 
 #### Session identity for local servers
 
@@ -489,6 +490,7 @@ Remote (HTTP/SSE) servers don't receive this variable.
 | `oauthGrantType` | `string` | No | OAuth grant type for the configured client, such as `client_credentials` |
 | `tools` | `string[]` | No | Tools to enable |
 | `timeout` | `number` | No | Timeout in milliseconds |
+| `deferTools` | `"auto"` or `"never"` | No | Whether this server's tools may be deferred behind tool search. `"never"` keeps them in the model's initial tool list; `"auto"` lets them be deferred. When omitted, the runtime's default deferral policy applies |
 
 ## OAuth ownership for remote servers
 

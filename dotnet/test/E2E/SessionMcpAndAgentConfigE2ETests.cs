@@ -4,6 +4,7 @@
 
 using Microsoft.Copilot.Rpc;
 using Microsoft.Copilot.Test.Harness;
+using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -344,4 +345,54 @@ public class SessionMcpAndAgentConfigE2ETests(E2ETestFixture fixture, ITestOutpu
         await session.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Should_Keep_Never_Deferred_Mcp_Server_Tools_Out_Of_Tool_Search()
+    {
+        const string deferredServer = "sdk-auto-defer-server";
+        const string pinnedServer = "sdk-never-defer-server";
+        var env = Ctx.GetEnvironment();
+        env["TOOL_SEARCH"] = "true";
+        env["TOOL_SEARCH_ANTHROPIC"] = "true";
+        env["COPILOT_EXP_COPILOT_CLI_TOOL_SEARCH_ANTHROPIC"] = "true";
+        env["TOOL_SEARCH_BUILTIN_ANTHROPIC"] = "false";
+        env["COPILOT_EXP_COPILOT_CLI_TOOL_SEARCH_BUILTIN_ANTHROPIC"] = "false";
+        env["TOOL_SEARCH_CLIENT_GENERIC"] = "false";
+        env["COPILOT_EXP_COPILOT_CLI_TOOL_SEARCH_CLIENT_GENERIC"] = "false";
+
+        await using var client = Ctx.CreateClient(
+            options: new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForSpawnedStdio() },
+            environment: env);
+
+        var mcpServers = CreateTestMcpServers(deferredServer, pinnedServer);
+        mcpServers[pinnedServer].DeferTools = CopilotToolDefer.Never;
+
+        await using var session = await Ctx.CreateSessionAsync(client, new CreateSessionOptions
+        {
+            Model = "claude-sonnet-5",
+            Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll },
+            Tools = new SessionToolOptions
+            {
+                Search = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 },
+                Definitions = [.. Enumerable.Range(0, 32).Select(index =>
+                    AIFunctionFactory.Create(SearchFiller, $"sdk_mcp_search_filler_{index}", $"Search filler {index}"))],
+            },
+            Mcp = new SessionMcpOptions { Servers = mcpServers },
+        });
+
+        await WaitForMcpServerStatusAsync(session, deferredServer, McpServerStatus.Connected);
+        await WaitForMcpServerStatusAsync(session, pinnedServer, McpServerStatus.Connected);
+
+        var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Reply with exactly SDK_NEVER_DEFER_MCP_DONE and nothing else. Do not call any tools." });
+        Assert.Equal("SDK_NEVER_DEFER_MCP_DONE", message?.Data.Content);
+
+        var tools = (await session.Rpc.Tools.GetCurrentMetadataAsync()).Tools;
+        Assert.NotNull(tools);
+        bool IsDeferred(string server) => Assert.Single(
+            tools,
+            tool => tool.McpServerName == server && tool.McpToolName == "get_env").DeferLoading == true;
+        Assert.True(IsDeferred(deferredServer));
+        Assert.False(IsDeferred(pinnedServer));
+    }
+
+    private static string SearchFiller() => "FILLER";
 }
