@@ -545,6 +545,14 @@ gh issue list --state open --json number,title \
   xargs -I{} gh issue close {} -c "✅ Synced and released v$VERSION. All CI green. All 36 SDKs ported and tested."
 ```
 
+### Step 6h: Full Wiki Pass (MANDATORY)
+The tag push runs `wiki-sync.yml`, which only adds a version header to the wiki's `Changelog.md`. After every release, also review EVERY wiki page so it matches the released code:
+- Clone `https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.wiki.git` outside OneDrive and wait for the tag's wiki-sync run to finish before pushing (avoids non-fast-forward pushes).
+- Pages that mirror `docs/` (Hooks*, Setup-*, Streaming-Events, Custom-Agents, Skills, Debugging, Compatibility, OpenTelemetry, and so on) are regenerated from the current `docs/` files, with links rewritten to wiki pages or absolute GitHub URLs.
+- Overview, guide, and translated pages (`{de,es,fr,hi,it,ja,ko,pt,zh}-*`) get the current version, CLI requirement, install commands (from the README "Available SDKs" table), and current API samples.
+- `Home.md` must say "Trusted by 100,000+ developers globally and growing daily." (the same line as `README.md`). Never replace it with computed download totals.
+- No em dashes in wiki prose.
+
 ---
 
 ## Phase 7: Download Stats and Health Report

@@ -46,7 +46,7 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **D** | [`dlang/`](./dlang/README.md) | [Cookbook](./dlang/cookbook/README.md) | `dub add copilot` |
 | **Dart** | [`dart/`](./dart/README.md) | [Cookbook](./dart/cookbook/README.md) | pub |
 | **Delphi / Object Pascal** | [`delphi/`](./delphi/README.md) | [Cookbook](./delphi/cookbook/README.md) | Boss / Manual |
-| **Elixir** | [`elixir/`](./elixir/README.md) | [Cookbook](./elixir/cookbook/README.md) | `{:copilot_sdk_supercharged, "~> 2.0"}` |
+| **Elixir** | [`elixir/`](./elixir/README.md) | [Cookbook](./elixir/cookbook/README.md) | `{:copilot_sdk_supercharged, "~> 3.1"}` |
 | **Erlang** | [`erlang/`](./erlang/README.md) | [Cookbook](./erlang/cookbook/README.md) | Rebar3 |
 | **F#** | [`fsharp/`](./fsharp/README.md) | [Cookbook](./fsharp/cookbook/README.md) | `dotnet add package CopilotSDK.Supercharged.FSharp` |
 | **Fortran** | [`fortran/`](./fortran/README.md) | [Cookbook](./fortran/cookbook/README.md) | `fpm` |

@@ -41,29 +41,8 @@ jobs:
             echo "v${VERSION} already in changelog"
           fi
 
-      - name: Update download counts
-        run: |
-          # Fetch latest download counts
-          NPM=$(curl -sf "https://api.npmjs.org/downloads/point/1000-01-01:3000-01-01/copilot-sdk-supercharged" | jq -r '.downloads // 0')
-          PYPI=$(curl -sf "https://pypistats.org/api/packages/copilot-sdk-supercharged/overall" | python3 -c "import sys,json; print(sum(r['downloads'] for r in json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "0")
-          CRATES=$(curl -sf -H 'User-Agent: wiki-sync' "https://crates.io/api/v1/crates/copilot-sdk-supercharged" | jq -r '.crate.downloads // 0')
-          RUBYGEMS=$(curl -sf "https://rubygems.org/api/v1/gems/copilot-sdk-supercharged.json" | jq -r '.downloads // 0')
-          NUGET=$(curl -sf "https://azuresearch-usnc.nuget.org/query?q=CopilotSDK.Supercharged&take=1" | jq -r '.data[0].totalDownloads // 0')
-          HEX=$(curl -sf "https://hex.pm/api/packages/copilot_sdk_supercharged" | jq -r '.downloads.all // 0')
-
-          TOTAL=$((NPM + PYPI + CRATES + RUBYGEMS + NUGET + HEX))
-          echo "Total downloads: $TOTAL"
-
-          # Round to nearest thousand
-          ROUNDED=$(( (TOTAL / 1000) * 1000 ))
-          COUNT="${ROUNDED}+"
-
-          # Update Home.md
-          if [ -f wiki/Home.md ]; then
-            sed -i "s/Trusted by [0-9,]*+ developers/Trusted by ${COUNT} developers/" wiki/Home.md
-            echo "Updated Home.md to ${COUNT}"
-          fi
-
+      # The developer count on wiki/Home.md ("Trusted by 100,000+ developers") is
+      # maintained by hand to match README.md; this workflow must not rewrite it.
       - name: Push wiki updates
         run: |
           cd wiki
