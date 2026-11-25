@@ -5,30 +5,27 @@ An Erlang/OTP SDK for interacting with the GitHub Copilot CLI server. Communicat
 ## Requirements
 
 - Erlang/OTP 25+
-- [rebar3](https://rebar3.org/) build tool (3.14 or newer for the `git_subdir` dependency below)
+- [rebar3](https://rebar3.org/) build tool
 - [jsx](https://hex.pm/packages/jsx) for JSON encoding/decoding
 - Copilot CLI 1.0.113 or newer: `copilot` on `PATH`, the `COPILOT_CLI_PATH` environment variable, or the `cli_path` client option
 
 ## Installation
 
-### rebar3 dependency (git_subdir)
+The Erlang SDK is not published to Hex (the `copilot_sdk_supercharged` package on Hex is the Elixir SDK), and it cannot be a rebar3 `git_subdir` dependency: rebar3 requires that subdirectory to be named after the application (`copilot_sdk`), while the SDK lives in `erlang/`. Add it to your rebar3 project as an application instead.
 
-The Erlang SDK is not published to Hex (the `copilot_sdk_supercharged` package on Hex is the Elixir SDK). Add it to your `rebar.config` as a `git_subdir` dependency, which fetches the `erlang/` directory of this repository at a release tag:
+### rebar3 project application
 
-```erlang
-{deps, [
-    {copilot_sdk, {git_subdir, "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git",
-                   {tag, "v3.1.1"}, "erlang"}}
-]}.
-```
-
-Then run:
+Copy `src/` and `rebar.config` from the `erlang/` directory of a release tag to `apps/copilot_sdk` in your project. rebar3 builds every application under `apps/` (next to a single application at the project root, too), and the directory must be named `copilot_sdk`:
 
 ```bash
+git clone --depth 1 --branch v3.1.1 https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git copilot-sdk-src
+mkdir -p apps/copilot_sdk
+cp -R copilot-sdk-src/erlang/src copilot-sdk-src/erlang/rebar.config apps/copilot_sdk/
+rm -rf copilot-sdk-src
 rebar3 compile
 ```
 
-The OTP application is `copilot_sdk`: list it in the `applications` of your `.app.src`. Its only dependency, `jsx`, is fetched from Hex.
+The OTP application is `copilot_sdk`: list it in the `applications` of your `.app.src`. Its only dependency, `jsx`, is declared in `apps/copilot_sdk/rebar.config` and fetched from Hex.
 
 ### Manual
 

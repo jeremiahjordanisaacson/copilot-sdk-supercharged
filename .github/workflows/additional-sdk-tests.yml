@@ -702,23 +702,21 @@ jobs:
       # Unit tests plus test/copilot_cli_e2e_SUITE.erl, which runs the real CLI
       # (COPILOT_CLI_PATH) against the replaying proxy in test/harness.
       - run: rebar3 ct
-      - name: Install the SDK as a rebar3 git_subdir dependency (README form)
+      - name: Build the SDK as an application of another rebar3 project (README install)
         run: |
           set -euo pipefail
-          # A local tag on the checked-out commit stands in for the release tag.
-          git tag -f erlang-git-subdir-check HEAD
-          app="$RUNNER_TEMP/erlang_git_subdir_check"
+          # Mirrors the README: copy src/ and rebar.config to apps/copilot_sdk of a
+          # project that also has an application at its root.
+          app="$RUNNER_TEMP/erlang_install_check"
           rm -rf "$app"
-          mkdir -p "$app/src"
-          cat > "$app/rebar.config" <<EOF
-          {deps, [
-              {copilot_sdk, {git_subdir, "file://$GITHUB_WORKSPACE",
-                             {tag, "erlang-git-subdir-check"}, "erlang"}}
-          ]}.
+          mkdir -p "$app/src" "$app/apps/copilot_sdk"
+          cp -R src rebar.config "$app/apps/copilot_sdk/"
+          cat > "$app/rebar.config" <<'EOF'
+          {erl_opts, [debug_info]}.
           EOF
-          cat > "$app/src/git_subdir_check.app.src" <<'EOF'
-          {application, git_subdir_check, [
-              {description, "Installs copilot_sdk as a git_subdir dependency"},
+          cat > "$app/src/install_check.app.src" <<'EOF'
+          {application, install_check, [
+              {description, "Builds copilot_sdk as a project application"},
               {vsn, "0.1.0"},
               {applications, [kernel, stdlib, copilot_sdk]}
           ]}.
@@ -728,6 +726,7 @@ jobs:
           test -f _build/default/lib/copilot_sdk/ebin/copilot_sdk.app
           test -f _build/default/lib/copilot_sdk/ebin/copilot_client.beam
           test -f _build/default/lib/jsx/ebin/jsx.beam
+          test -f _build/default/lib/install_check/ebin/install_check.app
 
   dlang:
     name: "Test: D SDK"
