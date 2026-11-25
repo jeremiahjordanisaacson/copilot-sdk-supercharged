@@ -1,0 +1,26 @@
+name: "CI: SDK Feature Parity"
+
+# Enforces the repo's feature-parity rule: every additional SDK must implement the
+# required RPC methods and features and declare the current SDK protocol version.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: "Verify SDK Coverage"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Verify RPC, feature, and protocol coverage in all 36 additional SDKs
+        run: node scripts/verify-sdk-coverage.mjs
