@@ -48,14 +48,15 @@
     state/1
 ]).
 
-%% Internal: session payload construction, SDK protocol 4 translation and the
-%% client-level request handlers (exported for unit tests).
+%% Internal: session payload construction, SDK protocol 4 translation, the
+%% client-level request handlers and the CLI launch (exported for unit tests).
 -export([
     build_session_params/3,
     group_session_params/2,
     apply_mode_defaults/2,
     client_request_handlers/4,
-    put_session_callbacks/3
+    put_session_callbacks/3,
+    cli_launch/2
 ]).
 
 %% gen_server callbacks
@@ -75,7 +76,7 @@
     options       :: map(),
     cli_path      :: string(),
     cli_url       :: binary() | undefined,
-    port          :: port() | undefined,
+    %% copilot_jsonrpc process; it owns the CLI port
     rpc           :: pid() | undefined,
     conn_state    :: disconnected | connecting | connected | error,
     sessions      :: #{binary() => pid()},
@@ -90,8 +91,9 @@
     mode          :: coding_agent | empty,
     %% Per-session callbacks answered by client-level request handlers
     %% (tool.call, hooks.invoke, shellAuthentication.*, memoryStore.store,
-    %% userInput.request): {SessionId, #{tools, hooks,
-    %% on_shell_authentication_request, store_memory, on_user_input_request}}
+    %% userInput.request, exitPlanMode.request): {SessionId, #{tools, hooks,
+    %% on_shell_authentication_request, store_memory, on_user_input_request,
+    %% on_exit_plan_mode_request}}
     session_callbacks :: ets:tid(),
     %% Pending shell authentication prompts: {{SessionId, RequestId}, Waiter, Ref}
     shell_auth_requests :: ets:tid()
@@ -350,7 +352,7 @@ handle_call({create_session, Config}, _From, #state{rpc = Rpc} = State)
                     MonRef = monitor(process, SessionPid),
                     NewSessions = maps:put(SessionId, SessionPid, State#state.sessions),
                     NewMonitors = maps:put(MonRef, SessionId, State#state.session_monitors),
-                    register_session_handlers(Rpc, SessionId, SessionPid, Config),
+                    copilot_session:set_ready(SessionPid),
                     assign_github_token_provider(RegId, SessionId, State),
                     {reply, {ok, SessionPid}, State#state{
                         sessions = NewSessions,
@@ -386,7 +388,7 @@ handle_call({resume_session, SessionId, Config}, _From, #state{rpc = Rpc} = Stat
                     MonRef = monitor(process, SessionPid),
                     NewSessions = maps:put(SessionId, SessionPid, State#state.sessions),
                     NewMonitors = maps:put(MonRef, SessionId, State#state.session_monitors),
-                    register_session_handlers(Rpc, SessionId, SessionPid, Config),
+                    copilot_session:set_ready(SessionPid),
                     {reply, {ok, SessionPid}, State#state{
                         sessions = NewSessions,
                         session_monitors = NewMonitors,
@@ -521,11 +523,14 @@ handle_info({copilot_jsonrpc, notification, Method, Params}, State) ->
     NewState = dispatch_notification(Method, Params, State),
     {noreply, NewState};
 
+handle_info({copilot_jsonrpc, port_closed}, #state{rpc = undefined} = State) ->
+    %% A connection that failed during startup; it was never in use.
+    {noreply, State};
 handle_info({copilot_jsonrpc, port_closed}, State) ->
     clear_github_token_providers(State),
     catch ets:delete_all_objects(State#state.session_callbacks),
     catch ets:delete_all_objects(State#state.shell_auth_requests),
-    {noreply, State#state{conn_state = disconnected, rpc = undefined, port = undefined,
+    {noreply, State#state{conn_state = disconnected, rpc = undefined,
                           token_registrations = #{}}};
 
 handle_info({'DOWN', MonRef, process, Pid, _Reason}, State0) ->
@@ -553,15 +558,16 @@ handle_info({'DOWN', MonRef, process, Pid, _Reason}, State0) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #state{port = Port, sessions = Sessions} = State) ->
+terminate(_Reason, #state{rpc = Rpc, sessions = Sessions} = State) ->
     maps:fold(fun(_Id, Pid, _) ->
         catch copilot_session:stop(Pid),
         ok
     end, ok, Sessions),
     clear_github_token_providers(State),
-    case Port of
+    %% Stopping the JSON-RPC process closes the CLI port.
+    case Rpc of
         undefined -> ok;
-        _         -> catch port_close(Port)
+        _         -> stop_rpc(Rpc)
     end,
     ok.
 
@@ -575,72 +581,138 @@ code_change(_OldVsn, State, _Extra) ->
 do_start_cli(#state{conn_state = connected} = State) ->
     {ok, State};
 do_start_cli(#state{cli_path = CliPath, options = Options} = State) ->
-    LogLevel = maps:get(log_level, Options, <<"info">>),
-    Args = build_cli_args(CliPath, LogLevel, Options),
-    Command = string:join(Args, " "),
-    try
-        Port = open_port({spawn, Command}, [
-            binary,
-            {line, 65536},
-            use_stdio,
-            exit_status,
-            stderr_to_stdout
-        ]),
-        {ok, RpcPid} = copilot_jsonrpc:start_link(Port, self()),
-        register_client_handlers(RpcPid, State),
-        NewState = State#state{
-            port = Port,
-            rpc = RpcPid,
-            conn_state = connecting
-        },
-        case connect_and_verify(RpcPid, Options) of
-            ok ->
-                case maybe_set_network_provider(RpcPid, Options) of
-                    ok ->
-                        maybe_set_session_fs(RpcPid, Options),
-                        {ok, NewState#state{conn_state = connected}};
-                    {error, NetworkReason} ->
-                        catch port_close(Port),
-                        {error, NetworkReason}
-                end;
-            {error, Reason} ->
-                catch port_close(Port),
-                {error, Reason}
-        end
-    catch
-        _:CrashReason ->
-            {error, {start_failed, CrashReason}}
+    case cli_launch(CliPath, Options) of
+        {ok, Launch} ->
+            %% The JSON-RPC process opens and owns the port, so the CLI's
+            %% stdout is delivered to it.
+            case copilot_jsonrpc:start_link(Launch, self()) of
+                {ok, RpcPid}    -> connect_rpc(RpcPid, State);
+                {error, Reason} -> {error, {start_failed, Reason}}
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
-build_cli_args(CliPath, LogLevel, Options) ->
-    %% JavaScript entry points (npm-loader.js, legacy index.js) run under node;
-    %% any other path (a native binary or the node_modules/.bin/copilot shim)
-    %% is executed directly.
-    Launcher = case lists:member(string:lowercase(filename:extension(CliPath)),
-                                 [".js", ".mjs", ".cjs"]) of
-        true  -> ["node", CliPath];
-        false -> [CliPath]
+connect_rpc(RpcPid, #state{options = Options} = State) ->
+    register_client_handlers(RpcPid, State),
+    Result = try connect_and_verify(RpcPid, Options) of
+        ok    -> maybe_set_network_provider(RpcPid, Options);
+        Error -> Error
+    catch
+        _:CrashReason -> {error, {start_failed, CrashReason}}
     end,
-    Base = Launcher ++ [
-        "--headless",
-        "--no-auto-update",
-        "--log-level", binary_to_list(ensure_binary(LogLevel)),
-        "--stdio"
-    ],
-    GithubToken = maps:get(github_token, Options, undefined),
-    UseLoggedIn = maps:get(use_logged_in, Options, undefined),
-    WithToken = case GithubToken of
-        undefined -> Base;
-        Token     -> Base ++ ["--github-token", binary_to_list(ensure_binary(Token))]
-    end,
-    WithToken2 = case UseLoggedIn of
-        true -> WithToken ++ ["--use-logged-in-user"];
-        _    -> WithToken
-    end,
-    case maps:get(remote, Options, undefined) of
-        true -> WithToken2 ++ ["--remote"];
-        _    -> WithToken2
+    case Result of
+        ok ->
+            maybe_set_session_fs(RpcPid, Options),
+            {ok, State#state{rpc = RpcPid, conn_state = connected}};
+        {error, _} = Failed ->
+            stop_rpc(RpcPid),
+            Failed
     end.
+
+stop_rpc(RpcPid) ->
+    catch copilot_jsonrpc:stop(RpcPid),
+    ok.
+
+%% @doc How the CLI is started: `{spawn_executable, Executable, PortSettings}`
+%% for copilot_jsonrpc:start_link/2. JavaScript entry points (npm-loader.js,
+%% legacy index.js) run under node; any other path (a native binary or the
+%% node_modules/.bin/copilot shim) is executed directly, and a bare name is
+%% looked up on PATH. Arguments are passed one by one (paths may contain
+%% spaces). Mirrors the official SDKs: `github_token` reaches the CLI as the
+%% COPILOT_SDK_AUTH_TOKEN environment variable (`--auth-token-env`, never on
+%% the command line), and `--no-auto-login` is passed unless `use_logged_in`
+%% is true (its default is true only without `github_token`). The `env`
+%% option (a map or list of {Name, Value}; `false` removes a variable) is
+%% merged into the VM environment, and `cwd` sets the CLI's working directory.
+-spec cli_launch(string() | binary(), map()) ->
+    {ok, {spawn_executable, string(), list()}} | {error, term()}.
+cli_launch(CliPath0, Options) ->
+    CliPath = unicode:characters_to_list(CliPath0),
+    {Program, ScriptArgs} = case is_js_entry_point(CliPath) of
+        true  -> {"node", [filename:absname(CliPath)]};
+        false -> {CliPath, []}
+    end,
+    case find_executable(Program) of
+        {ok, Executable} ->
+            LogLevel = maps:get(log_level, Options, <<"info">>),
+            Settings = [{args, ScriptArgs ++ build_cli_args(LogLevel, Options)},
+                        {env, cli_env(Options)}]
+                       ++ cd_setting(maps:get(cwd, Options, undefined)),
+            {ok, {spawn_executable, Executable, Settings}};
+        error ->
+            {error, {cli_not_found, Program}}
+    end.
+
+is_js_entry_point(Path) ->
+    lists:member(string:lowercase(filename:extension(Path)), [".js", ".mjs", ".cjs"]).
+
+find_executable(Program) ->
+    case filename:basename(Program) =:= Program of
+        true ->
+            case os:find_executable(Program) of
+                false -> error;
+                Path  -> {ok, Path}
+            end;
+        false ->
+            Path = filename:absname(Program),
+            case filelib:is_regular(Path) of
+                true  -> {ok, Path};
+                false -> error
+            end
+    end.
+
+build_cli_args(LogLevel, Options) ->
+    GithubToken = maps:get(github_token, Options, undefined),
+    UseLoggedIn = case maps:get(use_logged_in, Options, undefined) of
+        undefined -> GithubToken =:= undefined;
+        Value     -> Value
+    end,
+    lists:append([
+        ["--headless", "--no-auto-update",
+         "--log-level", binary_to_list(ensure_binary(LogLevel)),
+         "--stdio"],
+        case GithubToken of
+            undefined -> [];
+            _         -> ["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"]
+        end,
+        case UseLoggedIn of
+            true -> [];
+            _    -> ["--no-auto-login"]
+        end,
+        case maps:get(remote, Options, undefined) of
+            true -> ["--remote"];
+            _    -> []
+        end
+    ]).
+
+%% NODE_DEBUG is removed: its output would corrupt the JSON-RPC stream.
+cli_env(Options) ->
+    UserEnv = case maps:get(env, Options, undefined) of
+        Env when is_map(Env)  -> maps:to_list(Env);
+        Env when is_list(Env) -> Env;
+        _                     -> []
+    end,
+    TokenEnv = case maps:get(github_token, Options, undefined) of
+        undefined -> [];
+        Token     -> [{"COPILOT_SDK_AUTH_TOKEN", Token}]
+    end,
+    Merged = lists:foldl(fun({Name, Value}, Acc) ->
+        Acc#{env_string(Name) => env_value(Value)}
+    end, #{}, [{"NODE_DEBUG", false} | UserEnv] ++ TokenEnv),
+    lists:sort(maps:to_list(Merged)).
+
+env_value(false)     -> false;
+env_value(undefined) -> false;
+env_value(Value)     -> env_string(Value).
+
+env_string(Value) when is_binary(Value)  -> unicode:characters_to_list(Value);
+env_string(Value) when is_atom(Value)    -> atom_to_list(Value);
+env_string(Value) when is_integer(Value) -> integer_to_list(Value);
+env_string(Value) when is_list(Value)    -> Value.
+
+cd_setting(undefined) -> [];
+cd_setting(Dir)       -> [{cd, unicode:characters_to_list(Dir)}].
 
 verify_connection(RpcPid) ->
     case copilot_jsonrpc:request(RpcPid, <<"ping">>, #{<<"message">> => <<"init">>}) of
@@ -826,21 +898,33 @@ build_session_params(Mode, Config, _State) ->
             Params4
     end,
     %% Capability flags for client-side callbacks: hooks.hasHandlers,
-    %% interaction.requestShellAuthentication, interaction.requestUserInput
-    %% (the runtime then sends ask_user questions as userInput.request) and
-    %% state.hasMemoryStore. Sent on both session.create and session.resume.
+    %% permissions.request (the runtime then sends permission.requested
+    %% events), interaction.requestShellAuthentication,
+    %% interaction.requestUserInput (ask_user questions arrive as
+    %% userInput.request), interaction.requestExitPlanMode (plan approvals
+    %% arrive as exitPlanMode.request) and state.hasMemoryStore. Sent on both
+    %% session.create and session.resume.
     Flags = [
         {<<"hooks">>, has_hook_handlers(maps:get(hooks, Config, undefined))},
+        {<<"requestPermission">>,
+         is_permission_handler(maps:get(on_permission_request, Config, undefined))},
         {<<"requestShellAuthentication">>,
          is_function(maps:get(on_shell_authentication_request, Config, undefined), 1)},
         {<<"requestUserInput">>,
          is_function(maps:get(on_user_input_request, Config, undefined), 1)},
+        {<<"requestExitPlanMode">>,
+         is_function(maps:get(on_exit_plan_mode_request, Config, undefined), 1)},
         {<<"hasMemoryStore">>, is_function(maps:get(store_memory, Config, undefined), 1)}
     ],
     lists:foldl(fun
         ({Flag, true}, Acc)  -> Acc#{Flag => true};
         ({_Flag, _}, Acc)    -> Acc
     end, Params5, Flags).
+
+%% `on_permission_request` handlers take the permission request, or the
+%% request and an invocation map.
+is_permission_handler(Handler) ->
+    is_function(Handler, 1) orelse is_function(Handler, 2).
 
 %% `capi => #{enabled => Bool}` (or the wire-shaped `#{<<"enabled">> => Bool}`).
 capi_enabled(#{enabled := Enabled}) -> Enabled;
@@ -1203,12 +1287,13 @@ client_request_handlers(TokenProviders, Callbacks, Pending, Options) ->
         {<<"shellAuthentication.request">>,  shell_authentication_handler(Callbacks, Pending)},
         {<<"shellAuthentication.cancel">>,   shell_authentication_cancel_handler(Pending)},
         {<<"memoryStore.store">>,            memory_store_handler(Callbacks)},
-        {<<"userInput.request">>,            user_input_handler(Callbacks)}
+        {<<"userInput.request">>,            user_input_handler(Callbacks)},
+        {<<"exitPlanMode.request">>,         exit_plan_mode_handler(Callbacks)}
     ] ++ network_handlers(network_options(Options)).
 
 %% ---------------------------------------------------------------------------
 %% Per-session callbacks (tool.call, hooks.invoke, shellAuthentication.*,
-%% memoryStore.store, userInput.request)
+%% memoryStore.store, userInput.request, exitPlanMode.request)
 %% ---------------------------------------------------------------------------
 
 %% The request handlers run outside the client process, so the per-session
@@ -1230,7 +1315,8 @@ put_session_callbacks(Tab, SessionId, Config) ->
         hooks                           => Hooks,
         on_shell_authentication_request => maps:get(on_shell_authentication_request, Config, undefined),
         store_memory                    => maps:get(store_memory, Config, undefined),
-        on_user_input_request           => maps:get(on_user_input_request, Config, undefined)
+        on_user_input_request           => maps:get(on_user_input_request, Config, undefined),
+        on_exit_plan_mode_request       => maps:get(on_exit_plan_mode_request, Config, undefined)
     },
     true = ets:insert(Tab, {SessionId, Callbacks}),
     ok.
@@ -1410,6 +1496,47 @@ user_input_handler(Tab) ->
             _                                    -> error({no_user_input_handler, SessionId})
         end
     end.
+
+%% exitPlanMode.request {sessionId, summary, planContent?, actions,
+%% recommendedAction, requestId?} => {approved, selectedAction?, feedback?,
+%% decisionContext?} (the result itself, not wrapped). As in the Node SDK, an
+%% invalid payload or an unknown session gets a JSON-RPC error, and a session
+%% without an `on_exit_plan_mode_request` handler approves. The handler
+%% receives the request map unchanged and answers with a boolean or
+%% copilot_types:exit_plan_mode_result/1,2.
+exit_plan_mode_handler(Tab) ->
+    fun(Params) ->
+        SessionId = maps:get(<<"sessionId">>, Params, undefined),
+        Valid = is_binary(SessionId) andalso
+                is_binary(maps:get(<<"summary">>, Params, undefined)) andalso
+                is_list(maps:get(<<"actions">>, Params, undefined)) andalso
+                is_binary(maps:get(<<"recommendedAction">>, Params, undefined)),
+        case Valid of
+            false ->
+                error(invalid_exit_plan_mode_request);
+            true ->
+                case ets:lookup(Tab, SessionId) of
+                    [] ->
+                        error({session_not_found, SessionId});
+                    [{SessionId, Callbacks}] ->
+                        case maps:get(on_exit_plan_mode_request, Callbacks, undefined) of
+                            Handler when is_function(Handler, 1) ->
+                                exit_plan_mode_reply(Handler(Params));
+                            _ ->
+                                copilot_types:exit_plan_mode_result(true)
+                        end
+                end
+        end
+    end.
+
+exit_plan_mode_reply(Approved) when is_boolean(Approved) ->
+    copilot_types:exit_plan_mode_result(Approved);
+exit_plan_mode_reply(#{<<"approved">> := Approved} = Reply) when is_boolean(Approved) ->
+    Reply;
+exit_plan_mode_reply(#{approved := Approved} = Reply) when is_boolean(Approved) ->
+    copilot_types:exit_plan_mode_result(Approved, Reply);
+exit_plan_mode_reply(Other) ->
+    error({invalid_exit_plan_mode_result, Other}).
 
 %% ---------------------------------------------------------------------------
 %% Network callbacks (network.setProvider)
@@ -1609,37 +1736,11 @@ new_registration_id() ->
     iolist_to_binary(io_lib:format("~8.16.0b-~4.16.0b-4~3.16.0b-~4.16.0b-~12.16.0b",
                                    [A, B, C, D bor 16#8000, E])).
 
-register_session_handlers(Rpc, SessionId, SessionPid, Config) ->
-    %% Tool calls (`tool.call`) and ask_user questions (`userInput.request`)
-    %% arrive as client-level requests routed by sessionId (see
-    %% client_request_handlers/4).
-    %% Register permission handler
-    case maps:get(on_permission_request, Config, undefined) of
-        undefined -> ok;
-        PermHandler ->
-            copilot_jsonrpc:set_request_handler(Rpc, <<"permissionRequest">>,
-                fun(Params) ->
-                    case maps:get(<<"sessionId">>, Params, <<>>) of
-                        SessionId -> PermHandler(Params);
-                        _         -> copilot_types:permission_result(denied)
-                    end
-                end)
-    end,
-    %% Register exit plan mode handler
-    copilot_jsonrpc:set_request_handler(Rpc, <<"exitPlanMode.request">>, fun(Params) ->
-        TargetSession = maps:get(<<"sessionId">>, Params, <<>>),
-        case TargetSession of
-            SessionId ->
-                Result = copilot_session:handle_exit_plan_mode(SessionPid, Params),
-                #{<<"result">> => Result};
-            _ ->
-                #{<<"result">> => #{<<"approved">> => true}}
-        end
-    end),
-    %% Notify session process it is ready
-    copilot_session:set_ready(SessionPid),
-    ok.
-
+%% Session callbacks: tool calls, hooks, shell authentication, memory store,
+%% ask_user questions (`userInput.request`) and plan approvals
+%% (`exitPlanMode.request`) arrive as client-level requests routed by
+%% sessionId (see client_request_handlers/4). Permission requests arrive as
+%% `permission.requested` session events, answered by copilot_session.
 dispatch_notification(<<"session.event">>, Params, State) ->
     SessionId = maps:get(<<"sessionId">>, Params, <<>>),
     case maps:get(SessionId, State#state.sessions, undefined) of

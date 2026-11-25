@@ -699,7 +699,35 @@ jobs:
         with:
           otp-version: '27'
           rebar3-version: '3'
+      # Unit tests plus test/copilot_cli_e2e_SUITE.erl, which runs the real CLI
+      # (COPILOT_CLI_PATH) against the replaying proxy in test/harness.
       - run: rebar3 ct
+      - name: Install the SDK as a rebar3 git_subdir dependency (README form)
+        run: |
+          set -euo pipefail
+          # A local tag on the checked-out commit stands in for the release tag.
+          git tag -f erlang-git-subdir-check HEAD
+          app="$RUNNER_TEMP/erlang_git_subdir_check"
+          rm -rf "$app"
+          mkdir -p "$app/src"
+          cat > "$app/rebar.config" <<EOF
+          {deps, [
+              {copilot_sdk, {git_subdir, "file://$GITHUB_WORKSPACE",
+                             {tag, "erlang-git-subdir-check"}, "erlang"}}
+          ]}.
+          EOF
+          cat > "$app/src/git_subdir_check.app.src" <<'EOF'
+          {application, git_subdir_check, [
+              {description, "Installs copilot_sdk as a git_subdir dependency"},
+              {vsn, "0.1.0"},
+              {applications, [kernel, stdlib, copilot_sdk]}
+          ]}.
+          EOF
+          cd "$app"
+          rebar3 compile
+          test -f _build/default/lib/copilot_sdk/ebin/copilot_sdk.app
+          test -f _build/default/lib/copilot_sdk/ebin/copilot_client.beam
+          test -f _build/default/lib/jsx/ebin/jsx.beam
 
   dlang:
     name: "Test: D SDK"
