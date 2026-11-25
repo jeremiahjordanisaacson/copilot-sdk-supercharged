@@ -1,164 +1,186 @@
 # Multiple Sessions
 
-Manage multiple independent conversations simultaneously using the GitHub Copilot SDK in Java.
+Manage multiple independent conversations at the same time with the GitHub Copilot SDK in Java.
 
 ## Creating Multiple Sessions
 
-Each session maintains its own conversation history, so you can run independent tasks in parallel.
+One client can host many sessions. Each session keeps its own conversation history.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.CopilotSession;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-CopilotClient client = new CopilotClient();
+public class MultipleSessions {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            SessionConfig config = new SessionConfig()
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once"));
 
-try {
-    client.start();
+            CopilotSession codeReview = client.createSession(config);
+            CopilotSession documentation = client.createSession(config);
 
-    // Create two independent sessions
-    CopilotSession codeReview = client.createSession(new SessionConfig());
-    CopilotSession documentation = client.createSession(new SessionConfig());
+            SessionEvent review = codeReview.sendAndWait(
+                new MessageOptions("Review this method for bugs: int add(int a, int b) { return a - b; }"));
+            System.out.println("Review: " + contentOf(review));
 
-    // Each session tracks its own context
-    var reviewResponse = codeReview.sendAndWait(
-        new SendOptions("Review this function for bugs")
-    );
-    System.out.println("Review: " + reviewResponse.getMessage());
+            SessionEvent docs = documentation.sendAndWait(
+                new MessageOptions("Write a Javadoc comment for a method that adds two ints"));
+            System.out.println("Docs: " + contentOf(docs));
+        } finally {
+            client.stop();
+        }
+    }
 
-    var docsResponse = documentation.sendAndWait(
-        new SendOptions("Write API docs for UserService")
-    );
-    System.out.println("Docs: " + docsResponse.getMessage());
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
+    static Object contentOf(SessionEvent event) {
+        return event == null ? "(no reply)" : event.data.get("content");
+    }
 }
 ```
 
 ## Independent Conversations
 
-Sessions do not share context. A follow-up in one session has no effect on the other.
+Sessions don't share context. A follow-up in one session has no effect on the other.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.CopilotSession;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-CopilotClient client = new CopilotClient();
+public class IndependentConversations {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            SessionConfig config = new SessionConfig()
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once"));
 
-try {
-    client.start();
+            CopilotSession api = client.createSession(config);
+            CopilotSession cli = client.createSession(config);
 
-    CopilotSession session1 = client.createSession(new SessionConfig());
-    CopilotSession session2 = client.createSession(new SessionConfig());
+            api.sendAndWait(new MessageOptions("I'm building a REST API in Java"));
+            SessionEvent apiAnswer = api.sendAndWait(new MessageOptions("How should I handle auth?"));
+            System.out.println("REST API session: " + contentOf(apiAnswer));
 
-    // Session 1 conversation
-    session1.sendAndWait(new SendOptions("I'm working on a REST API in Java"));
-    var followUp1 = session1.sendAndWait(new SendOptions("How should I handle auth?"));
-    // This reply understands the REST API context from session1
-    System.out.println("Session 1: " + followUp1.getMessage());
+            // This session knows nothing about the REST API conversation
+            cli.sendAndWait(new MessageOptions("I'm building a command-line tool in Java"));
+            SessionEvent cliAnswer = cli.sendAndWait(new MessageOptions("How should I handle auth?"));
+            System.out.println("CLI session: " + contentOf(cliAnswer));
+        } finally {
+            client.stop();
+        }
+    }
 
-    // Session 2 conversation (knows nothing about session1)
-    session2.sendAndWait(new SendOptions("I'm building a CLI tool in Java"));
-    var followUp2 = session2.sendAndWait(new SendOptions("How should I handle auth?"));
-    // This reply is about CLI auth, not REST API auth
-    System.out.println("Session 2: " + followUp2.getMessage());
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
+    static Object contentOf(SessionEvent event) {
+        return event == null ? "(no reply)" : event.data.get("content");
+    }
 }
 ```
 
 ## Parallel Requests with CompletableFuture
 
-Run multiple sessions concurrently using `CompletableFuture`.
+`sendAndWait` blocks the calling thread, so give each session its own task to run them concurrently.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
-CopilotClient client = new CopilotClient();
-
-try {
-    client.start();
-
-    var session1 = client.createSession(new SessionConfig());
-    var session2 = client.createSession(new SessionConfig());
-    var session3 = client.createSession(new SessionConfig());
-
-    // Fire all requests at once
-    CompletableFuture<String> f1 = CompletableFuture.supplyAsync(() -> {
+public class ParallelSessions {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
         try {
-            return session1.sendAndWait(new SendOptions("Explain generics")).getMessage();
-        } catch (Exception e) { return "Error: " + e.getMessage(); }
-    });
+            client.start();
+            SessionConfig config = new SessionConfig()
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once"));
 
-    CompletableFuture<String> f2 = CompletableFuture.supplyAsync(() -> {
+            CopilotSession generics = client.createSession(config);
+            CopilotSession streams = client.createSession(config);
+            CopilotSession records = client.createSession(config);
+
+            CompletableFuture<String> f1 = CompletableFuture.supplyAsync(() -> ask(generics, "Explain Java generics in two sentences"));
+            CompletableFuture<String> f2 = CompletableFuture.supplyAsync(() -> ask(streams, "Explain Java streams in two sentences"));
+            CompletableFuture<String> f3 = CompletableFuture.supplyAsync(() -> ask(records, "Explain Java records in two sentences"));
+
+            CompletableFuture.allOf(f1, f2, f3).join();
+            System.out.println("Generics: " + f1.join());
+            System.out.println("Streams: " + f2.join());
+            System.out.println("Records: " + f3.join());
+        } finally {
+            client.stop();
+        }
+    }
+
+    static String ask(CopilotSession session, String prompt) {
         try {
-            return session2.sendAndWait(new SendOptions("Explain streams")).getMessage();
-        } catch (Exception e) { return "Error: " + e.getMessage(); }
-    });
-
-    CompletableFuture<String> f3 = CompletableFuture.supplyAsync(() -> {
-        try {
-            return session3.sendAndWait(new SendOptions("Explain records")).getMessage();
-        } catch (Exception e) { return "Error: " + e.getMessage(); }
-    });
-
-    // Wait for all results
-    CompletableFuture.allOf(f1, f2, f3).join();
-    System.out.println("Generics: " + f1.get());
-    System.out.println("Streams: " + f2.get());
-    System.out.println("Records: " + f3.get());
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
+            SessionEvent reply = session.sendAndWait(new MessageOptions(prompt), 120_000);
+            return reply == null ? "(no reply)" : String.valueOf(reply.data.get("content"));
+        } catch (Exception e) {
+            throw new CompletionException(e);
+        }
+    }
 }
 ```
 
 ## Session Lifecycle
 
-Sessions remain active until the client is stopped. Clean up sessions you no longer need.
+`destroy()` releases a session you no longer need and keeps its saved state, so you can resume it
+later. `deleteSession()` removes the saved state for good. `client.stop()` destroys every session the
+client still holds.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-CopilotClient client = new CopilotClient();
+public class SessionLifecycle {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            SessionConfig config = new SessionConfig()
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once"));
 
-try {
-    client.start();
+            // A short-lived session for a one-off task
+            CopilotSession scratch = client.createSession(config);
+            SessionEvent formatted = scratch.sendAndWait(new MessageOptions("Format this JSON: {\"a\":1,\"b\":[1,2]}"));
+            System.out.println(formatted == null ? "(no reply)" : formatted.data.get("content"));
+            scratch.destroy();
+            client.deleteSession(scratch.getSessionId());
 
-    // Short-lived session for a one-off task
-    var tempSession = client.createSession(new SessionConfig());
-    var result = tempSession.sendAndWait(new SendOptions("Format this JSON"));
-    System.out.println(result.getMessage());
-    // tempSession is cleaned up when the client stops
-
-    // Long-lived session for interactive use
-    var mainSession = client.createSession(new SessionConfig());
-    mainSession.sendAndWait(new SendOptions("Let's build a REST API"));
-    mainSession.sendAndWait(new SendOptions("Add a /users endpoint"));
-    mainSession.sendAndWait(new SendOptions("Add pagination support"));
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop(); // All sessions are cleaned up
+            // A long-lived session for a multi-step task
+            CopilotSession project = client.createSession(config);
+            project.sendAndWait(new MessageOptions("Let's design a REST API for a todo app"));
+            project.sendAndWait(new MessageOptions("Add a /users endpoint"));
+            SessionEvent last = project.sendAndWait(new MessageOptions("Add pagination to both endpoints"));
+            System.out.println(last == null ? "(no reply)" : last.data.get("content"));
+        } finally {
+            client.stop();
+        }
+    }
 }
 ```
 
 ## Best Practices
 
-- Use separate sessions for tasks that should not share conversational context.
-- Use `CompletableFuture` to run independent sessions concurrently.
-- Keep session references accessible so you can send follow-up messages to the right context.
-- Call `client.stop()` once when done; this cleans up all active sessions.
+- Use a separate session for each task that shouldn't share conversational context.
+- Reuse one `CopilotClient` for all sessions; each client starts its own CLI process.
+- Run independent sessions concurrently with `CompletableFuture`, one session per task.
+- Keep session references (or IDs) so follow-up messages go to the right conversation.
+- Call `destroy()` on sessions you're done with, and `client.stop()` once at the end.

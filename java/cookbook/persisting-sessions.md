@@ -1,156 +1,208 @@
 # Persisting Sessions
 
-Save and resume sessions across restarts using the GitHub Copilot SDK in Java.
+Save and resume sessions across restarts with the GitHub Copilot SDK in Java.
 
 ## Custom Session IDs
 
-Provide a custom session ID to resume a conversation later.
+Give a session your own ID so you can find and resume it later. To continue a saved conversation,
+use `resumeSession`: `createSession` with an ID that's already in use starts a new conversation
+without the saved history.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-CopilotClient client = new CopilotClient();
+public class CustomSessionId {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            CopilotSession session = client.createSession(new SessionConfig()
+                .sessionId("project-alpha-session-001")
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
+            System.out.println("Session ID: " + session.getSessionId());
 
-try {
-    client.start();
-
-    // Create a session with a custom ID
-    SessionConfig config = new SessionConfig();
-    config.setSessionId("project-alpha-session-001");
-
-    var session = client.createSession(config);
-    var response = session.sendAndWait(new SendOptions("Let's plan the auth module"));
-    System.out.println(response.getMessage());
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
+            SessionEvent reply = session.sendAndWait(new MessageOptions("Let's plan the auth module"));
+            if (reply != null) {
+                System.out.println(reply.data.get("content"));
+            }
+        } finally {
+            client.stop();
+        }
+    }
 }
 ```
 
 ## Resuming a Session
 
-Use the same session ID to pick up where you left off after a restart.
+Sessions are saved as you go. `client.stop()` (or `session.destroy()`) detaches a session and keeps
+its state on disk, and `resumeSession` picks it up again, even from another process. Handlers such as
+`onPermissionRequest` and tools aren't saved with the session, so pass them again when you resume.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-// First run: start a session
-CopilotClient client1 = new CopilotClient();
-try {
-    client1.start();
-    SessionConfig config = new SessionConfig();
-    config.setSessionId("persistent-session-42");
-    var session = client1.createSession(config);
-    session.sendAndWait(new SendOptions("We are building a payment gateway"));
-} finally {
-    client1.stop();
+public class ResumeSession {
+    static final String SESSION_ID = "persistent-session-42";
+
+    public static void main(String[] args) throws Exception {
+        // First run: start the conversation
+        CopilotClient first = new CopilotClient();
+        try {
+            first.start();
+            CopilotSession session = first.createSession(new SessionConfig()
+                .sessionId(SESSION_ID)
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
+            session.sendAndWait(new MessageOptions("We are building a payment gateway in Java"));
+        } finally {
+            first.stop();
+        }
+
+        // Later run: resume the conversation by ID
+        CopilotClient later = new CopilotClient();
+        try {
+            later.start();
+            CopilotSession session = later.resumeSession(SESSION_ID, new SessionConfig()
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
+
+            SessionEvent reply = session.sendAndWait(new MessageOptions("What are we building?"));
+            if (reply != null) {
+                System.out.println(reply.data.get("content")); // mentions the payment gateway
+            }
+        } finally {
+            later.stop();
+        }
+    }
 }
+```
 
-// Later run: resume the same session
-CopilotClient client2 = new CopilotClient();
-try {
-    client2.start();
-    SessionConfig config = new SessionConfig();
-    config.setSessionId("persistent-session-42");
-    var session = client2.createSession(config);
+## Listing and Deleting Saved Sessions
 
-    // The session remembers previous context
-    var response = session.sendAndWait(new SendOptions("What were we building?"));
-    System.out.println(response.getMessage()); // Refers to the payment gateway
-} finally {
-    client2.stop();
+```java
+import com.github.copilot.CopilotClient;
+import com.github.copilot.Types.SessionMetadata;
+
+public class ListSavedSessions {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            for (SessionMetadata meta : client.listSessions()) {
+                System.out.println(meta.sessionId + "  modified " + meta.modifiedTime + "  " + meta.summary);
+            }
+
+            String lastId = client.getLastSessionId();
+            if (lastId != null) {
+                System.out.println("Most recent session: " + lastId);
+            }
+
+            // Removes a saved session and its state for good
+            // client.deleteSession("project-alpha-session-001");
+        } finally {
+            client.stop();
+        }
+    }
 }
 ```
 
 ## Infinite Sessions with Compaction
 
-Enable infinite sessions for long-running conversations. The SDK automatically compacts
-history when it grows too large, emitting compaction events.
+Infinite sessions are on by default: when the conversation nears the model's context limit, the
+runtime compacts older history in the background and emits compaction events. Pass an
+`InfiniteSessionConfig` only to change the thresholds or to turn the feature off
+(`enabled = false`).
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
-import com.github.copilot.sdk.SendOptions;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.InfiniteSessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
+import com.github.copilot.Types.SessionEvent;
 
-CopilotClient client = new CopilotClient();
+public class InfiniteSessions {
+    public static void main(String[] args) throws Exception {
+        InfiniteSessionConfig infinite = new InfiniteSessionConfig();
+        infinite.enabled = true;
+        infinite.backgroundCompactionThreshold = 0.80; // start compacting at 80% of the context window
+        infinite.bufferExhaustionThreshold = 0.95;     // pause new work at 95% until compaction finishes
 
-try {
-    client.start();
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            CopilotSession session = client.createSession(new SessionConfig()
+                .sessionId("long-running-agent")
+                .infiniteSessions(infinite)
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
 
-    SessionConfig config = new SessionConfig();
-    config.setSessionId("long-running-agent");
-    config.setInfiniteSession(true); // Enable compaction for long conversations
+            session.on("session.compaction_start", event ->
+                System.out.println("Compacting conversation history..."));
+            session.on("session.compaction_complete", event ->
+                System.out.println("Compaction finished, success=" + event.data.get("success")));
 
-    var session = client.createSession(config);
-
-    // Listen for compaction events
-    session.onEvent("session.compaction_start", event -> {
-        System.out.println("Compaction started: conversation history is being summarized...");
-    });
-    session.onEvent("session.compaction_complete", event -> {
-        System.out.println("Compaction complete: history has been summarized.");
-    });
-
-    // Long-running loop that may trigger compaction
-    String[] tasks = {
-        "Analyze the auth module",
-        "Review the database schema",
-        "Check the API endpoints",
-        "Suggest performance improvements",
-        "Write unit tests for the service layer"
-    };
-
-    for (String task : tasks) {
-        var response = session.sendAndWait(new SendOptions(task));
-        System.out.println("Task: " + task);
-        System.out.println("Response: " + response.getMessage());
-        System.out.println();
+            String[] tasks = {
+                "Analyze the auth module",
+                "Review the database schema",
+                "Check the API endpoints",
+                "Suggest performance improvements",
+                "Write unit tests for the service layer"
+            };
+            for (String task : tasks) {
+                SessionEvent reply = session.sendAndWait(new MessageOptions(task), 300_000);
+                System.out.println("Task: " + task);
+                System.out.println("Response: " + (reply == null ? "(no reply)" : reply.data.get("content")));
+            }
+        } finally {
+            client.stop();
+        }
     }
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
 }
 ```
 
 ## Session State Location
 
-By default, session state is persisted to `~/.copilot/session-state/{sessionId}`.
-This allows automatic resumption without any extra configuration.
+With infinite sessions on, each session has a workspace directory for its checkpoints, plan, and
+files. By default it's `~/.copilot/session-state/{sessionId}`. `getWorkspacePath()` returns the
+actual path, or `null` when infinite sessions are off.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
 
-CopilotClient client = new CopilotClient();
+public class SessionStateLocation {
+    public static void main(String[] args) throws Exception {
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
+            CopilotSession session = client.createSession(new SessionConfig()
+                .sessionId("my-app-session")
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
 
-try {
-    client.start();
-
-    // The session state is saved at:
-    // ~/.copilot/session-state/my-app-session/
-    SessionConfig config = new SessionConfig();
-    config.setSessionId("my-app-session");
-
-    var session = client.createSession(config);
-    System.out.println("Session ID: " + config.getSessionId());
-    System.out.println("State stored at: ~/.copilot/session-state/my-app-session/");
-} catch (Exception e) {
-    System.err.println("Error: " + e.getMessage());
-} finally {
-    client.stop();
+            System.out.println("Session ID: " + session.getSessionId());
+            System.out.println("Workspace: " + session.getWorkspacePath());
+        } finally {
+            client.stop();
+        }
+    }
 }
 ```
 
 ## Best Practices
 
-- Use descriptive, deterministic session IDs (e.g., `"user-123-project-alpha"`) for easy resumption.
-- Enable infinite sessions (`setInfiniteSession(true)`) for long-running agents or interactive tools.
-- Listen for compaction events to provide user feedback during context summarization.
-- Session state is stored in `~/.copilot/session-state/{sessionId}` by default.
-- Avoid reusing session IDs across unrelated conversations to prevent context pollution.
+- Use descriptive, deterministic session IDs (for example `"user-123-project-alpha"`) so you can resume them.
+- Resume with `resumeSession`; `createSession` with an existing ID doesn't load the saved history.
+- Register handlers and tools again on every resume.
+- Listen for compaction events to tell users when history is being summarized.
+- Delete sessions you no longer need with `deleteSession`.

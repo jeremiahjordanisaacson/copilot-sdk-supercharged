@@ -2972,18 +2972,24 @@ try {
 
 ## Development
 
-From the repository root:
-
-```bash
-cd test/harness
-npm ci
-```
+This repository has no unit test script for the Node SDK: `package.json` only defines `clean`,
+`build`, `typecheck`, and `prepublishOnly`. CI ([`core-sdk-tests.yml`](../.github/workflows/core-sdk-tests.yml))
+installs the dependencies, type-checks, and builds. From the repository root:
 
 ```bash
 cd nodejs
-npm ci
-npm test
+npm install --ignore-scripts --no-audit --no-fund
+npm run typecheck
+npm run build
 ```
+
+`npm run typecheck` runs `tsc --noEmit`, and `npm run build` writes the ESM and CommonJS builds and
+the type declarations to `dist/`.
+
+Don't run `npm ci` or `npm test` in `nodejs/` or `test/harness/`: on macOS they can trigger a flood of
+Keychain prompts. The end-to-end tests of the other SDKs use the replay proxy in `test/harness`;
+install it with `cd test/harness && npm install --ignore-scripts`, as CI does. See
+[CONTRIBUTING.md](../CONTRIBUTING.md) for every SDK's commands.
 
 ### Internal feature-flag example
 
@@ -2996,18 +3002,10 @@ configuration, checks that the session's `githubIqEnabled` setting predicate
 keeps its value after `options.update` changes `enabledFeatureFlags`, and
 destroys the session. It sends no model request.
 
-After you prepare matching runtime artifacts, run this from the runtime repository root:
-
-```bash
-COPILOT_RUNTIME_PROVIDER_LIB="$PWD/bazel-bin/src/native/runtime/runtime.node" \
-  src/sdk/nodejs/node_modules/.bin/tsx \
-  src/sdk/nodejs/examples/internal-feature-flags.ts \
-  "$PWD/bazel-bin/src/runtime-bin/copilot-runtime"
-```
-
-The JSON output includes `staticResolution` values of `false`, `true`, `false`,
-and `true`, in that order, and `lifecycleViaExistingMethods` of `[true, true]`.
-The feature-flag and settings-predicate methods are internal, not public SDK APIs.
+Upstream runs this example from its runtime repository against Bazel-built runtime artifacts, which
+this repository doesn't include, so there's no command to run it from here. The feature-flag and
+settings-predicate methods it calls are internal, not public SDK APIs, and a released Copilot CLI
+may not support them.
 
 ## License
 

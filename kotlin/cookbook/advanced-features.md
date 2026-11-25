@@ -1,328 +1,248 @@
-# Advanced v2.0 Features
+# Advanced Features
 
-Recipes for the advanced features introduced in v2.0 of the Copilot SDK.
+Recipes for advanced session and client options in the GitHub Copilot SDK for Kotlin.
+
+The snippets on this page are fragments. They run inside a coroutine (for example `runBlocking`)
+and assume these imports, a started `CopilotClient` named `client`, and the `approveAll` permission
+handler below:
+
+```kotlin
+import com.github.copilot.*
+import kotlinx.serialization.json.*
+import java.util.UUID
+
+val approveAll: PermissionHandler = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+```
 
 ## Per-Session Authentication
 
-Scope auth tokens per session for multi-tenant applications:
+Run each session as a different GitHub user, for example one per tenant in a multi-tenant service:
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
+val tenantSession = client.createSession(SessionConfig(
+    gitHubToken = System.getenv("TENANT_ABC_GITHUB_TOKEN"),
+    onPermissionRequest = approveAll,
+))
 
-val client = CopilotClient()
-
-val config = SessionConfig(
-    githubToken = "ghu_tenant_abc_token_here"
-)
-
-val session = client.createSession(config)
-// This session authenticates as a specific tenant user
-session.send("Hello from tenant ABC")
-```
-
-## Session Idle Timeout
-
-Auto-cleanup inactive sessions with a configurable timeout:
-
-```kotlin
-val config = SessionConfig(
-    sessionIdleTimeoutSeconds = 600 // 10 minutes
-)
-
-val session = client.createSession(config)
-// Session automatically closes after 600 seconds of inactivity
-```
-
-## SessionFs (Session Filesystem)
-
-Provide a session-scoped filesystem with 10 I/O operations (readFile, writeFile, appendFile, exists, stat, mkdir, readdir, readdirWithTypes, rm, rename):
-
-```kotlin
-import com.github.copilot.sdk.SessionFsProvider
-import com.github.copilot.sdk.DirEntry
-import com.github.copilot.sdk.FileStat
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption
-
-class MyFsProvider(private val basePath: Path) : SessionFsProvider {
-    override suspend fun readFile(path: String): ByteArray =
-        Files.readAllBytes(basePath.resolve(path))
-
-    override suspend fun writeFile(path: String, content: ByteArray) {
-        Files.write(basePath.resolve(path), content)
-    }
-
-    override suspend fun appendFile(path: String, content: ByteArray) {
-        Files.write(basePath.resolve(path), content, StandardOpenOption.APPEND)
-    }
-
-    override suspend fun exists(path: String): Boolean =
-        Files.exists(basePath.resolve(path))
-
-    override suspend fun stat(path: String): FileStat {
-        val attrs = Files.readAttributes(basePath.resolve(path), java.nio.file.attribute.BasicFileAttributes::class.java)
-        return FileStat(size = attrs.size(), isDirectory = attrs.isDirectory)
-    }
-
-    override suspend fun mkdir(path: String) {
-        Files.createDirectories(basePath.resolve(path))
-    }
-
-    override suspend fun readdir(path: String): List<String> =
-        Files.list(basePath.resolve(path)).use { stream ->
-            stream.map { it.fileName.toString() }.toList()
-        }
-
-    override suspend fun readdirWithTypes(path: String): List<DirEntry> =
-        Files.list(basePath.resolve(path)).use { stream ->
-            stream.map { DirEntry(it.fileName.toString(), Files.isDirectory(it)) }.toList()
-        }
-
-    override suspend fun rm(path: String) {
-        val full = basePath.resolve(path)
-        if (Files.isDirectory(full)) {
-            Files.walk(full).sorted(Comparator.reverseOrder()).forEach(Files::delete)
-        } else {
-            Files.deleteIfExists(full)
-        }
-    }
-
-    override suspend fun rename(oldPath: String, newPath: String) {
-        Files.move(basePath.resolve(oldPath), basePath.resolve(newPath))
-    }
-}
-
-val config = SessionConfig(
-    sessionFs = MyFsProvider(Path.of("/workspace"))
-)
-
-val session = client.createSession(config)
-```
-
-## Commands and UI Elicitation
-
-Register slash commands and handle interactive prompts/dialogs:
-
-```kotlin
-import com.github.copilot.sdk.Command
-
-val commands = listOf(
-    Command(name = "deploy", description = "Deploy the current project"),
-    Command(name = "test", description = "Run the test suite"),
-)
-
-val config = SessionConfig(
-    commands = commands,
-    onElicitationRequest = { request ->
-        // Present the dialog to the user and collect responses
-        mapOf(
-            "environment" to "staging",
-            "confirmed" to true
-        )
-    }
-)
-
-val session = client.createSession(config)
+tenantSession.send(MessageOptions(prompt = "Hello from tenant ABC"))
 ```
 
 ## System Prompt Customization
 
-Fine-grained control with append, replace, and customize modes:
+### Append (the default mode)
+
+Your content is added after the SDK-managed sections of the system prompt:
+
+```kotlin
+val config = SessionConfig(
+    systemMessage = SystemMessageConfig(content = "Always check for security problems and suggest tests."),
+    onPermissionRequest = approveAll,
+)
+```
 
 ### Replace mode
 
-```kotlin
-val config = SessionConfig(
-    systemPrompt = "You are a Kotlin code review assistant. Focus on idiomatic patterns and coroutines.",
-    systemPromptMode = "replace"
-)
-
-val session = client.createSession(config)
-```
-
-### Customize mode with sections
-
-```kotlin
-import com.github.copilot.sdk.SystemPromptSection
-
-val sections = listOf(
-    SystemPromptSection(key = "role", content = "You are an expert Kotlin developer."),
-    SystemPromptSection(key = "constraints", content = "Always suggest idiomatic Kotlin with coroutines."),
-    SystemPromptSection(key = "output", content = "Format responses as Markdown with code blocks."),
-)
-
-val config = SessionConfig(
-    systemPromptSections = sections,
-    systemPromptMode = "customize"
-)
-
-val session = client.createSession(config)
-```
-
-## Per-Agent Skills
-
-Preload skill content into agent context at startup:
+Replaces the whole system prompt, including the SDK's guardrails:
 
 ```kotlin
 val config = SessionConfig(
-    skillDirectories = listOf(
-        "/workspace/.copilot/skills",
-        "/workspace/custom-skills"
+    systemMessage = SystemMessageConfig(
+        mode = "replace",
+        content = "You are a Kotlin code review assistant. Focus on idiomatic code and coroutines.",
     ),
-    disabledSkills = listOf("deprecated-skill")
+    onPermissionRequest = approveAll,
 )
-
-val session = client.createSession(config)
 ```
 
-## Per-Agent Tool Visibility
+### Customize mode
 
-Control tool access per agent with excludedTools:
+Override individual sections and keep the rest. `SystemPromptSection` has the section IDs and
+`SectionOverrideAction` has the actions (`REPLACE`, `REMOVE`, `APPEND`, `PREPEND`). `content` is
+appended after all sections.
 
 ```kotlin
-import com.github.copilot.sdk.AgentConfig
-
-val defaultAgent = AgentConfig(
-    excludedTools = listOf(
-        "shell_exec",
-        "file_delete",
-        "network_request"
-    )
-)
-
 val config = SessionConfig(
-    defaultAgent = defaultAgent
+    systemMessage = SystemMessageConfig(
+        mode = "customize",
+        sections = mapOf(
+            SystemPromptSection.TONE to SectionOverride(
+                action = SectionOverrideAction.REPLACE,
+                content = "Be concise and direct.",
+            ),
+            SystemPromptSection.GUIDELINES to SectionOverride(
+                action = SectionOverrideAction.APPEND,
+                content = "\n* Prefer idiomatic Kotlin and structured concurrency.",
+            ),
+        ),
+        content = "Focus on Kotlin backend services.",
+    ),
+    onPermissionRequest = approveAll,
+)
+```
+
+## Tool Visibility
+
+Hide built-in tools from a session, or allow only the tools you list:
+
+```kotlin
+// Keep the agent from writing files
+val readOnly = SessionConfig(
+    excludedTools = listOf("create", "edit"),
+    onPermissionRequest = approveAll,
 )
 
-val session = client.createSession(config)
+// Or allow only these tools
+val viewOnly = SessionConfig(
+    availableTools = listOf("view", "grep", "glob"),
+    onPermissionRequest = approveAll,
+)
 ```
+
+To limit the tools of a single custom agent, set `CustomAgentConfig.tools`; see
+[Custom Agents](tools-and-skills.md#custom-agents).
 
 ## Runtime Request Headers
 
-Send custom HTTP headers per message turn:
+Add HTTP headers to the outbound model requests of one message, or of every message in a session:
 
 ```kotlin
-import com.github.copilot.sdk.SendOptions
-import java.util.UUID
+val session = client.createSession(SessionConfig(onPermissionRequest = approveAll))
 
-val options = SendOptions(
+session.send(MessageOptions(
+    prompt = "Analyze this code",
     requestHeaders = mapOf(
         "X-Request-Id" to UUID.randomUUID().toString(),
-        "X-Tenant-Id" to "tenant-abc-123"
-    )
-)
+        "X-Tenant-Id" to "tenant-abc-123",
+    ),
+))
 
-session.send("Analyze this code", options)
+// Session-wide headers
+val config = SessionConfig(
+    requestHeaders = mapOf("X-Tenant-Id" to "tenant-abc-123"),
+    onPermissionRequest = approveAll,
+)
 ```
 
 ## Model Capabilities Override
 
-Deep-merge overrides for model feature flags:
+Deep-merge overrides into the capabilities the runtime reports for the model. `supports` takes
+`vision`, `toolCalls`, and `reasoningEffort` flags; `limits` takes `max_prompt_tokens`,
+`max_output_tokens`, and `max_context_window_tokens`.
 
 ```kotlin
 val config = SessionConfig(
+    model = "gpt-5",
     modelCapabilities = mapOf(
-        "streaming" to true,
-        "functionCalling" to true,
-        "vision" to false,
-        "maxTokens" to 8192
-    )
+        "supports" to mapOf("vision" to false),
+        "limits" to mapOf("max_output_tokens" to 8192),
+    ),
+    onPermissionRequest = approveAll,
 )
-
-val session = client.createSession(config)
 ```
 
 ## Config Discovery
 
-Auto-detect MCP servers and skill directories from workspace:
+Let the runtime discover supported configuration, such as ambient user hooks. Settings you pass
+explicitly take precedence. It's off by default.
 
 ```kotlin
 val config = SessionConfig(
-    enableConfigDiscovery = true
+    workingDirectory = "/path/to/project",
+    enableConfigDiscovery = true,
+    onPermissionRequest = approveAll,
 )
-
-val session = client.createSession(config)
-// MCP servers and skills from .copilot/ in the workspace are loaded automatically
 ```
 
-## Sub-Agent Streaming Events
+## Streaming and Sub-Agent Streaming Events
 
-Control streaming event forwarding from sub-agents:
+With `streaming = true` the session emits `assistant.message_delta` events with a `deltaContent`
+field. Deltas from sub-agents are included by default; set `includeSubAgentStreamingEvents = false`
+to get only the main agent's deltas.
 
 ```kotlin
-val config = SessionConfig(
-    includeSubAgentStreamingEvents = true
-)
+val session = client.createSession(SessionConfig(
+    streaming = true,
+    includeSubAgentStreamingEvents = false,
+    onPermissionRequest = approveAll,
+))
 
-val session = client.createSession(config)
-
-session.onEvent("assistant.message_delta") { event ->
-    // Receives deltas from both the primary agent and sub-agents
-    print(event.delta)
+session.on("assistant.message_delta") { event ->
+    print(event.data?.get("deltaContent")?.jsonPrimitive?.contentOrNull ?: "")
 }
+session.sendAndWait(MessageOptions(prompt = "Explain the visitor pattern"))
+println()
 ```
 
 ## Session Metadata
 
-Retrieve session metadata via RPC:
+`listSessions()` returns typed metadata for saved sessions. `getSessionMetadata()` and
+`session.getMetadata()` return the runtime's raw response, with the details under a `session` key:
 
 ```kotlin
-val session = client.createSession(config)
-session.send("Hello")
+val session = client.createSession(SessionConfig(onPermissionRequest = approveAll))
+session.sendAndWait(MessageOptions(prompt = "Hello"))
 
-val metadata = session.getSessionMetadata()
-println("Session ID: ${metadata.sessionId}")
-println("Created at: ${metadata.createdAt}")
-println("Turn count: ${metadata.turnCount}")
+client.listSessions()
+    .filter { it.sessionId == session.sessionId }
+    .forEach { meta ->
+        println("Started: ${meta.startTime}, last modified: ${meta.modifiedTime}")
+        println("Summary: ${meta.summary}")
+    }
+
+val raw = client.getSessionMetadata(session.sessionId)["session"]?.jsonObject
+println("Raw metadata: $raw")
 ```
 
 ## MCP Server Configuration
 
-Configure MCP servers with stdio and HTTP transport types:
-
-```kotlin
-import com.github.copilot.sdk.McpServerConfig
-
-val mcpServers = listOf(
-    // Stdio transport
-    McpServerConfig(
-        name = "local-tools",
-        transportType = "stdio",
-        command = "node",
-        args = listOf("./mcp-server/index.js")
-    ),
-    // HTTP transport
-    McpServerConfig(
-        name = "remote-tools",
-        transportType = "http",
-        url = "https://mcp.example.com/api",
-        headers = mapOf("Authorization" to "Bearer $token")
-    ),
-)
-
-val config = SessionConfig(
-    mcpServers = mcpServers
-)
-
-val session = client.createSession(config)
-```
-
-## Image Generation
-
-Configure response format and image options:
+Pass MCP servers as a map from a server name to its configuration. `tools` selects the server's tools
+(`"*"` for all); the model sees them as `<server-name>-<tool-name>`.
 
 ```kotlin
 val config = SessionConfig(
-    responseFormat = "image"
+    mcpServers = mapOf(
+        "local-tools" to MCPServerConfig(
+            tools = listOf("*"),
+            type = "stdio",
+            command = "node",
+            args = listOf("./mcp-server/index.js"),
+        ),
+        "remote-tools" to MCPServerConfig(
+            tools = listOf("*"),
+            type = "http",
+            url = "https://mcp.example.com/mcp",
+            headers = mapOf("Authorization" to "Bearer ${System.getenv("MCP_TOKEN")}"),
+        ),
+    ),
+    onPermissionRequest = approveAll,
+)
+```
+
+## Structured Output
+
+`sendAndWaitStructured` asks for a reply that matches a JSON Schema and returns it parsed as a
+`JsonElement`:
+
+```kotlin
+val schema = mapOf(
+    "type" to "object",
+    "properties" to mapOf(
+        "language" to mapOf("type" to "string"),
+        "rating" to mapOf("type" to "integer"),
+    ),
+    "required" to listOf("language", "rating"),
 )
 
-val session = client.createSession(config)
-
-val response = session.send("Generate a UML class diagram for a user auth system")
-// Response contains image data
-response.imageData?.let { data ->
-    java.io.File("diagram.png").writeBytes(data)
-}
+val session = client.createSession(SessionConfig(onPermissionRequest = approveAll))
+val result = session.sendAndWaitStructured("Name one JVM language and rate it from 1 to 5", schema).jsonObject
+println("${result["language"]?.jsonPrimitive?.contentOrNull}: ${result["rating"]?.jsonPrimitive?.intOrNull}")
 ```
+
+## Features Without a Recipe
+
+These options exist in the API, but the SDK doesn't act on them yet, so a recipe wouldn't work as
+written:
+
+- Session idle timeout (`CopilotClientOptions.sessionIdleTimeoutSeconds`, `SessionConfig.idleTimeout`): the SDK accepts the values but doesn't pass them to the CLI.
+- Slash commands (`SessionConfig.commands`) and elicitation (`SessionConfig.onElicitationRequest`): the SDK declares them to the runtime, but it doesn't run command handlers, and it calls the elicitation handler only for the legacy `elicitation.request` callback, not for the `elicitation.requested` events that protocol 4 runtimes send.
+- Custom session filesystem providers (`SessionFsProvider`): with `CopilotClientOptions.sessionFs` set, the SDK answers the runtime's `sessionFs.*` requests from the local disk itself; there's no way to plug in your own provider.

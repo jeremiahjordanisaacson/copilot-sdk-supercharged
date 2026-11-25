@@ -1,319 +1,226 @@
-# Advanced v2.0 Features
+# Advanced Features
 
-Recipes for the advanced features introduced in v2.0 of the Copilot SDK.
+Recipes for advanced session and client options in the GitHub Copilot SDK for Java.
+
+The snippets on this page are fragments. They assume these imports, a started `CopilotClient` named
+`client`, and the `approveAll` permission handler below:
+
+```java
+import com.github.copilot.*;
+import com.github.copilot.Types.*;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+PermissionHandler approveAll = (request, sessionId) -> new PermissionRequestResult("approve-once");
+```
 
 ## Per-Session Authentication
 
-Scope auth tokens per session for multi-tenant applications:
+Run each session as a different GitHub user, for example one per tenant in a multi-tenant service:
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.SessionConfig;
+CopilotSession tenantSession = client.createSession(new SessionConfig()
+    .gitHubToken(System.getenv("TENANT_ABC_GITHUB_TOKEN"))
+    .onPermissionRequest(approveAll));
 
-CopilotClient client = new CopilotClient();
-
-SessionConfig config = new SessionConfig()
-    .setGithubToken("ghu_tenant_abc_token_here");
-
-var session = client.createSession(config);
-// This session authenticates as a specific tenant user
-session.send("Hello from tenant ABC");
+tenantSession.send(new MessageOptions("Hello from tenant ABC"));
 ```
 
 ## Session Idle Timeout
 
-Auto-cleanup inactive sessions with a configurable timeout:
+The idle timeout is a client option. When the client starts the CLI, the CLI closes sessions that
+stay idle for longer than this many seconds:
 
 ```java
-SessionConfig config = new SessionConfig()
-    .setSessionIdleTimeoutSeconds(600); // 10 minutes
-
-var session = client.createSession(config);
-// Session automatically closes after 600 seconds of inactivity
-```
-
-## SessionFs (Session Filesystem)
-
-Provide a session-scoped filesystem with 10 I/O operations (readFile, writeFile, appendFile, exists, stat, mkdir, readdir, readdirWithTypes, rm, rename):
-
-```java
-import com.github.copilot.sdk.SessionFsProvider;
-
-SessionFsProvider fsProvider = new SessionFsProvider() {
-    @Override
-    public byte[] readFile(String path) {
-        return Files.readAllBytes(Path.of(basePath, path));
-    }
-
-    @Override
-    public void writeFile(String path, byte[] content) {
-        Files.write(Path.of(basePath, path), content);
-    }
-
-    @Override
-    public void appendFile(String path, byte[] content) {
-        Files.write(Path.of(basePath, path), content, StandardOpenOption.APPEND);
-    }
-
-    @Override
-    public boolean exists(String path) {
-        return Files.exists(Path.of(basePath, path));
-    }
-
-    @Override
-    public Map<String, Object> stat(String path) {
-        var attrs = Files.readAttributes(Path.of(basePath, path), BasicFileAttributes.class);
-        return Map.of("size", attrs.size(), "isDirectory", attrs.isDirectory());
-    }
-
-    @Override
-    public void mkdir(String path) {
-        Files.createDirectories(Path.of(basePath, path));
-    }
-
-    @Override
-    public List<String> readdir(String path) {
-        return Files.list(Path.of(basePath, path))
-            .map(p -> p.getFileName().toString())
-            .collect(Collectors.toList());
-    }
-
-    @Override
-    public List<DirEntry> readdirWithTypes(String path) {
-        return Files.list(Path.of(basePath, path))
-            .map(p -> new DirEntry(p.getFileName().toString(), Files.isDirectory(p)))
-            .collect(Collectors.toList());
-    }
-
-    @Override
-    public void rm(String path) {
-        Files.deleteIfExists(Path.of(basePath, path));
-    }
-
-    @Override
-    public void rename(String oldPath, String newPath) {
-        Files.move(Path.of(basePath, oldPath), Path.of(basePath, newPath));
-    }
-};
-
-SessionConfig config = new SessionConfig()
-    .setSessionFs(fsProvider);
-
-var session = client.createSession(config);
-```
-
-## Commands and UI Elicitation
-
-Register slash commands and handle interactive prompts/dialogs:
-
-```java
-import com.github.copilot.sdk.Command;
-import com.github.copilot.sdk.ElicitationHandler;
-
-List<Command> commands = List.of(
-    new Command("deploy", "Deploy the current project"),
-    new Command("test", "Run the test suite")
-);
-
-SessionConfig config = new SessionConfig()
-    .setCommands(commands)
-    .setOnElicitationRequest((request) -> {
-        // Present the dialog to the user and collect responses
-        Map<String, Object> response = new HashMap<>();
-        response.put("environment", "staging");
-        response.put("confirmed", true);
-        return response;
-    });
-
-var session = client.createSession(config);
+CopilotClient idleClient = new CopilotClient(
+    new CopilotClientOptions().sessionIdleTimeoutSeconds(600)); // 10 minutes
 ```
 
 ## System Prompt Customization
 
-Fine-grained control with append, replace, and customize modes:
+### Append (the default mode)
+
+Your content is added after the SDK-managed sections of the system prompt:
+
+```java
+SessionConfig config = new SessionConfig()
+    .systemMessage(SystemMessageConfig.append("Always check for security problems and suggest tests."))
+    .onPermissionRequest(approveAll);
+```
 
 ### Replace mode
 
-```java
-SessionConfig config = new SessionConfig()
-    .setSystemPrompt("You are a Java code review assistant. Focus on best practices and performance.")
-    .setSystemPromptMode("replace");
-
-var session = client.createSession(config);
-```
-
-### Customize mode with sections
-
-```java
-import com.github.copilot.sdk.SystemPromptSection;
-
-List<SystemPromptSection> sections = List.of(
-    new SystemPromptSection("role", "You are an expert Java developer."),
-    new SystemPromptSection("constraints", "Always suggest using modern Java 21+ features."),
-    new SystemPromptSection("output", "Format responses as Markdown with code blocks.")
-);
-
-SessionConfig config = new SessionConfig()
-    .setSystemPromptSections(sections)
-    .setSystemPromptMode("customize");
-
-var session = client.createSession(config);
-```
-
-## Per-Agent Skills
-
-Preload skill content into agent context at startup:
+Replaces the whole system prompt, including the SDK's guardrails:
 
 ```java
 SessionConfig config = new SessionConfig()
-    .setSkillDirectories(List.of(
-        "/workspace/.copilot/skills",
-        "/workspace/custom-skills"
-    ))
-    .setDisabledSkills(List.of("deprecated-skill"));
-
-var session = client.createSession(config);
+    .systemMessage(SystemMessageConfig.replace(
+        "You are a Java code review assistant. Focus on correctness and performance."))
+    .onPermissionRequest(approveAll);
 ```
 
-## Per-Agent Tool Visibility
+### Customize mode
 
-Control tool access per agent with excludedTools:
+Override individual sections and keep the rest. `SystemPromptSection` has the section IDs and
+`SectionOverrideAction` has the actions (`REPLACE`, `REMOVE`, `APPEND`, `PREPEND`). The optional
+second argument is appended after all sections.
 
 ```java
-import com.github.copilot.sdk.AgentConfig;
-
-AgentConfig defaultAgent = new AgentConfig()
-    .setExcludedTools(List.of(
-        "shell_exec",
-        "file_delete",
-        "network_request"
-    ));
-
 SessionConfig config = new SessionConfig()
-    .setDefaultAgent(defaultAgent);
-
-var session = client.createSession(config);
+    .systemMessage(SystemMessageConfig.customize(
+        Map.of(
+            SystemPromptSection.TONE,
+            new SectionOverride(SectionOverrideAction.REPLACE, "Be concise and direct."),
+            SystemPromptSection.GUIDELINES,
+            new SectionOverride(SectionOverrideAction.APPEND, "\n* Prefer Java 17 language features.")),
+        "Focus on Java backend services."))
+    .onPermissionRequest(approveAll);
 ```
+
+## Tool Visibility
+
+Hide built-in tools from a session, or allow only the tools you list:
+
+```java
+// Keep the agent from writing files
+SessionConfig readOnly = new SessionConfig()
+    .excludedTools(List.of("create", "edit"))
+    .onPermissionRequest(approveAll);
+
+// Or allow only these tools
+SessionConfig viewOnly = new SessionConfig()
+    .availableTools(List.of("view", "grep", "glob"))
+    .onPermissionRequest(approveAll);
+```
+
+To limit the tools of a single custom agent, set `CustomAgentConfig.tools`; see
+[Custom Agents](tools-and-skills.md#custom-agents).
 
 ## Runtime Request Headers
 
-Send custom HTTP headers per message turn:
+Add HTTP headers to the outbound model requests of one message, or of every message in a session:
 
 ```java
-import com.github.copilot.sdk.SendOptions;
+CopilotSession session = client.createSession(new SessionConfig().onPermissionRequest(approveAll));
 
-Map<String, String> headers = Map.of(
-    "X-Request-Id", UUID.randomUUID().toString(),
-    "X-Tenant-Id", "tenant-abc-123"
-);
+session.send(new MessageOptions("Analyze this code")
+    .requestHeaders(Map.of(
+        "X-Request-Id", UUID.randomUUID().toString(),
+        "X-Tenant-Id", "tenant-abc-123")));
 
-SendOptions options = new SendOptions()
-    .setRequestHeaders(headers);
-
-session.send("Analyze this code", options);
+// Session-wide headers
+SessionConfig config = new SessionConfig()
+    .requestHeaders(Map.of("X-Tenant-Id", "tenant-abc-123"))
+    .onPermissionRequest(approveAll);
 ```
 
 ## Model Capabilities Override
 
-Deep-merge overrides for model feature flags:
+Deep-merge overrides into the capabilities the runtime reports for the model. `supports` takes
+`vision`, `toolCalls`, and `reasoningEffort` flags; `limits` takes `max_prompt_tokens`,
+`max_output_tokens`, and `max_context_window_tokens`.
 
 ```java
-Map<String, Object> capabilities = Map.of(
-    "streaming", true,
-    "functionCalling", true,
-    "vision", false,
-    "maxTokens", 8192
-);
-
 SessionConfig config = new SessionConfig()
-    .setModelCapabilities(capabilities);
-
-var session = client.createSession(config);
+    .model("gpt-5")
+    .modelCapabilities(Map.of(
+        "supports", Map.of("vision", false),
+        "limits", Map.of("max_output_tokens", 8192)))
+    .onPermissionRequest(approveAll);
 ```
 
 ## Config Discovery
 
-Auto-detect MCP servers and skill directories from workspace:
+Let the runtime discover supported configuration, such as ambient user hooks. Settings you pass
+explicitly take precedence. It's off by default.
 
 ```java
 SessionConfig config = new SessionConfig()
-    .setEnableConfigDiscovery(true);
-
-var session = client.createSession(config);
-// MCP servers and skills from .copilot/ in the workspace are loaded automatically
+    .workingDirectory("/path/to/project")
+    .enableConfigDiscovery(true)
+    .onPermissionRequest(approveAll);
 ```
 
-## Sub-Agent Streaming Events
+## Streaming and Sub-Agent Streaming Events
 
-Control streaming event forwarding from sub-agents:
+With `streaming(true)` the session emits `assistant.message_delta` events with a `deltaContent`
+field. Deltas from sub-agents are included by default; pass `false` to
+`includeSubAgentStreamingEvents` to get only the main agent's deltas.
 
 ```java
-SessionConfig config = new SessionConfig()
-    .setIncludeSubAgentStreamingEvents(true);
+CopilotSession session = client.createSession(new SessionConfig()
+    .streaming(true)
+    .includeSubAgentStreamingEvents(false)
+    .onPermissionRequest(approveAll));
 
-var session = client.createSession(config);
-
-session.onEvent("assistant.message_delta", (event) -> {
-    // Receives deltas from both the primary agent and sub-agents
-    System.out.print(event.getDelta());
-});
+session.on("assistant.message_delta", event -> System.out.print(event.data.get("deltaContent")));
+session.sendAndWait(new MessageOptions("Explain the visitor pattern"));
+System.out.println();
 ```
 
 ## Session Metadata
 
-Retrieve session metadata via RPC:
+`listSessions()` returns typed metadata for saved sessions, and `session.getMetadata()` returns the
+runtime's raw metadata, with the details under a `session` key:
 
 ```java
-var session = client.createSession(config);
-session.send("Hello");
+CopilotSession session = client.createSession(new SessionConfig().onPermissionRequest(approveAll));
+session.sendAndWait(new MessageOptions("Hello"));
 
-var metadata = session.getSessionMetadata();
-System.out.println("Session ID: " + metadata.getSessionId());
-System.out.println("Created at: " + metadata.getCreatedAt());
-System.out.println("Turn count: " + metadata.getTurnCount());
+for (SessionMetadata meta : client.listSessions()) {
+    if (meta.sessionId.equals(session.getSessionId())) {
+        System.out.println("Started: " + meta.startTime + ", last modified: " + meta.modifiedTime);
+        System.out.println("Summary: " + meta.summary);
+    }
+}
+
+Map<String, Object> raw = session.getMetadata();
+System.out.println("Raw metadata: " + raw.get("session"));
 ```
 
 ## MCP Server Configuration
 
-Configure MCP servers with stdio and HTTP transport types:
+Pass MCP servers as a map from a server name to its configuration. `tools` selects the server's tools
+(`"*"` for all); the model sees them as `<server-name>-<tool-name>`.
 
 ```java
-import com.github.copilot.sdk.McpServerConfig;
+MCPStdioServerConfig localServer = new MCPStdioServerConfig("node", List.of("./mcp-server/index.js"));
+localServer.tools = List.of("*");
 
-List<McpServerConfig> mcpServers = List.of(
-    // Stdio transport
-    new McpServerConfig()
-        .setName("local-tools")
-        .setTransportType("stdio")
-        .setCommand("node")
-        .setArgs(List.of("./mcp-server/index.js")),
-
-    // HTTP transport
-    new McpServerConfig()
-        .setName("remote-tools")
-        .setTransportType("http")
-        .setUrl("https://mcp.example.com/api")
-        .setHeaders(Map.of("Authorization", "Bearer " + token))
-);
+MCPHTTPServerConfig remoteServer = new MCPHTTPServerConfig("https://mcp.example.com/mcp");
+remoteServer.type = "http"; // streamable HTTP; the constructor defaults to "sse"
+remoteServer.headers = Map.of("Authorization", "Bearer " + System.getenv("MCP_TOKEN"));
+remoteServer.tools = List.of("*");
 
 SessionConfig config = new SessionConfig()
-    .setMcpServers(mcpServers);
-
-var session = client.createSession(config);
+    .mcpServers(Map.of("local-tools", localServer, "remote-tools", remoteServer))
+    .onPermissionRequest(approveAll);
 ```
 
-## Image Generation
+## Structured Output
 
-Configure response format and image options:
+`sendAndWaitStructured` asks for a reply that matches a JSON Schema and returns it parsed as a
+Jackson `JsonNode`:
 
 ```java
-SessionConfig config = new SessionConfig()
-    .setResponseFormat("image");
+Map<String, Object> schema = Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "language", Map.of("type", "string"),
+        "rating", Map.of("type", "integer")),
+    "required", List.of("language", "rating"));
 
-var session = client.createSession(config);
-
-var response = session.send("Generate a UML class diagram for a user auth system");
-// Response contains image data
-byte[] imageData = response.getImageData();
-Files.write(Path.of("diagram.png"), imageData);
+CopilotSession session = client.createSession(new SessionConfig().onPermissionRequest(approveAll));
+com.fasterxml.jackson.databind.JsonNode result =
+    session.sendAndWaitStructured("Name one JVM language and rate it from 1 to 5", schema);
+System.out.println(result.get("language").asText() + ": " + result.get("rating").asInt());
 ```
+
+## Features Without a Recipe
+
+These options exist in the API, but the SDK doesn't handle the runtime's callbacks for them yet, so
+a recipe wouldn't work as written:
+
+- Slash commands (`SessionConfig.commands`) and elicitation (`SessionConfig.onElicitationRequest`): the SDK declares them to the runtime but doesn't call your command or elicitation handlers.
+- Custom session filesystem providers (`Types.SessionFsProvider`): `CopilotClientOptions.sessionFs` registers a session filesystem, but the SDK doesn't answer the runtime's `sessionFs.*` requests.
