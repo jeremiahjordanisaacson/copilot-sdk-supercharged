@@ -5,12 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/microsoft/copilot-sdk/go/v2/internal/jsonrpc2"
 )
+
+func TestCommandsExternalConsumer(t *testing.T) {
+	output, err := exec.CommandContext(t.Context(), "go", "run", "../testdata/commands_compat").CombinedOutput()
+	if err != nil {
+		t.Fatalf("external command consumer failed: %v\n%s", err, output)
+	}
+}
 
 // Existing catalog requests retain their optional pointer fields and keyed literals.
 func TestLegacyParameterRequestsKeepKeyedLiterals(t *testing.T) {

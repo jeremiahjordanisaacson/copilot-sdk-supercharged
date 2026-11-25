@@ -1481,6 +1481,27 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
     }
 
+    private async Task ReportToolProgressAsync(string requestId, string message, CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _isDisposed) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await Rpc.Tools.ReportProgressAsync(requestId, message, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Progress is best-effort; delivery failures must never fail the tool call.
+        }
+    }
+
     /// <summary>
     /// Executes a tool handler and sends the result back via the HandlePendingToolCall RPC.
     /// </summary>
@@ -1496,6 +1517,7 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
 
         var claimed = false;
+        ToolInvocation? invocation = null;
         try
         {
             if (cancellationSource.IsCancellationRequested)
@@ -1503,14 +1525,15 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 return;
             }
 
-            var invocation = new ToolInvocation
+            invocation = new ToolInvocation
             {
                 SessionId = SessionId,
                 ToolCallId = toolCallId,
                 ToolName = toolName,
                 Arguments = arguments,
                 AgentId = string.IsNullOrEmpty(agentId) ? null : agentId,
-                RequestId = requestId
+                RequestId = requestId,
+                ProgressReporter = (message, cancellationToken) => ReportToolProgressAsync(requestId, message, cancellationToken)
             };
 
             // The built-in tool-search tool receives a snapshot of the session's
@@ -1564,7 +1587,17 @@ public sealed partial class CopilotSession : IAsyncDisposable
                 }
             }
             var toolTimestamp = Stopwatch.GetTimestamp();
-            var result = await tool.InvokeAsync(aiFunctionArgs, cancellationSource.Token);
+            object? result;
+            try
+            {
+                result = await tool.InvokeAsync(aiFunctionArgs, cancellationSource.Token);
+            }
+            finally
+            {
+                // Stop progress as soon as the handler finishes, before the result is delivered.
+                invocation.ProgressReporter = null;
+            }
+
             LoggingHelpers.LogTiming(_logger, LogLevel.Debug, null,
                 "CopilotSession.ExecuteToolAndRespondAsync tool dispatch. Elapsed={Elapsed}, SessionId={SessionId}, RequestId={RequestId}, ToolCallId={ToolCallId}, Tool={ToolName}",
                 toolTimestamp,
@@ -1666,6 +1699,12 @@ public sealed partial class CopilotSession : IAsyncDisposable
         }
         finally
         {
+            // A handler can retain its invocation; don't let it keep the session alive.
+            if (invocation is not null)
+            {
+                invocation.ProgressReporter = null;
+            }
+
             ((ICollection<KeyValuePair<string, CancellationTokenSource>>)_pendingExternalTools)
                 .Remove(new(requestId, cancellationSource));
         }

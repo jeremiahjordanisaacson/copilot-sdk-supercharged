@@ -41,6 +41,26 @@
     <ProjectReference Include="../src/Microsoft.Copilot.SDK.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <ProjectReference Include="../test-fixtures/DownlevelSdk/DownlevelSdk.csproj"
+                      ReferenceOutputAssembly="false" Private="false"
+                      OutputItemType="_DownlevelSdkFixture" />
+  </ItemGroup>
+
+  <Target Name="StageDownlevelSdk" AfterTargets="ResolveProjectReferences"
+          Condition="'$(TargetFramework)' == 'net10.0'">
+    <PropertyGroup>
+      <_DownlevelSdkDirectory>@(_DownlevelSdkFixture->'%(RootDir)%(Directory)')</_DownlevelSdkDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <_DownlevelSdkFile Include="$(_DownlevelSdkDirectory)*.dll" Exclude="@(_DownlevelSdkFixture)" />
+      <ContentWithTargetPath Include="@(_DownlevelSdkFile)"
+                             TargetPath="downlevel-sdk\%(_DownlevelSdkFile.Filename)%(_DownlevelSdkFile.Extension)"
+                             CopyToOutputDirectory="PreserveNewest"
+                             CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">
     <Compile Include="..\src\Polyfills\*.cs" Link="Polyfills\%(Filename)%(Extension)" />
     <PackageReference Include="Microsoft.Bcl.Memory" />

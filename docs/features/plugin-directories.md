@@ -4,6 +4,12 @@ A **plugin** is a directory that bundles skills, MCP servers, and client-specifi
 
 This guide explains the plugin folder layout, how to load a plugin from a directory, when to use plugin directories vs. registering individual extensions, and how to make plugin sets deterministic.
 
+With a supporting runtime, session creation and owning resume accept `extensionSources.plugins: false`
+to exclude plugin extension processes without disabling independently eligible plugin servers, hooks,
+skills, agents, or instructions. This includes explicit plugin directories and host-bundled plugins.
+`true` or omission permits eligible extensions but does not activate plugins or grant trust.
+Warm resumes cannot change source overrides. Cold omission restores defaults.
+
 ## When to use plugin directories
 
 Use a plugin directory when you want to:

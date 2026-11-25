@@ -692,6 +692,7 @@ const (
 	ExitPlanModeActionAutopilotFleet                                     = rpc.ExitPlanModeActionAutopilotFleet
 	ExitPlanModeActionExitOnly                                           = rpc.ExitPlanModeActionExitOnly
 	ExitPlanModeActionInteractive                                        = rpc.ExitPlanModeActionInteractive
+	ExtensionsLoadedExtensionSourceExplicit                              = rpc.ExtensionsLoadedExtensionSourceExplicit
 	ExtensionsLoadedExtensionSourcePlugin                                = rpc.ExtensionsLoadedExtensionSourcePlugin
 	ExtensionsLoadedExtensionSourceProject                               = rpc.ExtensionsLoadedExtensionSourceProject
 	ExtensionsLoadedExtensionSourceSession                               = rpc.ExtensionsLoadedExtensionSourceSession

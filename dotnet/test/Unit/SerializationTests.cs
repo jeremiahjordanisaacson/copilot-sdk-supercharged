@@ -1491,6 +1491,29 @@ public class SerializationTests
     }
 
     [Fact]
+    public void McpServerConfigs_SerializeDeferTools_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        McpServerConfig local = new McpStdioServerConfig { Command = "node", DeferTools = CopilotToolDefer.Never };
+        McpServerConfig remote = new McpHttpServerConfig { Url = "https://example.com/mcp", DeferTools = CopilotToolDefer.Auto };
+        McpServerConfig plain = new McpStdioServerConfig { Command = "node" };
+
+        var localJson = JsonSerializer.Serialize(local, options);
+        var remoteJson = JsonSerializer.Serialize(remote, options);
+        var plainJson = JsonSerializer.Serialize(plain, options);
+        using (var document = JsonDocument.Parse(localJson))
+            Assert.Equal("never", document.RootElement.GetProperty("deferTools").GetString());
+        using (var document = JsonDocument.Parse(remoteJson))
+            Assert.Equal("auto", document.RootElement.GetProperty("deferTools").GetString());
+        using (var document = JsonDocument.Parse(plainJson))
+            Assert.False(document.RootElement.TryGetProperty("deferTools", out _));
+
+        Assert.Equal(CopilotToolDefer.Never, Assert.IsType<McpStdioServerConfig>(JsonSerializer.Deserialize<McpServerConfig>(localJson, options)).DeferTools);
+        Assert.Equal(CopilotToolDefer.Auto, Assert.IsType<McpHttpServerConfig>(JsonSerializer.Deserialize<McpServerConfig>(remoteJson, options)).DeferTools);
+        Assert.Null(JsonSerializer.Deserialize<McpServerConfig>(plainJson, options)!.DeferTools);
+    }
+
+    [Fact]
     public void QueuedCommandResult_SerializesHandledAsBoolean_WithSdkOptions()
     {
         var options = GetSerializerOptions();

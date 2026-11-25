@@ -214,6 +214,11 @@ public partial class SessionEvent
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
 
+    /// <summary>ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("occurredAt")]
+    public DateTimeOffset? OccurredAt { get; set; }
+
     /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("parentId")]
@@ -775,6 +780,11 @@ internal sealed class SessionEventEnvelope
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
 
+    /// <summary>ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("occurredAt")]
+    public DateTimeOffset? OccurredAt { get; set; }
+
     /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("parentId")]
@@ -793,6 +803,7 @@ internal sealed class SessionEventEnvelope
         Checkpoint = Checkpoint,
         Ephemeral = Ephemeral,
         Id = Id,
+        OccurredAt = OccurredAt,
         ParentId = ParentId,
         Timestamp = Timestamp,
         AdditionalProperties = AdditionalProperties,
@@ -4961,6 +4972,12 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("requestCount")]
     public required long RequestCount { get; set; }
 
+    /// <summary>Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("reviewSkippedReason")]
+    public string? ReviewSkippedReason { get; set; }
+
     /// <summary>Synthetic HydraFusion model selected for the session.</summary>
     [JsonPropertyName("syntheticModel")]
     public required string SyntheticModel { get; set; }
@@ -5369,6 +5386,12 @@ public sealed partial class AssistantFusionPhaseCompletedData
     [JsonInclude]
     [JsonPropertyName("projectionMode")]
     internal FusionProjectionMode? ProjectionMode { get; set; }
+
+    /// <summary>True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("readOnly")]
+    public bool? ReadOnly { get; set; }
 
     /// <summary>Explicit reasoning effort selected for this phase, if supplied.</summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
@@ -5917,13 +5940,13 @@ public sealed partial class AssistantUsageData
     [JsonPropertyName("inputTokens")]
     public long? InputTokens { get; set; }
 
-    /// <summary>Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateDeliveryId")]
     internal string? InstructionUpdateDeliveryId { get; set; }
 
-    /// <summary>Event identifier of the latest canonical instruction update included in this model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateLatestEventId")]
@@ -6398,13 +6421,13 @@ public sealed partial class ModelCallFailureData
     [JsonPropertyName("initiator")]
     public string? Initiator { get; set; }
 
-    /// <summary>Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateDeliveryId")]
     internal string? InstructionUpdateDeliveryId { get; set; }
 
-    /// <summary>Event identifier of the latest canonical instruction update included in this failed model request.</summary>
+    /// <summary>No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("instructionUpdateLatestEventId")]
@@ -7600,7 +7623,7 @@ public sealed partial class InstructionUpdateData
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
-    /// <summary>Whether this update was recorded after the conversation's initial user message.</summary>
+    /// <summary>No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonInclude]
     [JsonPropertyName("postInitial")]
@@ -26371,7 +26394,7 @@ public readonly struct McpServerStatus : IEquatable<McpServerStatus>
     }
 }
 
-/// <summary>Discovery source.</summary>
+/// <summary>Extension provenance.</summary>
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
 public readonly struct ExtensionsLoadedExtensionSource : IEquatable<ExtensionsLoadedExtensionSource>
@@ -26401,6 +26424,9 @@ public readonly struct ExtensionsLoadedExtensionSource : IEquatable<ExtensionsLo
 
     /// <summary>Extension discovered from the current session's state directory.</summary>
     public static ExtensionsLoadedExtensionSource Session { get; } = new("session");
+
+    /// <summary>Standalone extension supplied by the SDK host through extensionPaths.</summary>
+    public static ExtensionsLoadedExtensionSource Explicit { get; } = new("explicit");
 
     /// <summary>Returns a value indicating whether two <see cref="ExtensionsLoadedExtensionSource"/> instances are equivalent.</summary>
     public static bool operator ==(ExtensionsLoadedExtensionSource left, ExtensionsLoadedExtensionSource right) => left.Equals(right);

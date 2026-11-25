@@ -18,6 +18,19 @@ const client = new CopilotClient({
     },
 });
 try {
+    await client.start();
+    const catalog = await client.rpc.commands.list({ includeUnavailable: true });
+    const consolidation = await client.rpc.contextBoard.getConsolidationPrompt();
+    const modelCommand = catalog.commands.find((command) => command.name === "model");
+    assert(modelCommand?.cliArgsJson, "The complete catalog must include nested model arguments.");
+    console.log(
+        JSON.stringify({
+            commandCount: catalog.commands.length,
+            modelDisplayName: modelCommand.displayName,
+            modelArgumentGrammar: JSON.parse(modelCommand.cliArgsJson),
+            consolidationPromptLength: consolidation.prompt.length,
+        })
+    );
     const session = await client.createSession({
         model: "example-model",
         github: { capi: { enabled: false } },

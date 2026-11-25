@@ -520,13 +520,17 @@ def _mcp_servers_to_wire(
 ) -> dict[str, Any]:
     """Convert MCP server configs from public API format to wire format.
 
-    Renames ``working_directory`` key to ``cwd`` in each server config dict.
+    Renames ``working_directory`` to ``cwd`` and ``defer_tools`` to
+    ``deferTools`` in each server config dict.
     """
     wire: dict[str, Any] = {}
     for name, config in servers.items():
         if "working_directory" in config:
             config = {**config, "cwd": config["working_directory"]}
             del config["working_directory"]
+        if "defer_tools" in config:
+            config = {**config, "deferTools": config["defer_tools"]}
+            del config["defer_tools"]
         wire[name] = config
     return wire
 
@@ -2187,6 +2191,18 @@ class SessionExtensionOptions(TypedDict, total=False):
     identity: ExtensionInfo | None
 
 
+class ExtensionSources(TypedDict, total=False):
+    """Source overrides, not extension activation or trust grants.
+
+    Warm resumes cannot change overrides. Cold omission restores existing
+    discovery defaults. Requires a supporting runtime.
+    """
+
+    user: bool
+    project: bool
+    plugins: bool
+
+
 class SessionPolicyOptions(TypedDict, total=False):
     """Options for session policy."""
 
@@ -2227,6 +2243,8 @@ class CreateSessionOptions(TypedDict, total=False):
     plugins: SessionPluginOptions | None
     canvases: SessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
+    extension_sources: ExtensionSources | None
+    extension_paths: list[str] | None
     policy: SessionPolicyOptions | None
 
 
@@ -2262,6 +2280,8 @@ class ResumeSessionOptions(TypedDict, total=False):
     plugins: SessionPluginOptions | None
     canvases: ResumeSessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
+    extension_sources: ExtensionSources | None
+    extension_paths: list[str] | None
     policy: SessionPolicyOptions | None
 
 
@@ -3422,6 +3442,8 @@ class CopilotClient:
         plugins: SessionPluginOptions | None = None,
         canvases: SessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
+        extension_sources: ExtensionSources | None = None,
+        extension_paths: list[str] | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -3486,6 +3508,12 @@ class CopilotClient:
                 ``on_elicitation_request`` so the host can answer structured forms.
             hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
+            extension_paths: Host-trusted standalone modules, resolved relative to this
+                request's working directory. Does not enable extensions or grant trust.
+                Discovered entries and filesystem aliases are unsupported; exact
+                discovered overlaps fail per entry.
+                Re-supply on owning resume; omission or an empty list removes the
+                previous explicit entries on both warm and cold resumes.
             github.capi: CAPI provider-scoped options. Set ``auto_tier`` to ``efficiency``,
                 ``balance``, ``intelligence``, or ``fast`` to select an Auto routing
                 preference on a runtime with Auto tier support. ``fast`` is an
@@ -3738,6 +3766,7 @@ class CopilotClient:
         _validate_option_group("plugins", plugins, SessionPluginOptions)
         _validate_option_group("canvases", canvases, SessionCanvasOptions)
         _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("extension_sources", extension_sources, ExtensionSources)
         _validate_option_group("policy", policy, SessionPolicyOptions)
         on_permission_request = (permissions or {}).get("on_request", None)
         reasoning_effort = (inference or {}).get("reasoning_effort", None)
@@ -4076,6 +4105,10 @@ class CopilotClient:
         # Add config discovery flag if provided
         if enable_config_discovery is not None:
             payload["enableConfigDiscovery"] = enable_config_discovery
+        if extension_sources is not None:
+            payload["extensionSources"] = extension_sources
+        if extension_paths is not None:
+            payload["extensionPaths"] = extension_paths
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:
@@ -4572,6 +4605,8 @@ class CopilotClient:
         plugins: SessionPluginOptions | None = None,
         canvases: ResumeSessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
+        extension_sources: ExtensionSources | None = None,
+        extension_paths: list[str] | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -4632,6 +4667,12 @@ class CopilotClient:
                 ``on_elicitation_request`` so the host can answer structured forms.
             hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
+            extension_paths: Replaces the owner's host-trusted standalone modules, resolving
+                relative paths against this resume request's working directory.
+                Discovered entries and filesystem aliases are unsupported; exact
+                discovered overlaps fail per entry.
+                Omission or an empty list removes previous explicit entries on both
+                warm and cold resumes. Does not enable extensions or grant trust.
             github.capi: CAPI provider-scoped options. Omit ``auto_tier`` to preserve the
                 current or persisted Auto routing preference. An explicit tier
                 overrides it on cold resume, but cannot change it on an
@@ -4886,6 +4927,7 @@ class CopilotClient:
         _validate_option_group("plugins", plugins, SessionPluginOptions)
         _validate_option_group("canvases", canvases, ResumeSessionCanvasOptions)
         _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("extension_sources", extension_sources, ExtensionSources)
         _validate_option_group("policy", policy, SessionPolicyOptions)
         on_permission_request = (permissions or {}).get("on_request", None)
         reasoning_effort = (inference or {}).get("reasoning_effort", None)
@@ -5159,6 +5201,10 @@ class CopilotClient:
             payload["configDir"] = config_directory
         if enable_config_discovery is not None:
             payload["enableConfigDiscovery"] = enable_config_discovery
+        if extension_sources is not None:
+            payload["extensionSources"] = extension_sources
+        if extension_paths is not None:
+            payload["extensionPaths"] = extension_paths
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:

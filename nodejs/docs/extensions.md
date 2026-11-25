@@ -2,6 +2,23 @@
 
 Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run as separate Node.js processes that communicate with the CLI over JSON-RPC via stdio.
 
+## Select exact entry modules
+
+Set `extensionPaths` on owning session creation or resume for standalone
+`extension.mjs`, `extension.cjs`, or `extension.js` modules supplied and trusted by
+the SDK host. Each entry uses source `explicit` and a stable path-derived identifier.
+Relative paths resolve once against the request's effective working directory.
+Reload reuses the list. Owning resume replaces it; omission or `[]` clears it.
+
+Entries owned by existing discovery are unsupported. Exact overlaps fail individually,
+without changing ordinary discovery or blocking valid standalone entries.
+The option does not enable extensions, install packages, or grant trust or permissions.
+Global standalone prohibition applies; marketplace and plugin enablement settings do not.
+
+Paths are files, not directories or globs. Identical resolved explicit paths
+deduplicate. Filesystem aliases for the same module are unsupported consumer input;
+selection does not inspect links, volumes, plugin roots, or physical file identity.
+
 ## How Extensions Work
 
 ```
@@ -21,6 +38,8 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 3. **Connection**: The extension calls `joinSession()` which establishes a JSON-RPC connection over stdio to the CLI and attaches to the user's current foreground session.
 4. **Registration**: Tools and hooks declared in the session options are registered with the CLI and become available to the agent.
 5. **Lifecycle**: Extensions reload on `/clear` or foreground-session replacement and stop on CLI exit. On macOS and Linux, ordinary stop/reload sends SIGTERM, then SIGKILL after 5s if still running. CLI exit and session/service teardown use a shared 1s grace period, including disabling extensions on SDK resume; Windows kills immediately without a grace period.
+
+On Windows, the sandboxed extension launcher restores the granted temporary directory. For an absolute `.exe` other than `cmd.exe` with `ELECTRON_RUN_AS_NODE=1` set by the launch provider, the wrapper starts the executable in the session working directory and waits for it, not its descendants. This preserves stdio and normally returns the extension's exit code. In Windows PowerShell 5.1, the wrapper reports an error and exits with code `1` if the host exits before the wrapper reads its process handle. The sandbox still cleans up descendants. Other launches use PowerShell's call operator.
 
 ## File Structure
 
@@ -52,12 +71,20 @@ no-follow directory handles so directory replacement cannot redirect a write.
 
 ## Opting Into Request-Driven Activation
 
-Place a version 1 `extension.json` beside `extension.mjs`, with
-`"initialization": "module"` and nonempty `tools`, `canvases`, and/or `commands`
-arrays using the existing native-tool, canvas, and command definitions. Command
+Place an `extension.json` beside `extension.mjs`, with `"schemaVersion": 1`,
+`"initialization": "module"`, and nonempty `tools`, `canvases`, and/or `commands`
+arrays using the existing native-tool, canvas, and command definitions. The
+deprecated `"version": 1` spelling remains accepted for existing manifests. A
+manifest can include a top-level `"$schema"` string for editor integration; the
+runtime ignores its value. The Node.js SDK package includes the build-time schema
+as `@microsoft/copilot-sdk/extension-manifest.schema.json`. Command
 declarations contain `name` and optional `description`; handlers remain in the
 live `joinSession()` registration. Import the same declarations in the entrypoint
 and add handlers so the advertised metadata cannot drift.
+
+If an extension must preserve request-driven activation on older Copilot CLI
+versions, keep `"version": 1` and omit `"$schema"`. Older versions reject the new
+fields and start the extension eagerly instead.
 Omit absent optional fields rather than writing null. Missing metadata preserves
 eager startup; invalid metadata also produces a diagnostic.
 
@@ -96,6 +123,31 @@ const session = await joinSession({
 ```
 
 The `session` object provides methods for sending messages, logging to the timeline, listening to events, and accessing the RPC API. See the `.d.ts` files in the SDK package for full type information.
+
+## Selecting sources from an SDK host
+
+Session creation and owning resume accept `extensionSources` (`extension_sources` in Python and Rust).
+Its optional `user`, `project`, and `plugins` booleans select extension sources without enabling extensions.
+Keep the existing extension enablement, launch provider, and SDK-injection configuration.
+
+- `user: false` excludes automatic personal-extension discovery.
+- `project: false` excludes automatic project-extension discovery.
+- `user: true` or `project: true` requests that extension source independently of general configuration discovery.
+- `plugins: false` excludes extension contributions from all otherwise-active plugins, including host bundles. Their independently eligible servers, hooks, skills, agents, and instructions remain unchanged.
+
+Omission or `{}` preserves existing source behavior. In particular, an explicit extension request
+still discovers personal and project extensions with `enableConfigDiscovery: false` when those
+source fields are omitted. `plugins: true` and omission permit eligible contributions but never
+activate a plugin or read additional plugin configuration.
+
+Source choices stay fixed while loaded. A warm resume with different overrides, including an
+omitted reset, fails. Cold resume accepts new choices; omission restores defaults. Participants cannot configure sources.
+Reload and reconciliation retain the effective session selection without rewriting shared preferences.
+Session-owned extension authoring remains available when the subsystem permits it.
+
+Existing managed policy, trust, permissions, and individual disables still apply. A supporting
+runtime is required: hosts must pin or establish runtime support before relying on an exclusion.
+An older runtime ignoring an unknown option is not a safe fallback.
 
 ## Requesting Sensitive Environment Variables
 

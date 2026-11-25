@@ -84,6 +84,7 @@ import type {
     SessionCreationHandler,
     Tool,
     ToolHandler,
+    ToolInvocation,
     ToolResult,
     ToolResultObject,
     TraceContextProvider,
@@ -97,6 +98,9 @@ import type {
     UserInputResponse,
     MemoryConfiguration,
     StoredMemory,
+    HostPolicyPreCheckOptions,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
 } from "./types.js";
 import {
     WORKFLOW_AGENT_OPTION_KEYS,
@@ -619,6 +623,7 @@ export class CopilotSession {
     private setToolsQueue: Promise<void> = Promise.resolve();
     private pendingExternalTools: Map<string, AbortController> = new Map();
     private pendingSessionCreations = new Set<AbortController>();
+    private pendingHostPolicyPreChecks = new Set<AbortController>();
     private canvases: Map<string, Canvas> = new Map();
     private bearerTokenProviders: Map<string, BearerTokenProvider> = new Map();
     private commandHandlers: Map<string, CommandHandler> = new Map();
@@ -635,6 +640,7 @@ export class CopilotSession {
     private skillProvider?: SkillProvider;
     private sessionCreationHandler?: SessionCreationHandler;
     private memoryStoreHandler?: MemoryConfiguration["storeMemory"];
+    private hostPolicyPreCheckHandler?: HostPolicyPreCheckOptions["onRequest"];
     private hooks?: SessionHooks;
     private transformCallbacks?: Map<string, SectionTransformFn>;
     private _rpc: ReturnType<typeof createSessionRpc> | null = null;
@@ -1561,6 +1567,10 @@ export class CopilotSession {
             controller.abort();
         }
         this.pendingSessionCreations.clear();
+        for (const controller of this.pendingHostPolicyPreChecks) {
+            controller.abort();
+        }
+        this.pendingHostPolicyPreChecks.clear();
         this._clearMemoryStore();
         this.eventHandlers.clear();
         this.typedEventHandlers.clear();
@@ -1579,6 +1589,7 @@ export class CopilotSession {
         this.skillProvider = undefined;
         this.sessionCreationHandler = undefined;
         this.memoryStoreHandler = undefined;
+        this.hostPolicyPreCheckHandler = undefined;
         this.hooks = undefined;
         this.traceContextProvider = undefined;
         this.bearerTokenProviders.clear();
@@ -1951,7 +1962,7 @@ export class CopilotSession {
             if (controller.signal.aborted) {
                 return;
             }
-            const rawResult = await handler(args, {
+            const invocation: ToolInvocation = {
                 sessionId: this.sessionId,
                 toolCallId,
                 toolName,
@@ -1962,7 +1973,32 @@ export class CopilotSession {
                 signal: controller.signal,
                 agentId,
                 requestId,
+            };
+            let report: ((message: string) => Promise<void>) | undefined = async (message) => {
+                if (this.disconnected) {
+                    return;
+                }
+                try {
+                    await this.rpc.tools.reportProgress({ requestId, message });
+                } catch {
+                    // Progress is best-effort and must never fail the tool call.
+                }
+            };
+            // Non-enumerable so structuredClone() and worker postMessage() of the
+            // invocation keep working; a clone reports nothing.
+            Object.defineProperty(invocation, "reportProgress", {
+                value: async (message: string) => {
+                    await report?.(message);
+                },
+                enumerable: false,
             });
+            let rawResult: Awaited<ReturnType<typeof handler>>;
+            try {
+                rawResult = await handler(args, invocation);
+            } finally {
+                // A handler can retain its invocation; release the session once it finishes.
+                report = undefined;
+            }
             let result: ToolResult;
             if (rawResult == null) {
                 result = "";
@@ -2887,6 +2923,34 @@ export class CopilotSession {
     _registerMemoryStore(handler: MemoryConfiguration["storeMemory"]): void {
         this.assertConnected();
         this.memoryStoreHandler = handler;
+    }
+
+    /** @internal */
+    _registerHostPolicyPreCheck(handler: HostPolicyPreCheckOptions["onRequest"]): void {
+        this.assertConnected();
+        this.hostPolicyPreCheckHandler = handler;
+    }
+
+    /** @internal */
+    async _handleHostPolicyPreCheck(
+        request: HostPolicyPreCheckRequest,
+        signal: AbortSignal
+    ): Promise<HostPolicyPreCheckResult> {
+        this.assertConnected();
+        const handler = this.hostPolicyPreCheckHandler;
+        if (!handler) throw new Error("Host policy pre-check owner is unavailable");
+        // Disconnecting the session also ends the callback.
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        this.pendingHostPolicyPreChecks.add(controller);
+        try {
+            return await handler(request, { signal: controller.signal });
+        } finally {
+            signal.removeEventListener("abort", abort);
+            this.pendingHostPolicyPreChecks.delete(controller);
+        }
     }
 
     /** @internal */

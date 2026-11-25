@@ -1020,6 +1020,29 @@ public sealed class ToolInvocation
     /// </summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public string? RequestId { get; set; }
+
+    internal Func<string, CancellationToken, Task>? ProgressReporter { get; set; }
+
+    /// <summary>
+    /// Reports progress for this call while it runs.
+    /// </summary>
+    /// <param name="message">Progress message, emitted verbatim.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>A task that completes when the progress report has been delivered or dropped.</returns>
+    /// <remarks>
+    /// The runtime emits a <c>tool.execution_progress</c> session event with this call's
+    /// <see cref="ToolCallId"/> and <paramref name="message"/> verbatim. Progress for a call
+    /// that has already completed is dropped, and delivery failures never fail the tool call.
+    /// Canceling <paramref name="cancellationToken"/> throws <see cref="OperationCanceledException"/>
+    /// to the caller. This does nothing when the session has been disposed, after the handler
+    /// has finished, or when this invocation was not created by the SDK for a pending tool call.
+    /// </remarks>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    public Task ReportProgressAsync(string message, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return ProgressReporter?.Invoke(message, cancellationToken) ?? Task.CompletedTask;
+    }
 }
 
 /// <summary>
@@ -3788,6 +3811,18 @@ public abstract class McpServerConfig
     [JsonPropertyName("timeout")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? Timeout { get; set; }
+
+    /// <summary>
+    /// Controls whether this server's tools may be deferred behind tool search.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CopilotToolDefer.Auto"/> lets the runtime defer the server's tools when tool search is enabled.
+    /// <see cref="CopilotToolDefer.Never"/> keeps them in the initial tool list, even when tool search is enabled.
+    /// <c>null</c> (the default) lets the runtime decide.
+    /// </remarks>
+    [JsonPropertyName("deferTools")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CopilotToolDefer? DeferTools { get; set; }
 }
 
 /// <summary>
@@ -4489,6 +4524,10 @@ public abstract class SessionOptionsBase
         Filesystem = (SessionFilesystemOptions)other.Filesystem.Clone();
         ConfigDirectory = other.ConfigDirectory;
         EnableConfigDiscovery = other.EnableConfigDiscovery;
+        ExtensionSources = other.ExtensionSources is { } sources
+            ? new() { User = sources.User, Project = sources.Project, Plugins = sources.Plugins }
+            : null;
+        ExtensionPaths = other.ExtensionPaths is { } paths ? [.. paths] : null;
         State = (SessionStateOptions)other.State.Clone();
         Instructions = (SessionInstructionOptions)other.Instructions.Clone();
         Hooks = (SessionHookOptions)other.Hooks.Clone();
@@ -4556,6 +4595,23 @@ public abstract class SessionOptionsBase
     /// </summary>
     [JsonPropertyName("enableConfigDiscovery")]
     public bool? EnableConfigDiscovery { get; set; }
+
+    /// <summary>
+    /// Selects extension sources without enabling extensions or configuration discovery.
+    /// Warm resumes cannot change overrides. Cold omission restores existing defaults.
+    /// Requires a supporting runtime.
+    /// </summary>
+    [JsonPropertyName("extensionSources")]
+    public ExtensionSources? ExtensionSources { get; set; }
+
+    /// <summary>
+    /// Standalone entry modules supplied and trusted by the host, without enabling extensions or trust.
+    /// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+    /// Relative entries resolve against this request's working directory and remain fixed.
+    /// Re-supply on owning resume; omission or an empty list removes previous explicit entries.
+    /// </summary>
+    [JsonPropertyName("extensionPaths")]
+    public List<string>? ExtensionPaths { get; set; }
 
     /// <summary>Options for state.</summary>
     [JsonPropertyName("state")]
@@ -4676,8 +4732,8 @@ public sealed class CreateSessionOptions : SessionOptionsBase
     /// Creates a shallow clone of this <see cref="CreateSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
-    /// Mutable collection properties are copied into new collection instances so that modifications
-    /// to those collections on the clone do not affect the original.
+    /// Source overrides and mutable collections are copied so modifications on the clone
+    /// do not affect the original.
     /// Other reference-type properties (for example provider configuration, system messages,
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.
@@ -4791,8 +4847,8 @@ public sealed class ResumeSessionOptions : SessionOptionsBase
     /// Creates a shallow clone of this <see cref="ResumeSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
-    /// Mutable collection properties are copied into new collection instances so that modifications
-    /// to those collections on the clone do not affect the original.
+    /// Source overrides and mutable collections are copied so modifications on the clone
+    /// do not affect the original.
     /// Other reference-type properties (for example provider configuration, system messages,
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.

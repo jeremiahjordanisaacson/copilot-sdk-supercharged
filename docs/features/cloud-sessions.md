@@ -341,7 +341,7 @@ Mission Control routes SDK-created cloud sessions to the `copilot-developer-sand
 
 ## Advanced: `COPILOT_MC_BASE_URL`
 
-By default, the runtime derives the Mission Control base URL from the configured Copilot API URL. Set `COPILOT_MC_BASE_URL` only when you need to override that Mission Control endpoint.
+Mission Control uses the configured Copilot API URL, or GitHub's API gateway during rollout. Set `COPILOT_MC_BASE_URL` only to override that endpoint; cloud history queries remain on the Copilot API.
 
 This may be required for GitHub Enterprise Server deployments. Confirm the correct value and support status with your GitHub representative before relying on it in production.
 

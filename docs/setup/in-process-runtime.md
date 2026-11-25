@@ -3,7 +3,7 @@
 SDK v2 hosts the native Copilot runtime in your application process by default instead of starting a separate runtime process. Sessions, events, tools, hooks, and JSON-RPC framing remain the same.
 
 > [!WARNING]
-> In-process hosting is not a sandbox and provides no crash isolation from the runtime. A native crash can terminate your application. Test startup, model turns, and shutdown on every operating system and architecture that you deploy.
+> In-process hosting is not a sandbox. A Rust panic in the shipped runtime library terminates your application, even if the panic occurs while handling a single request. Use a spawned stdio or TCP connection if your application must survive a runtime crash. Test startup, model turns, and shutdown on every operating system and architecture that you deploy.
 
 ## When to use in-process hosting
 

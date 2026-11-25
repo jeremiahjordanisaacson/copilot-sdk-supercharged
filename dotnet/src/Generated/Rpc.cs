@@ -92,6 +92,26 @@ public sealed class DecisionErrorData
     public IList<DecisionViolation>? Violations { get; set; }
 }
 
+/// <summary>Session-owned extension source overrides. These do not enable extensions or activate plugins.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ExtensionSources
+{
+    /// <summary>Permit extensions from otherwise-active plugins, including bundles. Defaults to true; other plugin contributions are unaffected.</summary>
+    [JsonPropertyName("plugins")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Plugins { get; set; }
+
+    /// <summary>Discover project extensions when true; exclude them when false. Omission preserves existing discovery and trust checks.</summary>
+    [JsonPropertyName("project")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Project { get; set; }
+
+    /// <summary>Discover personal extensions when true; exclude them when false. Omission preserves existing discovery.</summary>
+    [JsonPropertyName("user")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? User { get; set; }
+}
+
 /// <summary>JSON-RPC error.data for application code -32004. Carries no credentials or provider error details.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class CredentialContextErrorData
@@ -24544,9 +24564,24 @@ public sealed class SlashCommandInfo
     [JsonPropertyName("allowDuringAgentExecution")]
     public bool AllowDuringAgentExecution { get; set; }
 
+    /// <summary>Whether the command can be the first message in a session.</summary>
+    [JsonPropertyName("availableAtSessionStart")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AvailableAtSessionStart { get; set; }
+
+    /// <summary>Nested terminal argument grammar, serialized as ArgsSpec JSON.</summary>
+    [JsonPropertyName("cliArgsJson")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CliArgsJson { get; set; }
+
     /// <summary>Human-readable command description.</summary>
     [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>Display name, including the leading slash.</summary>
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
 
     /// <summary>Whether the command is experimental.</summary>
     [JsonPropertyName("experimental")]
@@ -24566,10 +24601,30 @@ public sealed class SlashCommandInfo
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>Plugin that provides this command.</summary>
+    [JsonPropertyName("pluginName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginName { get; set; }
+
     /// <summary>Whether the command may be the target of `/every` / `/after` schedules. Resolution happens at every tick, so only set this when the command is safe to re-invoke and produces an agent prompt.</summary>
     [JsonPropertyName("schedulable")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Schedulable { get; set; }
+
+    /// <summary>Skill that provides this command.</summary>
+    [JsonPropertyName("skillName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SkillName { get; set; }
+
+    /// <summary>Command source, such as runtime, skill, or protocol-client.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+
+    /// <summary>Whether invocation stops processing the queued commands.</summary>
+    [JsonPropertyName("stopsQueueProcessing")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? StopsQueueProcessing { get; set; }
 }
 
 /// <summary>Slash commands available in the session, after applying any include/exclude filters.</summary>
@@ -24579,6 +24634,30 @@ public sealed class CommandList
     /// <summary>Commands available in this session.</summary>
     [JsonPropertyName("commands")]
     public IList<SlashCommandInfo> Commands { get => field ??= []; set; }
+}
+
+/// <summary>Presentation flags for the complete built-in command catalog.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class RuntimeCommandCatalogRequest
+{
+    /// <summary>Show Forge chronicle choices. This affects metadata only, not command admission.</summary>
+    [JsonPropertyName("forgeAgentEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ForgeAgentEnabled { get; set; }
+
+    /// <summary>Include commands unavailable before session creation. Defaults to false.</summary>
+    [JsonPropertyName("includeUnavailable")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IncludeUnavailable { get; set; }
+}
+
+/// <summary>The runtime-owned prompt for a context-board consolidation agent.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ContextBoardConsolidationPromptResult
+{
+    /// <summary>Instructions for the rem-agent to consolidate the session context board.</summary>
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
 }
 
 /// <summary>The outcome of the settings-file edit.</summary>
@@ -28274,7 +28353,7 @@ public sealed class Extension
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? Pid { get; set; }
 
-    /// <summary>Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/&lt;id&gt;/extensions/).</summary>
+    /// <summary>Extension provenance: project, user, plugin, session, or explicit.</summary>
     [JsonPropertyName("source")]
     public ExtensionSource Source { get; set; }
 
@@ -43420,6 +43499,23 @@ internal sealed class HandlePendingToolCallRequest
     public string SessionId { get; set; } = string.Empty;
 }
 
+/// <summary>Pending external tool call request ID and a progress message for its running tool call.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class ToolsReportProgressRequest
+{
+    /// <summary>Progress message, emitted verbatim as the tool.execution_progress progressMessage.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Request ID of the pending tool call.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
 /// <summary>External tool call of the session or one of its sub-agents that is still waiting for session.tools.handlePendingToolCall.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class PendingExternalToolRequest
@@ -45446,6 +45542,19 @@ public sealed class AuthenticatedAuthorityUpdate
     public string Source { get; set; } = string.Empty;
 }
 
+/// <summary>Owner-authenticated declaration for the non-prompting host-policy pre-check. The runtime accepts a decision only for the declared revision, which every SDK represents exactly.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class PermissionsConfigureHostPolicyPreCheck
+{
+    /// <summary>Whether this connection declares the host-policy pre-check.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    /// <summary>Host policy revision from 0 through 2^53 - 1.</summary>
+    [JsonPropertyName("policyRevision")]
+    public long PolicyRevision { get; set; }
+}
+
 /// <summary>If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class PermissionPathsConfig
@@ -45537,6 +45646,11 @@ internal sealed class PermissionsConfigureParams
     [JsonPropertyName("hostPolicyPermissionHandler")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? HostPolicyPermissionHandler { get; set; }
+
+    /// <summary>Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.</summary>
+    [JsonPropertyName("hostPolicyPreCheck")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PermissionsConfigureHostPolicyPreCheck? HostPolicyPreCheck { get; set; }
 
     /// <summary>If specified, replaces the session's path-permission policy. The runtime constructs the appropriate PathManager based on these inputs (rooted at the session's working directory). Omit to leave the current path policy unchanged.</summary>
     [JsonPropertyName("paths")]
@@ -46387,6 +46501,14 @@ public sealed class PermissionsCapabilities
     /// </summary>
     [JsonPropertyName("bypassPermissions")]
     public bool BypassPermissions { get; set; }
+
+    /// <summary>
+    /// Whether this local session supports the owner-authenticated
+    /// `hostPolicy.preCheck` capability.
+    /// </summary>
+    [JsonPropertyName("hostPolicyPreCheck")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? HostPolicyPreCheck { get; set; }
 }
 
 /// <summary>Identifies the target session.</summary>
@@ -66288,7 +66410,7 @@ public readonly struct SessionLogLevel : IEquatable<SessionLogLevel>
 }
 
 
-/// <summary>Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/&lt;id&gt;/extensions/).</summary>
+/// <summary>Extension provenance.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
@@ -66319,6 +66441,9 @@ public readonly struct ExtensionSource : IEquatable<ExtensionSource>
 
     /// <summary>Extension discovered from the current session's state directory (loaded only for this session).</summary>
     public static ExtensionSource Session { get; } = new("session");
+
+    /// <summary>Standalone extension supplied by the SDK host through extensionPaths.</summary>
+    public static ExtensionSource Explicit { get; } = new("explicit");
 
     /// <summary>Returns a value indicating whether two <see cref="ExtensionSource"/> instances are equivalent.</summary>
     public static bool operator ==(ExtensionSource left, ExtensionSource right) => left.Equals(right);
@@ -75296,6 +75421,12 @@ public sealed class ServerRpc
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
+    /// <summary>ContextBoard APIs.</summary>
+    public ServerContextBoardApi ContextBoard =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Settings APIs.</summary>
     public ServerSettingsApi Settings =>
         field ??
@@ -81776,12 +81907,42 @@ public sealed class ServerCommandsApi
         _rpc = rpc;
     }
 
-    /// <summary>Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.</summary>
+    /// <summary>Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.</summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Slash commands available in the session, after applying any include/exclude filters.</returns>
     public async Task<CommandList> ListAsync(CancellationToken cancellationToken = default)
     {
         return await CopilotClient.InvokeRpcAsync<CommandList>(_rpc, "commands.list", [], cancellationToken);
+    }
+
+    /// <summary>Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.</summary>
+    /// <param name="request">Presentation flags for the complete built-in command catalog.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Slash commands available in the session, after applying any include/exclude filters.</returns>
+    public async Task<CommandList> ListAsync(RuntimeCommandCatalogRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<CommandList>(_rpc, "commands.list", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped ContextBoard APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerContextBoardApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerContextBoardApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Returns the runtime-owned instructions for a rem-agent that consolidates a session context board. Hosts that launch a consolidation agent use this prompt rather than copy runtime instructions.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The runtime-owned prompt for a context-board consolidation agent.</returns>
+    public async Task<ContextBoardConsolidationPromptResult> GetConsolidationPromptAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<ContextBoardConsolidationPromptResult>(_rpc, "contextBoard.getConsolidationPrompt", [], cancellationToken);
     }
 }
 
@@ -88180,6 +88341,20 @@ public sealed class ToolsApi
         return await CopilotClient.InvokeRpcAsync<HandlePendingToolCallResult>(_session.Rpc, "session.tools.handlePendingToolCall", [request], cancellationToken);
     }
 
+    /// <summary>Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.</summary>
+    /// <param name="requestId">Request ID of the pending tool call.</param>
+    /// <param name="message">Progress message, emitted verbatim as the tool.execution_progress progressMessage.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task ReportProgressAsync(string requestId, string message, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requestId);
+        ArgumentNullException.ThrowIfNull(message);
+        _session.ThrowIfDisposed();
+
+        var request = new ToolsReportProgressRequest { SessionId = _session.SessionId, RequestId = requestId, Message = message };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.tools.reportProgress", [request], cancellationToken);
+    }
+
     /// <summary>Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.</summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>External tool calls still waiting for a result.</returns>
@@ -88694,13 +88869,14 @@ public sealed class PermissionsApi
     /// <param name="assistedApprovalContext">SDK-host advisory JSON for future Assisted Permissions judge requests. The value replaces only its named source; null clears that source. Omit to leave all sources unchanged. The runtime applies strict structural and size limits, renders the source in a runtime-controlled advisory frame, and never treats the value as instructions or authorization. Session-scoped only; hosts must reapply after resume.</param>
     /// <param name="authenticatedAuthority">Optional owner-authenticated per-source update to lifecycle-fenced session authority. Active grants from all sources are rendered together, in source order, to the Assisted Permissions judge, which alone interprets their statements and scope. Only the owning non-extension session connection, bound to the current session generation, may replace or revoke authority. Omit to leave unchanged. Hard runtime controls, mandatory policy, and later human restrictions still take precedence. Session-scoped only; hosts must reapply after resume.</param>
     /// <param name="hostPolicyPermissionHandler">Declares whether this connection's registered permission handler applies non-human host policy to the tools and canvases this connection registered. When true, unattended Assisted Autopilot sends permission requests for those tools, and `open_canvas` and `invoke_canvas_action` requests whose target canvas this connection registered, to the handler before runtime Assisted Approval or unattended fallback can settle them. All other requests, including shell commands, file access, URLs, and tools or canvases registered by other connections or extensions, keep runtime settlement. Managed policy and other runtime enforcement still take precedence. Only the session's owning non-extension connection may set this field. The declaration ends when that connection detaches or the session is resumed, so hosts must reapply it after resume. Omit to leave unchanged; false clears it. Without a declaration, registered handlers are not consulted during unattended Assisted Autopilot. Remote sessions are not supported.</param>
+    /// <param name="hostPolicyPreCheck">Declares a non-prompting host-policy callback that the runtime may call before the Assisted Permissions judge for eligible path, read, and custom-tool requests. Only the owning non-extension connection may set it. False disables the declaration. Hosts must reapply after resume. Remote sessions are not supported.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Indicates whether the operation succeeded.</returns>
-    public async Task<PermissionsConfigureResult> ConfigureAsync(bool? approveAllToolPermissionRequests = null, bool? approveAllReadPermissionRequests = null, PermissionRulesSet? rules = null, PermissionPathsConfig? paths = null, PermissionUrlsConfig? urls = null, IList<PermissionsConfigureAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, string? assistedApprovalInstructions = null, PermissionsConfigureAssistedApprovalContext? assistedApprovalContext = null, AuthenticatedAuthorityUpdate? authenticatedAuthority = null, bool? hostPolicyPermissionHandler = null, CancellationToken cancellationToken = default)
+    public async Task<PermissionsConfigureResult> ConfigureAsync(bool? approveAllToolPermissionRequests = null, bool? approveAllReadPermissionRequests = null, PermissionRulesSet? rules = null, PermissionPathsConfig? paths = null, PermissionUrlsConfig? urls = null, IList<PermissionsConfigureAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, string? assistedApprovalInstructions = null, PermissionsConfigureAssistedApprovalContext? assistedApprovalContext = null, AuthenticatedAuthorityUpdate? authenticatedAuthority = null, bool? hostPolicyPermissionHandler = null, PermissionsConfigureHostPolicyPreCheck? hostPolicyPreCheck = null, CancellationToken cancellationToken = default)
     {
         _session.ThrowIfDisposed();
 
-        var request = new PermissionsConfigureParams { SessionId = _session.SessionId, ApproveAllToolPermissionRequests = approveAllToolPermissionRequests, ApproveAllReadPermissionRequests = approveAllReadPermissionRequests, Rules = rules, Paths = paths, Urls = urls, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, AssistedApprovalInstructions = assistedApprovalInstructions, AssistedApprovalContext = assistedApprovalContext, AuthenticatedAuthority = authenticatedAuthority, HostPolicyPermissionHandler = hostPolicyPermissionHandler };
+        var request = new PermissionsConfigureParams { SessionId = _session.SessionId, ApproveAllToolPermissionRequests = approveAllToolPermissionRequests, ApproveAllReadPermissionRequests = approveAllReadPermissionRequests, Rules = rules, Paths = paths, Urls = urls, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, AssistedApprovalInstructions = assistedApprovalInstructions, AssistedApprovalContext = assistedApprovalContext, AuthenticatedAuthority = authenticatedAuthority, HostPolicyPermissionHandler = hostPolicyPermissionHandler, HostPolicyPreCheck = hostPolicyPreCheck };
         return await CopilotClient.InvokeRpcAsync<PermissionsConfigureResult>(_session.Rpc, "session.permissions.configure", [request], cancellationToken);
     }
 
@@ -91643,6 +91819,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ContentExclusionPathCheck))]
 [JsonSerializable(typeof(ContentExclusionValidatePoliciesRequest))]
 [JsonSerializable(typeof(ContentExclusionValidatePoliciesResult))]
+[JsonSerializable(typeof(ContextBoardConsolidationPromptResult))]
 [JsonSerializable(typeof(ContextHeaviestMessage))]
 [JsonSerializable(typeof(CopilotUserResponse))]
 [JsonSerializable(typeof(CopilotUserResponseEndpoints))]
@@ -91720,6 +91897,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ExtensionLaunchProviderResolveResult))]
 [JsonSerializable(typeof(ExtensionList))]
 [JsonSerializable(typeof(ExtensionManagedPolicy))]
+[JsonSerializable(typeof(ExtensionSources))]
 [JsonSerializable(typeof(ExtensionsDisableRequest))]
 [JsonSerializable(typeof(ExtensionsEnableRequest))]
 [JsonSerializable(typeof(ExternalToolTextResultForLlmBinaryResultsForLlm))]
@@ -92399,6 +92577,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(PermissionsConfigureAdditionalContentExclusionPolicyRule))]
 [JsonSerializable(typeof(PermissionsConfigureAdditionalContentExclusionPolicyRuleSource))]
 [JsonSerializable(typeof(PermissionsConfigureAssistedApprovalContext))]
+[JsonSerializable(typeof(PermissionsConfigureHostPolicyPreCheck))]
 [JsonSerializable(typeof(PermissionsConfigureParams))]
 [JsonSerializable(typeof(PermissionsConfigureResult))]
 [JsonSerializable(typeof(PermissionsEvaluateManagedPolicyParams))]
@@ -92636,6 +92815,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ResearchListReportsResult))]
 [JsonSerializable(typeof(ResearchStoredReport))]
 [JsonSerializable(typeof(ResponseFormat))]
+[JsonSerializable(typeof(RuntimeCommandCatalogRequest))]
 [JsonSerializable(typeof(RuntimeOpenBrowserRequest))]
 [JsonSerializable(typeof(SandboxApplyDefaultsRequest))]
 [JsonSerializable(typeof(SandboxConfig))]
@@ -93308,6 +93488,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ToolsInitializeAndValidateResult))]
 [JsonSerializable(typeof(ToolsListPendingRequestsRequest))]
 [JsonSerializable(typeof(ToolsListRequest))]
+[JsonSerializable(typeof(ToolsReportProgressRequest))]
 [JsonSerializable(typeof(ToolsSetRequest))]
 [JsonSerializable(typeof(ToolsSetResult))]
 [JsonSerializable(typeof(ToolsShellDescriptorConfig))]

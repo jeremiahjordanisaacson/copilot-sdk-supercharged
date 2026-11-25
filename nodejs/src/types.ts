@@ -29,12 +29,15 @@ import type { CopilotSession } from "./session.js";
 import type { JsonValue } from "./workflow.js";
 import type {
     ExtensionLaunchProviderHandler as GeneratedExtensionLaunchProvider,
+    ExtensionSources,
     FusionTier,
     AutopilotOptions,
     GitHubTokenAcquireRequest,
     GitHubTokenAcquireResult,
     GitHubTelemetryNotification,
     HostDiagnostics,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
     Model,
     ModelCapabilitiesOverride,
     DiagnosticsConfiguration,
@@ -63,6 +66,7 @@ export type {
     NetworkScope,
 } from "./generated/rpc.js";
 export type { RemoteSessionMode } from "./generated/rpc.js";
+export type { ExtensionSources } from "./generated/rpc.js";
 export type { AutopilotOptions } from "./generated/rpc.js";
 export type {
     UserInputImageAttachment,
@@ -125,6 +129,8 @@ export type {
     GitHubTelemetryEvent,
     GitHubTelemetryClientInfo,
     HostDiagnostics,
+    HostPolicyPreCheckRequest,
+    HostPolicyPreCheckResult,
     HostErrorReportingStatus,
     InstallationConfirmationRequest,
     InstallationConfirmationResponse,
@@ -850,6 +856,16 @@ export interface ToolInvocation {
      * @experimental
      */
     requestId?: string;
+    /**
+     * Report progress for this call while it runs. The runtime emits a
+     * `tool.execution_progress` session event with this call's `toolCallId` and
+     * `message` verbatim. Progress for a call that has already completed is
+     * dropped, and delivery failures never fail the tool call. After the handler
+     * finishes, this does nothing.
+     *
+     * @experimental
+     */
+    reportProgress?: (message: string) => Promise<void>;
 }
 
 export type ToolHandler<TArgs = unknown> = (
@@ -2326,6 +2342,13 @@ interface MCPServerConfigBase {
      * Optional timeout in milliseconds for tool calls to this server.
      */
     timeout?: number;
+    /**
+     * Controls whether this server's tools may be deferred behind tool search.
+     * `"auto"` lets the runtime defer them when tool search is enabled.
+     * `"never"` keeps them in the initial tool list, even when tool search is enabled.
+     * `undefined` (the default) lets the runtime decide.
+     */
+    deferTools?: "auto" | "never";
 }
 
 /**
@@ -2972,6 +2995,20 @@ export interface SessionOptionsBase {
     enableConfigDiscovery?: boolean;
     canvases?: SessionCanvasOptions;
     extensions?: SessionExtensionOptions;
+    /**
+     * Selects extension discovery sources without enabling extensions or other configuration.
+     * Omission or `{}` uses existing defaults. Warm resumes cannot change overrides;
+     * cold omission restores defaults. Requires a supporting runtime.
+     */
+    extensionSources?: ExtensionSources;
+    /**
+     * Standalone extension.mjs, extension.cjs or extension.js modules supplied and trusted by the host.
+     * Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+     * Relative entries resolve against this request's working directory and remain fixed.
+     * Does not enable extensions or grant trust. Re-supply on owning resume;
+     * omission or an empty list removes previous explicit entries. Requires a supporting runtime.
+     */
+    extensionPaths?: string[];
     interaction?: SessionInteractionOptions;
     /**
      * System message configuration
@@ -4453,6 +4490,14 @@ export interface SessionPermissionOptions {
      */
     onRequest?: PermissionHandler;
     /**
+     * Optional non-prompting host-policy callback invoked before the Assisted
+     * Permissions judge for eligible path, read, and custom-tool requests.
+     * Re-supply it on resume. Unsupported and remote runtimes ignore it.
+     *
+     * @experimental
+     */
+    hostPolicyPreCheck?: HostPolicyPreCheckOptions;
+    /**
      * Sandbox configuration applied before MCP servers or session tools start.
      * Uses the same direct-host semantics and managed-policy validation as
      * `session.rpc.options.update({ sandboxConfig })`. A policy conflict fails
@@ -4470,6 +4515,17 @@ export interface SessionPermissionOptions {
      * restored mode on resume. Not supported for cloud sessions.
      */
     mode?: PermissionMode;
+}
+
+/** @experimental */
+export interface HostPolicyPreCheckOptions {
+    /** Host policy revision from 0 through 2^53 - 1. */
+    policyRevision: number;
+    /** Decide without prompting or side effects. */
+    onRequest: (
+        request: HostPolicyPreCheckRequest,
+        options: { signal: AbortSignal }
+    ) => HostPolicyPreCheckResult | Promise<HostPolicyPreCheckResult>;
 }
 
 /** General MCP servers, OAuth, and renderer opt-in; built-in GitHub MCP tuning is under github.mcp. */

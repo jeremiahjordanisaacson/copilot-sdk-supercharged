@@ -1435,6 +1435,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 },
                 ConfigDirectory = config.ConfigDirectory,
                 EnableConfigDiscovery = config.EnableConfigDiscovery,
+                ExtensionSources = config.ExtensionSources,
+                ExtensionPaths = config.ExtensionPaths,
                 State = new SessionStateRequest
                 {
                     SkipEmbeddingRetrieval = config.State.SkipEmbeddingRetrieval,
@@ -1799,6 +1801,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 },
                 ConfigDirectory = config.ConfigDirectory,
                 EnableConfigDiscovery = config.EnableConfigDiscovery,
+                ExtensionSources = config.ExtensionSources,
+                ExtensionPaths = config.ExtensionPaths,
                 State = new SessionStateRequest
                 {
                     SkipEmbeddingRetrieval = config.State.SkipEmbeddingRetrieval,
@@ -4140,6 +4144,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         [JsonPropertyName("mcp")] public SessionMcpRequest? Mcp { get; init; }
         [JsonPropertyName("configDirectory")] public string? ConfigDirectory { get; init; }
         [JsonPropertyName("enableConfigDiscovery")] public bool? EnableConfigDiscovery { get; init; }
+        [JsonPropertyName("extensionSources")] public ExtensionSources? ExtensionSources { get; init; }
+        [JsonPropertyName("extensionPaths")] public List<string>? ExtensionPaths { get; init; }
         [JsonPropertyName("state")] public SessionStateRequest? State { get; init; }
         [JsonPropertyName("instructions")] public SessionInstructionRequest? Instructions { get; init; }
         [JsonPropertyName("git")] public SessionGitRequest? Git { get; init; }
@@ -4221,6 +4227,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         [JsonPropertyName("hooks")] public SessionHookRequest? Hooks { get; init; }
         [JsonPropertyName("configDirectory")] public string? ConfigDirectory { get; init; }
         [JsonPropertyName("enableConfigDiscovery")] public bool? EnableConfigDiscovery { get; init; }
+        [JsonPropertyName("extensionSources")] public ExtensionSources? ExtensionSources { get; init; }
+        [JsonPropertyName("extensionPaths")] public List<string>? ExtensionPaths { get; init; }
         [JsonPropertyName("state")] public SessionStateRequest? State { get; init; }
         [JsonPropertyName("instructions")] public SessionInstructionRequest? Instructions { get; init; }
         [JsonPropertyName("git")] public SessionGitRequest? Git { get; init; }

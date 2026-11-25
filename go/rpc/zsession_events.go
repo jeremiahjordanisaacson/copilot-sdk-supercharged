@@ -26,6 +26,8 @@ type SessionEvent struct {
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 	// Unique event identifier (UUID v4), generated when the event is emitted
 	ID string `json:"id"`
+	// ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+	OccurredAt *time.Time `json:"occurredAt,omitempty"`
 	// ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
 	ParentID *string `json:"parentId"`
 	// ISO 8601 timestamp when the event was created
@@ -509,7 +511,7 @@ type InstructionUpdateData struct {
 	Lifetime InstructionUpdateLifetime `json:"lifetime"`
 	// Optional stable source name for diagnostics and future host-authored updates.
 	Name *string `json:"name,omitempty"`
-	// Whether this update was recorded after the conversation's initial user message.
+	// No longer emitted. Older events may still record whether this update was recorded after the conversation's initial user message.
 	// Internal: PostInitial is part of the SDK's internal API surface and is not intended for external use.
 	PostInitial *bool `json:"postInitial,omitempty"`
 }
@@ -1319,6 +1321,9 @@ type AssistantFusionPhaseCompletedData struct {
 	// Projection action for the exact internal message.
 	// Internal: ProjectionMode is part of the SDK's internal API surface and is not intended for external use.
 	ProjectionMode *FusionProjectionMode `json:"projectionMode,omitempty"`
+	// True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.
+	// Experimental: ReadOnly is part of an experimental API and may change or be removed.
+	ReadOnly *bool `json:"readOnly,omitempty"`
 	// Explicit reasoning effort selected for this phase, if supplied.
 	// Experimental: ReasoningEffort is part of an experimental API and may change or be removed.
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
@@ -1411,6 +1416,9 @@ type SessionFusionCompletedData struct {
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// Total concrete model requests made by the turn.
 	RequestCount int64 `json:"requestCount"`
+	// Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.
+	// Experimental: ReviewSkippedReason is part of an experimental API and may change or be removed.
+	ReviewSkippedReason *string `json:"reviewSkippedReason,omitempty"`
 	// Synthetic HydraFusion model selected for the session.
 	SyntheticModel string `json:"syntheticModel"`
 	// Total normalized AI-unit cost reported by the turn, in nano-AIU.
@@ -1661,10 +1669,10 @@ type ModelCallFailureData struct {
 	InferenceGateway *bool `json:"inferenceGateway,omitempty"`
 	// What initiated this failed API call, when reported (e.g., "sub-agent", "mcp-sampling"); absent for main-loop failures, whether user- or agent-initiated
 	Initiator *string `json:"initiator,omitempty"`
-	// Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+	// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
 	// Internal: InstructionUpdateDeliveryID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateDeliveryID *string `json:"instructionUpdateDeliveryId,omitempty"`
-	// Event identifier of the latest canonical instruction update included in this failed model request.
+	// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this failed model request.
 	// Internal: InstructionUpdateLatestEventID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateLatestEventID *string `json:"instructionUpdateLatestEventId,omitempty"`
 	// Authoritative interaction classification for the failed call, matching `assistant.usage.interactionType` (for example `conversation-agent`, `conversation-subagent`, or `conversation-sampling`). Absent when the producer cannot classify the interaction.
@@ -2084,10 +2092,10 @@ type AssistantUsageData struct {
 	Initiator *string `json:"initiator,omitempty"`
 	// Number of input tokens consumed
 	InputTokens *int64 `json:"inputTokens,omitempty"`
-	// Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+	// No longer emitted. Older events may still contain this internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
 	// Internal: InstructionUpdateDeliveryID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateDeliveryID *string `json:"instructionUpdateDeliveryId,omitempty"`
-	// Event identifier of the latest canonical instruction update included in this model request.
+	// No longer emitted. Older events may still contain this event identifier of the latest canonical instruction update included in this model request.
 	// Internal: InstructionUpdateLatestEventID is part of the SDK's internal API surface and is not intended for external use.
 	InstructionUpdateLatestEventID *string `json:"instructionUpdateLatestEventId,omitempty"`
 	// Coarse classification of the interaction that produced this call, mirroring the session's per-request agent context (e.g. `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, `conversation-user`). Non-billing; lets consumers attribute a model call to a call class (e.g. sub-agent/sidekick) independently of the billing initiator. Absent when the runtime did not classify the request.
@@ -7122,10 +7130,12 @@ const (
 	ExitPlanModeActionInteractive ExitPlanModeAction = "interactive"
 )
 
-// Discovery source
+// Extension provenance
 type ExtensionsLoadedExtensionSource string
 
 const (
+	// Standalone extension supplied by the SDK host through extensionPaths.
+	ExtensionsLoadedExtensionSourceExplicit ExtensionsLoadedExtensionSource = "explicit"
 	// Extension contributed by an installed plugin.
 	ExtensionsLoadedExtensionSourcePlugin ExtensionsLoadedExtensionSource = "plugin"
 	// Extension discovered from the current project.
