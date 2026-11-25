@@ -1600,9 +1600,15 @@ type MCPServerConfig interface {
 //   - []string{"*"}: explicit "all tools"
 //   - []string{}: no tools
 //   - []string{"foo","bar"}: only those tools
+//
+// DeferTools controls whether the server's tools may be deferred behind tool
+// search: [ToolDeferAuto] lets the runtime defer them when tool search is
+// enabled, and [ToolDeferNever] keeps them in the initial tool list even when
+// tool search is enabled. When empty, the runtime decides.
 type MCPStdioServerConfig struct {
 	Tools            []string          `json:"tools,omitzero"`
 	Timeout          int               `json:"timeout,omitempty"`
+	DeferTools       ToolDefer         `json:"deferTools,omitempty"`
 	Command          string            `json:"command"`
 	Args             []string          `json:"args,omitzero"`
 	Env              map[string]string `json:"env,omitzero"`
@@ -1625,10 +1631,11 @@ func (c MCPStdioServerConfig) MarshalJSON() ([]byte, error) {
 
 // MCPHTTPServerConfig configures a remote MCP server (HTTP or SSE).
 //
-// See [MCPStdioServerConfig] for the semantics of the Tools field.
+// See [MCPStdioServerConfig] for the semantics of the Tools and DeferTools fields.
 type MCPHTTPServerConfig struct {
 	Tools             []string                               `json:"tools,omitzero"`
 	Timeout           int                                    `json:"timeout,omitempty"`
+	DeferTools        ToolDefer                              `json:"deferTools,omitempty"`
 	URL               string                                 `json:"url"`
 	Headers           map[string]string                      `json:"headers,omitzero"`
 	OAuthClientID     *string                                `json:"oauthClientId,omitempty"`

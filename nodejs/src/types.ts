@@ -2330,6 +2330,13 @@ interface MCPServerConfigBase {
      * Optional timeout in milliseconds for tool calls to this server.
      */
     timeout?: number;
+    /**
+     * Controls whether this server's tools may be deferred behind tool search.
+     * `"auto"` lets the runtime defer them when tool search is enabled.
+     * `"never"` keeps them in the initial tool list, even when tool search is enabled.
+     * `undefined` (the default) lets the runtime decide.
+     */
+    deferTools?: "auto" | "never";
 }
 
 /**

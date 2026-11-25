@@ -10,9 +10,9 @@ use serde_json::{Value, json};
 
 use super::{
     Attachment, AttachmentSelectionPosition, AttachmentSelectionRange, CreateSessionOptions,
-    GitHubReferenceType, McpServerConfig, McpStdioServerConfig, PermissionRequestData,
-    PermissionRequestKind, ProviderConfig, ResumeSessionOptions, SessionId, Tool,
-    ensure_attachment_display_names,
+    DeferMode, GitHubReferenceType, McpHttpServerConfig, McpServerConfig, McpStdioServerConfig,
+    PermissionRequestData, PermissionRequestKind, ProviderConfig, ResumeSessionOptions, SessionId,
+    Tool, ensure_attachment_display_names,
 };
 use crate::generated::session_events::{
     AssistedApprovalAssessment, AssistedApprovalCompletedRecommendation,
@@ -447,6 +447,52 @@ fn mcp_servers_serialize_in_insertion_order() {
         positions, ascending,
         "mcp server keys must serialize in insertion order: {json}"
     );
+}
+
+#[test]
+fn mcp_servers_serialize_defer_tools() {
+    use indexmap::IndexMap;
+
+    let mut servers = IndexMap::new();
+    servers.insert(
+        "local".to_string(),
+        McpServerConfig::Stdio(McpStdioServerConfig {
+            command: "run".to_string(),
+            defer_tools: Some(DeferMode::Never),
+            ..Default::default()
+        }),
+    );
+    servers.insert(
+        "remote".to_string(),
+        McpServerConfig::Http(McpHttpServerConfig {
+            url: "https://example.com/mcp".to_string(),
+            defer_tools: Some(DeferMode::Auto),
+            ..Default::default()
+        }),
+    );
+    servers.insert(
+        "plain".to_string(),
+        McpServerConfig::Stdio(McpStdioServerConfig {
+            command: "run".to_string(),
+            ..Default::default()
+        }),
+    );
+
+    let (wire, _runtime) = CreateSessionOptions::default()
+        .with_mcp(|group| group.with_servers(servers))
+        .into_wire(None)
+        .expect("into_wire should succeed");
+    let json = serde_json::to_value(&wire).expect("serialize wire");
+    let servers = &json["mcp"]["servers"];
+    assert_eq!(servers["local"]["deferTools"], json!("never"));
+    assert_eq!(servers["remote"]["deferTools"], json!("auto"));
+    assert!(servers["plain"].get("deferTools").is_none());
+
+    let parsed: McpServerConfig = serde_json::from_value(servers["local"].clone()).unwrap();
+    match parsed {
+        McpServerConfig::Stdio(config) => assert_eq!(config.defer_tools, Some(DeferMode::Never)),
+        other => panic!("expected stdio config, got {other:?}"),
+    }
 }
 
 #[test]

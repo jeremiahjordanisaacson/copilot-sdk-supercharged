@@ -47,6 +47,7 @@ async fn should_use_cimd_url_instead_of_dynamic_registration() {
                                     timeout: None,
                                     url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
+                                    defer_tools: None,
                                 }),
                             )]))
                         }),
@@ -105,6 +106,7 @@ async fn should_satisfy_mcp_oauth_using_host_provided_token() {
                                     timeout: None,
                                     url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
+                                    defer_tools: None,
                                 }),
                             )]))
                         }),
@@ -202,6 +204,7 @@ async fn should_request_replacement_tokens_across_mcp_oauth_lifecycle() {
                                     timeout: None,
                                     url: format!("{}/mcp", server.url),
                                     headers: HashMap::new(),
+                                    defer_tools: None,
                                 }),
                             )]))
                         }),
@@ -281,6 +284,7 @@ async fn should_cancel_pending_mcp_oauth_request() {
                                     timeout: None,
                                     url: format!("{}/mcp", oauth_server.url),
                                     headers: HashMap::new(),
+                                    defer_tools: None,
                                 }),
                             )]))
                         }),

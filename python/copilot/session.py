@@ -1647,6 +1647,8 @@ class MCPStdioServerConfig(TypedDict, total=False):
     tools: list[str]  # List of tools to include. [] means none. "*" means all.
     type: NotRequired[Literal["local", "stdio"]]  # Server type
     timeout: NotRequired[int]  # Timeout in milliseconds
+    # "auto" lets tool search defer this server's tools; "never" always loads them.
+    defer_tools: NotRequired[Literal["auto", "never"]]
     command: str  # Command to run
     args: NotRequired[list[str]]  # Command arguments
     env: NotRequired[dict[str, str]]  # Environment variables
@@ -1659,6 +1661,8 @@ class MCPHTTPServerConfig(TypedDict, total=False):
     tools: list[str]  # List of tools to include. [] means none. "*" means all.
     type: Literal["http", "sse"]  # Server type
     timeout: NotRequired[int]  # Timeout in milliseconds
+    # "auto" lets tool search defer this server's tools; "never" always loads them.
+    defer_tools: NotRequired[Literal["auto", "never"]]
     url: str  # URL of the remote server
     headers: NotRequired[dict[str, str]]  # HTTP headers
 

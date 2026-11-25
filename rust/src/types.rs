@@ -1511,6 +1511,12 @@ pub struct McpStdioServerConfig {
     /// Optional timeout in milliseconds for tool calls to this server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i64>,
+    /// Controls whether this server's tools may be deferred behind tool
+    /// search. [`DeferMode::Auto`] lets the runtime defer them when tool
+    /// search is enabled; [`DeferMode::Never`] keeps them in the initial tool
+    /// list, even when tool search is enabled. `None` lets the runtime decide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer_tools: Option<DeferMode>,
     /// Subprocess executable.
     pub command: String,
     /// Arguments to pass to the subprocess.
@@ -1541,6 +1547,12 @@ pub struct McpHttpServerConfig {
     /// Optional timeout in milliseconds for tool calls to this server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<i64>,
+    /// Controls whether this server's tools may be deferred behind tool
+    /// search. [`DeferMode::Auto`] lets the runtime defer them when tool
+    /// search is enabled; [`DeferMode::Never`] keeps them in the initial tool
+    /// list, even when tool search is enabled. `None` lets the runtime decide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer_tools: Option<DeferMode>,
     /// Server URL.
     pub url: String,
     /// Optional HTTP headers to include on every request.

@@ -520,13 +520,17 @@ def _mcp_servers_to_wire(
 ) -> dict[str, Any]:
     """Convert MCP server configs from public API format to wire format.
 
-    Renames ``working_directory`` key to ``cwd`` in each server config dict.
+    Renames ``working_directory`` to ``cwd`` and ``defer_tools`` to
+    ``deferTools`` in each server config dict.
     """
     wire: dict[str, Any] = {}
     for name, config in servers.items():
         if "working_directory" in config:
             config = {**config, "cwd": config["working_directory"]}
             del config["working_directory"]
+        if "defer_tools" in config:
+            config = {**config, "deferTools": config["defer_tools"]}
+            del config["defer_tools"]
         wire[name] = config
     return wire
 

@@ -194,6 +194,44 @@ func TestMCPHTTPServerConfig_JSONIncludesOAuthConfiguration(t *testing.T) {
 	}
 }
 
+func TestMCPServerConfigs_JSONIncludesDeferTools(t *testing.T) {
+	cases := map[string]any{
+		"stdio": MCPStdioServerConfig{Command: "node", DeferTools: ToolDeferNever},
+		"http":  MCPHTTPServerConfig{URL: "https://example.com/mcp", DeferTools: ToolDeferAuto},
+	}
+	expected := map[string]string{"stdio": "never", "http": "auto"}
+	for name, config := range cases {
+		data, err := json.Marshal(config)
+		if err != nil {
+			t.Fatalf("%s: failed to marshal: %v", name, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("%s: failed to unmarshal: %v", name, err)
+		}
+		if decoded["deferTools"] != expected[name] {
+			t.Errorf("%s: expected deferTools %q, got %v", name, expected[name], decoded["deferTools"])
+		}
+	}
+
+	for name, config := range map[string]any{
+		"stdio": MCPStdioServerConfig{Command: "node"},
+		"http":  MCPHTTPServerConfig{URL: "https://example.com/mcp"},
+	} {
+		data, err := json.Marshal(config)
+		if err != nil {
+			t.Fatalf("%s: failed to marshal: %v", name, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("%s: failed to unmarshal: %v", name, err)
+		}
+		if _, ok := decoded["deferTools"]; ok {
+			t.Errorf("%s: expected deferTools to be omitted, got %v", name, decoded["deferTools"])
+		}
+	}
+}
+
 func TestSessionSendRequest_JSONIncludesRequestHeaders(t *testing.T) {
 	req := sessionSendRequest{
 		SessionID:      "session-1",

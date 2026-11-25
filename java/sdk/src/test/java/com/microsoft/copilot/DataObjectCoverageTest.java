@@ -26,6 +26,7 @@ import com.microsoft.copilot.rpc.SectionOverride;
 import com.microsoft.copilot.rpc.SetForegroundSessionRequest;
 import com.microsoft.copilot.rpc.SetForegroundSessionResponse;
 import com.microsoft.copilot.rpc.ToolBinaryResult;
+import com.microsoft.copilot.rpc.ToolDefer;
 import com.microsoft.copilot.rpc.ToolResultObject;
 
 /**
@@ -345,6 +346,22 @@ class DataObjectCoverageTest {
 
         assertEquals("/workspace", json.path("cwd").asText());
         assertFalse(json.has("workingDirectory"));
+    }
+
+    @Test
+    void mcpServerConfigsSerializeDeferTools() {
+        var mapper = JsonRpcClient.getObjectMapper();
+        var stdio = new McpStdioServerConfig().setCommand("node").setDeferTools(ToolDefer.NEVER);
+        var http = new McpHttpServerConfig().setUrl("https://mcp.example.com").setDeferTools(ToolDefer.AUTO);
+
+        assertEquals(ToolDefer.NEVER, stdio.getDeferTools());
+        assertEquals("never", mapper.valueToTree(stdio).path("deferTools").asText());
+        assertEquals("auto", mapper.valueToTree(http).path("deferTools").asText());
+        assertFalse(mapper.valueToTree(new McpStdioServerConfig().setCommand("node")).has("deferTools"));
+
+        stdio.setDeferTools(ToolDefer.NONE);
+        assertNull(stdio.getDeferTools());
+        assertFalse(mapper.valueToTree(stdio).has("deferTools"));
     }
 
     @Test

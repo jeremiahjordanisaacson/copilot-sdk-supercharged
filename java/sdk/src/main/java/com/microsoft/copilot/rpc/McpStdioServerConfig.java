@@ -152,4 +152,10 @@ public final class McpStdioServerConfig extends McpServerConfig {
         super.setTimeout(timeout);
         return this;
     }
+
+    @Override
+    public McpStdioServerConfig setDeferTools(ToolDefer deferTools) {
+        super.setDeferTools(deferTools);
+        return this;
+    }
 }

@@ -40,6 +40,9 @@ public abstract class McpServerConfig {
     @JsonProperty("timeout")
     private Integer timeout;
 
+    @JsonProperty("deferTools")
+    private ToolDefer deferTools;
+
     /**
      * Gets the list of tools to include from this server.
      * <p>
@@ -83,6 +86,32 @@ public abstract class McpServerConfig {
      */
     public McpServerConfig setTimeout(Integer timeout) {
         this.timeout = timeout;
+        return this;
+    }
+
+    /**
+     * Gets whether this server's tools may be deferred behind tool search.
+     *
+     * @return the deferral mode, or {@code null} to let the runtime decide
+     */
+    public ToolDefer getDeferTools() {
+        return deferTools;
+    }
+
+    /**
+     * Sets whether this server's tools may be deferred behind tool search.
+     * <p>
+     * {@link ToolDefer#AUTO} lets the runtime defer the server's tools when tool
+     * search is enabled. {@link ToolDefer#NEVER} keeps them in the initial tool
+     * list, even when tool search is enabled. {@code null} or
+     * {@link ToolDefer#NONE} lets the runtime decide.
+     *
+     * @param deferTools
+     *            the deferral mode, or {@code null} to let the runtime decide
+     * @return this config for method chaining
+     */
+    public McpServerConfig setDeferTools(ToolDefer deferTools) {
+        this.deferTools = deferTools == ToolDefer.NONE ? null : deferTools;
         return this;
     }
 }

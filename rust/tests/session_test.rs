@@ -2413,6 +2413,7 @@ fn mcp_server_config_roundtrips_through_tagged_enum() {
         working_directory: None,
         tools: Some(vec!["*".to_string()]),
         timeout: None,
+        defer_tools: None,
     });
     let json = serde_json::to_value(&stdio).unwrap();
     assert_eq!(json["type"], "stdio");

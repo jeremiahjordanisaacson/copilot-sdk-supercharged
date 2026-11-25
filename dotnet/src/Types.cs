@@ -3713,6 +3713,18 @@ public abstract class McpServerConfig
     [JsonPropertyName("timeout")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? Timeout { get; set; }
+
+    /// <summary>
+    /// Controls whether this server's tools may be deferred behind tool search.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CopilotToolDefer.Auto"/> lets the runtime defer the server's tools when tool search is enabled.
+    /// <see cref="CopilotToolDefer.Never"/> keeps them in the initial tool list, even when tool search is enabled.
+    /// <c>null</c> (the default) lets the runtime decide.
+    /// </remarks>
+    [JsonPropertyName("deferTools")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CopilotToolDefer? DeferTools { get; set; }
 }
 
 /// <summary>

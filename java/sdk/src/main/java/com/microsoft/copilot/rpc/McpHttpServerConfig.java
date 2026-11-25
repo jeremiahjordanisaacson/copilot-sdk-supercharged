@@ -200,4 +200,10 @@ public final class McpHttpServerConfig extends McpServerConfig {
         super.setTimeout(timeout);
         return this;
     }
+
+    @Override
+    public McpHttpServerConfig setDeferTools(ToolDefer deferTools) {
+        super.setDeferTools(deferTools);
+        return this;
+    }
 }
