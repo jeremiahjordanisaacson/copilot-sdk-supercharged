@@ -12,7 +12,7 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged", subdir="julia", rev="v3.1.0")
+Pkg.add(url="https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged", subdir="julia", rev="v3.1.1")
 ```
 
 Or develop it from a local clone (run this from the repository root):

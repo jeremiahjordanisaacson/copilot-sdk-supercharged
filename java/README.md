@@ -21,14 +21,14 @@ Java SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 <dependency>
     <groupId>io.github.jeremiahjordanisaacson</groupId>
     <artifactId>copilot-sdk-supercharged</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.0'
+implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.1'
 ```
 
 ## Quick Start
@@ -373,7 +373,7 @@ to the top of `QuickStart.java`:
 ```java
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 17+
-//DEPS io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.0
+//DEPS io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.1
 ```
 
 Then run it:

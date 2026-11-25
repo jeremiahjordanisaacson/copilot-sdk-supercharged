@@ -1,3 +1,6 @@
+## 3.1.1
+- Fix release: Erlang and Elixir CLI transport fixes and corrected install
+  instructions across the SDK READMEs. No Dart API changes.
 ## 3.1.0
 - Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0. New: MCP secret
   store (`mcpSecretsSave`, `mcpSecretsDelete`, `mcpSecretsDeleteServer`) and

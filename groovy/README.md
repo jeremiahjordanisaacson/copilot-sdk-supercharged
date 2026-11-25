@@ -30,7 +30,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-groovy:3.1.0'
+    implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-groovy:3.1.1'
 }
 ```
 

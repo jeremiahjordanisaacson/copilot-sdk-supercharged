@@ -28,7 +28,7 @@ repositories {
 }
 
 dependencies {
-    implementation("io.github.jeremiahjordanisaacson:copilot-sdk-supercharged-kotlin:3.1.0")
+    implementation("io.github.jeremiahjordanisaacson:copilot-sdk-supercharged-kotlin:3.1.1")
     // The SDK uses these as implementation dependencies, so declare them to call it from your code
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")

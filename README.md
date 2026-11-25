@@ -79,6 +79,14 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
+## What's New in v3.1.1
+
+**Fix release.** The Erlang and Elixir SDKs now complete the handshake with a real Copilot CLI (they never could before), and install instructions are corrected. See the [CHANGELOG](./CHANGELOG.md).
+
+- **Erlang:** working CLI transport, SDK protocol 4 permissions, and exit plan mode. **Elixir:** working CLI transport. Both CI jobs now run end-to-end tests against the real Copilot CLI binary.
+- **Install docs** fixed across the SDK READMEs: a working Java Quick Start, the right Rust crate version, correct package names for Elixir, D, Tcl, Swift, Scala, Crystal, and more, and from-source steps for SDKs that aren't in a registry.
+- **CI** runs the feature-parity check (`scripts/verify-sdk-coverage.mjs`) on every pull request.
+
 ## What's New in v3.1.0
 
 **Upstream sync with Microsoft Copilot SDK 2.0.3-preview.0.** The MCP secret store, plugin extension approvals, and ask-user image answers are in all 40 SDKs, and existing handlers compile unchanged. See the [CHANGELOG](./CHANGELOG.md) for details.

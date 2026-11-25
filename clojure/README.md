@@ -11,13 +11,13 @@ The SDK is published to [Clojars](https://clojars.org/net.clojars.jeremiahisaacs
 ### deps.edn
 
 ```clojure
-{:deps {net.clojars.jeremiahisaacson/copilot-sdk-supercharged {:mvn/version "3.1.0"}}}
+{:deps {net.clojars.jeremiahisaacson/copilot-sdk-supercharged {:mvn/version "3.1.1"}}}
 ```
 
 ### Leiningen
 
 ```clojure
-[net.clojars.jeremiahisaacson/copilot-sdk-supercharged "3.1.0"]
+[net.clojars.jeremiahisaacson/copilot-sdk-supercharged "3.1.1"]
 ```
 
 ### Local checkout
