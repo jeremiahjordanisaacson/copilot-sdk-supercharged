@@ -4,21 +4,29 @@ Patterns for handling errors when using the GitHub Copilot SDK in Kotlin.
 
 ## Basic Error Handling
 
-Use try/catch with coroutines for clean error handling.
+`start()`, `createSession()`, and `sendAndWait()` are `suspend` functions that throw on failure.
+`stop()` returns a list of cleanup errors instead of throwing, so it's safe to call in `finally`.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-        val session = client.createSession(SessionConfig())
-        val response = session.sendAndWait(SendOptions(message = "Explain Kotlin coroutines"))
-        println(response.message)
+        val session = client.createSession(SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
+
+        // Returns the last assistant.message event of the turn, or null if there was none
+        val reply = session.sendAndWait(MessageOptions(prompt = "Explain Kotlin coroutines"))
+        println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)")
     } catch (e: Exception) {
         System.err.println("SDK error: ${e.message}")
     } finally {
@@ -29,90 +37,86 @@ suspend fun main() {
 
 ## Handling Specific Error Types
 
-Catch more specific exceptions before the generic fallback.
+| Failure | What the SDK throws |
+| --- | --- |
+| `copilot` isn't on `PATH` | `IOException` from `start()` |
+| `COPILOT_CLI_PATH` or `cliPath` is an absolute path that doesn't exist | `RuntimeException` ("Copilot CLI not found at ...") from `start()` |
+| The server at `cliUrl` isn't reachable | `java.net.ConnectException` (an `IOException`) |
+| The CLI rejects a request | `com.github.copilot.JsonRpcException`, which carries the JSON-RPC error `code` |
+| The CLI doesn't answer a request within 30 seconds, or `sendAndWait` times out | `kotlinx.coroutines.TimeoutCancellationException` |
+| The session reports `session.error` during `sendAndWait` | `RuntimeException` |
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
-import com.github.copilot.sdk.exception.ConnectionException
-import com.github.copilot.sdk.exception.TimeoutException
+import com.github.copilot.CopilotClient
+import com.github.copilot.JsonRpcException
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import java.io.IOException
+import java.net.ConnectException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-        val session = client.createSession(SessionConfig())
-        val response = session.sendAndWait(SendOptions(message = "Hello"))
-        println(response.message)
-    } catch (e: ConnectionException) {
-        System.err.println("Connection failed. Is the Copilot CLI running? ${e.message}")
-    } catch (e: TimeoutException) {
-        System.err.println("Request timed out: ${e.message}")
-    } catch (e: Exception) {
-        System.err.println("Unexpected error: ${e.message}")
+        val session = client.createSession(SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
+
+        val reply = session.sendAndWait(MessageOptions(prompt = "Hello"))
+        println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)")
+    } catch (e: ConnectException) {
+        System.err.println("Could not reach the CLI server: ${e.message}")
+    } catch (e: IOException) {
+        System.err.println("Could not start the Copilot CLI. Is it on PATH or in COPILOT_CLI_PATH? ${e.message}")
+    } catch (e: JsonRpcException) {
+        System.err.println("The CLI rejected the request (code ${e.code}): ${e.message}")
+    } catch (e: TimeoutCancellationException) {
+        System.err.println("Timed out: ${e.message}")
+    } catch (e: RuntimeException) {
+        System.err.println("The turn failed: ${e.message}")
     } finally {
         client.stop()
     }
 }
 ```
 
-## Using runCatching
-
-Use Kotlin's `runCatching` for a functional error-handling style.
-
-```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
-
-suspend fun main() {
-    val client = CopilotClient()
-
-    try {
-        client.start()
-        val session = client.createSession(SessionConfig())
-
-        val result = runCatching {
-            session.sendAndWait(SendOptions(message = "Explain sealed classes"))
-        }
-
-        result
-            .onSuccess { response -> println(response.message) }
-            .onFailure { error -> System.err.println("Send failed: ${error.message}") }
-    } finally {
-        client.stop()
-    }
-}
-```
+Catch `TimeoutCancellationException` before `RuntimeException`, because it's a subclass.
 
 ## Timeout Handling
 
-Use `withTimeout` from Kotlin coroutines to cap request duration.
+`sendAndWait` waits 60 seconds for the session to go idle. Pass `timeoutMs` to change that. When the
+wait times out, the turn can still be running in the CLI, so abort it.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
-import kotlinx.coroutines.withTimeout
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-        val session = client.createSession(SessionConfig())
+        val session = client.createSession(SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
 
-        val response = withTimeout(30_000) { // 30-second timeout
-            session.sendAndWait(SendOptions(message = "Summarize this codebase"))
+        try {
+            val reply = session.sendAndWait(MessageOptions(prompt = "Summarize this repository"), timeoutMs = 30_000)
+            println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)")
+        } catch (e: TimeoutCancellationException) {
+            System.err.println("No reply within 30 seconds")
+            session.abort() // stop the turn if it is still running
         }
-        println(response.message)
-    } catch (e: TimeoutCancellationException) {
-        System.err.println("Request timed out after 30 seconds")
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
     } finally {
         client.stop()
     }
@@ -121,32 +125,42 @@ suspend fun main() {
 
 ## Aborting a Request
 
-Use coroutine cancellation to abort in-flight requests.
+`send()` returns as soon as the message is queued. Call `abort()` to stop the turn; the session then
+goes idle and accepts new messages. Cancelling a coroutine that's waiting in `sendAndWait` only stops
+the wait, not the turn, so call `abort()` either way.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
-import kotlinx.coroutines.*
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-        val session = client.createSession(SessionConfig())
+        val session = client.createSession(SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
 
-        val job = CoroutineScope(Dispatchers.IO).launch {
-            val response = session.sendAndWait(SendOptions(message = "Write a long essay"))
-            println(response.message)
+        val idle = CompletableDeferred<Unit>()
+        session.on("abort") { event ->
+            println("Aborted: ${event.data?.get("reason")?.jsonPrimitive?.contentOrNull}")
         }
+        session.on("session.idle") { idle.complete(Unit) }
 
-        // Cancel after 5 seconds
-        delay(5000)
-        job.cancelAndJoin()
-        println("Request was cancelled.")
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        session.send(MessageOptions(prompt = "Write a long essay about the history of Kotlin"))
+
+        delay(5_000)
+        session.abort()
+
+        withTimeout(30_000) { idle.await() }
     } finally {
         client.stop()
     }
@@ -155,38 +169,42 @@ suspend fun main() {
 
 ## Graceful Shutdown
 
-Add a JVM shutdown hook to guarantee the client stops on exit.
+Stop the client from a shutdown hook so the CLI process it started is cleaned up, even when the
+program is interrupted.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 fun main() = runBlocking {
     val client = CopilotClient()
 
+    // Runs on normal exit, System.exit, and Ctrl+C
     Runtime.getRuntime().addShutdownHook(Thread {
         println("Shutting down...")
         runBlocking { client.stop() }
     })
 
-    try {
-        client.start()
-        val session = client.createSession(SessionConfig())
-        val response = session.sendAndWait(SendOptions(message = "Hello from Kotlin"))
-        println(response.message)
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
-    }
+    client.start()
+    val session = client.createSession(SessionConfig(
+        onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+    ))
+
+    val reply = session.sendAndWait(MessageOptions(prompt = "Hello from Kotlin"))
+    println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)")
 }
 ```
 
 ## Best Practices
 
-- Always call `client.stop()` in a `finally` block or shutdown hook.
-- Catch specific exception types before catching the generic `Exception`.
-- Use `withTimeout` for all production requests to prevent indefinite blocking.
-- Use `runCatching` for functional-style error handling in non-critical paths.
-- Use structured concurrency (`coroutineScope`, `supervisorScope`) for proper cancellation.
-- Log errors with enough context (session ID, prompt snippet) for easier debugging.
+- Call `client.stop()` in a `finally` block or a shutdown hook. It detaches every session the client created and stops the CLI process.
+- Check `sendAndWait` results for `null`; a turn can finish without an assistant message.
+- Catch specific exception types before the generic `Exception`, and `TimeoutCancellationException` before `RuntimeException`.
+- Pass `timeoutMs` to `sendAndWait` for long tasks, and call `abort()` when you stop waiting.
+- Don't wrap SDK calls in `runCatching` inside coroutines: it also catches `CancellationException` and breaks cancellation.
+- Log the session ID (`session.sessionId`) with errors so you can find the session later.

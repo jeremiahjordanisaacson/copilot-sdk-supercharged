@@ -36,4 +36,4 @@ source "${COPILOT_SDK_DIR}/session.sh"
 
 # --- SDK Info ---
 COPILOT_SDK_NAME="copilot-sdk-shell"
-COPILOT_SDK_VERSION="0.1.0"
+COPILOT_SDK_VERSION="3.1.1"

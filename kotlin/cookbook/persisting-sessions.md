@@ -1,30 +1,34 @@
 # Persisting Sessions
 
-Save and resume sessions across restarts using the GitHub Copilot SDK in Kotlin.
+Save and resume sessions across restarts with the GitHub Copilot SDK in Kotlin.
 
 ## Custom Session IDs
 
-Provide a custom session ID to resume a conversation later.
+Give a session your own ID so you can find and resume it later. To continue a saved conversation,
+use `resumeSession`: `createSession` with an ID that's already in use starts a new conversation
+without the saved history.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
+        val session = client.createSession(SessionConfig(
+            sessionId = "project-alpha-session-001",
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
+        println("Session ID: ${session.sessionId}")
 
-        // Create a session with a custom ID
-        val config = SessionConfig(sessionId = "project-alpha-session-001")
-        val session = client.createSession(config)
-
-        val response = session.sendAndWait(SendOptions(message = "Let's plan the auth module"))
-        println(response.message)
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        val reply = session.sendAndWait(MessageOptions(prompt = "Let's plan the auth module"))
+        println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)")
     } finally {
         client.stop()
     }
@@ -33,87 +37,127 @@ suspend fun main() {
 
 ## Resuming a Session
 
-Use the same session ID to pick up where you left off after a restart.
+Sessions are saved as you go. `client.stop()` (or `session.destroy()`) detaches a session and keeps
+its state on disk, and `resumeSession` picks it up again, even from another process. Handlers such as
+`onPermissionRequest` and tools aren't saved with the session, so pass them again in
+`ResumeSessionConfig`.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.ResumeSessionConfig
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
-    // First run: start a session
-    val client1 = CopilotClient()
+const val SESSION_ID = "persistent-session-42"
+
+fun main() = runBlocking {
+    // First run: start the conversation
+    val first = CopilotClient()
     try {
-        client1.start()
-        val config = SessionConfig(sessionId = "persistent-session-42")
-        val session = client1.createSession(config)
-        session.sendAndWait(SendOptions(message = "We are building a payment gateway"))
+        first.start()
+        val session = first.createSession(SessionConfig(
+            sessionId = SESSION_ID,
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
+        session.sendAndWait(MessageOptions(prompt = "We are building a payment gateway in Kotlin"))
     } finally {
-        client1.stop()
+        first.stop()
     }
 
-    // Later run: resume the same session
-    val client2 = CopilotClient()
+    // Later run: resume the conversation by ID
+    val later = CopilotClient()
     try {
-        client2.start()
-        val config = SessionConfig(sessionId = "persistent-session-42")
-        val session = client2.createSession(config)
+        later.start()
+        val session = later.resumeSession(SESSION_ID, ResumeSessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
 
-        // The session remembers previous context
-        val response = session.sendAndWait(SendOptions(message = "What were we building?"))
-        println(response.message) // Refers to the payment gateway
+        val reply = session.sendAndWait(MessageOptions(prompt = "What are we building?"))
+        println(reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)") // mentions the payment gateway
     } finally {
-        client2.stop()
+        later.stop()
+    }
+}
+```
+
+## Listing and Deleting Saved Sessions
+
+```kotlin
+import com.github.copilot.CopilotClient
+import kotlinx.coroutines.runBlocking
+
+fun main() = runBlocking {
+    val client = CopilotClient()
+    try {
+        client.start()
+        for (meta in client.listSessions()) {
+            println("${meta.sessionId}  modified ${meta.modifiedTime}  ${meta.summary}")
+        }
+
+        // Removes a saved session and its state for good:
+        // client.deleteSession("project-alpha-session-001")
+
+        val lastId = client.getLastSessionId()
+        println("Most recent session: ${lastId ?: "(none)"}")
+    } finally {
+        client.stop()
     }
 }
 ```
 
 ## Infinite Sessions with Compaction
 
-Enable infinite sessions for long-running conversations. The SDK automatically compacts
-history when it grows too large, emitting compaction events.
+Infinite sessions are on by default: when the conversation nears the model's context limit, the
+runtime compacts older history in the background and emits compaction events. Pass an
+`InfiniteSessionConfig` only to change the thresholds or to turn the feature off
+(`enabled = false`).
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.InfiniteSessionConfig
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-
-        val config = SessionConfig(
+        val session = client.createSession(SessionConfig(
             sessionId = "long-running-agent",
-            infiniteSession = true
-        )
-        val session = client.createSession(config)
+            infiniteSessions = InfiniteSessionConfig(
+                enabled = true,
+                backgroundCompactionThreshold = 0.80, // start compacting at 80% of the context window
+                bufferExhaustionThreshold = 0.95,     // pause new work at 95% until compaction finishes
+            ),
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
 
-        // Listen for compaction events
-        session.onEvent("session.compaction_start") {
-            println("Compaction started: conversation history is being summarized...")
-        }
-        session.onEvent("session.compaction_complete") {
-            println("Compaction complete: history has been summarized.")
+        session.on("session.compaction_start") { println("Compacting conversation history...") }
+        session.on("session.compaction_complete") { event ->
+            println("Compaction finished, success=${event.data?.get("success")?.jsonPrimitive?.booleanOrNull}")
         }
 
-        // Long-running loop that may trigger compaction
         val tasks = listOf(
             "Analyze the auth module",
             "Review the database schema",
             "Check the API endpoints",
             "Suggest performance improvements",
-            "Write unit tests for the service layer"
+            "Write unit tests for the service layer",
         )
-
         for (task in tasks) {
-            val response = session.sendAndWait(SendOptions(message = task))
+            val reply = session.sendAndWait(MessageOptions(prompt = task), timeoutMs = 300_000)
             println("Task: $task")
-            println("Response: ${response.message}\n")
+            println("Response: ${reply?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)"}")
         }
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
     } finally {
         client.stop()
     }
@@ -122,26 +166,27 @@ suspend fun main() {
 
 ## Session State Location
 
-By default, session state is persisted to `~/.copilot/session-state/{sessionId}`.
-This allows automatic resumption without any extra configuration.
+With infinite sessions on, each session has a workspace directory for its checkpoints, plan, and
+files. By default it's `~/.copilot/session-state/{sessionId}`. `workspacePath` holds the actual path,
+or `null` when infinite sessions are off.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.CopilotClient
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import kotlinx.coroutines.runBlocking
 
-suspend fun main() {
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
+        val session = client.createSession(SessionConfig(
+            sessionId = "my-app-session",
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        ))
 
-        val config = SessionConfig(sessionId = "my-app-session")
-        val session = client.createSession(config)
-
-        println("Session ID: ${config.sessionId}")
-        println("State stored at: ~/.copilot/session-state/my-app-session/")
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        println("Session ID: ${session.sessionId}")
+        println("Workspace: ${session.workspacePath}")
     } finally {
         client.stop()
     }
@@ -150,8 +195,8 @@ suspend fun main() {
 
 ## Best Practices
 
-- Use descriptive, deterministic session IDs (e.g., `"user-123-project-alpha"`) for easy resumption.
-- Enable infinite sessions (`infiniteSession = true`) for long-running agents or interactive tools.
-- Listen for compaction events to provide user feedback during context summarization.
-- Session state is stored in `~/.copilot/session-state/{sessionId}` by default.
-- Avoid reusing session IDs across unrelated conversations to prevent context pollution.
+- Use descriptive, deterministic session IDs (for example `"user-123-project-alpha"`) so you can resume them.
+- Resume with `resumeSession`; `createSession` with an existing ID doesn't load the saved history.
+- Register handlers and tools again on every resume.
+- Listen for compaction events to tell users when history is being summarized.
+- Delete sessions you no longer need with `deleteSession`.

@@ -1,6 +1,6 @@
 {application, copilot_sdk, [
     {description, "Erlang SDK for the GitHub Copilot CLI"},
-    {vsn, "2.0.0"},
+    {vsn, "3.1.1"},
     {registered, []},
     {applications, [
         kernel,

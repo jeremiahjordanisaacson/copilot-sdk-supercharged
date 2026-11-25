@@ -32,9 +32,9 @@ extern "C" {
  * Version
  * ============================================================================ */
 
-#define COPILOT_SDK_VERSION_MAJOR 0
+#define COPILOT_SDK_VERSION_MAJOR 3
 #define COPILOT_SDK_VERSION_MINOR 1
-#define COPILOT_SDK_VERSION_PATCH 0
+#define COPILOT_SDK_VERSION_PATCH 1
 
 /* ============================================================================
  * Error codes

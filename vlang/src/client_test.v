@@ -10,7 +10,7 @@ import x.json2
 
 fn test_sdk_version_is_set() {
 	assert sdk_version.len > 0
-	assert sdk_version == '0.1.0'
+	assert sdk_version == '3.1.1'
 }
 
 fn test_protocol_version_value() {

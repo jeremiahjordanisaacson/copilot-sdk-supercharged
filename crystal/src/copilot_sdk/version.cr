@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 module CopilotSDK
-  VERSION = "0.1.0"
+  VERSION = "3.1.1"
 
   # SDK protocol version this SDK speaks. Copilot CLI 1.0.113 and newer report 4.
   SDK_PROTOCOL_VERSION = 4

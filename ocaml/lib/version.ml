@@ -10,4 +10,4 @@ let max_protocol_version = 4
 
 let sdk_name = "copilot-sdk-supercharged-ocaml"
 
-let sdk_version = "0.1.0"
+let sdk_version = "3.1.1"

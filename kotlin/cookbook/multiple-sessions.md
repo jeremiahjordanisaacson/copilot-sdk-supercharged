@@ -1,38 +1,44 @@
 # Multiple Sessions
 
-Manage multiple independent conversations simultaneously using the GitHub Copilot SDK in Kotlin.
+Manage multiple independent conversations at the same time with the GitHub Copilot SDK in Kotlin.
 
 ## Creating Multiple Sessions
 
-Each session maintains its own conversation history, so you can run independent tasks in parallel.
+One client can host many sessions. Each session keeps its own conversation history.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import com.github.copilot.SessionEvent
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+private fun SessionEvent?.text(): String =
+    this?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)"
+
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
-
-        // Create two independent sessions
-        val codeReview = client.createSession(SessionConfig())
-        val documentation = client.createSession(SessionConfig())
-
-        // Each session tracks its own context
-        val reviewResponse = codeReview.sendAndWait(
-            SendOptions(message = "Review this function for bugs")
+        val config = SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
         )
-        println("Review: ${reviewResponse.message}")
 
-        val docsResponse = documentation.sendAndWait(
-            SendOptions(message = "Write API docs for UserService")
+        val codeReview = client.createSession(config)
+        val documentation = client.createSession(config)
+
+        val review = codeReview.sendAndWait(
+            MessageOptions(prompt = "Review this function for bugs: fun add(a: Int, b: Int) = a - b")
         )
-        println("Docs: ${docsResponse.message}")
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        println("Review: ${review.text()}")
+
+        val docs = documentation.sendAndWait(
+            MessageOptions(prompt = "Write a KDoc comment for a function that adds two Ints")
+        )
+        println("Docs: ${docs.text()}")
     } finally {
         client.stop()
     }
@@ -41,33 +47,40 @@ suspend fun main() {
 
 ## Independent Conversations
 
-Sessions do not share context. A follow-up in one session has no effect on the other.
+Sessions don't share context. A follow-up in one session has no effect on the other.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import com.github.copilot.SessionEvent
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+private fun SessionEvent?.text(): String =
+    this?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)"
+
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
+        val config = SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        )
 
-        val session1 = client.createSession(SessionConfig())
-        val session2 = client.createSession(SessionConfig())
+        val server = client.createSession(config)
+        val android = client.createSession(config)
 
-        // Session 1 conversation
-        session1.sendAndWait(SendOptions(message = "I'm working on a Ktor server"))
-        val followUp1 = session1.sendAndWait(SendOptions(message = "How should I handle auth?"))
-        println("Session 1: ${followUp1.message}")
+        server.sendAndWait(MessageOptions(prompt = "I'm working on a Ktor server"))
+        val serverAnswer = server.sendAndWait(MessageOptions(prompt = "How should I handle auth?"))
+        println("Ktor session: ${serverAnswer.text()}")
 
-        // Session 2 conversation (knows nothing about session1)
-        session2.sendAndWait(SendOptions(message = "I'm building an Android app"))
-        val followUp2 = session2.sendAndWait(SendOptions(message = "How should I handle auth?"))
-        println("Session 2: ${followUp2.message}")
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        // This session knows nothing about the Ktor conversation
+        android.sendAndWait(MessageOptions(prompt = "I'm building an Android app"))
+        val androidAnswer = android.sendAndWait(MessageOptions(prompt = "How should I handle auth?"))
+        println("Android session: ${androidAnswer.text()}")
     } finally {
         client.stop()
     }
@@ -76,36 +89,49 @@ suspend fun main() {
 
 ## Parallel Requests with Coroutines
 
-Run multiple sessions concurrently using `async`/`await`.
+`sendAndWait` suspends instead of blocking, so `async` runs several sessions concurrently.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
-import kotlinx.coroutines.*
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import com.github.copilot.SessionEvent
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+private fun SessionEvent?.text(): String =
+    this?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)"
+
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
+        val config = SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        )
 
-        val s1 = client.createSession(SessionConfig())
-        val s2 = client.createSession(SessionConfig())
-        val s3 = client.createSession(SessionConfig())
+        val questions = listOf(
+            "Explain coroutines in two sentences",
+            "Explain sealed classes in two sentences",
+            "Explain data classes in two sentences",
+        )
+        val sessions = questions.map { client.createSession(config) }
 
-        // Fire all requests concurrently
-        coroutineScope {
-            val d1 = async { s1.sendAndWait(SendOptions(message = "Explain coroutines")) }
-            val d2 = async { s2.sendAndWait(SendOptions(message = "Explain sealed classes")) }
-            val d3 = async { s3.sendAndWait(SendOptions(message = "Explain data classes")) }
-
-            println("Coroutines: ${d1.await().message}")
-            println("Sealed: ${d2.await().message}")
-            println("Data: ${d3.await().message}")
+        // coroutineScope waits for every request and fails fast if one of them throws
+        val answers = coroutineScope {
+            sessions.zip(questions)
+                .map { (session, question) ->
+                    async { session.sendAndWait(MessageOptions(prompt = question), timeoutMs = 120_000).text() }
+                }
+                .awaitAll()
         }
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+
+        questions.zip(answers).forEach { (question, answer) -> println("$question\n$answer\n") }
     } finally {
         client.stop()
     }
@@ -114,41 +140,52 @@ suspend fun main() {
 
 ## Session Lifecycle
 
-Sessions remain active until the client is stopped. Clean up with `client.stop()`.
+`destroy()` releases a session you no longer need and keeps its saved state, so you can resume it
+later. `deleteSession()` removes the saved state for good. `client.stop()` destroys every session the
+client still holds.
 
 ```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.SendOptions
+import com.github.copilot.CopilotClient
+import com.github.copilot.MessageOptions
+import com.github.copilot.PermissionRequestResult
+import com.github.copilot.SessionConfig
+import com.github.copilot.SessionEvent
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
-suspend fun main() {
+private fun SessionEvent?.text(): String =
+    this?.data?.get("content")?.jsonPrimitive?.contentOrNull ?: "(no reply)"
+
+fun main() = runBlocking {
     val client = CopilotClient()
-
     try {
         client.start()
+        val config = SessionConfig(
+            onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approve-once") }
+        )
 
-        // Short-lived session for a one-off task
-        val temp = client.createSession(SessionConfig())
-        val result = temp.sendAndWait(SendOptions(message = "Format this JSON"))
-        println(result.message)
+        // A short-lived session for a one-off task
+        val scratch = client.createSession(config)
+        println(scratch.sendAndWait(MessageOptions(prompt = """Format this JSON: {"a":1,"b":[1,2]}""")).text())
+        scratch.destroy()
+        client.deleteSession(scratch.sessionId)
 
-        // Long-lived session for interactive use
-        val mainSession = client.createSession(SessionConfig())
-        mainSession.sendAndWait(SendOptions(message = "Let's build a REST API"))
-        mainSession.sendAndWait(SendOptions(message = "Add a /users endpoint"))
-        mainSession.sendAndWait(SendOptions(message = "Add pagination support"))
-    } catch (e: Exception) {
-        System.err.println("Error: ${e.message}")
+        // A long-lived session for a multi-step task
+        val project = client.createSession(config)
+        project.sendAndWait(MessageOptions(prompt = "Let's design a REST API for a todo app"))
+        project.sendAndWait(MessageOptions(prompt = "Add a /users endpoint"))
+        println(project.sendAndWait(MessageOptions(prompt = "Add pagination to both endpoints")).text())
     } finally {
-        client.stop() // All sessions are cleaned up
+        client.stop()
     }
 }
 ```
 
 ## Best Practices
 
-- Use separate sessions for tasks that should not share conversational context.
-- Use `async`/`await` from `kotlinx.coroutines` to run independent sessions concurrently.
-- Keep session references accessible so you can send follow-up messages to the right context.
-- Call `client.stop()` once when done; this cleans up all active sessions.
-- Use `coroutineScope` to propagate exceptions from child coroutines properly.
+- Use a separate session for each task that shouldn't share conversational context.
+- Reuse one `CopilotClient` for all sessions; each client starts its own CLI process.
+- Run independent sessions concurrently with `async` inside `coroutineScope`, one session per task.
+- Keep session references (or IDs) so follow-up messages go to the right conversation.
+- Call `destroy()` on sessions you're done with, and `client.stop()` once at the end.

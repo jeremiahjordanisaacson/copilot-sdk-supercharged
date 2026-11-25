@@ -7,7 +7,7 @@
 
 package Copilot.Version is
 
-   SDK_Version      : constant String := "2.0.2";
+   SDK_Version      : constant String := "3.1.1";
    --  SDK protocol version spoken with the Copilot CLI (CLI 1.0.113 or newer).
    Protocol_Version : constant Natural := 4;
    --  The startup handshake accepts exactly Min_Protocol .. Max_Protocol.

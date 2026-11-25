@@ -3,7 +3,7 @@
             [deps-deploy.deps-deploy :as dd]))
 
 (def lib 'net.clojars.jeremiahisaacson/copilot-sdk-supercharged)
-(def version (or (System/getenv "VERSION") "1.0.0"))
+(def version (or (System/getenv "VERSION") "3.1.1"))
 (def class-dir "target/classes")
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 (def jar-file (format "target/%s-%s.jar" (name lib) version))

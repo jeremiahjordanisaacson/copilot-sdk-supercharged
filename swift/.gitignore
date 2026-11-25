@@ -1,0 +1,3 @@
+# SwiftPM build output and caches
+.build/
+.swiftpm/

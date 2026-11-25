@@ -5,64 +5,67 @@
 ## Big picture 🔧
 
 - The repo implements language SDKs for **40 languages** (Node/TS, Python, Go, .NET, Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell/Bash, Elixir, Haskell, Clojure, Visual Basic, Delphi, Fortran, MATLAB, Ada, Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V) that speak to the **Copilot CLI** via **JSON-RPC** (see `README.md` and `nodejs/src/client.ts`).
-- Typical flow: your App → SDK client → JSON-RPC → Copilot CLI (server mode). The CLI must be installed or you can connect to an external CLI server via the `CLI URL option (language-specific casing)` (Node: `cliUrl`, Go: `CLIUrl`, .NET: `CliUrl`, Python: `cli_url`).
+- Typical flow: your App → SDK client → JSON-RPC → Copilot CLI (server mode). The SDK starts the CLI (or a bundled runtime) itself, or connects to one that is already running; see the connection options under "Integration & environment notes" below.
 
 ## Most important files to read first 📚
 
 - Top-level: `README.md` (architecture + quick start)
 - Language entry points: `nodejs/src/client.ts`, `python/README.md`, `go/README.md`, `dotnet/README.md`, and 36 additional SDK READMEs (see `MULTI_LANGUAGE_SDKS.md` for the full list)
 - Test harness & E2E: `test/harness/*`, Python harness wrapper `python/e2e/testharness/proxy.py`
-- Schemas & type generation: `nodejs/scripts/generate-session-types.ts`
+- Generated protocol types: `nodejs/src/generated/` (`session-events.ts`, `rpc.ts`) and the other core SDKs' generated folders arrive with upstream syncs; this repo has no type generator
 - Session snapshots used by E2E: `test/snapshots/` (used by the replay proxy)
+- CI workflows (the source of truth for build and test commands): `.github/workflows/core-sdk-tests.yml` (Node, Python, Go, .NET) and `.github/workflows/additional-sdk-tests.yml` (the other 36 SDKs)
 
 ## Developer workflows (commands you’ll use often) ▶️
 
-- Monorepo helpers: use `just` tasks from repo root:
-  - Install deps: `just install` (runs npm ci, uv pip install -e, go mod download, dotnet restore)
-  - Format all: `just format` | Lint all: `just lint` | Test all: `just test`
+There's no `justfile` or other task runner at the repo root, so run commands per SDK. CI is the source of truth: `.github/workflows/core-sdk-tests.yml` and `.github/workflows/additional-sdk-tests.yml`. `CONTRIBUTING.md` has each job's full commands (including the long deselect, skip, and filter lists) and toolchain versions.
+
+- **NEVER run `npm test`, `npm ci`, or `npx vitest` in `nodejs/` or `test/harness/`.** On macOS they trigger a flood of Keychain prompts. Install dependencies with `npm install --ignore-scripts` (what CI runs) and validate Node changes with `npm run typecheck` (or `npx tsc --noEmit`).
+- Shared E2E setup: `cd nodejs && npm install --ignore-scripts` (installs the pinned Copilot CLI at `nodejs/node_modules/.bin/copilot`) and `cd test/harness && npm install --ignore-scripts`. CI sets `COPILOT_CLI_PATH` to that CLI and `GH_TOKEN`/`GITHUB_TOKEN` to a placeholder.
 - Per-language (core SDKs):
-  - Node: `cd nodejs && npm ci` → `npm test` (Vitest), `npm run generate:session-types` to regenerate session-event types
-  - Python: `cd python && uv pip install -e ".[dev]"` → `uv run pytest` (E2E tests use the test harness)
-  - Go: `cd go && go test ./...`
-  - .NET: `cd dotnet && dotnet test test/Microsoft.Copilot.SDK.Test.csproj`
+  - Node: `cd nodejs && npm install --ignore-scripts --no-audit --no-fund`, then `npm run typecheck` and `npm run build`. `package.json` only has `clean`, `build`, `typecheck`, and `prepublishOnly` scripts: there's no test or lint script.
+  - Python (3.11+): `cd python && uv sync --all-extras --dev`, then `uv run ruff format --check .`, `uv run ruff check`, and `uv run pytest -q --ignore=e2e -n 4 --timeout 120` with the `--deselect` list from `core-sdk-tests.yml` (set `COPILOT_CLI_PATH` first).
+  - Go: `cd go && go build ./... && go vet -unsafeptr=false ./...`, then `go test -count=1 -timeout 20m` with the `-skip` list from `core-sdk-tests.yml` over `$(go list ./... | grep -v '/internal/e2e')`.
+  - .NET: `cd dotnet && dotnet build test/Microsoft.Copilot.SDK.Test.csproj -p:CopilotSkipCliDownload=true`, then `dotnet test test/Microsoft.Copilot.SDK.Test.csproj --no-build -f net10.0 -p:CopilotSkipCliDownload=true` with the `--filter` from `core-sdk-tests.yml`.
   - **.NET testing note:** Never add `InternalsVisibleTo` to any project file when writing tests. Tests must only access public APIs.
-- Per-language (additional SDKs):
-  - Java: `cd java && mvn test`
+- Per-language (additional SDKs), as CI runs them:
+  - Java: `cd java && mvn test -q` (there's no `src/test`, so this only compiles; CI doesn't run the separate `java/e2e` Maven project)
   - Rust: `cd rust && cargo test`
-  - Ruby: `cd ruby && bundle exec rake test`
-  - PHP: `cd php && composer test`
-  - Swift: `cd swift && swift test`
-  - Kotlin: `cd kotlin && ./gradlew test`
-  - C++: `cd cpp && cmake -B build && cmake --build build && ctest --test-dir build`
-  - C: `cd c && cmake -B build && cmake --build build && ctest --test-dir build`
-  - Dart: `cd dart && dart test`
+  - Ruby: `cd ruby && bundle install && bundle exec rake test`
+  - PHP: `cd php && composer install --no-interaction && composer test`
+  - Swift: `cd swift && swift test` (macOS)
+  - Kotlin: `cd kotlin && gradle test` (no Gradle wrapper; the build needs a JDK 17 for `jvmToolchain(17)`)
+  - C++: `cd cpp && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure` (ctest finds no registered tests, so the build is the check)
+  - C: `cd c && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure` (same as C++)
+  - Dart: `cd dart && dart pub get && dart test`
   - Scala: `cd scala && sbt test`
   - R: `cd r && Rscript -e "devtools::test()"`
-  - Perl: `cd perl && prove -l t/`
-  - Lua: `cd lua && busted`
-  - Shell: `cd shell && bash -n lib/*.sh`
-  - Elixir: `cd elixir && mix test`
-  - Haskell: `cd haskell && cabal test`
-  - Clojure: `cd clojure && clj -M:test`
-  - Visual Basic: `cd visualbasic && dotnet test`
-  - Delphi: `cd delphi && lazbuild tests/TestRunner.lpi && ./tests/TestRunner`
+  - Perl: `cd perl && cpanm --notest Type::Tiny Moo File::Which Test::Exception HTTP::Tiny && cpanm --installdeps --notest . && prove -l e2e/`
+  - Lua: `cd lua && luarocks install lua-cjson && luarocks install busted && busted`
+  - Shell: `cd shell && bash -c 'for f in lib/*.sh; do bash -n "$f" || exit 1; done'` (CI's `bash -n lib/*.sh` checks only the first file)
+  - Elixir: `cd elixir && mix deps.get && mix test`
+  - Haskell: `cd haskell && cabal update && cabal test`
+  - Clojure: `cd clojure && clojure -X:test` (currently runs 0 tests: the runner looks in `test/`, and the suite is in `e2e/`)
+  - Visual Basic: `cd visualbasic && dotnet test tests/CopilotSDK.Supercharged.VB.Tests.vbproj` (CI's plain `dotnet test` picks up the library project and runs no tests)
+  - Delphi: no working check yet; CI's non-blocking `fpc -Sd -v0 src/*.pas` step fails
   - Fortran: `cd fortran && fpm test`
-  - MATLAB: `cd matlab && matlab -batch "runtests('tests')"`
-  - Ada: `cd ada && alr build && alr run copilot_sdk_tests`
-  - Objective-C: `cd objc && xcodebuild test -scheme CopilotSDK`
-  - F#: `cd fsharp && dotnet test`
-  - Groovy: `cd groovy && ./gradlew test`
-  - Julia: `cd julia && julia --project=. -e 'using Pkg; Pkg.test()'`
-  - COBOL: `cd cobol && make test`
-  - OCaml: `cd ocaml && dune runtest`
-  - Zig: `cd zig && zig build test`
-  - Nim: `cd nim && nimble test`
+  - MATLAB: `cd matlab && octave --eval "addpath(genpath('.')); disp('MATLAB SDK loaded successfully')"` (a load check; it doesn't run `tests/TestClient.m`)
+  - Ada: `cd ada && gnatmake -c src/*.adb` (CI's compile check); unit tests: `cd ada/tests && gnatmake test_client.adb -I../src -aI../src && ./test_client`
+  - Objective-C: no working check yet; CI's non-blocking `xcodebuild test -scheme CopilotSDK` step fails (the package's targets are `CopilotObjCSDK` and `CopilotObjCSDKTests`)
+  - F#: `cd fsharp && dotnet test tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj`
+  - Groovy: `cd groovy && gradle test` (no Gradle wrapper)
+  - Julia: `cd julia && julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'`
+  - COBOL: no working check yet; the sources don't compile with GnuCOBOL 3.2, and CI's non-blocking `cobc -fsyntax-only src/*.cob` step fails
+  - OCaml: `cd ocaml && opam install . --deps-only --with-test -y && opam exec -- dune test`
+  - Zig: `cd zig && zig build test` (Zig 0.13.0)
+  - Nim: `cd nim && nimble test -y`
   - D: `cd dlang && dub test`
   - Erlang: `cd erlang && rebar3 ct`
-  - Crystal: `cd crystal && crystal spec`
-  - Tcl: `cd tcl && make test`
-  - Solidity: `cd solidity && forge test`
-  - V: `cd vlang && v test src/`
+  - Crystal: `cd crystal && shards install --without-development --skip-postinstall && crystal spec`
+  - Tcl: `cd tcl && make test` (runs `tests/client_test.tcl`; CI's non-blocking step points at a missing `tests/run_tests.tcl`)
+  - Solidity: build the Node SDK first (`cd nodejs && npm install --ignore-scripts && npm run build`), then `cd solidity && npm install --legacy-peer-deps && npm test` (Vitest; the SDK is TypeScript)
+  - V: `cd vlang && v test src/` (CI's non-blocking `v src/*.v` step fails because V takes a single target)
+- Feature parity check: `node scripts/verify-sdk-coverage.mjs` from the repo root. CI runs it on every pull request and on pushes to main (`.github/workflows/sdk-coverage.yml`).
 
 ## Testing & E2E tips⚙️
 
@@ -76,7 +79,7 @@
 
 - **Never claim a feature in the README that isn't implemented in actual code across all 40 SDKs.**
 - **After every upstream sync**, audit what changed and port ALL new features/methods/types to all 36 additional SDKs before shipping.
-- **Run `node scripts/verify-sdk-coverage.mjs`** before every release. It checks all 36 additional SDKs for required RPC methods AND feature implementations. CI will block if any SDK has gaps.
+- **Run `node scripts/verify-sdk-coverage.mjs`** before every release. It checks all 36 additional SDKs for required RPC methods AND feature implementations. CI runs it on every pull request (`.github/workflows/sdk-coverage.yml`) and will block if any SDK has gaps.
 - **If a feature can't be implemented in a language**, document why explicitly in that SDK's README — don't silently skip it.
 
 ## Git commit conventions 🚫
@@ -111,7 +114,7 @@
 4. Wait for the user's response before doing anything.
 5. If there are NO open sync issues and upstream is up to date, say nothing — proceed normally.
 - Streaming: when `streaming`/`Streaming=true` you receive delta events (`assistant.message_delta`, `assistant.reasoning_delta`) and final events (`assistant.message`, `assistant.reasoning`) — tests expect this behavior.
-- Type generation is centralized in `nodejs/scripts/generate-session-types.ts` and requires the `@github/copilot` schema to be present (often via `npm link` or installed package).
+- Generated protocol types arrive with upstream syncs (for example `nodejs/src/generated/session-events.ts` and `rpc.ts`). This repo has no type generator, so don't hand-edit generated files.
 
 ## Release announcements 📢
 
@@ -121,13 +124,13 @@
 
 ## Integration & environment notes ⚠️
 
-- The SDK requires a Copilot CLI installation or an external server reachable via the `CLI URL option (language-specific casing)` (Node: `cliUrl`, Go: `CLIUrl`, .NET: `CliUrl`, Python: `cli_url`) or `COPILOT_CLI_PATH`.
-- Some scripts (typegen, formatting) call external tools: `gofmt`, `dotnet format`, `tsx` (available via npm), `quicktype`/`quicktype-core` (used by the Node typegen script), and `prettier` (provided as an npm devDependency). Most of these are available through the repo's package scripts or devDependencies—run `just install` (and `cd nodejs && npm ci`) to install them. Ensure the required tools are available in CI / developer machines.
-- Tests may assume `node >= 18`, `python >= 3.9`, platform differences handled (Windows uses `shell=True` for npx in harness).
+- The SDKs need the Copilot CLI (`COPILOT_CLI_PATH` points them at a specific executable) or a running runtime to connect to. The core SDKs connect to a running runtime with a TCP connection (Node: `RuntimeConnection.forTcp(host, port)`, Python: `RuntimeConnection.for_tcp(host, port)`, Go: `TCPConnection{Host, Port}`, .NET: `RuntimeConnection.ForTcp(...)`); most additional SDKs take a CLI URL option (for example `cliUrl` in Java and Kotlin).
+- CI's lint and format checks are `ruff` for Python (through `uv`), `go vet` for Go, and `tsc` for Node (`npm run typecheck`). There's no repo-wide formatter or install script; see the per-language commands above.
+- Toolchain floors: Node `^20.19.0 || >=22.12.0` (CI uses Node 22) and Python 3.11+ (CI uses 3.12). The Python E2E harness wrapper uses `shell=True` on Windows to find `npx`.
 
 ## Where to add new code or tests 🧭
 
 - SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, and `{java,rust,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure,visualbasic,delphi,fortran,matlab,ada,objc,fsharp,groovy,julia,cobol,ocaml,zig,nim,dlang,erlang,crystal,tcl,solidity,vlang}/` (see each SDK's README for directory layout)
-- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, and test directories within each of the 36 additional SDK directories
+- Unit tests: `python/` (`test_*.py`), `go/` (`*_test.go`), `dotnet/test`, and the test directories of the 36 additional SDKs. The Node SDK has no unit tests in this repo.
 - E2E tests: `*/e2e/` folders that use the shared replay proxy and `test/snapshots/`
-- Generated types: update schema in `@github/copilot` then run `cd nodejs && npm run generate:session-types` and commit generated files in `src/generated` or language generated location.
+- Generated types: generated files (`nodejs/src/generated`, `python/copilot/_generated`, `go/zsession_events.go`, `go/rpc/zrpc.go`, `dotnet/src/Generated`) come from upstream. Update them through an upstream sync, not by hand.
