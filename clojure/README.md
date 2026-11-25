@@ -6,12 +6,26 @@ Clojure SDK for programmatic control of GitHub Copilot CLI via JSON-RPC 2.0.
 
 ## Installation
 
+The SDK is published to [Clojars](https://clojars.org/net.clojars.jeremiahisaacson/copilot-sdk-supercharged) as `net.clojars.jeremiahisaacson/copilot-sdk-supercharged`.
+
 ### deps.edn
 
-Add the SDK source path to your project or include it as a local dependency:
+```clojure
+{:deps {net.clojars.jeremiahisaacson/copilot-sdk-supercharged {:mvn/version "3.1.0"}}}
+```
+
+### Leiningen
 
 ```clojure
-{:deps {copilot-sdk-supercharged/clojure {:local/root "../copilot-sdk-supercharged/clojure"}}}
+[net.clojars.jeremiahisaacson/copilot-sdk-supercharged "3.1.0"]
+```
+
+### Local checkout
+
+To use a clone of this repository instead, point a local dependency at the `clojure/` directory:
+
+```clojure
+{:deps {net.clojars.jeremiahisaacson/copilot-sdk-supercharged {:local/root "../copilot-sdk-supercharged/clojure"}}}
 ```
 
 ### Dependencies

@@ -13,11 +13,24 @@ Groovy SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
 ## Installation
 
+The Groovy SDK is not published to Maven Central yet, so build it from source and publish it to your local Maven repository (`~/.m2`):
+
+```bash
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/groovy
+gradle publishToMavenLocal
+```
+
 ### Gradle
 
 ```groovy
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
 dependencies {
-    implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-groovy:2.0.0'
+    implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-groovy:3.1.0'
 }
 ```
 

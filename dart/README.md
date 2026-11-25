@@ -25,12 +25,12 @@ This SDK follows the same architecture and protocol as all other SDKs in the [co
 
 ## Installation
 
-Add to your `pubspec.yaml`:
+The `copilot_sdk_supercharged` package is not on pub.dev yet, so add it as a path dependency on a clone of this repository. In your `pubspec.yaml`:
 
 ```yaml
 dependencies:
   copilot_sdk_supercharged:
-    path: ../dart  # or publish to pub.dev
+    path: ../copilot-sdk-supercharged/dart
 ```
 
 Then run:

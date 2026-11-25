@@ -11,7 +11,7 @@ you programmatic access to the same agent runtime behind GitHub Copilot.
 | Requirement | Version |
 |-------------|---------|
 | MATLAB | R2020b or later |
-| Copilot CLI | Latest (`npm install -g @anthropic/copilot-cli` or via GitHub) |
+| Copilot CLI | 1.0.113 or newer, SDK protocol 4 (`npm install -g @github/copilot`) |
 | Java Runtime | Bundled with MATLAB (used for process I/O) |
 
 ## Installation

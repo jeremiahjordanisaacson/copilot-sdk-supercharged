@@ -6,16 +6,19 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ## Installation
 
-### Using Alire (recommended)
+### Using Alire
 
-Add the dependency to your `alire.toml`:
+The crate (`copilot_sdk_supercharged`) is not in the Alire community index yet, so pin the dependency to a clone of this repository. In your `alire.toml`:
 
 ```toml
 [[depends-on]]
-copilot_sdk_supercharged = ">=2.0.2"
+copilot_sdk_supercharged = "^3.1.0"
+
+[[pins]]
+copilot_sdk_supercharged = { path = "../copilot-sdk-supercharged/ada" }
 ```
 
-Then run:
+Then add `with "copilot_sdk.gpr";` to your project file and run:
 
 ```sh
 alr update

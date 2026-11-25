@@ -6,16 +6,11 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ## Installation
 
-Add a project reference (from the repo):
+The F# package (`CopilotSDK.Supercharged.FSharp`) is not published to NuGet yet, so reference the project from a clone of this repository:
 
 ```bash
-dotnet add reference ../fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj
-```
-
-Or if published to NuGet:
-
-```bash
-dotnet add package CopilotSDK.Supercharged.FSharp
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+dotnet add reference path/to/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj
 ```
 
 ## Quick Start

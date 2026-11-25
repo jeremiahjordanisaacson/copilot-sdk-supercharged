@@ -27,22 +27,33 @@ Event Handlers (blocks)
 
 ### Swift Package Manager
 
-Add this to your `Package.swift`:
+The Objective-C package is not published to a registry, and the `Package.swift` at the repository root only provides the Swift SDK, so add it as a local package from a clone of this repository. In your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(path: "../objc")  // or remote URL
+    .package(path: "../objc")  // path to the objc/ directory of your clone
 ]
 ```
 
-Or in Xcode: File > Add Package Dependencies, then point to this directory.
+Then add the product to your target:
+
+```swift
+.target(
+    name: "MyApp",
+    dependencies: [
+        .product(name: "CopilotObjCSDK", package: "objc")
+    ]
+)
+```
+
+Or in Xcode: File > Add Package Dependencies > Add Local, then choose the `objc/` directory.
 
 ### CocoaPods
 
-Add to your `Podfile`:
+The pod is not on CocoaPods trunk. Its podspec file is named `CopilotSDK.podspec`, so point `:path` at the file itself (from a directory, CocoaPods only looks for `CopilotObjCSDK.podspec`). Add to your `Podfile`:
 
 ```ruby
-pod 'CopilotObjCSDK', :path => '../objc'
+pod 'CopilotObjCSDK', :path => '../objc/CopilotSDK.podspec'
 ```
 
 Then run:

@@ -13,14 +13,14 @@ Fortran SDK for the GitHub Copilot CLI. Communicates with the Copilot CLI server
 
 ### With fpm (recommended)
 
-Add the dependency to your `fpm.toml`:
+The SDK is not published to the fpm registry, so add it as a path dependency on a clone of this repository. The dependency name must match the package name in `fortran/fpm.toml` (`copilot-sdk-supercharged`). In your `fpm.toml`:
 
 ```toml
 [dependencies]
-copilot-sdk = { path = "fortran" }
+copilot-sdk-supercharged = { path = "../copilot-sdk-supercharged/fortran" }
 ```
 
-Build and run tests:
+To build and test the SDK itself from a clone:
 
 ```bash
 cd fortran

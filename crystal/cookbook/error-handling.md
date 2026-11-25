@@ -5,7 +5,7 @@ Patterns for handling errors, timeouts, and retries in Crystal.
 ## Basic Error Handling
 
 ```crystal
-require "copilot_sdk"
+require "copilot-sdk-supercharged/copilot_sdk"
 
 client = CopilotSDK::CopilotClient.new(
   CopilotSDK::CopilotClientOptions.new(cli_path: "/usr/local/bin/copilot-cli")

@@ -10,19 +10,27 @@ PHP SDK for the GitHub Copilot CLI. Communicates with the Copilot CLI server via
 
 ## Installation
 
+The package (`github/copilot-sdk-supercharged`) is not on Packagist yet, so install it from a clone of this repository through a Composer path repository. Clone the repository next to your project, then run this from your project directory:
+
 ```bash
-composer require github/copilot-sdk-supercharged
+composer config repositories.copilot-sdk-supercharged path ../copilot-sdk-supercharged/php
+composer require "github/copilot-sdk-supercharged:*@dev"
 ```
 
-Or add to your `composer.json`:
+Or add the same settings to your `composer.json` and run `composer update`:
 
 ```json
 {
+    "repositories": [
+        { "type": "path", "url": "../copilot-sdk-supercharged/php" }
+    ],
     "require": {
-        "github/copilot-sdk-supercharged": "*"
+        "github/copilot-sdk-supercharged": "*@dev"
     }
 }
 ```
+
+The `@dev` flag is needed because a checkout of a branch has a `dev-` version.
 
 ## Quick Start
 

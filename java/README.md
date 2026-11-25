@@ -3,7 +3,7 @@
 Java SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
 [![Build](https://github.com/github/copilot-sdk-java/actions/workflows/build-test.yml/badge.svg)](https://github.com/github/copilot-sdk-java/actions/workflows/build-test.yml)
-[![Maven Central](https://img.shields.io/maven-central/v/com.github/copilot-sdk-java)](https://central.sonatype.com/artifact/com.github/copilot-sdk-java)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.jeremiahjordanisaacson/copilot-sdk-supercharged)](https://central.sonatype.com/artifact/io.github.jeremiahjordanisaacson/copilot-sdk-supercharged)
 [![Java 17+](https://img.shields.io/badge/Java-17%2B-blue?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://github.github.io/copilot-sdk-java/)
 [![Javadoc](https://javadoc.io/badge2/com.github/copilot-sdk-java/javadoc.svg)](https://javadoc.io/doc/com.github/copilot-sdk-java/latest/index.html)
@@ -21,14 +21,14 @@ Java SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 <dependency>
     <groupId>io.github.jeremiahjordanisaacson</groupId>
     <artifactId>copilot-sdk-supercharged</artifactId>
-    <version>2.0.2</version>
+    <version>3.1.0</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:2.0.2'
+implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.0'
 ```
 
 ## Quick Start
@@ -38,41 +38,40 @@ implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:2.0.2'
 > **Note:** This SDK is in public preview and may change in breaking ways.
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.events.AssistantMessageEvent;
-import com.github.copilot.sdk.events.SessionIdleEvent;
-import com.github.copilot.sdk.json.MessageOptions;
-import com.github.copilot.sdk.json.PermissionHandler;
-import com.github.copilot.sdk.json.SessionConfig;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.CopilotSession;
+import com.github.copilot.MessageOptions;
+import com.github.copilot.SessionConfig;
+import com.github.copilot.Types.PermissionRequestResult;
 
 public class QuickStart {
     public static void main(String[] args) throws Exception {
-        // Create and start client
-        try (var client = new CopilotClient()) {
-            client.start().get();
+        // Spawns the `copilot` CLI found on PATH (or COPILOT_CLI_PATH).
+        // Use new CopilotClientOptions().cliUrl("localhost:3000") to connect to a running server instead.
+        CopilotClient client = new CopilotClient();
+        try {
+            client.start();
 
-            // Create a session (onPermissionRequest is required)
-            var session = client.createSession(
-                new SessionConfig()
-                    .setModel("gpt-5")
-                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
-            ).get();
+            // Approve every permission request (replace this with your own policy)
+            CopilotSession session = client.createSession(new SessionConfig()
+                .model("gpt-5")
+                .onPermissionRequest((request, sessionId) -> new PermissionRequestResult("approve-once")));
 
-            var done = new java.util.concurrent.CompletableFuture<Void>();
+            // Print each assistant message as it arrives
+            session.on("assistant.message", event -> System.out.println(event.data.get("content")));
 
-            // Handle events
-            session.on(AssistantMessageEvent.class, msg ->
-                System.out.println(msg.getData().content()));
-            session.on(SessionIdleEvent.class, idle ->
-                done.complete(null));
-
-            // Send a message and wait for completion
-            session.send(new MessageOptions().setPrompt("What is 2+2?"));
-            done.get();
+            // Send a message and block until the session is idle (60 second default timeout)
+            session.sendAndWait(new MessageOptions("What is 2+2?"));
+        } finally {
+            client.stop(); // also detaches the client's sessions
         }
     }
 }
 ```
+
+The snippets in the rest of this README are fragments. They assume `import com.github.copilot.*;`,
+`import com.github.copilot.Types.*;`, the `java.util` and `java.nio.file` imports they use, and an
+existing `client` and `session`.
 
 ## What's New in v3.1.0
 
@@ -302,7 +301,7 @@ Configure automatic session cleanup after a period of inactivity:
 
 ```java
 CopilotClient client = new CopilotClient(
-    new CopilotClientOptions().setSessionIdleTimeoutSeconds(300)
+    new CopilotClientOptions().sessionIdleTimeoutSeconds(300)
 );
 ```
 
@@ -311,8 +310,12 @@ CopilotClient client = new CopilotClient(
 SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
 
 ```java
-CopilotClientOptions opts = new CopilotClientOptions()
-    .setSessionFs(new SessionFsConfig("/repo", "/tmp/state", "posix"));
+SessionFsConfig sessionFs = new SessionFsConfig();
+sessionFs.initialCwd = "/repo";
+sessionFs.sessionStatePath = "/tmp/state";
+sessionFs.conventions = "posix";
+
+CopilotClientOptions opts = new CopilotClientOptions().sessionFs(sessionFs);
 ```
 
 ### Session Metadata
@@ -329,9 +332,9 @@ Register skill directories and control sub-agent behavior:
 
 ```java
 SessionConfig config = new SessionConfig()
-    .setSkillDirectories(List.of("./skills"))
-    .setDisabledSkills(List.of("test-skill"))
-    .setIncludeSubAgentStreamingEvents(true);
+    .skillDirectories(List.of("./skills"))
+    .disabledSkills(List.of("test-skill"))
+    .includeSubAgentStreamingEvents(true);
 ```
 
 - `skillDirectories` - Paths to directories containing skill definitions
@@ -364,10 +367,19 @@ session.on("assistant.message_delta", event -> {
 
 ## Try it with JBang
 
-Run the SDK without setting up a full project using [JBang](https://www.jbang.dev/):
+Run the Quick Start without setting up a project by using [JBang](https://www.jbang.dev/). Add these lines
+to the top of `QuickStart.java`:
+
+```java
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//JAVA 17+
+//DEPS io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:3.1.0
+```
+
+Then run it:
 
 ```bash
-jbang https://github.com/github/copilot-sdk-java/blob/main/jbang-example.java
+jbang QuickStart.java
 ```
 
 ## API Reference
@@ -471,7 +483,7 @@ CopilotSession session = client.createSession(
     new SessionConfig()
         .model("gpt-5")
         .reasoningEffort("high")          // "low" | "medium" | "high" | "xhigh"
-).get();
+);
 ```
 
 ```java
@@ -481,14 +493,14 @@ CopilotSession session = client.createSession(
         .rewindEnabled(true)              // emits session.snapshot_rewind events
         .additionalDirectories(List.of("/repo/shared", "/repo/docs"))
         .contentExclusion(true)
-).get();
+);
 ```
 
 ```java
 // On-demand tool discovery for large tool sets
 CopilotSession session = client.createSession(
     new SessionConfig().toolSearch(Map.of("enabled", true))   // forwarded to the CLI tool-search config
-).get();
+);
 ```
 
 ```java

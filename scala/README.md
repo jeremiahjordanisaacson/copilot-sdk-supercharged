@@ -28,7 +28,7 @@ sbt publishLocal
 ```
 
 ```scala
-libraryDependencies += "io.github.jeremiahjordanisaacson" %% "copilot-sdk-supercharged" % "2.0.2"
+libraryDependencies += "io.github.jeremiahjordanisaacson" %% "copilot-sdk-supercharged" % "3.1.0"
 ```
 
 ## Quick Start

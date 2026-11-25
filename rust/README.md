@@ -10,24 +10,24 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-copilot-sdk-supercharged = { path = "../rust" }
+copilot-sdk-supercharged = "3.1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```
 
-Or if published to crates.io:
+The package is `copilot-sdk-supercharged`, but its library crate is named `copilot_sdk`, so you import it with `use copilot_sdk::*;`.
+
+To build against a local clone of this repository instead, use a path dependency:
 
 ```toml
 [dependencies]
-copilot-sdk-supercharged = "0.1"
-tokio = { version = "1", features = ["full"] }
+copilot-sdk-supercharged = { path = "path/to/copilot-sdk-supercharged/rust" }
 ```
 
 ## Quick Start
 
 ```rust
 use copilot_sdk::*;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), CopilotError> {
@@ -52,8 +52,7 @@ async fn main() -> Result<(), CopilotError> {
     let response = session.send_and_wait(
         MessageOptions {
             prompt: "What is 2 + 2?".to_string(),
-            attachments: None,
-            mode: None,
+            ..Default::default()
         },
         None, // default 60s timeout
     ).await?;
@@ -353,11 +352,13 @@ let perm_handler: PermissionHandlerFn = Arc::new(|request, session_id| {
             Ok(PermissionRequestResult {
                 kind: PermissionResultKind::Approved,
                 rules: None,
+                decision_context: None,
             })
         } else {
             Ok(PermissionRequestResult {
                 kind: PermissionResultKind::DeniedInteractivelyByUser,
                 rules: None,
+                decision_context: None,
             })
         }
     })
@@ -474,8 +475,8 @@ Register skill directories and control sub-agent behavior:
 
 ```rust
 let config = SessionConfig {
-    skill_directories: vec!["./skills".into()],
-    disabled_skills: vec!["test-skill".into()],
+    skill_directories: Some(vec!["./skills".into()]),
+    disabled_skills: Some(vec!["test-skill".into()]),
     include_sub_agent_streaming_events: Some(true),
     ..Default::default()
 };
@@ -627,7 +628,7 @@ let response = session.send_and_wait(MessageOptions {
         style: Some("natural".into()),
     }),
     ..Default::default()
-}, 60_000).await?;
+}, Some(60_000)).await?;
 ```
 
 ## What's New in v2.6.0
@@ -797,6 +798,8 @@ session.register_hooks_handler(Arc::new(|hook_type, input, _session_id| {
 BYOK with a key command and a max-output-tokens override:
 
 ```rust
+use std::collections::HashMap;
+
 let config = SessionConfig {
     provider: Some(ProviderConfig {
         base_url: "http://localhost:11434/v1".into(),

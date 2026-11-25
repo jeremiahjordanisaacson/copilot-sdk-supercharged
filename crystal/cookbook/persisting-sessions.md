@@ -5,7 +5,7 @@ How to resume sessions across application restarts.
 ## Save and Restore Session ID
 
 ```crystal
-require "copilot_sdk"
+require "copilot-sdk-supercharged/copilot_sdk"
 require "json"
 
 SESSION_FILE = ".copilot_session.json"

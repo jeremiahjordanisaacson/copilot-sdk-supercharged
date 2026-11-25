@@ -6,14 +6,17 @@ Visual Basic .NET SDK for programmatic control of the GitHub Copilot CLI.
 
 ## Installation
 
+The Visual Basic package (`CopilotSDK.Supercharged.VB`) is not published to NuGet yet, so reference the project from a clone of this repository:
+
 ```bash
-dotnet add package CopilotSDK.Supercharged.VB
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+dotnet add reference path/to/copilot-sdk-supercharged/visualbasic/CopilotSDK.Supercharged.VB.vbproj
 ```
 
-Or add a project reference when building from source:
+Or add the project reference to your `.vbproj` by hand:
 
 ```xml
-<ProjectReference Include="..\visualbasic\CopilotSDK.Supercharged.VB.vbproj" />
+<ProjectReference Include="..\copilot-sdk-supercharged\visualbasic\CopilotSDK.Supercharged.VB.vbproj" />
 ```
 
 ## Quick Start

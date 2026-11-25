@@ -11,11 +11,27 @@ The Kotlin SDK for the GitHub Copilot CLI provides a coroutine-based interface f
 
 ## Installation
 
+The Kotlin SDK is not published to Maven Central yet, so build it from source and publish it to your local Maven repository (`~/.m2`). The `kotlin/` directory has no Gradle wrapper, so run a local Gradle installation:
+
+```bash
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/kotlin
+gradle publishToMavenLocal
+```
+
 ### Gradle (Kotlin DSL)
 
 ```kotlin
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
 dependencies {
-    implementation("io.github.jeremiahjordanisaacson:copilot-sdk-supercharged-kotlin:2.0.2")
+    implementation("io.github.jeremiahjordanisaacson:copilot-sdk-supercharged-kotlin:3.1.0")
+    // The SDK uses these as implementation dependencies, so declare them to call it from your code
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 }
 ```
 
@@ -23,7 +39,7 @@ dependencies {
 
 ```bash
 cd kotlin
-./gradlew build
+gradle build
 ```
 
 ## Quick Start

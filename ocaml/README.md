@@ -8,9 +8,15 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ### With opam
 
+The package is not in the opam repository yet, so install it from a clone of this repository (`opam install .` pins the local package and installs it with its dependencies):
+
 ```bash
-opam install copilot-sdk-supercharged
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/ocaml
+opam install .
 ```
+
+Then add `(libraries copilot-sdk-supercharged)` to your `dune` file; the modules are under `Copilot_sdk`.
 
 ### From source (development)
 

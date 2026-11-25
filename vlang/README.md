@@ -6,23 +6,25 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ## Installation
 
-Clone the repository and reference the module locally:
+The module is not published to VPM, so install it from a clone of this repository. The `copilot` module's sources are in `vlang/src`; link that directory into your V modules folder as `copilot`:
 
 ```bash
 git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
-cd copilot-sdk-supercharged/vlang
+mkdir -p ~/.vmodules
+ln -s "$PWD/copilot-sdk-supercharged/vlang/src" ~/.vmodules/copilot
 ```
 
-Then import in your V project:
+On Windows, create a directory junction instead:
+
+```bat
+mkdir "%USERPROFILE%\.vmodules"
+mklink /J "%USERPROFILE%\.vmodules\copilot" "C:\path\to\copilot-sdk-supercharged\vlang\src"
+```
+
+Then import it in your V project:
 
 ```v
-import copilot  // from vlang/src/
-```
-
-Or symlink into your `~/.vmodules`:
-
-```bash
-v install --git https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged vlang
+import copilot
 ```
 
 ## Quick Start

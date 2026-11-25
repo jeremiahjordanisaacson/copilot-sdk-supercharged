@@ -9,17 +9,18 @@ The Nim SDK for the GitHub Copilot CLI. Build AI-powered applications using idio
 
 ## Installation
 
-Add to your `.nimble` file:
-
-```nim
-requires "copilot_sdk >= 2.0.0"
-```
-
-Or clone this repository and use the source directly:
+The `copilot_sdk` package is not in the Nimble package directory yet, so install it from a clone of this repository first:
 
 ```bash
-cd nim
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/nim
 nimble install
+```
+
+Then add it to your `.nimble` file:
+
+```nim
+requires "copilot_sdk >= 3.1.0"
 ```
 
 ## Quick Start

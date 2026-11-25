@@ -6,12 +6,12 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ## Installation
 
-Add to your `shard.yml`:
+The SDK lives in the `crystal/` directory of this repository, so add it as a path dependency on a clone. The dependency key must match the shard's name (`copilot-sdk-supercharged`). In your `shard.yml`:
 
 ```yaml
 dependencies:
-  copilot_sdk:
-    path: ../crystal
+  copilot-sdk-supercharged:
+    path: ../copilot-sdk-supercharged/crystal
 ```
 
 Then run:
@@ -20,10 +20,12 @@ Then run:
 shards install
 ```
 
+Shards installs it as `lib/copilot-sdk-supercharged`, so require it as `require "copilot-sdk-supercharged/copilot_sdk"`.
+
 ## Quick Start
 
 ```crystal
-require "copilot_sdk"
+require "copilot-sdk-supercharged/copilot_sdk"
 
 # Create and start a client
 client = CopilotSDK::CopilotClient.new(
@@ -142,7 +144,7 @@ with `inference.defaultProvider = "default"` and Copilot API models disabled
 server requests are answered in their own fibers.
 
 ```crystal
-require "copilot_sdk"
+require "copilot-sdk-supercharged/copilot_sdk"
 
 client = CopilotSDK::CopilotClient.new(CopilotSDK::CopilotClientOptions.new(
   # Client info: sent as `clientInfo` on the `connect` handshake.

@@ -8,16 +8,19 @@ in this repository (see the [full list of 40 supported languages](../README.md#a
 
 - Perl 5.20 or later
 - [GitHub Copilot CLI](https://github.com/github/copilot) installed and authenticated
-- CPAN modules: `Moo`, `JSON::PP`, `UUID::Tiny`, `File::Which`, `Thread::Queue`
+- CPAN modules: `Moo`, `Types::Standard` (from Type::Tiny), `JSON::PP`, `File::Which`, `Thread::Queue`
 
 ## Installation
 
-```bash
-# Install dependencies
-cpanm Moo JSON::PP UUID::Tiny File::Which Thread::Queue
+The distribution (`GitHub-Copilot`) is not on CPAN yet, so install it from a clone of this repository:
 
-# From the SDK directory
-cd perl
+```bash
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/perl
+
+# Install the dependencies declared in Makefile.PL (add --notest to skip their test suites)
+cpanm --installdeps .
+
 perl Makefile.PL
 make
 make test

@@ -5,7 +5,7 @@ Crystal-specific concurrency patterns for the Copilot SDK.
 ## Channel-Based Event Collection
 
 ```crystal
-require "copilot_sdk"
+require "copilot-sdk-supercharged/copilot_sdk"
 
 client = CopilotSDK::CopilotClient.new(
   CopilotSDK::CopilotClientOptions.new(cli_path: "/usr/local/bin/copilot-cli")

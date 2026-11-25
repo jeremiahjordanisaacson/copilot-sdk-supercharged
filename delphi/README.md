@@ -10,11 +10,7 @@ Delphi SDK for the GitHub Copilot CLI. Communicates with the Copilot CLI server 
 
 ## Installation
 
-### Boss Package Manager
-
-```bash
-boss install copilot-sdk-supercharged
-```
+The SDK is not available as a Boss package (this repository has no `boss.json` at its root, and the units live in `delphi/src`), so install it manually from a clone of this repository.
 
 ### Manual Installation
 

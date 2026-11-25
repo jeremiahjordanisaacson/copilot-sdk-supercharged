@@ -8,18 +8,18 @@ This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio 
 
 ## Installation
 
-Add the package from the repository root:
+`CopilotSDK` is not registered in the Julia General registry yet, so add it straight from this repository and pin the release tag with `rev`:
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged", subdir="julia", rev="v3.1.0")
+```
+
+Or develop it from a local clone (run this from the repository root):
 
 ```julia
 using Pkg
 Pkg.develop(path="julia")
-```
-
-Or add the dependency directly in your `Project.toml`:
-
-```toml
-[deps]
-CopilotSDK = "c7e3a1d0-5f2b-4e8a-9c1d-3b6f7a8e9d0c"
 ```
 
 ### Prerequisites

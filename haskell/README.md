@@ -34,7 +34,14 @@ The SDK follows the same patterns as all other SDKs in this repository (see the 
 
 ## Installation
 
-Add to your `cabal.project` or use as a local dependency:
+The package (`copilot-sdk-supercharged`) is not on Hackage yet, so build it from a clone of this repository. List the SDK directory in your project's `cabal.project`:
+
+```cabal
+packages: .
+          ../copilot-sdk-supercharged/haskell
+```
+
+Then depend on it from your package's `.cabal` file:
 
 ```cabal
 build-depends: copilot-sdk-supercharged
