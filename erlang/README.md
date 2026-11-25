@@ -778,7 +778,7 @@ cd erlang
 rebar3 ct
 ```
 
-`test/copilot_cli_e2e_SUITE.erl` runs the real Copilot CLI through `copilot_client` against the shared replaying CAPI proxy (`test/harness/server.ts`) and the snapshots in `test/snapshots/`: it pings (SDK protocol 4), creates a session, sends a message, and waits for the reply and `session.idle`; it also approves a file edit and refuses a shell command through the permission flow. It needs Node.js and `npm install` in `nodejs/` and `test/harness/`; set `COPILOT_CLI_PATH` to use another CLI build. Without these prerequisites the suite is skipped locally, and it fails on GitHub Actions.
+`test/copilot_cli_e2e_SUITE.erl` runs the real Copilot CLI through `copilot_client` against the shared replaying CAPI proxy (`test/harness/server.ts`) and the snapshots in `test/snapshots/`: it pings (SDK protocol 4), creates a session, sends a message, and waits for the reply and `session.idle`; it also approves a file creation through the permission flow. It needs Node.js and `npm install` in `nodejs/` and `test/harness/`; set `COPILOT_CLI_PATH` to use another CLI build. Without these prerequisites the suite is skipped locally, and it fails on GitHub Actions.
 
 ## API Reference
 

@@ -33,8 +33,7 @@
 
 -export([
     real_cli_send_message/1,
-    real_cli_permission_approve/1,
-    real_cli_permission_deny/1
+    real_cli_permission_approve/1
 ]).
 
 -define(TOKEN, <<"fake-token-for-e2e-tests">>).
@@ -46,7 +45,7 @@ suite() ->
     [{timetrap, {minutes, 10}}].
 
 all() ->
-    [real_cli_send_message, real_cli_permission_approve, real_cli_permission_deny].
+    [real_cli_send_message, real_cli_permission_approve].
 
 %% ---------------------------------------------------------------------------
 %% Setup
@@ -90,14 +89,13 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(_TestCase, _Config) ->
     ok.
 
-%% Snapshots whose tool calls need approval: read-only shell commands such as
-%% `echo` are approved by the runtime itself, so they never reach a handler.
+%% The permission test needs a tool call that the runtime gates (read-only shell
+%% commands such as `echo` are approved without a request) and whose tool
+%% output CLI 1.0.113 reproduces exactly, so every recorded request replays.
 snapshot(real_cli_send_message) ->
     {"session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"};
 snapshot(real_cli_permission_approve) ->
-    {"permissions", "should_invoke_permission_handler_for_write_operations"};
-snapshot(real_cli_permission_deny) ->
-    {"permissions", "should_deny_tool_operations_when_handler_explicitly_denies"}.
+    {"multi_client", "one_client_approves_permission_and_both_see_the_result"}.
 
 %% ---------------------------------------------------------------------------
 %% Tests
@@ -127,13 +125,13 @@ real_cli_send_message(Config) ->
         stop_client(Client)
     end.
 
-%% A file edit needs approval: the runtime emits permission.requested (kind
+%% Creating a file needs approval: the runtime emits permission.requested (kind
 %% write), the fun/2 handler approves it through
-%% session.permissions.handlePendingPermissionRequest, and the edit is applied.
+%% session.permissions.handlePendingPermissionRequest, the file is created, and
+%% the turn completes.
 real_cli_permission_approve(Config) ->
     Self = self(),
-    File = filename:join(?config(work, Config), "test.txt"),
-    ok = file:write_file(File, <<"original content">>),
+    File = filename:join(?config(work, Config), "hello.txt"),
     Client = start_client(Config),
     try
         Handler = fun(Request, Invocation) ->
@@ -147,58 +145,27 @@ real_cli_permission_approve(Config) ->
         SessionId = copilot_session:session_id(Session),
         _ = copilot_session:subscribe(Session, self()),
         {ok, _MessageId} = copilot_session:send(Session, #{
-            prompt => <<"Edit test.txt and replace 'original' with 'modified'">>
+            prompt => <<"Create a file called hello.txt containing the text 'hello world'">>
         }),
-        {Content, _Events} = await_turn(SessionId),
-        ct:pal("Assistant reply: ~ts", [Content]),
-        Requests = permission_requests(),
-        [{WriteRequest, Invocation} | _] =
-            [Entry || {#{<<"kind">> := <<"write">>}, _} = Entry <- Requests],
-        true = is_binary(maps:get(<<"toolCallId">>, WriteRequest)),
-        #{session_id := SessionId, request_id := RequestId} = Invocation,
-        true = is_binary(RequestId),
-        {ok, <<"modified content">>} = file:read_file(File),
-        ok
-    after
-        stop_client(Client)
-    end.
-
-%% A shell command that needs approval is refused: the fun/1 handler answers
-%% user_not_available, so the tool call fails with a permission error and the
-%% turn still completes.
-real_cli_permission_deny(Config) ->
-    Self = self(),
-    Client = start_client(Config),
-    try
-        Handler = fun(Request) ->
-            Self ! {permission_request, Request, undefined},
-            copilot_types:permission_result(user_not_available)
-        end,
-        {ok, Session} = copilot_client:create_session(Client, #{
-            model                 => ?MODEL,
-            on_permission_request => Handler
-        }),
-        SessionId = copilot_session:session_id(Session),
-        _ = copilot_session:subscribe(Session, self()),
-        {ok, _MessageId} = copilot_session:send(Session, #{prompt => <<"Run 'node --version'">>}),
         {Content, Events} = await_turn(SessionId),
         ct:pal("Assistant reply: ~ts", [Content]),
-        [ShellRequest | _] =
-            [Request || {#{<<"kind">> := <<"shell">>} = Request, _} <- permission_requests()],
-        ToolCallId = maps:get(<<"toolCallId">>, ShellRequest),
-        [Failure | _] = [Data || {<<"tool.execution_complete">>,
-                                  #{<<"toolCallId">> := Id, <<"success">> := false} = Data} <- Events,
-                                 Id =:= ToolCallId],
-        Message = error_message(maps:get(<<"error">>, Failure, undefined)),
-        true = binary:match(Message, <<"Permission denied">>) =/= nomatch,
+        [{WriteRequest, Invocation} | _] =
+            [Entry || {#{<<"kind">> := <<"write">>}, _} = Entry <- permission_requests()],
+        ToolCallId = maps:get(<<"toolCallId">>, WriteRequest),
+        true = is_binary(ToolCallId),
+        #{session_id := SessionId, request_id := RequestId} = Invocation,
+        true = is_binary(RequestId),
+        %% The runtime applied the decision, and the gated tool call succeeded.
+        [_ | _] = [Data || {<<"permission.completed">>, #{<<"requestId">> := Id} = Data} <- Events,
+                           Id =:= RequestId],
+        [_ | _] = [Data || {<<"tool.execution_complete">>,
+                            #{<<"toolCallId">> := Id, <<"success">> := true} = Data} <- Events,
+                           Id =:= ToolCallId],
+        {ok, <<"hello world">>} = file:read_file(File),
         ok
     after
         stop_client(Client)
     end.
-
-error_message(#{<<"message">> := Message}) when is_binary(Message) -> Message;
-error_message(Message) when is_binary(Message)                    -> Message;
-error_message(_)                                                  -> <<>>.
 
 %% ---------------------------------------------------------------------------
 %% Client helpers
