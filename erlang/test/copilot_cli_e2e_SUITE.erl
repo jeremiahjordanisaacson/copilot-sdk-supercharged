@@ -33,7 +33,8 @@
 
 -export([
     real_cli_send_message/1,
-    real_cli_permission_request/1
+    real_cli_permission_request/1,
+    diag_permissions_with_connect/1
 ]).
 
 -define(TOKEN, <<"fake-token-for-e2e-tests">>).
@@ -45,7 +46,7 @@ suite() ->
     [{timetrap, {minutes, 10}}].
 
 all() ->
-    [real_cli_send_message, real_cli_permission_request].
+    [real_cli_send_message, real_cli_permission_request, diag_permissions_with_connect].
 
 %% ---------------------------------------------------------------------------
 %% Setup
@@ -91,7 +92,7 @@ end_per_testcase(_TestCase, _Config) ->
 
 snapshot(real_cli_send_message) ->
     {"session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"};
-snapshot(real_cli_permission_request) ->
+snapshot(_PermissionTest) ->
     {"permissions", "should_receive_toolcallid_in_permission_requests"}.
 
 %% ---------------------------------------------------------------------------
@@ -127,9 +128,23 @@ real_cli_send_message(Config) ->
 %% session.permissions.handlePendingPermissionRequest, so the command runs and
 %% the turn completes.
 real_cli_permission_request(Config) ->
+    diag_permissions(Config, false).
+
+diag_permissions_with_connect(Config) ->
+    diag_permissions(Config, true).
+
+diag_permissions(Config, Connect) ->
     Self = self(),
     Client = start_client(Config),
     try
+        ClientRpc = element(5, sys:get_state(Client)),
+        case Connect of
+            true ->
+                ct:pal("DIAG connect: ~tp", [copilot_jsonrpc:request(ClientRpc, <<"connect">>,
+                    #{<<"supportedTaskKinds">> => [<<"agent">>, <<"client">>, <<"shell">>]})]);
+            false ->
+                ok
+        end,
         Handler = fun(Request, Invocation) ->
             Self ! {permission_request, Request, Invocation},
             copilot_types:permission_result(approve_once)
@@ -139,6 +154,11 @@ real_cli_permission_request(Config) ->
             on_permission_request => Handler
         }),
         SessionId = copilot_session:session_id(Session),
+        lists:foreach(fun(Method) ->
+            ct:pal("DIAG ~ts: ~tp", [Method, copilot_jsonrpc:request(ClientRpc, Method,
+                                                                     #{<<"sessionId">> => SessionId})])
+        end, [<<"session.permissions.getMode">>, <<"session.permissions.getAllowAll">>,
+              <<"session.permissions.getRequired">>, <<"session.permissions.getCapabilities">>]),
         _ = copilot_session:subscribe(Session, self()),
         {ok, _MessageId} = copilot_session:send(Session, #{prompt => <<"Run 'echo test'">>}),
         Content = await_reply(SessionId),
@@ -233,7 +253,8 @@ await_reply(SessionId, Deadline, Content) ->
         {copilot_session_event, SessionId, #{type := <<"session.error">>, data := Data}} ->
             ct:fail({session_error, Data});
         {copilot_session_event, SessionId, #{type := Type, data := Data}} ->
-            case binary:match(Type, [<<"permission">>, <<"tool.">>]) of
+            case binary:match(Type, [<<"permission">>, <<"tool.">>, <<"sandbox">>,
+                                     <<"session.start">>, <<"managed_settings">>]) of
                 nomatch -> ct:pal("Session event ~ts", [Type]);
                 _       -> ct:pal("Session event ~ts: ~tp", [Type, Data])
             end,
