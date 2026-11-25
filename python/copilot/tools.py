@@ -93,6 +93,47 @@ class ToolInvocation:
     sub-agent is still running.
     """
 
+    async def report_progress(self, message: str) -> None:
+        """**Experimental.** Report progress for this call while it runs.
+
+        The runtime emits a ``tool.execution_progress`` session event with this
+        call's ``tool_call_id`` and ``message`` verbatim. Progress for a call that
+        has already completed is dropped, and delivery failures never fail the
+        tool call. Does nothing after the handler finishes or for an invocation
+        the SDK did not create.
+
+        Synchronous handlers run on the client's event loop, so a report cannot
+        be sent until they return. A handler that reports progress must be
+        ``async`` and offload blocking work, e.g. with :func:`asyncio.to_thread`.
+        """
+        # Kept out of the dataclass fields so asdict(), replace() and
+        # comparisons never see the SDK-bound reporter.
+        reporter = self.__dict__.get(_PROGRESS_REPORTER_ATTR)
+        if reporter is not None:
+            await reporter(message)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # The bound reporter is a closure and cannot be pickled; a restored
+        # invocation (e.g. in a process pool) reports nothing.
+        state = self.__dict__.copy()
+        state.pop(_PROGRESS_REPORTER_ATTR, None)
+        return state
+
+
+_PROGRESS_REPORTER_ATTR = "_report_progress"
+
+
+def _bind_progress_reporter(
+    invocation: ToolInvocation, reporter: Callable[[str], Awaitable[None]]
+) -> None:
+    """Bind the SDK's progress sender to an invocation it created."""
+    invocation.__dict__[_PROGRESS_REPORTER_ATTR] = reporter
+
+
+def _release_progress_reporter(invocation: ToolInvocation) -> None:
+    """Unbind the progress sender once the handler finishes."""
+    invocation.__dict__.pop(_PROGRESS_REPORTER_ATTR, None)
+
 
 ToolHandler = Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]
 

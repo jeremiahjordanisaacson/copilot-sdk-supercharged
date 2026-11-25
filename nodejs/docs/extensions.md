@@ -54,12 +54,20 @@ no-follow directory handles so directory replacement cannot redirect a write.
 
 ## Opting Into Request-Driven Activation
 
-Place a version 1 `extension.json` beside `extension.mjs`, with
-`"initialization": "module"` and nonempty `tools`, `canvases`, and/or `commands`
-arrays using the existing native-tool, canvas, and command definitions. Command
+Place an `extension.json` beside `extension.mjs`, with `"schemaVersion": 1`,
+`"initialization": "module"`, and nonempty `tools`, `canvases`, and/or `commands`
+arrays using the existing native-tool, canvas, and command definitions. The
+deprecated `"version": 1` spelling remains accepted for existing manifests. A
+manifest can include a top-level `"$schema"` string for editor integration; the
+runtime ignores its value. The Node.js SDK package includes the build-time schema
+as `@microsoft/copilot-sdk/extension-manifest.schema.json`. Command
 declarations contain `name` and optional `description`; handlers remain in the
 live `joinSession()` registration. Import the same declarations in the entrypoint
 and add handlers so the advertised metadata cannot drift.
+
+If an extension must preserve request-driven activation on older Copilot CLI
+versions, keep `"version": 1` and omit `"$schema"`. Older versions reject the new
+fields and start the extension eagerly instead.
 Omit absent optional fields rather than writing null. Missing metadata preserves
 eager startup; invalid metadata also produces a diagnostic.
 

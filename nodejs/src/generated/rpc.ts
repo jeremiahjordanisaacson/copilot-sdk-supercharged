@@ -53369,6 +53369,23 @@ export interface ToolsListRequest {
   model?: string;
 }
 /**
+ * Pending external tool call request ID and a progress message for its running tool call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsReportProgressRequest".
+ */
+/** @experimental */
+export interface ToolsReportProgressRequest {
+  /**
+   * Request ID of the pending tool call
+   */
+  requestId: string;
+  /**
+   * Progress message, emitted verbatim as the tool.execution_progress progressMessage
+   */
+  message: string;
+}
+/**
  * Complete externally implemented tool list for the calling connection. An empty list removes every tool previously supplied by that connection.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -69006,6 +69023,13 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             handlePendingToolCall: async (params: HandlePendingToolCallRequest): Promise<HandlePendingToolCallResult> =>
                 connection.sendRequest("session.tools.handlePendingToolCall", { ...params, sessionId }),
+            /**
+             * Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.
+             *
+             * @param params Pending external tool call request ID and a progress message for its running tool call.
+             */
+            reportProgress: async (params: ToolsReportProgressRequest): Promise<void> =>
+                connection.sendRequest("session.tools.reportProgress", { ...params, sessionId }),
             /**
              * Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.
              *

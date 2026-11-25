@@ -6,10 +6,14 @@ package com.microsoft.copilot.rpc;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.microsoft.copilot.internal.ToolInvocationAccess;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
@@ -49,6 +53,12 @@ public final class ToolInvocation {
     private List<CurrentToolMetadata> availableTools;
     private String agentId;
     private String requestId;
+    @JsonIgnore
+    private volatile Function<String, CompletableFuture<Void>> progressReporter;
+
+    static {
+        ToolInvocationAccess.register((invocation, reporter) -> invocation.progressReporter = reporter);
+    }
 
     /**
      * Gets the session ID where the tool was invoked.
@@ -280,5 +290,46 @@ public final class ToolInvocation {
     public ToolInvocation setRequestId(String requestId) {
         this.requestId = requestId;
         return this;
+    }
+
+    /**
+     * Reports progress for this call while it runs.
+     * <p>
+     * <strong>Experimental.</strong> The runtime emits a
+     * {@code tool.execution_progress} session event with this call's
+     * {@code toolCallId} and {@code message} verbatim. Progress for a call that has
+     * already completed is dropped, and delivery failures never fail the tool call:
+     * the returned future always completes normally. On an invocation the SDK did
+     * not create, after the handler finishes, or once the session is closed, this
+     * is a no-op.
+     *
+     * <pre>{@code
+     * ToolHandler handler = invocation -> invocation.reportProgress("Downloading...")
+     * 		.thenComposeAsync(ignored -> downloadAsync(invocation), executor);
+     * }</pre>
+     *
+     * @param message
+     *            the progress message
+     * @return a future that completes when the report has been handled; it never
+     *         completes exceptionally
+     * @since 1.0.15-preview.1
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> reportProgress(String message) {
+        Function<String, CompletableFuture<Void>> reporter = progressReporter;
+        if (reporter == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        CompletableFuture<Void> sent;
+        try {
+            sent = reporter.apply(message);
+        } catch (RuntimeException e) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (sent == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        // Progress is best-effort and must never fail the tool call.
+        return sent.handle((ignored, error) -> null);
     }
 }

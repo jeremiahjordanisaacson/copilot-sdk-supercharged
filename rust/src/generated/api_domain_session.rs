@@ -9459,6 +9459,26 @@ pub struct ToolsListRequest {
 }
 crate::record_serde::wire_record!(ToolsListRequest { model: "model" if is_none });
 
+/// Pending external tool call request ID and a progress message for its running tool call.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ToolsReportProgressRequest {
+    /// Progress message, emitted verbatim as the tool.execution_progress progressMessage
+    pub message: String,
+    /// Request ID of the pending tool call
+    pub request_id: RequestId,
+}
+crate::record_serde::wire_record!(ToolsReportProgressRequest {
+    message: "message",
+    request_id: "requestId"
+});
+
 /// Complete externally implemented tool list for the calling connection. An empty list removes every tool previously supplied by that connection.
 ///
 /// <div class="warning">

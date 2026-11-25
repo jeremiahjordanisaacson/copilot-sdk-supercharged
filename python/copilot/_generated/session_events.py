@@ -18865,6 +18865,7 @@ class SessionEvent:
     agent_id: str | None = None
     checkpoint: bool | None = None
     ephemeral: bool | None = None
+    occurred_at: datetime | None = field(default=None, kw_only=True)
     parent_id: UUID | None = None
     raw_type: str | None = None
 
@@ -18877,6 +18878,7 @@ class SessionEvent:
         checkpoint = from_union([from_none, from_bool], obj.get("checkpoint"))
         ephemeral = from_union([from_none, from_bool], obj.get("ephemeral"))
         id = from_uuid(obj.get("id"))
+        occurred_at = from_union([from_none, from_datetime], obj.get("occurredAt"))
         parent_id = from_union([from_none, from_uuid], obj.get("parentId"))
         timestamp = from_datetime(obj.get("timestamp"))
         data_obj = obj.get("data")
@@ -19058,6 +19060,7 @@ class SessionEvent:
             agent_id=agent_id,
             checkpoint=checkpoint,
             ephemeral=ephemeral,
+            occurred_at=occurred_at,
             parent_id=parent_id,
             raw_type=raw_type if event_type == SessionEventType.UNKNOWN else None,
         )
@@ -19074,6 +19077,8 @@ class SessionEvent:
             result["checkpoint"] = from_union([from_none, from_bool], self.checkpoint)
         if self.ephemeral is not None:
             result["ephemeral"] = from_union([from_none, from_bool], self.ephemeral)
+        if self.occurred_at is not None:
+            result["occurredAt"] = from_union([from_none, to_datetime], self.occurred_at)
         result["parentId"] = from_union([from_none, to_uuid], self.parent_id)
         return result
 

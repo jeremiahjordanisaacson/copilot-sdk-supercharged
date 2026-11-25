@@ -3774,6 +3774,44 @@ public sealed partial class ClientSessionLifetimeTests
             });
     }
 
+    [Fact]
+    public async Task ExternalTool_ReportProgress_Sends_Message_For_The_Pending_Request()
+    {
+        const string progressMessage = "  Step 1/3: \"indexing\" ✓\n";
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "session.tools.reportProgress"
+            ? null
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port) });
+        var tool = CopilotTool.DefineTool(
+            async (ToolInvocation invocation) =>
+            {
+                await invocation.ReportProgressAsync(progressMessage);
+                return "ok";
+            },
+            factoryOptions: new AIFunctionFactoryOptions { Name = "calc" });
+        await using var session = await client.CreateSessionAsync(new CreateSessionOptions
+        { Permissions = new SessionPermissionOptions { OnRequest = PermissionHandler.ApproveAll }, Tools = new SessionToolOptions { Definitions = [tool] } });
+        server.ClearRequests();
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = "req-progress",
+                SessionId = session.SessionId,
+                ToolCallId = "tc-progress",
+                ToolName = "calc"
+            }
+        });
+        await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+
+        var progress = Assert.Single(server.Requests, request => request.Method == "session.tools.reportProgress");
+        Assert.Equal(session.SessionId, progress.Params.GetProperty("sessionId").GetString());
+        Assert.Equal("req-progress", progress.Params.GetProperty("requestId").GetString());
+        Assert.Equal(progressMessage, progress.Params.GetProperty("message").GetString());
+    }
+
     private static ExternalToolRequestedEvent ExternalToolRequested(string requestId, string toolName = "blocked_tool") =>
         new()
         {

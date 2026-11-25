@@ -50,7 +50,7 @@ use crate::types::{
     SessionExperimentOptions, SessionGitHubOptions, SessionGitOptions, SessionHookOptions,
     SessionId, SessionMcpOptions, SessionOptionsRuntime, SessionSkillOptions, SessionStateOptions,
     SessionToolOptions, SetModelOptions, SystemMessageConfig, Tool, ToolHandlerMap, ToolInvocation,
-    TraceContext, TranscriptRecovery, UiInputOptions, collect_tool_handlers,
+    ToolProgressReporter, TraceContext, TranscriptRecovery, UiInputOptions, collect_tool_handlers,
     ensure_attachment_display_names,
 };
 use crate::{
@@ -4620,6 +4620,8 @@ async fn handle_notification(
                     } else {
                         None
                     };
+                    // Retained invocation clones stop reporting once the handler finishes.
+                    let progress_active = Arc::new(cancellation.child_token());
                     let invocation = ToolInvocation {
                         session_id: sid.clone(),
                         tool_call_id: data.tool_call_id,
@@ -4632,6 +4634,12 @@ async fn handle_notification(
                         tracestate: data.tracestate,
                         agent_id,
                         request_id: Some(request_id.clone()),
+                        progress: Some(ToolProgressReporter {
+                            client: Arc::downgrade(&client.inner),
+                            cancellation: progress_active.clone(),
+                            session_id: sid.clone(),
+                            request_id: request_id.clone(),
+                        }),
                     };
                     let handler_start = Instant::now();
                     // Keep callback construction, polling and drop inside the unwind
@@ -4643,6 +4651,7 @@ async fn handle_notification(
                         _ = cancellation.cancelled() => return,
                         result = call => result,
                     };
+                    progress_active.cancel();
                     tracing::debug!(
                         elapsed_ms = handler_start.elapsed().as_millis(),
                         session_id = %sid,

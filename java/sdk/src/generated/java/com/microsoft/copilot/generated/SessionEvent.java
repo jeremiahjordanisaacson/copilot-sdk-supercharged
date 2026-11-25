@@ -390,6 +390,10 @@ public abstract sealed class SessionEvent permits
     @JsonProperty("checkpoint")
     private Boolean checkpoint;
 
+    /** ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope {@code timestamp} is when this copy was recorded. */
+    @JsonProperty("occurredAt")
+    private OffsetDateTime occurredAt;
+
     /**
      * Returns the event-type discriminator string (e.g., {@code "session.idle"}).
      *
@@ -414,4 +418,7 @@ public abstract sealed class SessionEvent permits
 
     public Boolean getCheckpoint() { return checkpoint; }
     public void setCheckpoint(Boolean checkpoint) { this.checkpoint = checkpoint; }
+
+    public OffsetDateTime getOccurredAt() { return occurredAt; }
+    public void setOccurredAt(OffsetDateTime occurredAt) { this.occurredAt = occurredAt; }
 }

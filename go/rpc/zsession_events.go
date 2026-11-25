@@ -26,6 +26,8 @@ type SessionEvent struct {
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 	// Unique event identifier (UUID v4), generated when the event is emitted
 	ID string `json:"id"`
+	// ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.
+	OccurredAt *time.Time `json:"occurredAt,omitempty"`
 	// ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
 	ParentID *string `json:"parentId"`
 	// ISO 8601 timestamp when the event was created

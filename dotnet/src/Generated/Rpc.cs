@@ -43440,6 +43440,23 @@ internal sealed class HandlePendingToolCallRequest
     public string SessionId { get; set; } = string.Empty;
 }
 
+/// <summary>Pending external tool call request ID and a progress message for its running tool call.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+internal sealed class ToolsReportProgressRequest
+{
+    /// <summary>Progress message, emitted verbatim as the tool.execution_progress progressMessage.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Request ID of the pending tool call.</summary>
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+}
+
 /// <summary>External tool call of the session or one of its sub-agents that is still waiting for session.tools.handlePendingToolCall.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class PendingExternalToolRequest
@@ -88226,6 +88243,20 @@ public sealed class ToolsApi
         return await CopilotClient.InvokeRpcAsync<HandlePendingToolCallResult>(_session.Rpc, "session.tools.handlePendingToolCall", [request], cancellationToken);
     }
 
+    /// <summary>Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.</summary>
+    /// <param name="requestId">Request ID of the pending tool call.</param>
+    /// <param name="message">Progress message, emitted verbatim as the tool.execution_progress progressMessage.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    public async Task ReportProgressAsync(string requestId, string message, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requestId);
+        ArgumentNullException.ThrowIfNull(message);
+        _session.ThrowIfDisposed();
+
+        var request = new ToolsReportProgressRequest { SessionId = _session.SessionId, RequestId = requestId, Message = message };
+        await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.tools.reportProgress", [request], cancellationToken);
+    }
+
     /// <summary>Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.</summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>External tool calls still waiting for a result.</returns>
@@ -93357,6 +93388,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ToolsInitializeAndValidateResult))]
 [JsonSerializable(typeof(ToolsListPendingRequestsRequest))]
 [JsonSerializable(typeof(ToolsListRequest))]
+[JsonSerializable(typeof(ToolsReportProgressRequest))]
 [JsonSerializable(typeof(ToolsSetRequest))]
 [JsonSerializable(typeof(ToolsSetResult))]
 [JsonSerializable(typeof(ToolsShellDescriptorConfig))]

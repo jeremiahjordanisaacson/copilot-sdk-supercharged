@@ -18,6 +18,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -56,6 +57,8 @@ import com.microsoft.copilot.generated.rpc.SessionPermissionsHandlePendingPermis
 import com.microsoft.copilot.generated.rpc.SessionPermissionsSetModeResult;
 import com.microsoft.copilot.generated.rpc.SessionRpc;
 import com.microsoft.copilot.generated.rpc.SessionToolsHandlePendingToolCallParams;
+import com.microsoft.copilot.generated.rpc.SessionToolsReportProgressParams;
+import com.microsoft.copilot.internal.ToolInvocationAccess;
 import com.microsoft.copilot.generated.rpc.SessionToolsSetParams;
 import com.microsoft.copilot.generated.rpc.SessionUiElicitationParams;
 import com.microsoft.copilot.generated.rpc.SessionUiElicitationResult;
@@ -314,6 +317,10 @@ public final class CopilotSession implements AutoCloseable {
             if (state.get() == CANCELLED) {
                 toolFuture.cancel(true);
             }
+        }
+
+        void detach(CompletableFuture<?> toolFuture) {
+            future.compareAndSet(toolFuture, null);
         }
 
         void cancel() {
@@ -1912,6 +1919,8 @@ public final class CopilotSession implements AutoCloseable {
                 var invocation = new com.microsoft.copilot.rpc.ToolInvocation().setSessionId(sessionId)
                         .setToolCallId(toolCallId).setToolName(toolName).setArguments(argumentsNode);
                 invocation.setAgentId(agentId).setRequestId(requestId);
+                ToolInvocationAccess.setProgressReporter(invocation,
+                        message -> reportToolProgress(requestId, pending, message));
 
                 if (TOOL_SEARCH_TOOL_NAME.equals(toolName)) {
                     try {
@@ -1933,15 +1942,23 @@ public final class CopilotSession implements AutoCloseable {
                 if (!pending.tryStart()) {
                     return;
                 }
-                CompletableFuture<Object> toolFuture = tool.handler().invoke(invocation);
+                CompletableFuture<Object> toolFuture;
+                try {
+                    toolFuture = tool.handler().invoke(invocation);
+                } catch (RuntimeException | Error e) {
+                    ToolInvocationAccess.setProgressReporter(invocation, null);
+                    throw e;
+                }
                 pending.attach(toolFuture);
                 toolFuture.thenAccept(result -> {
+                    ToolInvocationAccess.setProgressReporter(invocation, null);
                     ToolResultObject toolResult = toToolResult(result);
                     if (!pendingExternalTools.remove(requestId, pending)) {
                         return;
                     }
                     sendToolResponse(requestId, toolName, toolResult, null);
                 }).exceptionally(ex -> {
+                    ToolInvocationAccess.setProgressReporter(invocation, null);
                     if (!pendingExternalTools.remove(requestId, pending)) {
                         return null;
                     }
@@ -1949,6 +1966,10 @@ public final class CopilotSession implements AutoCloseable {
                     return null;
                 }).whenComplete((result, error) -> {
                     pendingExternalTools.remove(requestId, pending);
+                    // A handler can retain its invocation; release the reporter so it
+                    // cannot keep the session alive, and drop the result-bearing future.
+                    ToolInvocationAccess.setProgressReporter(invocation, null);
+                    pending.detach(toolFuture);
                     completeCallbacksRetirement();
                 });
             } catch (Exception e) {
@@ -1970,6 +1991,35 @@ public final class CopilotSession implements AutoCloseable {
         } catch (RejectedExecutionException e) {
             LOG.log(Level.WARNING, "Executor rejected tool task for requestId=" + requestId + "; running inline", e);
             task.run();
+        }
+    }
+
+    /**
+     * Sends {@code session.tools.reportProgress} for a running external tool call.
+     * Progress is best-effort: a call that already settled or a failed send
+     * completes normally. The gate is the call's own pending entry, so a call
+     * admitted before a same-connection resume can still report.
+     */
+    private CompletableFuture<Void> reportToolProgress(String requestId, PendingExternalTool pending, String message) {
+        if (pendingExternalTools.get(requestId) != pending) {
+            return CompletableFuture.completedFuture(null);
+        }
+        try {
+            CompletableFuture<?> sent = getRpc().tools.reportProgress(SessionToolsReportProgressParams.builder()
+                    .sessionId(sessionId).requestId(requestId).message(message).build());
+            // Settle where the response completes (the JSON-RPC reader), never on the
+            // application's executor, so a handler that joins this future on a
+            // single-thread executor cannot deadlock its own settlement.
+            BiFunction<Object, Throwable, Void> settle = (ignored, error) -> {
+                if (error != null) {
+                    LOG.log(Level.FINE, "Failed to report tool progress for requestId=" + requestId, error);
+                }
+                return null;
+            };
+            return sent.handle(settle);
+        } catch (RuntimeException e) {
+            LOG.log(Level.FINE, "Failed to report tool progress for requestId=" + requestId, e);
+            return CompletableFuture.completedFuture(null);
         }
     }
 

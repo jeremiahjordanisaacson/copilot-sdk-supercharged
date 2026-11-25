@@ -7078,6 +7078,77 @@ async fn external_tool_requested_dispatches_to_handler_and_responds() {
     assert_eq!(rpc_call["params"]["result"], "all tests passed");
 }
 
+#[tokio::test]
+async fn external_tool_handler_reports_progress_for_its_request() {
+    struct ProgressTool {
+        retained: Arc<std::sync::Mutex<Option<ToolInvocation>>>,
+    }
+    #[async_trait]
+    impl tool::ToolHandler for ProgressTool {
+        async fn call(
+            &self,
+            mut invocation: ToolInvocation,
+        ) -> Result<ToolResult, copilot_sdk::Error> {
+            // Progress stays bound to the dispatched call even if the handler
+            // edits the invocation's public fields.
+            invocation.session_id = "other-session".into();
+            invocation.request_id = Some("other-request".into());
+            invocation.report_progress("  50% done\n").await;
+            *self.retained.lock().unwrap() = Some(invocation.clone());
+            Ok(ToolResult::Text("done".to_string()))
+        }
+    }
+
+    let retained = Arc::new(std::sync::Mutex::new(None));
+    let handler = Arc::new(ProgressTool {
+        retained: retained.clone(),
+    });
+
+    let (_session, mut server) = create_session_pair_with_config(move |cfg| {
+        cfg.with_tools(|group| {
+            group.with_definitions(vec![
+                Tool::new("slow_tool")
+                    .with_description("Slow")
+                    .with_parameters(serde_json::json!({"type":"object"}))
+                    .with_handler(handler.clone()),
+            ])
+        })
+    })
+    .await;
+
+    server
+        .send_event(
+            "external_tool.requested",
+            serde_json::json!({
+                "requestId": "req-progress-1",
+                "sessionId": server.session_id,
+                "toolCallId": "tc-progress-1",
+                "toolName": "slow_tool",
+                "arguments": {},
+            }),
+        )
+        .await;
+
+    let progress = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(progress["method"], "session.tools.reportProgress");
+    assert_eq!(progress["params"]["sessionId"], server.session_id.as_str());
+    assert_eq!(progress["params"]["requestId"], "req-progress-1");
+    assert_eq!(progress["params"]["message"], "  50% done\n");
+    server.respond(&progress, Value::Null).await;
+
+    let result = timeout(TIMEOUT, server.read_request()).await.unwrap();
+    assert_eq!(result["method"], "session.tools.handlePendingToolCall");
+    assert_eq!(result["params"]["requestId"], "req-progress-1");
+
+    // A clone retained past the handler no longer reports: without the release
+    // this would send another request and wait for a response that never comes.
+    let retained = retained.lock().unwrap().take().unwrap();
+    timeout(TIMEOUT, retained.report_progress("late"))
+        .await
+        .expect("progress after the handler finished should be a no-op");
+    server.respond(&result, Value::Null).await;
+}
+
 /// A pooled connection carries every session's notifications through one
 /// client-wide hop. A telemetry callback that blocks while thousands of
 /// events arrive must not lose any of them: a lost `external_tool.requested`

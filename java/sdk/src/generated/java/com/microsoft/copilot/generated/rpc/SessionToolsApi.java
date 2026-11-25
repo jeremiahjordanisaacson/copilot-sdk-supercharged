@@ -106,6 +106,22 @@ public final class SessionToolsApi {
     }
 
     /**
+     * Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.
+     * <p>
+     * Note: the {@code sessionId} field in the params record is overridden
+     * by the session-scoped wrapper; any value provided is ignored.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<Void> reportProgress(SessionToolsReportProgressParams params) {
+        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);
+        _p.put("sessionId", this.sessionId);
+        return caller.invoke("session.tools.reportProgress", _p, Void.class);
+    }
+
+    /**
      * Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.
      *
      * @apiNote This method is experimental and may change in a future version.

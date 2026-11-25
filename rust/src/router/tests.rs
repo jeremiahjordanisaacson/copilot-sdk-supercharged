@@ -21,6 +21,18 @@ use super::*;
 
 const DEADLINE: Duration = Duration::from_secs(5);
 
+#[test]
+fn terminal_connection_rejects_late_registrations() {
+    let router = SessionRouter::new();
+    let id = SessionId::new("closed-connection");
+    router.event_sink().close();
+    let mut registration = router.register(&id);
+    assert_eq!(
+        registration.channels.notifications.try_recv().err(),
+        Some(mpsc::error::TryRecvError::Disconnected)
+    );
+}
+
 impl SessionRouter {
     pub(crate) fn initialization_count(&self) -> usize {
         self.initializations.lock().len()

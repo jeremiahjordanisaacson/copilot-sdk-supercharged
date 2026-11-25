@@ -607,6 +607,9 @@ When a sub-agent runs, the parent session emits lifecycle events. Subscribe to t
 
 Sub-agent-originated session events share the parent session stream and include envelope-level `agentId`. Root/main agent events and session-level events omit `agentId`, so renderers can keep the parent response separate from sub-agent traces by checking the event envelope.
 
+A sub-agent's event reaches the parent stream as a copy, so its `timestamp` is when the parent recorded that copy. Its envelope-level `occurredAt`, when present, is when the sub-agent recorded the event; use it to time sub-agent activity.
+The Rust SDK does not expose `occurredAt` yet.
+
 ### Event types
 
 | Event | Emitted when | Data |

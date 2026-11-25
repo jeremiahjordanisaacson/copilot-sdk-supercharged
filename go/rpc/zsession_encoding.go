@@ -23,6 +23,7 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 		Data       json.RawMessage  `json:"data"`
 		Ephemeral  *bool            `json:"ephemeral,omitempty"`
 		ID         string           `json:"id"`
+		OccurredAt *time.Time       `json:"occurredAt,omitempty"`
 		ParentID   *string          `json:"parentId"`
 		Timestamp  time.Time        `json:"timestamp"`
 		Type       SessionEventType `json:"type"`
@@ -35,6 +36,7 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 	e.Checkpoint = raw.Checkpoint
 	e.Ephemeral = raw.Ephemeral
 	e.ID = raw.ID
+	e.OccurredAt = raw.OccurredAt
 	e.ParentID = raw.ParentID
 	e.Timestamp = raw.Timestamp
 
@@ -1060,6 +1062,7 @@ func (e SessionEvent) MarshalJSON() ([]byte, error) {
 		Data       any              `json:"data"`
 		Ephemeral  *bool            `json:"ephemeral,omitempty"`
 		ID         string           `json:"id"`
+		OccurredAt *time.Time       `json:"occurredAt,omitempty"`
 		ParentID   *string          `json:"parentId"`
 		Timestamp  time.Time        `json:"timestamp"`
 		Type       SessionEventType `json:"type"`
@@ -1070,6 +1073,7 @@ func (e SessionEvent) MarshalJSON() ([]byte, error) {
 		Data:       e.Data,
 		Ephemeral:  e.Ephemeral,
 		ID:         e.ID,
+		OccurredAt: e.OccurredAt,
 		ParentID:   e.ParentID,
 		Timestamp:  e.Timestamp,
 		Type:       e.Type(),

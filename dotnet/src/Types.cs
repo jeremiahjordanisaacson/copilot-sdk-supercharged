@@ -1020,6 +1020,29 @@ public sealed class ToolInvocation
     /// </summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
     public string? RequestId { get; set; }
+
+    internal Func<string, CancellationToken, Task>? ProgressReporter { get; set; }
+
+    /// <summary>
+    /// Reports progress for this call while it runs.
+    /// </summary>
+    /// <param name="message">Progress message, emitted verbatim.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>A task that completes when the progress report has been delivered or dropped.</returns>
+    /// <remarks>
+    /// The runtime emits a <c>tool.execution_progress</c> session event with this call's
+    /// <see cref="ToolCallId"/> and <paramref name="message"/> verbatim. Progress for a call
+    /// that has already completed is dropped, and delivery failures never fail the tool call.
+    /// Canceling <paramref name="cancellationToken"/> throws <see cref="OperationCanceledException"/>
+    /// to the caller. This does nothing when the session has been disposed, after the handler
+    /// has finished, or when this invocation was not created by the SDK for a pending tool call.
+    /// </remarks>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    public Task ReportProgressAsync(string message, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return ProgressReporter?.Invoke(message, cancellationToken) ?? Task.CompletedTask;
+    }
 }
 
 /// <summary>

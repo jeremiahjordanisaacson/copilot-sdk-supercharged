@@ -195,6 +195,7 @@ async fn define_tool_builds_schema_and_dispatches() {
         tracestate: None,
         agent_id: None,
         request_id: None,
+        progress: None,
     };
     match handler.call(inv.clone()).await.unwrap() {
         ToolResult::Text(s) => assert_eq!(s, "sunny in Seattle"),

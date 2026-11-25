@@ -6533,9 +6533,77 @@ pub struct ToolInvocation {
     /// sub-agent is still running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<RequestId>,
+    /// Connection used by [`report_progress`](Self::report_progress). Set only
+    /// on invocations the SDK dispatches to a tool handler.
+    #[serde(skip)]
+    pub(crate) progress: Option<ToolProgressReporter>,
+}
+
+/// Connection and cancellation state that lets a dispatched tool call report
+/// progress until the call completes or its session stops.
+#[derive(Clone)]
+pub(crate) struct ToolProgressReporter {
+    /// Weak so a handler that outlives its session cannot keep the client alive.
+    pub(crate) client: std::sync::Weak<crate::ClientInner>,
+    pub(crate) cancellation: Arc<tokio_util::sync::CancellationToken>,
+    /// Captured at dispatch so later edits to the invocation's public fields
+    /// cannot redirect progress to another call.
+    pub(crate) session_id: SessionId,
+    pub(crate) request_id: RequestId,
+}
+
+impl std::fmt::Debug for ToolProgressReporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolProgressReporter")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ToolInvocation {
+    /// **Experimental.** Report progress for this call while it runs.
+    ///
+    /// The runtime emits a `tool.execution_progress` session event with this
+    /// call's [`tool_call_id`](Self::tool_call_id) and `message` verbatim.
+    /// Progress for a call that has already completed is dropped, and delivery
+    /// failures never fail the tool call. Does nothing after the handler
+    /// finishes, when the session has stopped, or when the invocation was not
+    /// dispatched by the SDK.
+    pub async fn report_progress(&self, message: impl Into<String>) {
+        let Some(progress) = &self.progress else {
+            return;
+        };
+        if progress.cancellation.is_cancelled() {
+            return;
+        }
+        let Some(client) = progress.client.upgrade().map(crate::Client::from_inner) else {
+            return;
+        };
+        let request = crate::generated::api_types::ToolsReportProgressRequest {
+            message: message.into(),
+            request_id: progress.request_id.clone(),
+        };
+        let result = async {
+            let mut params = serde_json::to_value(request)?;
+            params["sessionId"] = serde_json::Value::String(progress.session_id.to_string());
+            let _: serde::de::IgnoredAny = client
+                .call_typed(
+                    crate::generated::api_types::rpc_methods::SESSION_TOOLS_REPORTPROGRESS,
+                    Some(params),
+                )
+                .await?;
+            Ok::<(), crate::Error>(())
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::debug!(
+                error = %error,
+                session_id = %progress.session_id,
+                request_id = %progress.request_id,
+                "tool progress delivery failed"
+            );
+        }
+    }
+
     /// Deserialize this invocation's [`arguments`](Self::arguments) into a
     /// strongly-typed parameter struct.
     ///

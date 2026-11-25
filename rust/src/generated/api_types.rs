@@ -1642,6 +1642,8 @@ pub mod rpc_methods {
     pub const SESSION_TOOLS_TASKCOMPLETEEVENTDATA: &str = "session.tools.taskCompleteEventData";
     /// `session.tools.handlePendingToolCall`
     pub const SESSION_TOOLS_HANDLEPENDINGTOOLCALL: &str = "session.tools.handlePendingToolCall";
+    /// `session.tools.reportProgress`
+    pub const SESSION_TOOLS_REPORTPROGRESS: &str = "session.tools.reportProgress";
     /// `session.tools.listPendingRequests`
     pub const SESSION_TOOLS_LISTPENDINGREQUESTS: &str = "session.tools.listPendingRequests";
     /// `session.tools.initializeAndValidate`
@@ -2656,8 +2658,9 @@ pub use sdk_api_session::{
     ToolsGetBuiltinDescriptorsRequest, ToolsGetBuiltinDescriptorsResult,
     ToolsGetCurrentMetadataResult, ToolsGetSubagentSettingsResult,
     ToolsInitializeAndValidateResult, ToolsListPendingRequestsRequest, ToolsListRequest,
-    ToolsListResult, ToolsSetRequest, ToolsSetResult, ToolsShellDescriptorConfig,
-    ToolsTaskCompleteEventDataRequest, ToolsUpdateSubagentSettingsResult,
+    ToolsListResult, ToolsReportProgressRequest, ToolsSetRequest, ToolsSetResult,
+    ToolsShellDescriptorConfig, ToolsTaskCompleteEventDataRequest,
+    ToolsUpdateSubagentSettingsResult,
 };
 pub(crate) use sdk_api_session::{
     LifecycleDiagnosticsConfiguration, PermissionsEvaluateManagedPolicyParams,

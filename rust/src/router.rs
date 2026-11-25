@@ -245,6 +245,7 @@ const MAX_RETIRED_SESSIONS: usize = 4096;
 /// Routing table shared by the router and the client's notification dispatcher.
 #[derive(Default)]
 struct RouterState {
+    closed: bool,
     sessions: HashMap<SessionId, SessionSenders>,
     /// Events for IDs not registered yet, in arrival order, keyed in the
     /// order the IDs were first seen. Registering the ID delivers them ahead
@@ -299,6 +300,10 @@ impl RouterState {
         senders: SessionSenders,
         dispatcher: Option<&mpsc::UnboundedSender<DispatcherInput>>,
     ) -> Option<SessionSenders> {
+        if self.closed {
+            senders.state.cancel();
+            return None;
+        }
         self.retired.shift_remove(session_id.as_str());
         let held = self
             .unclaimed
@@ -438,6 +443,9 @@ impl RouterState {
     }
 
     fn route(&mut self, notification: SessionEventNotification) {
+        if self.closed {
+            return;
+        }
         // Read before a detach reply: only a registration that existed then
         // may see it.
         if let Some(mark) = self
@@ -552,7 +560,9 @@ impl SessionEventSink {
     /// has delivered everything read before it, which ends each session's
     /// event loop.
     pub(crate) fn close(&self) {
-        *self.0.lock() = RouterState::default();
+        let mut state = self.0.lock();
+        *state = RouterState::default();
+        state.closed = true;
     }
 
     /// The dispatcher reached a [`DispatcherInput::Claim`]: every event read
@@ -569,6 +579,9 @@ impl SessionEventSink {
 
     pub(crate) fn deleted(&self, session_id: &SessionId) {
         let mut state = self.0.lock();
+        if state.closed {
+            return;
+        }
         if let Some(pending) = state.pending_deletions.get(session_id.as_str()) {
             for seen in pending {
                 seen.store(true, Ordering::Relaxed);
@@ -936,12 +949,12 @@ impl SessionRouter {
         self.state.lock().sessions.len()
     }
 
-    /// Drop all registered session channels.
+    /// Close all registered session channels without allowing new registrations.
     ///
     /// Used by [`Client::force_stop`](crate::Client::force_stop) to release
     /// per-session state without waiting for graceful unregistration.
     pub(crate) fn clear(&self) {
-        *self.state.lock() = RouterState::default();
+        self.event_sink().close();
     }
 
     /// Start the request routing task if not already running.

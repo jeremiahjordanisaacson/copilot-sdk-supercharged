@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/microsoft/copilot-sdk/go/v2/rpc"
@@ -2591,6 +2592,39 @@ type ToolInvocation struct {
 	// deliveredContainers holds every object and array of Arguments as the
 	// SDK delivered it, so a caller's replacement is not mistaken for it.
 	deliveredContainers []any
+
+	// reportProgress sends progress for this call; nil when the invocation was
+	// not created by a session. It is a pointer so copies of an invocation
+	// stay equal under reflect.DeepEqual, which never treats funcs as equal.
+	reportProgress *toolProgressReporter
+}
+
+// toolProgressReporter is cleared when the handler returns, so an invocation
+// the handler retains does not keep the session alive.
+type toolProgressReporter struct {
+	report atomic.Pointer[func(ctx context.Context, message string)]
+}
+
+// ReportProgress reports progress for this call while it runs. The runtime
+// emits a tool.execution_progress session event with this call's ToolCallID
+// and message verbatim. Progress for a call that has already completed is
+// dropped, and delivery failures never fail the tool call. It does nothing
+// after the handler returns, when the session has disconnected, or when the
+// invocation was not created by a session.
+//
+// Experimental: this method may change or be removed.
+func (i ToolInvocation) ReportProgress(ctx context.Context, message string) {
+	if i.reportProgress == nil {
+		return
+	}
+	report := i.reportProgress.report.Load()
+	if report == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	(*report)(ctx, message)
 }
 
 // ToolHandler executes a tool invocation.

@@ -756,6 +756,7 @@ pub const SESSION_METHOD_PATHS: &[(&str, &[&str])] = &[
         "session.tools.handlePendingToolCall",
         &["tools", "handlePendingToolCall"],
     ),
+    ("session.tools.reportProgress", &["tools", "reportProgress"]),
     (
         "session.tools.listPendingRequests",
         &["tools", "listPendingRequests"],
@@ -28720,6 +28721,32 @@ impl<'a> SessionRpcTools<'a> {
                 Some(wire_params),
             )
             .await
+    }
+
+    /// Reports progress for a pending external tool call as a tool.execution_progress event on its tool call. An empty message, or progress for an unknown or already completed request, is ignored.
+    ///
+    /// Wire method: `session.tools.reportProgress`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Pending external tool call request ID and a progress message for its running tool call.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn report_progress(&self, params: ToolsReportProgressRequest) -> Result<(), Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        let _: serde::de::IgnoredAny = self
+            .session
+            .client()
+            .call_typed(rpc_methods::SESSION_TOOLS_REPORTPROGRESS, Some(wire_params))
+            .await?;
+        Ok(())
     }
 
     /// Lists the external tool calls of the session and its sub-agents that are still waiting for session.tools.handlePendingToolCall.

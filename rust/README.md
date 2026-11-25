@@ -1383,6 +1383,8 @@ The closure receives the full [`ToolInvocation`](crate::types::ToolInvocation) a
 
 Reach for the `ToolHandler` trait directly when you need shared state across multiple methods or want a named type that shows up by name in stack traces.
 
+A long-running handler can call `inv.report_progress(message).await` (experimental) while it runs. The runtime emits a `tool.execution_progress` session event for the call with the message verbatim, matching `reportProgress` on the Node SDK's tool invocation. Progress for a completed call is dropped, and delivery failures never fail the tool call.
+
 #### Replacing tools during a session
 
 `Session::set_tools` (experimental) replaces the complete set of tools this client supplies to a live session, together with the handlers that serve them. It takes the same `Tool` values as `SessionToolOptions::with_definitions`, and an empty collection removes all of this client's tools. Built-in, MCP, plugin, and extension tools, and tools that other connected clients supply, are unaffected.

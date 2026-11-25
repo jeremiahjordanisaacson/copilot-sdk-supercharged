@@ -2691,6 +2691,19 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 		rawArguments: rawArguments,
 	}
 	invocation.deliveredContainers = deliveredContainers
+	report := func(progressCtx context.Context, message string) {
+		if s.externalToolsAreClosed() {
+			return
+		}
+		// Progress is best-effort and must never fail the tool call.
+		_, _ = s.RPC.Tools.ReportProgress(progressCtx, &rpc.ToolsReportProgressRequest{
+			RequestID: requestID,
+			Message:   message,
+		})
+	}
+	invocation.reportProgress = &toolProgressReporter{}
+	invocation.reportProgress.report.Store(&report)
+	defer invocation.reportProgress.report.Store(nil)
 
 	// The built-in tool-search tool receives a snapshot of the session's
 	// currently initialized tools so an override can filter the live catalog
@@ -2706,7 +2719,11 @@ func (s *Session) executeToolAndRespond(requestID, toolName, toolCallID, agentID
 		return
 	}
 
-	result, err := handler(invocation)
+	result, err := func() (ToolResult, error) {
+		// Stop progress as soon as the handler returns or panics, before the result is delivered.
+		defer invocation.reportProgress.report.Store(nil)
+		return handler(invocation)
+	}()
 	if !s.claimExternalTool(requestID, pending) {
 		return
 	}

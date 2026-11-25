@@ -1051,6 +1051,33 @@ func TestSession_SetToolsRunningCallsFinishOnOriginalHandler(t *testing.T) {
 	server.respond(t, completion.ID, map[string]any{})
 }
 
+func TestSession_ToolInvocationReportProgressSendsRequest(t *testing.T) {
+	session, server := newSetToolsTestSession(t)
+	message := "  50% done\n"
+	session.registerTools([]Tool{{Name: "lookup", Handler: func(inv ToolInvocation) (ToolResult, error) {
+		if copied := inv; !reflect.DeepEqual(inv, copied) {
+			t.Errorf("a copied invocation is not DeepEqual to the original")
+		}
+		inv.ReportProgress(context.Background(), message)
+		return ToolResult{TextResultForLLM: "ok"}, nil
+	}}})
+	session.startExternalTool(&ExternalToolRequestedData{
+		RequestID:  "request-1",
+		SessionID:  "session-1",
+		ToolCallID: "tool-call-1",
+		ToolName:   "lookup",
+	}, "", nil)
+
+	progress := server.expectRequest(t, "session.tools.reportProgress")
+	if progress.Params["requestId"] != "request-1" || progress.Params["message"] != message {
+		t.Fatalf("progress params = %#v, want requestId request-1 and verbatim message", progress.Params)
+	}
+	server.respond(t, progress.ID, nil)
+
+	completion := server.expectRequest(t, "session.tools.handlePendingToolCall")
+	server.respond(t, completion.ID, map[string]any{})
+}
+
 func TestSession_SetToolsRejectionLeavesHandlersUnchanged(t *testing.T) {
 	session, server := newSetToolsTestSession(t)
 	oldHandler := func(_ ToolInvocation) (ToolResult, error) {

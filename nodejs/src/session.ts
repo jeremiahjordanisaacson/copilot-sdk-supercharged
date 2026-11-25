@@ -84,6 +84,7 @@ import type {
     SessionCreationHandler,
     Tool,
     ToolHandler,
+    ToolInvocation,
     ToolResult,
     ToolResultObject,
     TraceContextProvider,
@@ -1959,7 +1960,7 @@ export class CopilotSession {
             if (controller.signal.aborted) {
                 return;
             }
-            const rawResult = await handler(args, {
+            const invocation: ToolInvocation = {
                 sessionId: this.sessionId,
                 toolCallId,
                 toolName,
@@ -1970,7 +1971,32 @@ export class CopilotSession {
                 signal: controller.signal,
                 agentId,
                 requestId,
+            };
+            let report: ((message: string) => Promise<void>) | undefined = async (message) => {
+                if (this.disconnected) {
+                    return;
+                }
+                try {
+                    await this.rpc.tools.reportProgress({ requestId, message });
+                } catch {
+                    // Progress is best-effort and must never fail the tool call.
+                }
+            };
+            // Non-enumerable so structuredClone() and worker postMessage() of the
+            // invocation keep working; a clone reports nothing.
+            Object.defineProperty(invocation, "reportProgress", {
+                value: async (message: string) => {
+                    await report?.(message);
+                },
+                enumerable: false,
             });
+            let rawResult: Awaited<ReturnType<typeof handler>>;
+            try {
+                rawResult = await handler(args, invocation);
+            } finally {
+                // A handler can retain its invocation; release the session once it finishes.
+                report = undefined;
+            }
             let result: ToolResult;
             if (rawResult == null) {
                 result = "";

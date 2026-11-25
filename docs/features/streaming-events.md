@@ -57,6 +57,7 @@ Every session event, regardless of type, includes these fields:
 | `timestamp` | `string` (ISO 8601) | When the event was created |
 | `parentId` | `string \| null` | ID of the most recent persisted event when this event was emitted; `null` if there was none yet |
 | `agentId` | `string?` | Sub-agent instance ID for sub-agent-originated events; absent for root/main agent and session-level events |
+| `occurredAt` | `string?` (ISO 8601) | When the event happened, on a copy recorded later, such as a sub-agent's event forwarded to its parent; `timestamp` is then when the copy was recorded |
 | `ephemeral` | `boolean?` | `true` for transient events; absent or `false` for persisted events |
 | `type` | `string` | Event type discriminator (see tables below) |
 | `data` | `object` | Event-specific payload |

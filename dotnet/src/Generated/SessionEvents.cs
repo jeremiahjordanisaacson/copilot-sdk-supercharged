@@ -214,6 +214,11 @@ public partial class SessionEvent
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
 
+    /// <summary>ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("occurredAt")]
+    public DateTimeOffset? OccurredAt { get; set; }
+
     /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("parentId")]
@@ -775,6 +780,11 @@ internal sealed class SessionEventEnvelope
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
 
+    /// <summary>ISO 8601 time the event happened, when it was recorded elsewhere and copied into this session later, such as a sub-agent's event forwarded to its parent. The envelope `timestamp` is when this copy was recorded.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("occurredAt")]
+    public DateTimeOffset? OccurredAt { get; set; }
+
     /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     [JsonPropertyName("parentId")]
@@ -793,6 +803,7 @@ internal sealed class SessionEventEnvelope
         Checkpoint = Checkpoint,
         Ephemeral = Ephemeral,
         Id = Id,
+        OccurredAt = OccurredAt,
         ParentId = ParentId,
         Timestamp = Timestamp,
         AdditionalProperties = AdditionalProperties,

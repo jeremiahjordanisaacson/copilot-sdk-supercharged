@@ -134,6 +134,9 @@ pub fn subscribe_notifications(
     client.inner.rpc.subscribe_notifications(methods)
 }
 
+mod session_events;
+pub use session_events::{SessionEvents, subscribe_session};
+
 /// Install an owner-scoped timing consumer during the native CLI's connection setup.
 ///
 /// The consumer performs only in-memory initialization; release admission and endpoint

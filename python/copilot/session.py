@@ -72,6 +72,7 @@ from ._generated.rpc import (
     SessionLogLevel,
     SessionRpc,
     SkillProviderDescriptor,
+    ToolsReportProgressRequest,
     ToolsSetRequest,
     UIElicitationRequest,
     UIElicitationResponse,
@@ -133,6 +134,8 @@ from .tools import (
     ToolHandler,
     ToolInvocation,
     ToolResult,
+    _bind_progress_reporter,
+    _release_progress_reporter,
     tool_result_to_external_tool_text_result_for_llm,
 )
 
@@ -3349,6 +3352,17 @@ class CopilotSession:
                 except Exception:
                     available_tools = None
 
+            async def report_progress(message: str) -> None:
+                if self._destroyed:
+                    return
+                try:
+                    await self.rpc.tools.report_progress(
+                        ToolsReportProgressRequest(request_id=request_id, message=message)
+                    )
+                except Exception:
+                    # Progress is best-effort and must never fail the tool call.
+                    pass
+
             invocation = ToolInvocation(
                 session_id=self.session_id,
                 tool_call_id=tool_call_id,
@@ -3358,10 +3372,15 @@ class CopilotSession:
                 agent_id=agent_id,
                 request_id=request_id,
             )
+            _bind_progress_reporter(invocation, report_progress)
 
             with trace_context(traceparent, tracestate):
                 handler_start = time.perf_counter()
-                result = await _run_handler(handler, invocation)
+                try:
+                    result = await _run_handler(handler, invocation)
+                finally:
+                    # A handler can retain its invocation; release the session.
+                    _release_progress_reporter(invocation)
                 log_timing(
                     logger,
                     logging.DEBUG,

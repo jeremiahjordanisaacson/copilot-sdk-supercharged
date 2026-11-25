@@ -34301,6 +34301,11 @@ type SessionTelemetryReloadResult struct {
 type SessionTelemetrySetFeatureOverridesResult struct {
 }
 
+// Experimental: SessionToolsReportProgressResult is part of an experimental API and may
+// change or be removed.
+type SessionToolsReportProgressResult struct {
+}
+
 // Experimental: SessionUIRegisterDirectAutoModeSwitchHandlerRequest is part of an
 // experimental API and may change or be removed.
 type SessionUIRegisterDirectAutoModeSwitchHandlerRequest struct {
@@ -37628,6 +37633,16 @@ type ToolsListRequest struct {
 	// Optional model ID — when provided, the returned tool list reflects model-specific
 	// overrides
 	Model *string `json:"model,omitempty"`
+}
+
+// Pending external tool call request ID and a progress message for its running tool call.
+// Experimental: ToolsReportProgressRequest is part of an experimental API and may change or
+// be removed.
+type ToolsReportProgressRequest struct {
+	// Progress message, emitted verbatim as the tool.execution_progress progressMessage
+	Message string `json:"message"`
+	// Request ID of the pending tool call
+	RequestID string `json:"requestId"`
 }
 
 // Complete externally implemented tool list for the calling connection. An empty list
@@ -68686,6 +68701,31 @@ func (a *ToolsAPI) ListPendingRequests(ctx context.Context) (*PendingExternalToo
 		return nil, err
 	}
 	var result PendingExternalToolRequestList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ReportProgress reports progress for a pending external tool call as a
+// tool.execution_progress event on its tool call. An empty message, or progress for an
+// unknown or already completed request, is ignored.
+//
+// RPC method: session.tools.reportProgress.
+//
+// Parameters: Pending external tool call request ID and a progress message for its running
+// tool call.
+func (a *ToolsAPI) ReportProgress(ctx context.Context, params *ToolsReportProgressRequest) (*SessionToolsReportProgressResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		req["message"] = params.Message
+		req["requestId"] = params.RequestID
+	}
+	raw, err := a.client.Request(ctx, "session.tools.reportProgress", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SessionToolsReportProgressResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}

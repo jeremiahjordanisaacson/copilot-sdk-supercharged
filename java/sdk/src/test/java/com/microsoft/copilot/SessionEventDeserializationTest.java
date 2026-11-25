@@ -6,6 +6,7 @@ package com.microsoft.copilot;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -100,6 +101,22 @@ public class SessionEventDeserializationTest {
             } else {
                 assertInstanceOf(SessionInfoEvent.class, event);
             }
+            assertEquals(wire, MAPPER.valueToTree(event));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"session.info", "future.event"})
+    void testOccurredAtRoundTrip(String type) throws Exception {
+        for (String occurredAt : new String[]{null, "2026-09-18T11:59:30Z"}) {
+            var wire = MAPPER.readValue(eventEnvelope(type, """
+                    {"infoType":"status","message":"Forwarded state"}
+                    """), ObjectNode.class);
+            if (occurredAt != null) {
+                wire.put("occurredAt", occurredAt);
+            }
+            var event = parseJson(wire.toString());
+            assertEquals(occurredAt == null ? null : OffsetDateTime.parse(occurredAt), event.getOccurredAt());
             assertEquals(wire, MAPPER.valueToTree(event));
         }
     }

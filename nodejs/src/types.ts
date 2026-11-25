@@ -856,6 +856,16 @@ export interface ToolInvocation {
      * @experimental
      */
     requestId?: string;
+    /**
+     * Report progress for this call while it runs. The runtime emits a
+     * `tool.execution_progress` session event with this call's `toolCallId` and
+     * `message` verbatim. Progress for a call that has already completed is
+     * dropped, and delivery failures never fail the tool call. After the handler
+     * finishes, this does nothing.
+     *
+     * @experimental
+     */
+    reportProgress?: (message: string) => Promise<void>;
 }
 
 export type ToolHandler<TArgs = unknown> = (
