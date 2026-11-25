@@ -1393,6 +1393,7 @@ func (c *Client) CreateSession(ctx context.Context, input *CreateSessionOptions)
 	req.ConfigDir = config.ConfigDirectory
 	req.EnableConfigDiscovery = config.EnableConfigDiscovery
 	req.ExtensionSources = config.ExtensionSources
+	req.ExtensionPaths = config.ExtensionPaths
 	req.TrustWorkingDirectory = string(config.TrustWorkingDirectory)
 	req.SkipEmbeddingRetrieval = config.SkipEmbeddingRetrieval
 	req.EmbeddingCacheStorage = config.EmbeddingCacheStorage
@@ -2018,6 +2019,7 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, input *Res
 	req.ConfigDir = config.ConfigDirectory
 	req.EnableConfigDiscovery = config.EnableConfigDiscovery
 	req.ExtensionSources = config.ExtensionSources
+	req.ExtensionPaths = config.ExtensionPaths
 	req.SkipEmbeddingRetrieval = config.SkipEmbeddingRetrieval
 	req.EmbeddingCacheStorage = config.EmbeddingCacheStorage
 	req.OrganizationCustomInstructions = config.OrganizationCustomInstructions

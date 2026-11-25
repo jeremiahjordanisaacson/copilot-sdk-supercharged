@@ -27,14 +27,27 @@ public final class ServerCommandsApi {
     }
 
     /**
-     * Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.
+     * Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+     * <p>
+     * Invokes the method with no params, applying the runtime defaults.
      *
      * @apiNote This method is experimental and may change in a future version.
      * @since 1.0.0
      */
     @CopilotExperimental
     public CompletableFuture<CommandsListResult> list() {
-        return caller.invoke("commands.list", java.util.Map.of(), CommandsListResult.class);
+        return list(null);
+    }
+
+    /**
+     * Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+     *
+     * @apiNote This method is experimental and may change in a future version.
+     * @since 1.0.0
+     */
+    @CopilotExperimental
+    public CompletableFuture<CommandsListResult> list(CommandsListParams params) {
+        return caller.invoke("commands.list", params == null ? java.util.Map.of() : params, CommandsListResult.class);
     }
 
 }

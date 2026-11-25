@@ -74,5 +74,10 @@ public final class ReleasedConstructorCaller {
                 new ElicitationCompletedEventData("input", ElicitationCompletedAction.ACCEPT, Map.of("screenshot", ""))));
         System.out.println(mapper.writeValueAsString(
                 new ElicitationRequestedEventData("input", "tool", null, null, "Question?", null, null, null)));
+        System.out.println(mapper.writeValueAsString(new com.microsoft.copilot.generated.rpc.SlashCommandInfo(
+                "legacy-command", List.of("legacy"), "Legacy command",
+                com.microsoft.copilot.generated.rpc.SlashCommandKind.CLIENT,
+                com.microsoft.copilot.generated.rpc.SlashCommandInput.builder().hint("argument").build(),
+                true, false, true)));
     }
 }

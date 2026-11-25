@@ -1227,6 +1227,13 @@ impl<'a> ClientRpc<'a> {
         }
     }
 
+    /// `contextBoard.*` sub-namespace.
+    pub fn context_board(&self) -> ClientRpcContextBoard<'a> {
+        ClientRpcContextBoard {
+            client: self.client,
+        }
+    }
+
     /// `decisions.*` sub-namespace.
     pub fn decisions(&self) -> ClientRpcDecisions<'a> {
         ClientRpcDecisions {
@@ -4075,7 +4082,31 @@ pub struct ClientRpcCommands<'a> {
 }
 
 impl<'a> ClientRpcCommands<'a> {
-    /// Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.
+    /// Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+    ///
+    /// Wire method: `commands.list`.
+    ///
+    /// # Returns
+    ///
+    /// Slash commands available in the session, after applying any include/exclude filters.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Returns complete presentation metadata without changing the published command DTO.
+    pub async fn list_with_metadata(&self) -> Result<CommandListWithMetadata, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(rpc_methods::COMMANDS_LIST, Some(wire_params))
+            .await
+    }
+
+    /// Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
     ///
     /// Wire method: `commands.list`.
     ///
@@ -4092,6 +4123,35 @@ impl<'a> ClientRpcCommands<'a> {
     /// </div>
     pub async fn list(&self) -> Result<CommandList, Error> {
         let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(rpc_methods::COMMANDS_LIST, Some(wire_params))
+            .await
+    }
+
+    /// Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+    ///
+    /// Wire method: `commands.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Presentation flags for the complete built-in command catalog.
+    ///
+    /// # Returns
+    ///
+    /// Slash commands available in the session, after applying any include/exclude filters.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn list_with_params(
+        &self,
+        params: RuntimeCommandCatalogRequest,
+    ) -> Result<CommandListWithMetadata, Error> {
+        let wire_params = serde_json::to_value(params)?;
         self.client
             .call_typed(rpc_methods::COMMANDS_LIST, Some(wire_params))
             .await
@@ -4242,6 +4302,41 @@ impl<'a> ClientRpcContentExclusion<'a> {
         self.client
             .call_typed(
                 rpc_methods::CONTENTEXCLUSION_VALIDATEPOLICIES,
+                Some(wire_params),
+            )
+            .await
+    }
+}
+
+/// `contextBoard.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcContextBoard<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcContextBoard<'a> {
+    /// Returns the runtime-owned instructions for a rem-agent that consolidates a session context board. Hosts that launch a consolidation agent use this prompt rather than copy runtime instructions.
+    ///
+    /// Wire method: `contextBoard.getConsolidationPrompt`.
+    ///
+    /// # Returns
+    ///
+    /// The runtime-owned prompt for a context-board consolidation agent.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_consolidation_prompt(
+        &self,
+    ) -> Result<ContextBoardConsolidationPromptResult, Error> {
+        let wire_params = serde_json::json!({});
+        self.client
+            .call_typed(
+                rpc_methods::CONTEXTBOARD_GETCONSOLIDATIONPROMPT,
                 Some(wire_params),
             )
             .await
@@ -17836,6 +17931,64 @@ pub struct SessionRpcCommands<'a> {
 }
 
 impl<'a> SessionRpcCommands<'a> {
+    /// Lists slash commands available in the session.
+    ///
+    /// Wire method: `session.commands.list`.
+    ///
+    /// # Returns
+    ///
+    /// Slash commands available in the session, after applying any include/exclude filters.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Returns complete presentation metadata without changing the published command DTO.
+    pub async fn list_with_metadata(&self) -> Result<CommandListWithMetadata, Error> {
+        let wire_params = serde_json::json!({ "sessionId": self.session.id() });
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_COMMANDS_LIST, Some(wire_params))
+            .await
+    }
+
+    /// Lists slash commands available in the session.
+    ///
+    /// Wire method: `session.commands.list`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional filters controlling which command sources to include in the listing.
+    ///
+    /// # Returns
+    ///
+    /// Slash commands available in the session, after applying any include/exclude filters.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Applies source filters and returns complete presentation metadata.
+    pub async fn list_with_metadata_with_params(
+        &self,
+        params: CommandsListRequest,
+    ) -> Result<CommandListWithMetadata, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        self.session
+            .client()
+            .call_typed(rpc_methods::SESSION_COMMANDS_LIST, Some(wire_params))
+            .await
+    }
+
     /// Lists slash commands available in the session.
     ///
     /// Wire method: `session.commands.list`.

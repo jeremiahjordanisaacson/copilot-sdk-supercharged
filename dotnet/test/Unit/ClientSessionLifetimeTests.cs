@@ -3019,10 +3019,10 @@ public sealed partial class ClientSessionLifetimeTests
         server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
             ? new Dictionary<string, object?> { ["success"] = true }
             : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        using var process = StartExitedProcess();
         await using var client = new CopilotClient(new CopilotClientOptions
         { Mode = CopilotClientMode.CodingAgent, Runtime = RuntimeConnection.ForTcp(server.Host, server.Port), SessionFs = new SessionFsConfig { InitialWorkingDirectory = "/", SessionStatePath = "/session-state", Conventions = SessionFsSetProviderConventions.Posix } });
         await client.StartAsync();
-        using var process = StartExitedProcess();
         await ReplaceConnectionResourcesAsync(client, process);
         using var releaseSetup = new ManualResetEventSlim();
         using var releaseCreation = new ManualResetEventSlim();

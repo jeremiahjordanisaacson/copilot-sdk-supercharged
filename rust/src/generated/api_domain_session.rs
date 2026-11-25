@@ -157,6 +157,21 @@ crate::record_serde::wire_record!(BuiltinToolDescriptor {
     r#type: "type"
 });
 
+/// The runtime-owned prompt for a context-board consolidation agent.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ContextBoardConsolidationPromptResult {
+    /// Instructions for the rem-agent to consolidate the session context board.
+    pub prompt: String,
+}
+crate::record_serde::wire_record!(ContextBoardConsolidationPromptResult { prompt: "prompt" });
+
 /// Lightweight metadata for a currently initialized session tool
 ///
 /// <div class="warning">
@@ -9953,6 +9968,21 @@ pub struct ToolsListResult {
     pub tools: Vec<Tool>,
 }
 crate::record_serde::wire_record!(ToolsListResult { tools: "tools" });
+
+/// The runtime-owned prompt for a context-board consolidation agent.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ContextBoardGetConsolidationPromptResult {
+    /// Instructions for the rem-agent to consolidate the session context board.
+    pub prompt: String,
+}
+crate::record_serde::wire_record!(ContextBoardGetConsolidationPromptResult { prompt: "prompt" });
 
 /// Flushes durable session state through its original runtime and client owners.
 ///

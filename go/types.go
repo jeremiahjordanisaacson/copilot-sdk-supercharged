@@ -2000,6 +2000,10 @@ type sessionOptions struct {
 	// ExtensionSources selects extension sources without enabling extensions.
 	// Warm resumes cannot change overrides. Cold omission restores existing defaults.
 	ExtensionSources *ExtensionSources
+	// ExtensionPaths adds standalone modules supplied and trusted by the host, without enabling extensions.
+	// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+	// Relative entries resolve against the request's working directory. Re-supply on owning resume.
+	ExtensionPaths []string
 	// TrustWorkingDirectory trusts the working directory for this session
 	// ("session") or persistently for the user ("user"). Empty leaves trust unchanged.
 	TrustWorkingDirectory WorkingDirectoryTrust
@@ -2977,6 +2981,9 @@ type resumeOptions struct {
 	EnableConfigDiscovery *bool
 	// ExtensionSources must match a loaded session; cold omission restores defaults.
 	ExtensionSources *ExtensionSources
+	// ExtensionPaths replaces host-trusted standalone entries. Omission or an empty list removes them.
+	// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+	ExtensionPaths []string
 	// SkipEmbeddingRetrieval, when non-nil, controls embedding-based retrieval
 	// for this session. Use in multitenant deployments to prevent cross-session
 	// information leakage through the shared embedding cache.
@@ -3771,6 +3778,7 @@ type createSessionRequest struct {
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
 	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
+	ExtensionPaths                     []string                       `json:"extensionPaths,omitzero"`
 	TrustWorkingDirectory              string                         `json:"trustWorkingDirectory,omitempty"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
@@ -3878,6 +3886,7 @@ type resumeSessionRequest struct {
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
 	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
+	ExtensionPaths                     []string                       `json:"extensionPaths,omitzero"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
 	OrganizationCustomInstructions     *string                        `json:"organizationCustomInstructions,omitempty"`

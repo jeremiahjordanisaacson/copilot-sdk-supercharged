@@ -97,6 +97,8 @@ public final class ServerRpc {
     final ServerGlobalStateApi globalState;
     /** API methods for the {@code commands} namespace. */
     public final ServerCommandsApi commands;
+    /** API methods for the {@code contextBoard} namespace. */
+    public final ServerContextBoardApi contextBoard;
     /** API methods for the {@code settings} namespace. */
     final ServerSettingsApi settings;
     /** API methods for the {@code gitHubRepository} namespace. */
@@ -179,6 +181,7 @@ public final class ServerRpc {
         this.agents = new ServerAgentsApi(caller);
         this.globalState = new ServerGlobalStateApi(caller);
         this.commands = new ServerCommandsApi(caller);
+        this.contextBoard = new ServerContextBoardApi(caller);
         this.settings = new ServerSettingsApi(caller);
         this.gitHubRepository = new ServerGitHubRepositoryApi(caller);
         this.gitHubOwners = new ServerGitHubOwnersApi(caller);

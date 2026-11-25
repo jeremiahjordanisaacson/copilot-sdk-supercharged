@@ -791,13 +791,16 @@ type CreateSessionOptions struct {
 	// ExtensionSources selects extension sources without enabling extensions.
 	// Warm resumes must retain overrides; cold omission restores defaults.
 	ExtensionSources *ExtensionSources
-	Filesystem       CreateSessionFilesystemOptions
-	State            SessionStateOptions
-	Instructions     CreateSessionInstructionOptions
-	Hooks            SessionHookOptions
-	Git              SessionGitOptions
-	Skills           SessionSkillOptions
-	Tools            SessionToolOptions
+	// ExtensionPaths adds host-trusted standalone modules without enabling extensions or granting trust.
+	// Relative paths resolve against the session working directory. Re-supply on owning resume.
+	ExtensionPaths []string
+	Filesystem     CreateSessionFilesystemOptions
+	State          SessionStateOptions
+	Instructions   CreateSessionInstructionOptions
+	Hooks          SessionHookOptions
+	Git            SessionGitOptions
+	Skills         SessionSkillOptions
+	Tools          SessionToolOptions
 	// SystemMessage configures system message customization
 	SystemMessage *SystemMessageConfig
 	Agents        SessionAgentOptions
@@ -843,6 +846,7 @@ func (options *CreateSessionOptions) normalize() *sessionOptions {
 		ConfigDirectory:                    options.ConfigDirectory,
 		EnableConfigDiscovery:              options.EnableConfigDiscovery,
 		ExtensionSources:                   options.ExtensionSources,
+		ExtensionPaths:                     options.ExtensionPaths,
 		TrustWorkingDirectory:              options.Filesystem.TrustWorkingDirectory,
 		SkipEmbeddingRetrieval:             options.State.SkipEmbeddingRetrieval,
 		EmbeddingCacheStorage:              options.State.EmbeddingCacheStorage,
@@ -977,8 +981,10 @@ type ResumeSessionOptions struct {
 	EnableConfigDiscovery *bool
 	// ExtensionSources must match a loaded session; cold omission restores defaults.
 	ExtensionSources *ExtensionSources
-	State            SessionStateOptions
-	Events           SessionEventOptions
+	// ExtensionPaths replaces host-trusted standalone selections. Omission or an empty list removes them.
+	ExtensionPaths []string
+	State          SessionStateOptions
+	Events         SessionEventOptions
 	// Diagnostics updates explicitly configured sources. Leave it nil on a
 	// resident resume to preserve the current settings.
 	Diagnostics *rpc.DiagnosticsConfiguration
@@ -1061,6 +1067,7 @@ func (options *ResumeSessionOptions) normalize() *resumeOptions {
 		ConfigDirectory:                    options.ConfigDirectory,
 		EnableConfigDiscovery:              options.EnableConfigDiscovery,
 		ExtensionSources:                   options.ExtensionSources,
+		ExtensionPaths:                     options.ExtensionPaths,
 		SkipEmbeddingRetrieval:             options.State.SkipEmbeddingRetrieval,
 		EmbeddingCacheStorage:              options.State.EmbeddingCacheStorage,
 		OrganizationCustomInstructions:     options.Instructions.OrganizationText,

@@ -24,6 +24,20 @@ import javax.annotation.processing.Generated;
 public record SlashCommandInfo(
     /** Canonical command name without a leading slash */
     @JsonProperty("name") String name,
+    /** Display name, including the leading slash. */
+    @JsonProperty("displayName") String displayName,
+    /** Command source, such as runtime, skill, or protocol-client. */
+    @JsonProperty("source") String source,
+    /** Whether invocation stops processing the queued commands. */
+    @JsonProperty("stopsQueueProcessing") Boolean stopsQueueProcessing,
+    /** Whether the command can be the first message in a session. */
+    @JsonProperty("availableAtSessionStart") Boolean availableAtSessionStart,
+    /** Nested terminal argument grammar, serialized as ArgsSpec JSON. */
+    @JsonProperty("cliArgsJson") String cliArgsJson,
+    /** Skill that provides this command. */
+    @JsonProperty("skillName") String skillName,
+    /** Plugin that provides this command. */
+    @JsonProperty("pluginName") String pluginName,
     /** Canonical aliases without leading slashes */
     @JsonProperty("aliases") List<String> aliases,
     /** Human-readable command description */
@@ -47,6 +61,21 @@ public record SlashCommandInfo(
     public SlashCommandInfo {}
 
     /**
+     * Creates a record without optional runtime metadata.
+     * @param name the {@code name} property
+     * @param aliases the {@code aliases} property
+     * @param description the {@code description} property
+     * @param kind the {@code kind} property
+     * @param input the {@code input} property
+     * @param allowDuringAgentExecution the {@code allowDuringAgentExecution} property
+     * @param experimental the {@code experimental} property
+     * @param schedulable the {@code schedulable} property
+     */
+    public SlashCommandInfo(String name, List<String> aliases, String description, SlashCommandKind kind, SlashCommandInput input, Boolean allowDuringAgentExecution, Boolean experimental, Boolean schedulable) {
+        this(name, null, null, null, null, null, null, null, aliases, description, kind, input, allowDuringAgentExecution, experimental, schedulable);
+    }
+
+    /**
      * Returns a named builder.
      * @return a new builder
      * @since 2.0.0
@@ -60,6 +89,13 @@ public record SlashCommandInfo(
     public static final class Builder {
         private Builder() {}
         private String name;
+        private String displayName;
+        private String source;
+        private Boolean stopsQueueProcessing;
+        private Boolean availableAtSessionStart;
+        private String cliArgsJson;
+        private String skillName;
+        private String pluginName;
         private List<String> aliases;
         private String description;
         private SlashCommandKind kind;
@@ -76,6 +112,83 @@ public record SlashCommandInfo(
          */
         public Builder name(String value) {
             this.name = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code displayName} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder displayName(String value) {
+            this.displayName = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code source} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder source(String value) {
+            this.source = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code stopsQueueProcessing} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder stopsQueueProcessing(Boolean value) {
+            this.stopsQueueProcessing = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code availableAtSessionStart} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder availableAtSessionStart(Boolean value) {
+            this.availableAtSessionStart = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code cliArgsJson} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder cliArgsJson(String value) {
+            this.cliArgsJson = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code skillName} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder skillName(String value) {
+            this.skillName = value;
+            return this;
+        }
+
+        /**
+         * Sets the {@code pluginName} property.
+         * @param value the property value
+         * @return this builder
+         * @since 2.0.0
+         */
+        public Builder pluginName(String value) {
+            this.pluginName = value;
             return this;
         }
 
@@ -167,7 +280,7 @@ public record SlashCommandInfo(
             if (description == null) throw new IllegalStateException("Missing required property: description");
             if (kind == null) throw new IllegalStateException("Missing required property: kind");
             if (allowDuringAgentExecution == null) throw new IllegalStateException("Missing required property: allowDuringAgentExecution");
-            return new SlashCommandInfo(name, aliases, description, kind, input, allowDuringAgentExecution, experimental, schedulable);
+            return new SlashCommandInfo(name, displayName, source, stopsQueueProcessing, availableAtSessionStart, cliArgsJson, skillName, pluginName, aliases, description, kind, input, allowDuringAgentExecution, experimental, schedulable);
         }
     }
 }

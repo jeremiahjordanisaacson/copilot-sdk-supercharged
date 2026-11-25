@@ -4452,6 +4452,7 @@ public abstract class SessionOptionsBase
         ExtensionSources = other.ExtensionSources is { } sources
             ? new() { User = sources.User, Project = sources.Project, Plugins = sources.Plugins }
             : null;
+        ExtensionPaths = other.ExtensionPaths is { } paths ? [.. paths] : null;
         State = (SessionStateOptions)other.State.Clone();
         Instructions = (SessionInstructionOptions)other.Instructions.Clone();
         Hooks = (SessionHookOptions)other.Hooks.Clone();
@@ -4527,6 +4528,15 @@ public abstract class SessionOptionsBase
     /// </summary>
     [JsonPropertyName("extensionSources")]
     public ExtensionSources? ExtensionSources { get; set; }
+
+    /// <summary>
+    /// Standalone entry modules supplied and trusted by the host, without enabling extensions or trust.
+    /// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+    /// Relative entries resolve against this request's working directory and remain fixed.
+    /// Re-supply on owning resume; omission or an empty list removes previous explicit entries.
+    /// </summary>
+    [JsonPropertyName("extensionPaths")]
+    public List<string>? ExtensionPaths { get; set; }
 
     /// <summary>Options for state.</summary>
     [JsonPropertyName("state")]

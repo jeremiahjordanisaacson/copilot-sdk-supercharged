@@ -10,7 +10,7 @@ package com.microsoft.copilot.generated;
 import javax.annotation.processing.Generated;
 
 /**
- * Discovery source
+ * Extension provenance
  *
  * @since 1.0.0
  */
@@ -23,7 +23,9 @@ public enum ExtensionsLoadedExtensionSource {
     /** The {@code plugin} variant. */
     PLUGIN("plugin"),
     /** The {@code session} variant. */
-    SESSION("session");
+    SESSION("session"),
+    /** The {@code explicit} variant. */
+    EXPLICIT("explicit");
 
     private final String value;
     ExtensionsLoadedExtensionSource(String value) { this.value = value; }

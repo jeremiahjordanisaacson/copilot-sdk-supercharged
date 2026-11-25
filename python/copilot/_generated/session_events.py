@@ -17474,7 +17474,7 @@ class ExitPlanModeAction(Enum):
 
 
 class ExtensionsLoadedExtensionSource(Enum):
-    "Discovery source"
+    "Extension provenance"
     # Extension discovered from the current project.
     PROJECT = "project"
     # Extension discovered from the user's extension directory.
@@ -17483,6 +17483,8 @@ class ExtensionsLoadedExtensionSource(Enum):
     PLUGIN = "plugin"
     # Extension discovered from the current session's state directory.
     SESSION = "session"
+    # Standalone extension supplied by the SDK host through extensionPaths.
+    EXPLICIT = "explicit"
 
 
 class ExtensionsLoadedExtensionStatus(Enum):

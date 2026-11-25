@@ -80,6 +80,10 @@ class GeneratedBuilderEvolutionTest {
             assertTrue(java.lang.reflect.Modifier.isPublic(canonical.getModifiers()), name);
         }
         Class<?>[] compatibilityParameters = switch (name) {
+            case "com.microsoft.copilot.generated.rpc.SlashCommandInfo" -> new Class<?>[]{String.class, List.class,
+                    String.class, com.microsoft.copilot.generated.rpc.SlashCommandKind.class,
+                    com.microsoft.copilot.generated.rpc.SlashCommandInput.class, Boolean.class, Boolean.class,
+                    Boolean.class};
             case "com.microsoft.copilot.generated.rpc.UIUserInputResponse" ->
                 new Class<?>[]{String.class, Boolean.class};
             case "com.microsoft.copilot.generated.UserInputCompletedEvent$UserInputCompletedEventData" ->
@@ -163,7 +167,7 @@ class GeneratedBuilderEvolutionTest {
                 Path.of(com.microsoft.copilot.generated.rpc.TaskBlocker.class.getProtectionDomain().getCodeSource()
                         .getLocation().toURI()))
                 .strip().split("\\R");
-        assertEquals(13, output.length);
+        assertEquals(14, output.length);
         assertEquals(JSON.readTree("{\"answer\":\"yes\",\"wasFreeform\":true}"), JSON.readTree(output[8]));
         assertEquals(JSON.readTree("{\"requestId\":\"input\",\"answer\":\"yes\",\"wasFreeform\":true}"),
                 JSON.readTree(output[9]));
@@ -230,6 +234,18 @@ class GeneratedBuilderEvolutionTest {
                   "workspace": null
                 }
                 """), JSON.readTree(output[7]));
+        assertEquals(JSON.readTree("""
+                {
+                  "name": "legacy-command",
+                  "aliases": ["legacy"],
+                  "description": "Legacy command",
+                  "kind": "client",
+                  "input": {"hint": "argument"},
+                  "allowDuringAgentExecution": true,
+                  "experimental": false,
+                  "schedulable": true
+                }
+                """), JSON.readTree(output[13]));
         assertEquals(before, sha256(bytecode));
     }
 

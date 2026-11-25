@@ -570,7 +570,7 @@ pub struct ExtensionDetails {
     pub name: String,
     /// Process ID if the extension is running
     pub pid: Option<i64>,
-    /// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/`<id>`/extensions/)
+    /// Extension provenance: project, user, plugin, session, or explicit.
     pub source: ExtensionSource,
     /// Current status: running, dormant, disabled, failed, or starting
     pub status: ExtensionStatus,

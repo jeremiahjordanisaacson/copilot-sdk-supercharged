@@ -2043,7 +2043,7 @@ export type McpServerStatus =
   /** The server is not configured for this session. */
   | "not_configured";
 /**
- * Discovery source
+ * Extension provenance
  */
 export type ExtensionsLoadedExtensionSource =
   /** Extension discovered from the current project. */
@@ -2053,7 +2053,9 @@ export type ExtensionsLoadedExtensionSource =
   /** Extension contributed by an installed plugin. */
   | "plugin"
   /** Extension discovered from the current session's state directory. */
-  | "session";
+  | "session"
+  /** Standalone extension supplied by the SDK host through extensionPaths. */
+  | "explicit";
 /**
  * Current status: running, dormant, disabled, failed, or starting
  */

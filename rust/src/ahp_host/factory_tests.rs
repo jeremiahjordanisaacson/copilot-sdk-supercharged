@@ -116,8 +116,14 @@ async fn resume_can_return_retained_original_after_creation_handoff_released() {
     let (client, mut peer) = fixture();
     let (options, mut created, mut released) = factory_options();
     let host = start_factory(&client, &mut peer, options).await;
-    peer.materialize(&host.host_id, "create", json!({"sessionId": "retained"}))
-        .await;
+    peer.materialize(
+        &host.host_id,
+        "create",
+        json!({
+            "sessionId": "retained", "extensionPaths": ["selected/extension.mjs"]
+        }),
+    )
+    .await;
     peer.created().await;
     assert_eq!(
         peer.request().await["result"],
@@ -267,6 +273,7 @@ async fn resume_factory_registered_before_start_retains_original_and_preserves_s
             "hostId": host_id, "handoffId": "resume", "resume": true,
             "config": {
                 "sessionId": "durable", "workingDirectory": "/workspace",
+                "extensionPaths": ["selected/extension.mjs"],
                 "continuePendingWork": false, "suppressResumeEvent": true
             }
         }
@@ -483,37 +490,47 @@ async fn callback_failure_and_panic_fail_handoff_without_release() {
 
 #[tokio::test]
 async fn altered_post_create_setting_is_rejected_and_original_released() {
-    let (client, mut peer) = fixture();
-    let (released_tx, mut released) = mpsc::unbounded_channel();
-    let options = local_options()
-        .with_create_session(
-            |mut request: AhpSessionRequest, client: Client| async move {
-                request.config.instructions.skip_custom_instructions = None;
-                Ok(Arc::new(client.create_session(request.config).await?))
+    for extension_paths in [false, true] {
+        let (client, mut peer) = fixture();
+        let (released_tx, mut released) = mpsc::unbounded_channel();
+        let options = local_options()
+            .with_create_session(
+                move |mut request: AhpSessionRequest, client: Client| async move {
+                    if extension_paths {
+                        request.config.extension_paths = None;
+                    } else {
+                        request.config.instructions.skip_custom_instructions = None;
+                    }
+                    Ok(Arc::new(client.create_session(request.config).await?))
+                },
+            )
+            .with_on_session_released(move |session| {
+                released_tx.send(session).unwrap();
+            });
+        let host = start_factory(&client, &mut peer, options).await;
+        peer.materialize(
+            &host.host_id,
+            "altered",
+            if extension_paths {
+                json!({"sessionId": "altered", "extensionPaths": ["selected/extension.mjs"]})
+            } else {
+                json!({
+                    "sessionId": "altered", "skipCustomInstructions": true
+                })
             },
         )
-        .with_on_session_released(move |session| {
-            released_tx.send(session).unwrap();
-        });
-    let host = start_factory(&client, &mut peer, options).await;
-    peer.materialize(
-        &host.host_id,
-        "altered",
-        json!({
-            "sessionId": "altered", "skipCustomInstructions": true
-        }),
-    )
-    .await;
-    peer.created().await;
-    let error = peer.request().await;
-    assert!(
-        error["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("preserve")
-    );
-    assert_eq!(receive(&mut released).await.id().as_str(), "altered");
-    client.force_stop();
+        .await;
+        peer.created().await;
+        let error = peer.request().await;
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("preserve")
+        );
+        assert_eq!(receive(&mut released).await.id().as_str(), "altered");
+        client.force_stop();
+    }
 }
 
 #[tokio::test]

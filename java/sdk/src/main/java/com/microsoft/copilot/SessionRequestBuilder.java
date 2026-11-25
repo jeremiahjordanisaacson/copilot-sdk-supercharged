@@ -287,6 +287,7 @@ final class SessionRequestBuilder {
             request.setExtensions(config.getExtensions().clone());
         }
         request.setExtensionSources(config.getExtensionSources());
+        request.setExtensionPaths(config.getExtensionPaths());
         config.getState().getSkipEmbeddingRetrieval().ifPresent(request.getState()::setSkipEmbeddingRetrieval);
         if (config.getInstructions().getOrganizationText() != null) {
             request.setInstructions(
@@ -423,6 +424,7 @@ final class SessionRequestBuilder {
             request.setExtensions(config.getExtensions().clone());
         }
         request.setExtensionSources(config.getExtensionSources());
+        request.setExtensionPaths(config.getExtensionPaths());
         config.getState().getSkipEmbeddingRetrieval().ifPresent(request.getState()::setSkipEmbeddingRetrieval);
         if (config.getInstructions().getOrganizationText() != null) {
             request.setInstructions(

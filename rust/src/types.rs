@@ -4102,6 +4102,10 @@ pub struct CreateSessionOptions {
     /// Source overrides, not extension activation or trust grants.
     /// Warm resumes cannot change overrides; cold omission restores defaults.
     pub extension_sources: Option<ExtensionSources>,
+    /// Host-trusted standalone modules, resolved against this request's working directory.
+    /// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+    /// Does not enable extensions or grant trust. Re-supply on owning resume.
+    pub extension_paths: Option<Vec<PathBuf>>,
     /// Filesystem options for this session.
     pub filesystem: CreateSessionFilesystemOptions,
     /// State options for this session.
@@ -4163,6 +4167,7 @@ impl Default for CreateSessionOptions {
             config_directory: None,
             enable_config_discovery: None,
             extension_sources: None,
+            extension_paths: None,
             filesystem: Default::default(),
             state: Default::default(),
             instructions: Default::default(),
@@ -4286,6 +4291,7 @@ impl CreateSessionOptions {
             config_directory: self.config_directory,
             enable_config_discovery: self.enable_config_discovery,
             extension_sources: self.extension_sources.clone(),
+            extension_paths: self.extension_paths,
             filesystem: crate::wire::SessionCreateFilesystemWire {
                 trust_working_directory: self.filesystem.trust_working_directory,
                 track_file_changes: self.filesystem.track_file_changes,
@@ -4535,6 +4541,12 @@ impl CreateSessionOptions {
         self
     }
 
+    /// Add exact entry modules without enabling extensions or granting trust.
+    pub fn with_extension_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.extension_paths = Some(paths);
+        self
+    }
+
     /// Update the filesystem option group.
     pub fn with_filesystem(
         mut self,
@@ -4715,6 +4727,9 @@ pub struct ResumeSessionOptions {
     pub enable_config_discovery: Option<bool>,
     /// Must match a loaded session's overrides; cold omission restores defaults.
     pub extension_sources: Option<ExtensionSources>,
+    /// Replaces host-trusted standalone entries. Omission or an empty list removes them.
+    /// Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+    pub extension_paths: Option<Vec<PathBuf>>,
     /// State options for this session.
     pub state: SessionStateOptions,
     /// Instructions options for this session.
@@ -4829,6 +4844,7 @@ impl ResumeSessionOptions {
             config_directory: self.config_directory,
             enable_config_discovery: self.enable_config_discovery,
             extension_sources: self.extension_sources.clone(),
+            extension_paths: self.extension_paths,
             instructions: crate::wire::SessionResumeInstructionWire {
                 organization_text: self.instructions.organization_text,
                 on_demand_discovery: self.instructions.on_demand_discovery,
@@ -4927,6 +4943,7 @@ impl ResumeSessionOptions {
             config_directory: None,
             enable_config_discovery: None,
             extension_sources: None,
+            extension_paths: None,
             state: Default::default(),
             instructions: Default::default(),
             hooks: Default::default(),
@@ -5122,6 +5139,12 @@ impl ResumeSessionOptions {
     /// Select sources without enabling extensions. Warm resumes must match.
     pub fn with_extension_sources(mut self, sources: ExtensionSources) -> Self {
         self.extension_sources = Some(sources);
+        self
+    }
+
+    /// Replace exact entry modules, resolving relative paths against the resume working directory.
+    pub fn with_extension_paths(mut self, paths: Vec<PathBuf>) -> Self {
+        self.extension_paths = Some(paths);
         self
     }
 

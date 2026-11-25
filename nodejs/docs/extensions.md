@@ -2,6 +2,23 @@
 
 Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run as separate Node.js processes that communicate with the CLI over JSON-RPC via stdio.
 
+## Select exact entry modules
+
+Set `extensionPaths` on owning session creation or resume for standalone
+`extension.mjs`, `extension.cjs`, or `extension.js` modules supplied and trusted by
+the SDK host. Each entry uses source `explicit` and a stable path-derived identifier.
+Relative paths resolve once against the request's effective working directory.
+Reload reuses the list. Owning resume replaces it; omission or `[]` clears it.
+
+Entries owned by existing discovery are unsupported. Exact overlaps fail individually,
+without changing ordinary discovery or blocking valid standalone entries.
+The option does not enable extensions, install packages, or grant trust or permissions.
+Global standalone prohibition applies; marketplace and plugin enablement settings do not.
+
+Paths are files, not directories or globs. Identical resolved explicit paths
+deduplicate. Filesystem aliases for the same module are unsupported consumer input;
+selection does not inspect links, volumes, plugin roots, or physical file identity.
+
 ## How Extensions Work
 
 ```

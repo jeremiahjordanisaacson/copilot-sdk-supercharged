@@ -11,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.io.OutputStream;
 import java.net.JarURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -143,9 +146,8 @@ class NativeRuntimeLoaderIT {
         Path nativeJar = Path.of(((JarURLConnection) runtimeResource().openConnection()).getJarFileURL().toURI());
         String classpath = String.join(File.pathSeparator, sdkJar.toString(),
                 System.getProperty("project.build.testOutputDirectory"), nativeJar.toString());
-        Path log = Files.createTempFile(home, "resolve-", ".log");
         ProcessBuilder builder = new ProcessBuilder(java.toString(), "-Duser.home=" + home, "-cp", classpath,
-                ResolveProbe.class.getName()).redirectErrorStream(true).redirectOutput(log.toFile());
+                ResolveProbe.class.getName()).redirectErrorStream(true);
         builder.environment().put("PATH", "");
         if (cliPath == null) {
             builder.environment().remove("COPILOT_CLI_PATH");
@@ -153,15 +155,29 @@ class NativeRuntimeLoaderIT {
             builder.environment().put("COPILOT_CLI_PATH", cliPath);
         }
         Process process = builder.start();
+        var output = new FutureTask<String>(() -> {
+            try (var stream = process.getInputStream()) {
+                byte[] prefix = stream.readNBytes(64 * 1024);
+                // Keep diagnostics bounded, but drain all output so the child cannot block.
+                stream.transferTo(OutputStream.nullOutputStream());
+                return new String(prefix, StandardCharsets.UTF_8);
+            }
+        });
+        Thread reader = new Thread(output, "resolver-output");
+        reader.start();
+        boolean exited;
         try {
-            assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Resolver JVM did not exit:\n" + Files.readString(log));
-            return new ProbeResult(process.exitValue(), Files.readString(log));
+            exited = process.waitFor(30, TimeUnit.SECONDS);
         } finally {
             if (process.isAlive()) {
                 process.destroyForcibly();
                 process.waitFor();
             }
+            reader.join();
         }
+        String text = output.get();
+        assertTrue(exited, "Resolver JVM did not exit:\n" + text);
+        return new ProbeResult(process.exitValue(), text);
     }
 
     private record ProbeResult(int exitCode, String output) {

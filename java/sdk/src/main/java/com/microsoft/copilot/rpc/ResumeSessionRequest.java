@@ -7,6 +7,8 @@ package com.microsoft.copilot.rpc;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 import com.microsoft.copilot.generated.rpc.DiagnosticsConfiguration;
 
 /**
@@ -395,6 +397,26 @@ public final class ResumeSessionRequest {
 
     @JsonProperty("extensionSources")
     private com.microsoft.copilot.generated.rpc.ExtensionSources extensionSources;
+
+    @JsonProperty("extensionPaths")
+    private List<String> extensionPaths;
+
+    /** Gets exact extension entry modules. @return the selected paths */
+    public List<String> getExtensionPaths() {
+        return extensionPaths;
+    }
+
+    /**
+     * Sets exact entry modules.
+     *
+     * @param value
+     *            the selected paths
+     * @return this request
+     */
+    public ResumeSessionRequest setExtensionPaths(List<String> value) {
+        extensionPaths = value;
+        return this;
+    }
 
     @JsonProperty("extensions")
     private SessionExtensionOptions extensions;

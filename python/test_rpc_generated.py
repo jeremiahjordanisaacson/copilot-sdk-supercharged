@@ -79,6 +79,8 @@ from copilot.rpc import (
     SessionSandboxResetSessionChoicesRequest,
     ShellBuildInteractiveEnvironmentRequest,
     ShellBuildInteractiveEnvironmentResult,
+    SlashCommandInfo,
+    SlashCommandKind,
     SlashCommandTextResult,
     TaskAgentInfo,
     UIElicitationSchemaType,
@@ -690,6 +692,55 @@ async def test_host_shutdown_handler_round_trips_empty_acknowledgement():
     client._send_message.assert_awaited_once_with(
         {"jsonrpc": "2.0", "id": "shutdown", "result": {}}
     )
+
+
+def test_slash_command_info_preserves_existing_positional_parameters():
+    command = SlashCommandInfo(
+        True, "Select a model", SlashCommandKind.BUILTIN, "model", ["md"], False, None, True
+    )
+    wire = {
+        "allowDuringAgentExecution": True,
+        "description": "Select a model",
+        "kind": "builtin",
+        "name": "model",
+        "aliases": ["md"],
+        "experimental": False,
+        "schedulable": True,
+    }
+    assert command.experimental is False
+    assert command.schedulable is True
+    assert command.to_dict() == wire
+    assert SlashCommandInfo.from_dict(wire) == command
+
+    extended = SlashCommandInfo(
+        True,
+        "Select a model",
+        SlashCommandKind.BUILTIN,
+        "model",
+        ["md"],
+        False,
+        None,
+        True,
+        available_at_session_start=True,
+        cli_args_json='{"model": {}}',
+        display_name="/model",
+        plugin_name="catalog-plugin",
+        skill_name="catalog-skill",
+        source="runtime",
+        stops_queue_processing=False,
+    )
+    extended_wire = {
+        **wire,
+        "availableAtSessionStart": True,
+        "cliArgsJson": '{"model": {}}',
+        "displayName": "/model",
+        "pluginName": "catalog-plugin",
+        "skillName": "catalog-skill",
+        "source": "runtime",
+        "stopsQueueProcessing": False,
+    }
+    assert extended.to_dict() == extended_wire
+    assert SlashCommandInfo.from_dict(extended_wire) == extended
 
 
 def test_autopilot_objective_state_preserves_existing_positional_parameters():

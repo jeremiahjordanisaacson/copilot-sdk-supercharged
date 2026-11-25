@@ -10,7 +10,7 @@ package com.microsoft.copilot.generated.rpc;
 import javax.annotation.processing.Generated;
 
 /**
- * Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/&lt;id>/extensions/)
+ * Extension provenance.
  *
  * @since 1.0.0
  */
@@ -23,7 +23,9 @@ public enum ExtensionSource {
     /** The {@code plugin} variant. */
     PLUGIN("plugin"),
     /** The {@code session} variant. */
-    SESSION("session");
+    SESSION("session"),
+    /** The {@code explicit} variant. */
+    EXPLICIT("explicit");
 
     private final String value;
     ExtensionSource(String value) { this.value = value; }

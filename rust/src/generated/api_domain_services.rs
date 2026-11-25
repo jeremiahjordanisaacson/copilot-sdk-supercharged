@@ -4911,6 +4911,66 @@ crate::record_serde::wire_record!(CloudTasksSharingStatusResult { credential_res
 ///
 /// </div>
 #[derive(Debug, Clone, Default)]
+pub struct CommandListWithMetadata {
+    /// Commands available in this session
+    pub commands: Vec<SlashCommandInfoWithMetadata>,
+}
+crate::record_serde::wire_record!(CommandListWithMetadata {
+    commands: "commands"
+});
+
+/// Slash-command metadata with name, aliases, description, kind, input hint, execution allowance, and schedulability.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct SlashCommandInfoWithMetadata {
+    /// Canonical aliases without leading slashes
+    pub aliases: Option<Vec<String>>,
+    /// Whether the command may run while an agent turn is active
+    pub allow_during_agent_execution: bool,
+    /// Whether the command can be the first message in a session.
+    pub available_at_session_start: Option<bool>,
+    /// Nested terminal argument grammar, serialized as ArgsSpec JSON.
+    pub cli_args_json: Option<String>,
+    /// Human-readable command description
+    pub description: String,
+    /// Display name, including the leading slash.
+    pub display_name: Option<String>,
+    /// Whether the command is experimental
+    pub experimental: Option<bool>,
+    /// Optional unstructured input hint
+    pub input: Option<SlashCommandInput>,
+    /// Coarse command category for grouping and behavior: runtime built-in, skill-backed command, or SDK/client-owned command
+    pub kind: SlashCommandKind,
+    /// Canonical command name without a leading slash
+    pub name: String,
+    /// Plugin that provides this command.
+    pub plugin_name: Option<String>,
+    /// Whether the command may be the target of `/every` / `/after` schedules. Resolution happens at every tick, so only set this when the command is safe to re-invoke and produces an agent prompt.
+    pub schedulable: Option<bool>,
+    /// Skill that provides this command.
+    pub skill_name: Option<String>,
+    /// Command source, such as runtime, skill, or protocol-client.
+    pub source: Option<String>,
+    /// Whether invocation stops processing the queued commands.
+    pub stops_queue_processing: Option<bool>,
+}
+crate::record_serde::wire_record!(SlashCommandInfoWithMetadata { aliases: "aliases" if is_none, allow_during_agent_execution: "allowDuringAgentExecution", available_at_session_start: "availableAtSessionStart" if is_none, cli_args_json: "cliArgsJson" if is_none, description: "description", display_name: "displayName" if is_none, experimental: "experimental" if is_none, input: "input" if is_none, kind: "kind", name: "name", plugin_name: "pluginName" if is_none, schedulable: "schedulable" if is_none, skill_name: "skillName" if is_none, source: "source" if is_none, stops_queue_processing: "stopsQueueProcessing" if is_none });
+
+/// Slash commands available in the session, after applying any include/exclude filters.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
 pub struct CommandList {
     /// Commands available in this session
     pub commands: Vec<SlashCommandInfo>,
@@ -13153,6 +13213,23 @@ crate::record_serde::wire_record!(ResponseFormat {
     json_schema: "jsonSchema",
     r#type: "type"
 });
+
+/// Presentation flags for the complete built-in command catalog.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeCommandCatalogRequest {
+    /// Show Forge chronicle choices. This affects metadata only, not command admission.
+    pub forge_agent_enabled: Option<bool>,
+    /// Include commands unavailable before session creation. Defaults to false.
+    pub include_unavailable: Option<bool>,
+}
+crate::record_serde::wire_record!(RuntimeCommandCatalogRequest { forge_agent_enabled: "forgeAgentEnabled" if is_none, include_unavailable: "includeUnavailable" if is_none });
 
 /// An authorization URL for the host browser.
 ///

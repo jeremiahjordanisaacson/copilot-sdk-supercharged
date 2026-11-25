@@ -3642,7 +3642,7 @@ export type EventsCursorStatus =
   /** The requested continuation is unavailable; see the endpoint's recovery semantics. */
   | "expired";
 /**
- * Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/<id>/extensions/)
+ * Extension provenance.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "ExtensionSource".
@@ -3656,7 +3656,9 @@ export type ExtensionSource =
   /** Extension contributed by an installed plugin. */
   | "plugin"
   /** Extension discovered from the current session's state directory (loaded only for this session). */
-  | "session";
+  | "session"
+  /** Standalone extension supplied by the SDK host through extensionPaths. */
+  | "explicit";
 /**
  * Current status: running, dormant, disabled, failed, or starting
  *
@@ -18698,6 +18700,34 @@ export interface SlashCommandInfo {
    */
   name: string;
   /**
+   * Display name, including the leading slash.
+   */
+  displayName?: string;
+  /**
+   * Command source, such as runtime, skill, or protocol-client.
+   */
+  source?: string;
+  /**
+   * Whether invocation stops processing the queued commands.
+   */
+  stopsQueueProcessing?: boolean;
+  /**
+   * Whether the command can be the first message in a session.
+   */
+  availableAtSessionStart?: boolean;
+  /**
+   * Nested terminal argument grammar, serialized as ArgsSpec JSON.
+   */
+  cliArgsJson?: string;
+  /**
+   * Skill that provides this command.
+   */
+  skillName?: string;
+  /**
+   * Plugin that provides this command.
+   */
+  pluginName?: string;
+  /**
    * Canonical aliases without leading slashes
    */
   aliases?: string[];
@@ -19802,6 +19832,19 @@ export interface ContentExclusionValidatePoliciesResult {
    * Validated policy objects in input order. Raw JSON preserves every field returned by the runtime's policy parser.
    */
   policies: JsonValue[];
+}
+/**
+ * The runtime-owned prompt for a context-board consolidation agent.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ContextBoardConsolidationPromptResult".
+ */
+/** @experimental */
+export interface ContextBoardConsolidationPromptResult {
+  /**
+   * Instructions for the rem-agent to consolidate the session context board.
+   */
+  prompt: string;
 }
 /**
  * A single large message currently in context.
@@ -21832,7 +21875,7 @@ export interface Extension {
    */
   name: string;
   /**
-   * Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/<id>/extensions/)
+   * Extension provenance: project, user, plugin, session, or explicit.
    */
   source: ExtensionSource;
   /**
@@ -43140,6 +43183,23 @@ export interface ResearchStoredReport {
   filePath: string;
 }
 /**
+ * Presentation flags for the complete built-in command catalog.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RuntimeCommandCatalogRequest".
+ */
+/** @experimental */
+export interface RuntimeCommandCatalogRequest {
+  /**
+   * Include commands unavailable before session creation. Defaults to false.
+   */
+  includeUnavailable?: boolean;
+  /**
+   * Show Forge chronicle choices. This affects metadata only, not command admission.
+   */
+  forgeAgentEnabled?: boolean;
+}
+/**
  * An authorization URL for the host browser.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -64264,12 +64324,24 @@ export function createServerRpc(connection: MessageConnection) {
         /** @experimental */
         commands: {
             /**
-             * Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.
+             * Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.
+             *
+             * @param params Presentation flags for the complete built-in command catalog.
              *
              * @returns Slash commands available in the session, after applying any include/exclude filters.
              */
-            list: async (): Promise<CommandList> =>
-                connection.sendRequest("commands.list", {}),
+            list: async (params?: RuntimeCommandCatalogRequest): Promise<CommandList> =>
+                connection.sendRequest("commands.list", params ?? {}),
+        },
+        /** @experimental */
+        contextBoard: {
+            /**
+             * Returns the runtime-owned instructions for a rem-agent that consolidates a session context board. Hosts that launch a consolidation agent use this prompt rather than copy runtime instructions.
+             *
+             * @returns The runtime-owned prompt for a context-board consolidation agent.
+             */
+            getConsolidationPrompt: async (): Promise<ContextBoardConsolidationPromptResult> =>
+                connection.sendRequest("contextBoard.getConsolidationPrompt", {}),
         },
         /** @experimental */
         runtime: {

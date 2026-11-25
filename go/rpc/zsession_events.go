@@ -7130,10 +7130,12 @@ const (
 	ExitPlanModeActionInteractive ExitPlanModeAction = "interactive"
 )
 
-// Discovery source
+// Extension provenance
 type ExtensionsLoadedExtensionSource string
 
 const (
+	// Standalone extension supplied by the SDK host through extensionPaths.
+	ExtensionsLoadedExtensionSourceExplicit ExtensionsLoadedExtensionSource = "explicit"
 	// Extension contributed by an installed plugin.
 	ExtensionsLoadedExtensionSourcePlugin ExtensionsLoadedExtensionSource = "plugin"
 	// Extension discovered from the current project.

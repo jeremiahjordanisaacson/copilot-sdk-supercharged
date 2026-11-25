@@ -86,6 +86,8 @@ pub(crate) struct SessionCreateWire {
     pub enable_config_discovery: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_sources: Option<crate::types::ExtensionSources>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension_paths: Option<Vec<PathBuf>>,
     pub filesystem: SessionCreateFilesystemWire,
     pub instructions: SessionCreateInstructionWire,
     pub hooks: SessionHookWire,
@@ -140,6 +142,8 @@ pub(crate) struct SessionResumeWire {
     pub enable_config_discovery: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension_sources: Option<crate::types::ExtensionSources>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension_paths: Option<Vec<PathBuf>>,
     pub instructions: SessionResumeInstructionWire,
     pub hooks: SessionHookWire,
     pub git: SessionGitWire,

@@ -17395,7 +17395,7 @@ impl<'de> Deserialize<'de> for McpServerStatus {
     }
 }
 
-/// Discovery source
+/// Extension provenance
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub enum ExtensionsLoadedExtensionSource {
     /// Extension discovered from the current project.
@@ -17410,6 +17410,9 @@ pub enum ExtensionsLoadedExtensionSource {
     /// Extension discovered from the current session's state directory.
     #[serde(rename = "session")]
     Session,
+    /// Standalone extension supplied by the SDK host through extensionPaths.
+    #[serde(rename = "explicit")]
+    Explicit,
     /// Unknown variant for forward compatibility.
     #[default]
     #[serde(other)]
@@ -17420,14 +17423,17 @@ impl<'de> Deserialize<'de> for ExtensionsLoadedExtensionSource {
         let index = crate::enum_serde::deserialize_variant(
             deserializer,
             "ExtensionsLoadedExtensionSource",
-            &["project", "user", "plugin", "session", "Unknown"],
-            Some(4),
+            &[
+                "project", "user", "plugin", "session", "explicit", "Unknown",
+            ],
+            Some(5),
         )?;
         Ok(match index {
             0 => Self::Project,
             1 => Self::User,
             2 => Self::Plugin,
             3 => Self::Session,
+            4 => Self::Explicit,
             _ => Self::Unknown,
         })
     }

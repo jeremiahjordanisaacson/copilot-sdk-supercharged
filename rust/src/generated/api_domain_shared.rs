@@ -2884,7 +2884,7 @@ pub struct Extension {
     pub name: String,
     /// Process ID if the extension is running
     pub pid: Option<i64>,
-    /// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/`<id>`/extensions/)
+    /// Extension provenance: project, user, plugin, session, or explicit.
     pub source: ExtensionSource,
     /// Current status: running, dormant, disabled, failed, or starting
     pub status: ExtensionStatus,
@@ -10391,7 +10391,7 @@ impl<'de> Deserialize<'de> for EventsCursorStatus {
     }
 }
 
-/// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/<id>/extensions/)
+/// Extension provenance.
 ///
 /// <div class="warning">
 ///
@@ -10413,6 +10413,9 @@ pub enum ExtensionSource {
     /// Extension discovered from the current session's state directory (loaded only for this session).
     #[serde(rename = "session")]
     Session,
+    /// Standalone extension supplied by the SDK host through extensionPaths.
+    #[serde(rename = "explicit")]
+    Explicit,
     /// Unknown variant for forward compatibility.
     #[default]
     #[serde(other)]
@@ -10423,14 +10426,17 @@ impl<'de> Deserialize<'de> for ExtensionSource {
         let index = crate::enum_serde::deserialize_variant(
             deserializer,
             "ExtensionSource",
-            &["project", "user", "plugin", "session", "Unknown"],
-            Some(4),
+            &[
+                "project", "user", "plugin", "session", "explicit", "Unknown",
+            ],
+            Some(5),
         )?;
         Ok(match index {
             0 => Self::Project,
             1 => Self::User,
             2 => Self::Plugin,
             3 => Self::Session,
+            4 => Self::Explicit,
             _ => Self::Unknown,
         })
     }

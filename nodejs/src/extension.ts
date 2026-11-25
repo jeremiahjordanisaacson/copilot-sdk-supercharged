@@ -28,7 +28,7 @@ export {
 
 export type JoinSessionOptions = Omit<
     ResumeSessionOptions,
-    "extensions" | "extensionSources" | "skills" | "tools" | "permissions"
+    "extensions" | "extensionSources" | "extensionPaths" | "skills" | "tools" | "permissions"
 > & {
     extensions?: Omit<SessionExtensionOptions, "sdkPath">;
     skills?: Omit<SessionSkillOptions, "provider">;
@@ -154,6 +154,8 @@ export async function joinSession(config: JoinSessionOptions = {}): Promise<Join
     // providers belong to the session's owning client, and the CLI rejects them
     // from extensions.
     const { workflows, requestedEnvironmentVariables, ...rest } = config;
+    const resumeOptions: ResumeSessionOptions = rest;
+    delete resumeOptions.extensionPaths;
     const { sdkPath: _stripped, ...extensions } = (config.extensions ??
         {}) as SessionExtensionOptions;
     const { provider: _strippedSkillProvider, ...skills } = (config.skills ??
@@ -172,7 +174,7 @@ export async function joinSession(config: JoinSessionOptions = {}): Promise<Join
     const session = await client.resumeSessionForExtension(
         sessionId,
         {
-            ...rest,
+            ...resumeOptions,
             extensions,
             skills,
             tools,

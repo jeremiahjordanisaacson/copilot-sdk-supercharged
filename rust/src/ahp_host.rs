@@ -1381,6 +1381,7 @@ macro_rules! host_settings {
             "mcpOAuthTokenStorage" => mcp.oauth_token_storage,
             "enableConfigDiscovery" => enable_config_discovery,
             "extensionSources" => extension_sources,
+            "extensionPaths" => extension_paths,
             "featureFlags" => experiments.flags,
             "enableManagedSettings" => github.fetch_managed_settings,
             "excludedManagedSettings" => policy.excluded_managed_settings,

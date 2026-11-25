@@ -6010,6 +6010,12 @@ type CommandList struct {
 	Commands []SlashCommandInfo `json:"commands"`
 }
 
+// Slash commands available in the session, after applying any include/exclude filters.
+type CommandListWithMetadata struct {
+	// Commands available in this session
+	Commands []SlashCommandInfoWithMetadata `json:"commands"`
+}
+
 // The pending slash-command invocation effect to finalize, plus whether the host applied or
 // cancelled it.
 // Experimental: CommandsFinalizeInvocationEffectRequest is part of an experimental API and
@@ -6062,8 +6068,6 @@ type CommandsInvokeRequest struct {
 	Origin *CommandsInvocationOrigin `json:"origin,omitempty"`
 }
 
-// Experimental: CommandsListRequest is part of an experimental API and may change or be
-// removed.
 type CommandsListRequest struct {
 	// Include runtime built-in commands
 	IncludeBuiltins *bool `json:"includeBuiltins,omitempty"`
@@ -6668,6 +6672,14 @@ type ContentExclusionValidatePoliciesResult struct {
 	// Validated policy objects in input order. Raw JSON preserves every field returned by the
 	// runtime's policy parser.
 	Policies []any `json:"policies"`
+}
+
+// The runtime-owned prompt for a context-board consolidation agent.
+// Experimental: ContextBoardConsolidationPromptResult is part of an experimental API and
+// may change or be removed.
+type ContextBoardConsolidationPromptResult struct {
+	// Instructions for the rem-agent to consolidate the session context board.
+	Prompt string `json:"prompt"`
 }
 
 // A single large message currently in context.
@@ -8296,8 +8308,7 @@ type Extension struct {
 	Name string `json:"name"`
 	// Process ID if the extension is running
 	Pid *int64 `json:"pid,omitempty"`
-	// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin
-	// (installed plugin), or session (session-state/<id>/extensions/)
+	// Extension provenance: project, user, plugin, session, or explicit.
 	Source ExtensionSource `json:"source"`
 	// Current status: running, dormant, disabled, failed, or starting
 	Status ExtensionStatus `json:"status"`
@@ -27396,6 +27407,16 @@ type ResponseFormat struct {
 	Type ResponseFormatType `json:"type"`
 }
 
+// Presentation flags for the complete built-in command catalog.
+// Experimental: RuntimeCommandCatalogRequest is part of an experimental API and may change
+// or be removed.
+type RuntimeCommandCatalogRequest struct {
+	// Show Forge chronicle choices. This affects metadata only, not command admission.
+	ForgeAgentEnabled *bool `json:"forgeAgentEnabled,omitempty"`
+	// Include commands unavailable before session creation. Defaults to false.
+	IncludeUnavailable *bool `json:"includeUnavailable,omitempty"`
+}
+
 // An authorization URL for the host browser.
 // Experimental: RuntimeOpenBrowserRequest is part of an experimental API and may change or
 // be removed.
@@ -36301,6 +36322,44 @@ type SlashCommandInfo struct {
 	Schedulable *bool `json:"schedulable,omitempty"`
 }
 
+// Slash-command metadata with name, aliases, description, kind, input hint, execution
+// allowance, and schedulability.
+type SlashCommandInfoWithMetadata struct {
+	// Canonical aliases without leading slashes
+	Aliases []string `json:"aliases,omitzero"`
+	// Whether the command may run while an agent turn is active
+	AllowDuringAgentExecution bool `json:"allowDuringAgentExecution"`
+	// Whether the command can be the first message in a session.
+	AvailableAtSessionStart *bool `json:"availableAtSessionStart,omitempty"`
+	// Nested terminal argument grammar, serialized as ArgsSpec JSON.
+	CLIArgsJSON *string `json:"cliArgsJson,omitempty"`
+	// Human-readable command description
+	Description string `json:"description"`
+	// Display name, including the leading slash.
+	DisplayName *string `json:"displayName,omitempty"`
+	// Whether the command is experimental
+	Experimental *bool `json:"experimental,omitempty"`
+	// Optional unstructured input hint
+	Input *SlashCommandInput `json:"input,omitempty"`
+	// Coarse command category for grouping and behavior: runtime built-in, skill-backed
+	// command, or SDK/client-owned command
+	Kind SlashCommandKind `json:"kind"`
+	// Canonical command name without a leading slash
+	Name string `json:"name"`
+	// Plugin that provides this command.
+	PluginName *string `json:"pluginName,omitempty"`
+	// Whether the command may be the target of `/every` / `/after` schedules. Resolution
+	// happens at every tick, so only set this when the command is safe to re-invoke and
+	// produces an agent prompt.
+	Schedulable *bool `json:"schedulable,omitempty"`
+	// Skill that provides this command.
+	SkillName *string `json:"skillName,omitempty"`
+	// Command source, such as runtime, skill, or protocol-client.
+	Source *string `json:"source,omitempty"`
+	// Whether invocation stops processing the queued commands.
+	StopsQueueProcessing *bool `json:"stopsQueueProcessing,omitempty"`
+}
+
 // Optional unstructured input hint
 // Experimental: SlashCommandInput is part of an experimental API and may change or be
 // removed.
@@ -43224,12 +43283,13 @@ const (
 	EventsReadViewReplay EventsReadView = "replay"
 )
 
-// Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin
-// (installed plugin), or session (session-state/<id>/extensions/)
+// Extension provenance.
 // Experimental: ExtensionSource is part of an experimental API and may change or be removed.
 type ExtensionSource string
 
 const (
+	// Standalone extension supplied by the SDK host through extensionPaths.
+	ExtensionSourceExplicit ExtensionSource = "explicit"
 	// Extension contributed by an installed plugin.
 	ExtensionSourcePlugin ExtensionSource = "plugin"
 	// Extension discovered from the current project's .github/extensions directory.
@@ -49426,9 +49486,11 @@ func (a *ServerCatalogAPI) Select(ctx context.Context, params *CatalogSelectionR
 // Experimental: ServerCommandsAPI contains experimental APIs that may change or be removed.
 type ServerCommandsAPI serverAPI
 
-// Lists the well-known built-in slash commands that work as the first message in a new
-// session (e.g. /plan, /env), without requiring an active session. Commands that depend on
-// session state, authentication, or a synced session are omitted.
+// Lists well-known built-in slash commands without an active session. By default, commands
+// that need session state, authentication, or a synced session are omitted. Editors and
+// terminal hosts can request the complete catalog and its argument grammar with
+// includeUnavailable. Presentation flags never grant execution permissions. Use
+// ListWithOptions for catalog options and complete presentation metadata.
 //
 // RPC method: commands.list.
 //
@@ -49440,6 +49502,33 @@ func (a *ServerCommandsAPI) List(ctx context.Context) (*CommandList, error) {
 		return nil, err
 	}
 	var result CommandList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListWithOptions lists well-known built-in slash commands without an active session. By
+// default, commands that need session state, authentication, or a synced session are
+// omitted. Editors and terminal hosts can request the complete catalog and its argument
+// grammar with includeUnavailable. Presentation flags never grant execution permissions.
+//
+// RPC method: commands.list.
+//
+// Parameters: Presentation flags for the complete built-in command catalog.
+//
+// Returns: Slash commands available in the session, after applying any include/exclude
+// filters.
+// Pass nil for params to use the default request options.
+func (a *ServerCommandsAPI) ListWithOptions(ctx context.Context, params *RuntimeCommandCatalogRequest) (*CommandListWithMetadata, error) {
+	if params == nil {
+		params = &RuntimeCommandCatalogRequest{}
+	}
+	raw, err := a.client.Request(ctx, "commands.list", params)
+	if err != nil {
+		return nil, err
+	}
+	var result CommandListWithMetadata
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -49549,6 +49638,29 @@ func (a *ServerContentExclusionAPI) ValidatePolicies(ctx context.Context, params
 		return nil, err
 	}
 	var result ContentExclusionValidatePoliciesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: ServerContextBoardAPI contains experimental APIs that may change or be
+// removed.
+type ServerContextBoardAPI serverAPI
+
+// GetConsolidationPrompt returns the runtime-owned instructions for a rem-agent that
+// consolidates a session context board. Hosts that launch a consolidation agent use this
+// prompt rather than copy runtime instructions.
+//
+// RPC method: contextBoard.getConsolidationPrompt.
+//
+// Returns: The runtime-owned prompt for a context-board consolidation agent.
+func (a *ServerContextBoardAPI) GetConsolidationPrompt(ctx context.Context) (*ContextBoardConsolidationPromptResult, error) {
+	raw, err := a.client.Request(ctx, "contextBoard.getConsolidationPrompt", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ContextBoardConsolidationPromptResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -53837,6 +53949,7 @@ type ServerRPC struct {
 	Commands         *ServerCommandsAPI
 	Connectors       *ServerConnectorsAPI
 	ContentExclusion *ServerContentExclusionAPI
+	ContextBoard     *ServerContextBoardAPI
 	Decisions        *ServerDecisionsAPI
 	Environments     *ServerEnvironmentsAPI
 	Extensions       *ServerExtensionsAPI
@@ -53923,6 +54036,7 @@ func NewServerRPC(client *jsonrpc2.Client) *ServerRPC {
 	r.Commands = (*ServerCommandsAPI)(&r.common)
 	r.Connectors = (*ServerConnectorsAPI)(&r.common)
 	r.ContentExclusion = (*ServerContentExclusionAPI)(&r.common)
+	r.ContextBoard = (*ServerContextBoardAPI)(&r.common)
 	r.Decisions = (*ServerDecisionsAPI)(&r.common)
 	r.Environments = (*ServerEnvironmentsAPI)(&r.common)
 	r.Extensions = (*ServerExtensionsAPI)(&r.common)
@@ -61652,6 +61766,39 @@ func (a *CommandsAPI) List(ctx context.Context, params *SessionCommandsListReque
 		return nil, err
 	}
 	var result CommandList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListWithMetadata lists slash commands available in the session.
+//
+// RPC method: session.commands.list.
+//
+// Parameters: Optional filters controlling which command sources to include in the listing.
+//
+// Returns: Slash commands available in the session, after applying any include/exclude
+// filters.
+// Pass nil for params to use the default request options.
+func (a *CommandsAPI) ListWithMetadata(ctx context.Context, params *SessionCommandsListRequest) (*CommandListWithMetadata, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.IncludeBuiltins != nil {
+			req["includeBuiltins"] = *params.IncludeBuiltins
+		}
+		if params.IncludeClientCommands != nil {
+			req["includeClientCommands"] = *params.IncludeClientCommands
+		}
+		if params.IncludeSkills != nil {
+			req["includeSkills"] = *params.IncludeSkills
+		}
+	}
+	raw, err := a.client.Request(ctx, "session.commands.list", req)
+	if err != nil {
+		return nil, err
+	}
+	var result CommandListWithMetadata
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}

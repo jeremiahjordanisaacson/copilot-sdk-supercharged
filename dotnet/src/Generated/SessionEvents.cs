@@ -26394,7 +26394,7 @@ public readonly struct McpServerStatus : IEquatable<McpServerStatus>
     }
 }
 
-/// <summary>Discovery source.</summary>
+/// <summary>Extension provenance.</summary>
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
 public readonly struct ExtensionsLoadedExtensionSource : IEquatable<ExtensionsLoadedExtensionSource>
@@ -26424,6 +26424,9 @@ public readonly struct ExtensionsLoadedExtensionSource : IEquatable<ExtensionsLo
 
     /// <summary>Extension discovered from the current session's state directory.</summary>
     public static ExtensionsLoadedExtensionSource Session { get; } = new("session");
+
+    /// <summary>Standalone extension supplied by the SDK host through extensionPaths.</summary>
+    public static ExtensionsLoadedExtensionSource Explicit { get; } = new("explicit");
 
     /// <summary>Returns a value indicating whether two <see cref="ExtensionsLoadedExtensionSource"/> instances are equivalent.</summary>
     public static bool operator ==(ExtensionsLoadedExtensionSource left, ExtensionsLoadedExtensionSource right) => left.Equals(right);

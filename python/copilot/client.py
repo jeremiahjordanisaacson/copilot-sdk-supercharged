@@ -2244,6 +2244,7 @@ class CreateSessionOptions(TypedDict, total=False):
     canvases: SessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
     extension_sources: ExtensionSources | None
+    extension_paths: list[str] | None
     policy: SessionPolicyOptions | None
 
 
@@ -2280,6 +2281,7 @@ class ResumeSessionOptions(TypedDict, total=False):
     canvases: ResumeSessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
     extension_sources: ExtensionSources | None
+    extension_paths: list[str] | None
     policy: SessionPolicyOptions | None
 
 
@@ -3441,6 +3443,7 @@ class CopilotClient:
         canvases: SessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
         extension_sources: ExtensionSources | None = None,
+        extension_paths: list[str] | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -3505,6 +3508,12 @@ class CopilotClient:
                 ``on_elicitation_request`` so the host can answer structured forms.
             hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
+            extension_paths: Host-trusted standalone modules, resolved relative to this
+                request's working directory. Does not enable extensions or grant trust.
+                Discovered entries and filesystem aliases are unsupported; exact
+                discovered overlaps fail per entry.
+                Re-supply on owning resume; omission or an empty list removes the
+                previous explicit entries on both warm and cold resumes.
             github.capi: CAPI provider-scoped options. Set ``auto_tier`` to ``efficiency``,
                 ``balance``, ``intelligence``, or ``fast`` to select an Auto routing
                 preference on a runtime with Auto tier support. ``fast`` is an
@@ -4098,6 +4107,8 @@ class CopilotClient:
             payload["enableConfigDiscovery"] = enable_config_discovery
         if extension_sources is not None:
             payload["extensionSources"] = extension_sources
+        if extension_paths is not None:
+            payload["extensionPaths"] = extension_paths
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:
@@ -4595,6 +4606,7 @@ class CopilotClient:
         canvases: ResumeSessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
         extension_sources: ExtensionSources | None = None,
+        extension_paths: list[str] | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -4655,6 +4667,12 @@ class CopilotClient:
                 ``on_elicitation_request`` so the host can answer structured forms.
             hooks.handlers: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
+            extension_paths: Replaces the owner's host-trusted standalone modules, resolving
+                relative paths against this resume request's working directory.
+                Discovered entries and filesystem aliases are unsupported; exact
+                discovered overlaps fail per entry.
+                Omission or an empty list removes previous explicit entries on both
+                warm and cold resumes. Does not enable extensions or grant trust.
             github.capi: CAPI provider-scoped options. Omit ``auto_tier`` to preserve the
                 current or persisted Auto routing preference. An explicit tier
                 overrides it on cold resume, but cannot change it on an
@@ -5185,6 +5203,8 @@ class CopilotClient:
             payload["enableConfigDiscovery"] = enable_config_discovery
         if extension_sources is not None:
             payload["extensionSources"] = extension_sources
+        if extension_paths is not None:
+            payload["extensionPaths"] = extension_paths
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:

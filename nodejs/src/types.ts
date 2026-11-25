@@ -3001,6 +3001,14 @@ export interface SessionOptionsBase {
      * cold omission restores defaults. Requires a supporting runtime.
      */
     extensionSources?: ExtensionSources;
+    /**
+     * Standalone extension.mjs, extension.cjs or extension.js modules supplied and trusted by the host.
+     * Discovered entries and filesystem aliases are unsupported; exact discovered overlaps fail per entry.
+     * Relative entries resolve against this request's working directory and remain fixed.
+     * Does not enable extensions or grant trust. Re-supply on owning resume;
+     * omission or an empty list removes previous explicit entries. Requires a supporting runtime.
+     */
+    extensionPaths?: string[];
     interaction?: SessionInteractionOptions;
     /**
      * System message configuration

@@ -24564,9 +24564,24 @@ public sealed class SlashCommandInfo
     [JsonPropertyName("allowDuringAgentExecution")]
     public bool AllowDuringAgentExecution { get; set; }
 
+    /// <summary>Whether the command can be the first message in a session.</summary>
+    [JsonPropertyName("availableAtSessionStart")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AvailableAtSessionStart { get; set; }
+
+    /// <summary>Nested terminal argument grammar, serialized as ArgsSpec JSON.</summary>
+    [JsonPropertyName("cliArgsJson")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CliArgsJson { get; set; }
+
     /// <summary>Human-readable command description.</summary>
     [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>Display name, including the leading slash.</summary>
+    [JsonPropertyName("displayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
 
     /// <summary>Whether the command is experimental.</summary>
     [JsonPropertyName("experimental")]
@@ -24586,10 +24601,30 @@ public sealed class SlashCommandInfo
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>Plugin that provides this command.</summary>
+    [JsonPropertyName("pluginName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginName { get; set; }
+
     /// <summary>Whether the command may be the target of `/every` / `/after` schedules. Resolution happens at every tick, so only set this when the command is safe to re-invoke and produces an agent prompt.</summary>
     [JsonPropertyName("schedulable")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Schedulable { get; set; }
+
+    /// <summary>Skill that provides this command.</summary>
+    [JsonPropertyName("skillName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SkillName { get; set; }
+
+    /// <summary>Command source, such as runtime, skill, or protocol-client.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+
+    /// <summary>Whether invocation stops processing the queued commands.</summary>
+    [JsonPropertyName("stopsQueueProcessing")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? StopsQueueProcessing { get; set; }
 }
 
 /// <summary>Slash commands available in the session, after applying any include/exclude filters.</summary>
@@ -24599,6 +24634,30 @@ public sealed class CommandList
     /// <summary>Commands available in this session.</summary>
     [JsonPropertyName("commands")]
     public IList<SlashCommandInfo> Commands { get => field ??= []; set; }
+}
+
+/// <summary>Presentation flags for the complete built-in command catalog.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class RuntimeCommandCatalogRequest
+{
+    /// <summary>Show Forge chronicle choices. This affects metadata only, not command admission.</summary>
+    [JsonPropertyName("forgeAgentEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ForgeAgentEnabled { get; set; }
+
+    /// <summary>Include commands unavailable before session creation. Defaults to false.</summary>
+    [JsonPropertyName("includeUnavailable")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IncludeUnavailable { get; set; }
+}
+
+/// <summary>The runtime-owned prompt for a context-board consolidation agent.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ContextBoardConsolidationPromptResult
+{
+    /// <summary>Instructions for the rem-agent to consolidate the session context board.</summary>
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
 }
 
 /// <summary>The outcome of the settings-file edit.</summary>
@@ -28294,7 +28353,7 @@ public sealed class Extension
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? Pid { get; set; }
 
-    /// <summary>Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/&lt;id&gt;/extensions/).</summary>
+    /// <summary>Extension provenance: project, user, plugin, session, or explicit.</summary>
     [JsonPropertyName("source")]
     public ExtensionSource Source { get; set; }
 
@@ -66351,7 +66410,7 @@ public readonly struct SessionLogLevel : IEquatable<SessionLogLevel>
 }
 
 
-/// <summary>Discovery source: project (.github/extensions/), user (~/.copilot/extensions/), plugin (installed plugin), or session (session-state/&lt;id&gt;/extensions/).</summary>
+/// <summary>Extension provenance.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
 [DebuggerDisplay("{Value,nq}")]
@@ -66382,6 +66441,9 @@ public readonly struct ExtensionSource : IEquatable<ExtensionSource>
 
     /// <summary>Extension discovered from the current session's state directory (loaded only for this session).</summary>
     public static ExtensionSource Session { get; } = new("session");
+
+    /// <summary>Standalone extension supplied by the SDK host through extensionPaths.</summary>
+    public static ExtensionSource Explicit { get; } = new("explicit");
 
     /// <summary>Returns a value indicating whether two <see cref="ExtensionSource"/> instances are equivalent.</summary>
     public static bool operator ==(ExtensionSource left, ExtensionSource right) => left.Equals(right);
@@ -75359,6 +75421,12 @@ public sealed class ServerRpc
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
+    /// <summary>ContextBoard APIs.</summary>
+    public ServerContextBoardApi ContextBoard =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Settings APIs.</summary>
     public ServerSettingsApi Settings =>
         field ??
@@ -81839,12 +81907,42 @@ public sealed class ServerCommandsApi
         _rpc = rpc;
     }
 
-    /// <summary>Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.</summary>
+    /// <summary>Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.</summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Slash commands available in the session, after applying any include/exclude filters.</returns>
     public async Task<CommandList> ListAsync(CancellationToken cancellationToken = default)
     {
         return await CopilotClient.InvokeRpcAsync<CommandList>(_rpc, "commands.list", [], cancellationToken);
+    }
+
+    /// <summary>Lists well-known built-in slash commands without an active session. By default, commands that need session state, authentication, or a synced session are omitted. Editors and terminal hosts can request the complete catalog and its argument grammar with includeUnavailable. Presentation flags never grant execution permissions.</summary>
+    /// <param name="request">Presentation flags for the complete built-in command catalog.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Slash commands available in the session, after applying any include/exclude filters.</returns>
+    public async Task<CommandList> ListAsync(RuntimeCommandCatalogRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<CommandList>(_rpc, "commands.list", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped ContextBoard APIs.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ServerContextBoardApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerContextBoardApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Returns the runtime-owned instructions for a rem-agent that consolidates a session context board. Hosts that launch a consolidation agent use this prompt rather than copy runtime instructions.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The runtime-owned prompt for a context-board consolidation agent.</returns>
+    public async Task<ContextBoardConsolidationPromptResult> GetConsolidationPromptAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<ContextBoardConsolidationPromptResult>(_rpc, "contextBoard.getConsolidationPrompt", [], cancellationToken);
     }
 }
 
@@ -91721,6 +91819,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ContentExclusionPathCheck))]
 [JsonSerializable(typeof(ContentExclusionValidatePoliciesRequest))]
 [JsonSerializable(typeof(ContentExclusionValidatePoliciesResult))]
+[JsonSerializable(typeof(ContextBoardConsolidationPromptResult))]
 [JsonSerializable(typeof(ContextHeaviestMessage))]
 [JsonSerializable(typeof(CopilotUserResponse))]
 [JsonSerializable(typeof(CopilotUserResponseEndpoints))]
@@ -92716,6 +92815,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ResearchListReportsResult))]
 [JsonSerializable(typeof(ResearchStoredReport))]
 [JsonSerializable(typeof(ResponseFormat))]
+[JsonSerializable(typeof(RuntimeCommandCatalogRequest))]
 [JsonSerializable(typeof(RuntimeOpenBrowserRequest))]
 [JsonSerializable(typeof(SandboxApplyDefaultsRequest))]
 [JsonSerializable(typeof(SandboxConfig))]

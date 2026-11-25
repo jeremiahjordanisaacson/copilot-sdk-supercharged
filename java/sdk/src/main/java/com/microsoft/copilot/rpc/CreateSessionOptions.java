@@ -4,6 +4,8 @@
 
 package com.microsoft.copilot.rpc;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -620,6 +622,31 @@ public class CreateSessionOptions {
     @JsonProperty("extensions")
     private SessionExtensionOptions extensions = new SessionExtensionOptions();
     private ExtensionSources extensionSources;
+    private List<String> extensionPaths;
+
+    /**
+     * Gets exact extension entry modules.
+     *
+     * @return the selected entries, or null for no explicit entries
+     */
+    public List<String> getExtensionPaths() {
+        return extensionPaths;
+    }
+
+    /**
+     * Adds host-trusted standalone modules without enabling extensions or granting
+     * trust. Discovered entries and filesystem aliases are unsupported; exact
+     * discovered overlaps fail per entry. Relative paths resolve against the
+     * request's effective working directory. Re-supply on owning resume.
+     *
+     * @param value
+     *            the exact module paths
+     * @return this options instance
+     */
+    public CreateSessionOptions setExtensionPaths(List<String> value) {
+        extensionPaths = value;
+        return this;
+    }
 
     /**
      * Gets existing extension activation and SDK injection choices.
@@ -780,6 +807,7 @@ public class CreateSessionOptions {
         copy.enableConfigDiscovery = this.enableConfigDiscovery;
         copy.extensions = this.extensions.clone();
         copy.extensionSources = this.extensionSources;
+        copy.extensionPaths = this.extensionPaths == null ? null : new ArrayList<>(this.extensionPaths);
         copy.policy = this.policy.clone();
         return copy;
     }
