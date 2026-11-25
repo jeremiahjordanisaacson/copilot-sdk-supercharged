@@ -43,7 +43,7 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Clojure** | [`clojure/`](./clojure/README.md) | [Cookbook](./clojure/cookbook/README.md) | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
 | **COBOL** | [`cobol/`](./cobol/README.md) | [Cookbook](./cobol/cookbook/README.md) | GnuCOBOL |
 | **Crystal** | [`crystal/`](./crystal/README.md) | [Cookbook](./crystal/cookbook/README.md) | `shards install` |
-| **D** | [`dlang/`](./dlang/README.md) | [Cookbook](./dlang/cookbook/README.md) | `dub add copilot` |
+| **D** | [`dlang/`](./dlang/README.md) | [Cookbook](./dlang/cookbook/README.md) | `dub.json` path dependency on `copilot-sdk` |
 | **Dart** | [`dart/`](./dart/README.md) | [Cookbook](./dart/cookbook/README.md) | pub |
 | **Delphi / Object Pascal** | [`delphi/`](./delphi/README.md) | [Cookbook](./delphi/cookbook/README.md) | Boss / Manual |
 | **Elixir** | [`elixir/`](./elixir/README.md) | [Cookbook](./elixir/cookbook/README.md) | `{:copilot_sdk_supercharged, "~> 3.1"}` |
@@ -70,10 +70,10 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Rust** | [`rust/`](./rust/README.md) | [Cookbook](./rust/cookbook/README.md) | `cargo add copilot-sdk-supercharged` |
 | **Scala** | [`scala/`](./scala/README.md) | [Cookbook](./scala/cookbook/README.md) | sbt |
 | **Shell / Bash** | [`shell/`](./shell/README.md) | [Cookbook](./shell/cookbook/README.md) | Source |
-| **Solidity** | [`solidity/`](./solidity/README.md) | [Cookbook](./solidity/cookbook/README.md) | `npm install copilot-sdk-solidity` |
+| **Solidity** | [`solidity/`](./solidity/README.md) | [Cookbook](./solidity/cookbook/README.md) | Source (`npm run build` in `solidity/`) |
 | **Swift** | [`swift/`](./swift/README.md) | [Cookbook](./swift/cookbook/README.md) | Swift Package Manager |
-| **Tcl** | [`tcl/`](./tcl/README.md) | [Cookbook](./tcl/cookbook/README.md) | `package require copilot` |
-| **V (Vlang)** | [`vlang/`](./vlang/README.md) | [Cookbook](./vlang/cookbook/README.md) | `v install copilot_sdk` |
+| **Tcl** | [`tcl/`](./tcl/README.md) | [Cookbook](./tcl/cookbook/README.md) | `package require copilot::client` |
+| **V (Vlang)** | [`vlang/`](./vlang/README.md) | [Cookbook](./vlang/cookbook/README.md) | Source (`import copilot`) |
 | **Visual Basic** | [`visualbasic/`](./visualbasic/README.md) | [Cookbook](./visualbasic/cookbook/README.md) | `dotnet add package CopilotSDK.Supercharged.VB` |
 | **Zig** | [`zig/`](./zig/README.md) | [Cookbook](./zig/cookbook/README.md) | `zig fetch` |
 

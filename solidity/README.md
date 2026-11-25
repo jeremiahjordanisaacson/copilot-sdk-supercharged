@@ -13,17 +13,16 @@ The Solidity SDK provides TypeScript helpers for integrating GitHub Copilot into
 
 ## Installation
 
-```bash
-npm install copilot-sdk-supercharged copilot-sdk-supercharged-solidity
-```
-
-### Building from source
+The Solidity helpers (`copilot-sdk-supercharged-solidity`) are not published to npm yet, so build them from source. They run on top of the Node.js SDK, which is on npm:
 
 ```bash
-cd solidity
+git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
+cd copilot-sdk-supercharged/solidity
 npm install
 npm run build
 ```
+
+Then add the built package to your project (for example `npm install ../copilot-sdk-supercharged/solidity`).
 
 ## Quick Start
 
