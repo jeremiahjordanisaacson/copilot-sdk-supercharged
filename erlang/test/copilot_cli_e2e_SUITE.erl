@@ -232,8 +232,11 @@ await_reply(SessionId, Deadline, Content) ->
             Content;
         {copilot_session_event, SessionId, #{type := <<"session.error">>, data := Data}} ->
             ct:fail({session_error, Data});
-        {copilot_session_event, SessionId, #{type := Type}} ->
-            ct:log("Session event ~ts", [Type]),
+        {copilot_session_event, SessionId, #{type := Type, data := Data}} ->
+            case binary:match(Type, [<<"permission">>, <<"tool.">>]) of
+                nomatch -> ct:pal("Session event ~ts", [Type]);
+                _       -> ct:pal("Session event ~ts: ~tp", [Type, Data])
+            end,
             await_reply(SessionId, Deadline, Content)
     after Remaining ->
         ct:fail({no_reply_before_timeout, Content})
