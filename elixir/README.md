@@ -316,7 +316,7 @@ The SDK consists of the following modules:
 |---|---|
 | `Copilot.Client` | Main client GenServer. Spawns the CLI process, manages the JSON-RPC connection, and provides session lifecycle operations (create, resume, delete, list). |
 | `Copilot.Session` | Session GenServer. Sends messages, subscribes to events, handles tool calls, permissions, user input, and hooks. |
-| `Copilot.JsonRpcClient` | Low-level JSON-RPC 2.0 client using Erlang `Port` for stdio communication with Content-Length header framing. |
+| `Copilot.JsonRpcClient` | Low-level JSON-RPC 2.0 client. It opens and owns the CLI port (stdio) and frames messages with Content-Length headers (see [Connection](#connection)). |
 | `Copilot.Types` | All type definitions as Elixir structs with typespecs. |
 | `Copilot.DefineTool` | Helper for defining tools to expose to the CLI. |
 | `Copilot.SdkProtocolVersion` | Protocol version constant (must match the server). |
@@ -614,6 +614,16 @@ BYOK bearer-token provider and in-process transport (client options):
   in_process: false
 })
 ```
+
+## Connection
+
+`Copilot.Client` starts the CLI with `--headless --no-auto-update --log-level <level> --stdio` after any `cli_args`, passing one argument per item, so paths with spaces work. `Copilot.JsonRpcClient` opens the CLI port itself and owns it, so it receives everything the CLI writes to stdout, from the first byte. The port runs in stream mode with the Content-Length framing of vscode-jsonrpc: a frame split across reads, or several frames in one read, are both handled. The CLI's stderr is not read (it goes to the stderr of the Erlang VM), so log output never mixes with JSON-RPC frames.
+
+* If the CLI cannot be started, `Client.start/1` returns `{:error, "Failed to start the Copilot CLI (<path>): <reason>"}` and the client keeps running.
+* If the CLI exits, pending requests return `{:error, %{code: -1, message: "CLI process exited"}}` and the client state becomes `:disconnected`. With `auto_start: true` (the default) the next call starts a new CLI; otherwise requests return `{:error, %{code: -1, message: "JSON-RPC client is not running"}}` until `Client.start/1` is called again.
+* `Copilot.JsonRpcClient.request/4` returns `{:error, :timeout}` when no response arrives within its timeout.
+
+`test/copilot/cli_e2e_test.exs` runs this connection against the real CLI and the shared replaying proxy in CI.
 
 ## Protocol Version
 

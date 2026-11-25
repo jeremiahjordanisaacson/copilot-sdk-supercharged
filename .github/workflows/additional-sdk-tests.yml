@@ -292,6 +292,8 @@ jobs:
           elixir-version: '1.17'
           otp-version: '27'
       - run: mix deps.get
+      # Unit tests plus test/copilot/cli_e2e_test.exs, which runs the real CLI
+      # (COPILOT_CLI_PATH) against the replaying proxy in test/harness.
       - run: mix test
 
   crystal:
