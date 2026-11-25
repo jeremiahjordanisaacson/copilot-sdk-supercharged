@@ -788,13 +788,16 @@ type CreateSessionOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
-	Filesystem            CreateSessionFilesystemOptions
-	State                 SessionStateOptions
-	Instructions          CreateSessionInstructionOptions
-	Hooks                 SessionHookOptions
-	Git                   SessionGitOptions
-	Skills                SessionSkillOptions
-	Tools                 SessionToolOptions
+	// ExtensionSources selects extension sources without enabling extensions.
+	// Warm resumes must retain overrides; cold omission restores defaults.
+	ExtensionSources *ExtensionSources
+	Filesystem       CreateSessionFilesystemOptions
+	State            SessionStateOptions
+	Instructions     CreateSessionInstructionOptions
+	Hooks            SessionHookOptions
+	Git              SessionGitOptions
+	Skills           SessionSkillOptions
+	Tools            SessionToolOptions
 	// SystemMessage configures system message customization
 	SystemMessage *SystemMessageConfig
 	Agents        SessionAgentOptions
@@ -839,6 +842,7 @@ func (options *CreateSessionOptions) normalize() *sessionOptions {
 		ContextTier:                        options.Inference.ContextTier,
 		ConfigDirectory:                    options.ConfigDirectory,
 		EnableConfigDiscovery:              options.EnableConfigDiscovery,
+		ExtensionSources:                   options.ExtensionSources,
 		TrustWorkingDirectory:              options.Filesystem.TrustWorkingDirectory,
 		SkipEmbeddingRetrieval:             options.State.SkipEmbeddingRetrieval,
 		EmbeddingCacheStorage:              options.State.EmbeddingCacheStorage,
@@ -971,8 +975,10 @@ type ResumeSessionOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
-	State                 SessionStateOptions
-	Events                SessionEventOptions
+	// ExtensionSources must match a loaded session; cold omission restores defaults.
+	ExtensionSources *ExtensionSources
+	State            SessionStateOptions
+	Events           SessionEventOptions
 	// Diagnostics updates explicitly configured sources. Leave it nil on a
 	// resident resume to preserve the current settings.
 	Diagnostics *rpc.DiagnosticsConfiguration
@@ -1054,6 +1060,7 @@ func (options *ResumeSessionOptions) normalize() *resumeOptions {
 		AdditionalDirectories:              options.Filesystem.AdditionalDirectories,
 		ConfigDirectory:                    options.ConfigDirectory,
 		EnableConfigDiscovery:              options.EnableConfigDiscovery,
+		ExtensionSources:                   options.ExtensionSources,
 		SkipEmbeddingRetrieval:             options.State.SkipEmbeddingRetrieval,
 		EmbeddingCacheStorage:              options.State.EmbeddingCacheStorage,
 		OrganizationCustomInstructions:     options.Instructions.OrganizationText,

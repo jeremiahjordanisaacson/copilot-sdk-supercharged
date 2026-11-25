@@ -614,6 +614,7 @@ fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
         "sessionId": "id", "workingDirectory": "/work", "model": "model",
         "additionalDirectories": ["/extra"],
         "configDir": "/config", "enableConfigDiscovery": false,
+        "extensionSources": {"user": false, "project": true, "plugins": false},
         "enableExperimentalMode": true, "featureFlags": {"flag": true},
         "infiniteSessions": {"enabled": false, "backgroundCompactionThreshold": 0.7},
         "enableSessionStore": true, "memory": {"enabled": false},
@@ -641,6 +642,10 @@ fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
     assert_eq!(config.config_directory, Some(PathBuf::from("/config")));
     assert_eq!(config.experiments.enable_experimental_mode, Some(true));
     assert_eq!(
+        serde_json::to_value(config.clone().into_wire(None).unwrap().0).unwrap()["extensionSources"],
+        value["extensionSources"]
+    );
+    assert_eq!(
         config.state.infinite_sessions.as_ref().unwrap().enabled,
         Some(false)
     );
@@ -656,6 +661,10 @@ fn host_settings_round_trip_without_callbacks_or_losing_constraints() {
     );
     assert_eq!(resume.config_directory, Some(PathBuf::from("/config")));
     assert_eq!(resume.experiments.enable_experimental_mode, Some(true));
+    assert_eq!(
+        serde_json::to_value(resume.clone().into_wire().unwrap().0).unwrap()["extensionSources"],
+        value["extensionSources"]
+    );
     assert_eq!(
         resume.state.infinite_sessions.as_ref().unwrap().enabled,
         Some(false)

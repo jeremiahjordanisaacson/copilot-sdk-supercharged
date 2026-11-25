@@ -31,27 +31,33 @@ fn import_logs_do_not_echo_remote_errors() {
 }
 
 #[test]
-fn deserialize_notification() {
-    let json = r#"{"jsonrpc":"2.0","method":"session.event","params":{"id":"e1"}}"#;
-    let msg: JsonRpcMessage = serde_json::from_str(json).unwrap();
-    assert!(matches!(msg, JsonRpcMessage::Notification(n) if n.method == "session.event"));
-}
-
-#[test]
-fn deserialize_request() {
-    let json =
-        r#"{"jsonrpc":"2.0","id":5,"method":"permission.request","params":{"kind":"shell"}}"#;
-    let msg: JsonRpcMessage = serde_json::from_str(json).unwrap();
-    assert!(
-        matches!(msg, JsonRpcMessage::Request(r) if r.id == 5 && r.method == "permission.request")
-    );
-}
-
-#[test]
-fn deserialize_response_with_result() {
-    let json = r#"{"jsonrpc":"2.0","id":3,"result":{"ok":true}}"#;
-    let msg: JsonRpcMessage = serde_json::from_str(json).unwrap();
-    assert!(matches!(msg, JsonRpcMessage::Response(r) if r.id == 3 && !r.is_error()));
+fn deserialize_classifies_messages_by_id_and_method() {
+    for (json, id, method) in [
+        (
+            r#"{"jsonrpc":"2.0","method":"session.event","params":{"id":"e1"}}"#,
+            None,
+            Some("session.event"),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":5,"method":"permission.request","params":{"kind":"shell"}}"#,
+            Some(5),
+            Some("permission.request"),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":3,"result":{"ok":true}}"#,
+            Some(3),
+            None,
+        ),
+    ] {
+        let msg = serde_json::from_str(json).unwrap();
+        let actual = match &msg {
+            JsonRpcMessage::Notification(n) => (None, Some(n.method.as_str())),
+            JsonRpcMessage::Request(r) => (Some(r.id), Some(r.method.as_str())),
+            JsonRpcMessage::Response(r) if !r.is_error() => (Some(r.id), None),
+            other => panic!("unexpected message for {json}: {other:?}"),
+        };
+        assert_eq!(actual, (id, method), "{json}");
+    }
 }
 
 #[test]
@@ -132,12 +138,6 @@ fn a_peer_message_is_repeated_without_its_quoted_values() {
         sanitized_peer_message(&long).chars().count(),
         PEER_MESSAGE_MAX_CHARS + 1
     );
-}
-
-#[test]
-fn deserialize_rejects_non_object() {
-    let result = serde_json::from_str::<JsonRpcMessage>(r#""not an object""#);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -314,8 +314,9 @@ fn deserialize_preserves_optional_payloads() {
 }
 
 #[test]
-fn deserialize_rejects_invalid_metadata() {
+fn deserialize_rejects_invalid_envelopes() {
     for json in [
+        r#""not an object""#,
         r#"{"jsonrpc":null,"method":"notify","params":{"nested":[1]}}"#,
         r#"{"jsonrpc":"2.0","method":42,"params":{"nested":[1]}}"#,
         r#"{"jsonrpc":"2.0","id":null,"result":{}}"#,

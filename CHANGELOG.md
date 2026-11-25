@@ -7,6 +7,16 @@ See [GitHub Releases](https://github.com/github/copilot-sdk/releases) for the fu
 
 ## [Unreleased]
 
+### Feature: skill catalog diagnostics in session events
+
+The `session.skills_loaded` event includes optional `errors` and `warnings` arrays. Older runtimes can omit these fields.
+
+**Rust source break:** `SessionSkillsLoadedData` gains `errors` and `warnings` fields. Change patterns from `SessionSkillsLoadedData { skills }` to `SessionSkillsLoadedData { skills, .. }`. Add `errors: None` and `warnings: None` to exhaustive struct literals, or use `SessionSkillsLoadedData { skills, ..Default::default() }`.
+
+**Go source break:** `rpc.SessionSkillsLoadedData` gains `Errors` and `Warnings` fields. Change positional literals from `rpc.SessionSkillsLoadedData{skills}` to keyed literals such as `rpc.SessionSkillsLoadedData{Skills: skills}`. Existing keyed literals need no change.
+
+**Java source break:** Java 21+ record patterns must include all three components. Replace `SessionSkillsLoadedEventData(var skills)` with `SessionSkillsLoadedEventData(var skills, var warnings, var errors)`. The existing one-argument constructor remains available; this does not preserve record-pattern source compatibility.
+
 ### Bugfix: Java session event handlers no longer block the connection reader
 
 Java session event handlers now run on the client's executor rather than the connection reader. Events remain ordered and serialized within each session, but handlers for different sessions on the same client can run concurrently. Synchronize shared callback state when needed.

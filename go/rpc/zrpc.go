@@ -8396,6 +8396,22 @@ type ExtensionsEnableRequest struct {
 type ExtensionsEnableResult struct {
 }
 
+// Session-owned extension source overrides. These do not enable extensions or activate
+// plugins.
+// Experimental: ExtensionSources is part of an experimental API and may change or be
+// removed.
+type ExtensionSources struct {
+	// Permit extensions from otherwise-active plugins, including bundles. Defaults to true;
+	// other plugin contributions are unaffected.
+	Plugins *bool `json:"plugins,omitempty"`
+	// Discover project extensions when true; exclude them when false. Omission preserves
+	// existing discovery and trust checks.
+	Project *bool `json:"project,omitempty"`
+	// Discover personal extensions when true; exclude them when false. Omission preserves
+	// existing discovery.
+	User *bool `json:"user,omitempty"`
+}
+
 // Tool call result (string or expanded result object)
 // Experimental: ExternalToolResult is part of an experimental API and may change or be
 // removed.

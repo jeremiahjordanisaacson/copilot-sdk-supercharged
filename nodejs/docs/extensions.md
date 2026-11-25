@@ -22,6 +22,8 @@ Extensions add custom tools, hooks, and behaviors to the Copilot CLI. They run a
 4. **Registration**: Tools and hooks declared in the session options are registered with the CLI and become available to the agent.
 5. **Lifecycle**: Extensions reload on `/clear` or foreground-session replacement and stop on CLI exit. On macOS and Linux, ordinary stop/reload sends SIGTERM, then SIGKILL after 5s if still running. CLI exit and session/service teardown use a shared 1s grace period, including disabling extensions on SDK resume; Windows kills immediately without a grace period.
 
+On Windows, the sandboxed extension launcher restores the granted temporary directory. For an absolute `.exe` other than `cmd.exe` with `ELECTRON_RUN_AS_NODE=1` set by the launch provider, the wrapper starts the executable in the session working directory and waits for it, not its descendants. This preserves stdio and normally returns the extension's exit code. In Windows PowerShell 5.1, the wrapper reports an error and exits with code `1` if the host exits before the wrapper reads its process handle. The sandbox still cleans up descendants. Other launches use PowerShell's call operator.
+
 ## File Structure
 
 ```
@@ -96,6 +98,31 @@ const session = await joinSession({
 ```
 
 The `session` object provides methods for sending messages, logging to the timeline, listening to events, and accessing the RPC API. See the `.d.ts` files in the SDK package for full type information.
+
+## Selecting sources from an SDK host
+
+Session creation and owning resume accept `extensionSources` (`extension_sources` in Python and Rust).
+Its optional `user`, `project`, and `plugins` booleans select extension sources without enabling extensions.
+Keep the existing extension enablement, launch provider, and SDK-injection configuration.
+
+- `user: false` excludes automatic personal-extension discovery.
+- `project: false` excludes automatic project-extension discovery.
+- `user: true` or `project: true` requests that extension source independently of general configuration discovery.
+- `plugins: false` excludes extension contributions from all otherwise-active plugins, including host bundles. Their independently eligible servers, hooks, skills, agents, and instructions remain unchanged.
+
+Omission or `{}` preserves existing source behavior. In particular, an explicit extension request
+still discovers personal and project extensions with `enableConfigDiscovery: false` when those
+source fields are omitted. `plugins: true` and omission permit eligible contributions but never
+activate a plugin or read additional plugin configuration.
+
+Source choices stay fixed while loaded. A warm resume with different overrides, including an
+omitted reset, fails. Cold resume accepts new choices; omission restores defaults. Participants cannot configure sources.
+Reload and reconciliation retain the effective session selection without rewriting shared preferences.
+Session-owned extension authoring remains available when the subsystem permits it.
+
+Existing managed policy, trust, permissions, and individual disables still apply. A supporting
+runtime is required: hosts must pin or establish runtime support before relying on an exclusion.
+An older runtime ignoring an unknown option is not a safe fallback.
 
 ## Requesting Sensitive Environment Variables
 

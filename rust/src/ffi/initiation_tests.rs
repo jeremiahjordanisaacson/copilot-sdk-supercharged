@@ -310,11 +310,8 @@ fn assert_submission_does_not_wait_for_native_close(shutdown_phase: bool) {
 }
 
 #[tokio::test]
-async fn synchronous_submission_does_not_wait_for_connection_close() {
-    assert_submission_does_not_wait_for_native_close(false);
-}
-
-#[tokio::test]
-async fn synchronous_submission_does_not_wait_for_host_shutdown() {
-    assert_submission_does_not_wait_for_native_close(true);
+async fn synchronous_submission_does_not_wait_for_native_teardown() {
+    for shutdown_phase in [false, true] {
+        assert_submission_does_not_wait_for_native_close(shutdown_phase);
+    }
 }

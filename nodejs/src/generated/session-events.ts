@@ -7195,6 +7195,12 @@ export interface FusionCompletedData {
    */
   requestCount: number;
   /**
+   * Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.
+   *
+   * @experimental
+   */
+  reviewSkippedReason?: string;
+  /**
    * Synthetic HydraFusion model selected for the session.
    */
   syntheticModel: string;
@@ -8276,6 +8282,12 @@ export interface FusionPhaseCompletedData {
    * @internal
    */
   projectionMode?: FusionProjectionMode;
+  /**
+   * True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.
+   *
+   * @experimental
+   */
+  readOnly?: boolean;
   /**
    * Explicit reasoning effort selected for this phase, if supplied.
    *

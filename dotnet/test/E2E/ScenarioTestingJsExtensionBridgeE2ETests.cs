@@ -17,6 +17,73 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
 {
     private static readonly TimeSpan ExtensionTimeout = TimeSpan.FromSeconds(60);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Should_Keep_Session_Exclusions_Independent_When_Clone_Is_Changed(bool resume)
+    {
+        var fixture = await CreateExtensionFixtureAsync();
+        var boots = Path.Join(Ctx.WorkDir, $"clone-source-boots-{Guid.NewGuid():N}");
+        await File.WriteAllTextAsync(fixture.EntryPath,
+            "import { appendFileSync as recordBoot } from \"node:fs\";\n" +
+            $"recordBoot(\"{JsonEncodedText.Encode(boots)}\", process.env.SESSION_ID + \"\\n\");\n" +
+            ExtensionScript);
+        await using var client = CreateExtensionClient(fixture, CopilotClientMode.Empty);
+        var seedConfig = CreateSessionConfig(fixture.ProjectDirectory);
+        seedConfig.Name = "Extension source clone seed";
+        seedConfig.Tools.AvailableTools = new ToolSet();
+        seedConfig.ExtensionSources = new() { User = false, Project = false, Plugins = false };
+        await using var seed = await Ctx.CreateSessionAsync(client, seedConfig);
+        await seed.Rpc.Extensions.ReconcileAsync();
+        Assert.Empty((await seed.Rpc.Extensions.ListAsync()).Extensions);
+        Assert.False(File.Exists(boots));
+
+        CopilotSession selected;
+        if (resume)
+        {
+            var original = new ResumeSessionOptions
+            {
+                WorkingDirectory = fixture.ProjectDirectory,
+                EnableConfigDiscovery = true,
+                Extensions = new() { Enabled = true },
+                Tools = new() { AvailableTools = new ToolSet() },
+                ExtensionSources = new() { User = false, Project = true, Plugins = false },
+                Permissions = new() { OnRequest = PermissionHandler.ApproveAll }
+            };
+            var other = original.Clone();
+            other.ExtensionSources!.Project = false;
+            await seed.DisposeAsync();
+            selected = await Ctx.ResumeSessionAsync(client, seed.SessionId, original);
+        }
+        else
+        {
+            var original = CreateSessionConfig(fixture.ProjectDirectory);
+            original.Tools.AvailableTools = new ToolSet();
+            original.ExtensionSources = new() { User = false, Project = true, Plugins = false };
+            var other = original.Clone();
+            other.ExtensionSources!.Project = false;
+            selected = await Ctx.CreateSessionAsync(client, original);
+        }
+
+        await using var session = selected;
+        await session.Rpc.Extensions.ReconcileAsync();
+        var extension = Assert.Single((await session.Rpc.Extensions.ListAsync()).Extensions);
+        Assert.Equal(fixture.ExtensionId, extension.Id);
+        Assert.Equal(ExtensionStatus.Running, extension.Status);
+        var canvas = await WaitForCanvasAsync(session, fixture.ExtensionId);
+        await OpenCanvasWhenRegisteredAsync(session, canvas.CanvasId, "clone-isolation",
+            fixture.ExtensionId, new Dictionary<string, object> { ["value"] = "before" });
+        var action = await session.Rpc.Canvas.Action.InvokeAsync(
+            instanceId: "clone-isolation", actionName: "set-value",
+            input: new Dictionary<string, object> { ["value"] = "clone-isolated" });
+        Assert.Equal("clone-isolated", action.Result!.Value.GetProperty("value").GetString());
+        await session.Rpc.Canvas.CloseAsync("clone-isolation");
+        var executions = (await File.ReadAllTextAsync(boots))
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(executions);
+        Assert.All(executions, id => Assert.Equal(session.SessionId, id));
+    }
+
     [Fact]
     public async Task Should_Run_Standalone_Empty_Mode_Extension_Canvas_Without_Conversation()
     {
@@ -245,11 +312,13 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
         Directory.CreateDirectory(projectDirectory);
         Directory.CreateDirectory(extensionDirectory);
         await InitializeGitRepositoryAsync(projectDirectory);
-        File.WriteAllText(Path.Join(extensionDirectory, "extension.mjs"), ExtensionScript);
+        var entryPath = Path.Join(extensionDirectory, "extension.mjs");
+        File.WriteAllText(entryPath, ExtensionScript);
         return new ExtensionFixture(
             projectDirectory,
             traceFile,
-            $"{source.Value}:{extensionName}");
+            $"{source.Value}:{extensionName}",
+            entryPath);
     }
 
     private async Task<RpcExtension> WaitForExtensionAsync(
@@ -431,7 +500,8 @@ public class ScenarioTestingJsExtensionBridgeE2ETests(E2ETestFixture fixture, IT
     private sealed record ExtensionFixture(
         string ProjectDirectory,
         string TraceFile,
-        string ExtensionId);
+        string ExtensionId,
+        string EntryPath);
 
     private const string ExtensionScript = """
         import { appendFileSync } from "node:fs";

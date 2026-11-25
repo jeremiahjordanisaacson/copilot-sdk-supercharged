@@ -121,6 +121,7 @@ pub use crate::copilot_request_handler::{
 pub use crate::copilot_request_handler::{
     CopilotWebSocketForwarder, CopilotWebSocketForwarderBuilder, forward_http,
 };
+pub use crate::generated::api_types::ExtensionSources;
 /// Copilot Fusion tier, matching the CLI's `--fusion-tier`. The runtime
 /// resolves each tier to the Auto routing preference it stands for.
 pub use crate::generated::api_types::FusionTier;
@@ -4098,6 +4099,9 @@ pub struct CreateSessionOptions {
     /// Enables runtime discovery of supported configuration. Explicitly supplied
     /// configuration takes precedence; explicit feature roots remain independent.
     pub enable_config_discovery: Option<bool>,
+    /// Source overrides, not extension activation or trust grants.
+    /// Warm resumes cannot change overrides; cold omission restores defaults.
+    pub extension_sources: Option<ExtensionSources>,
     /// Filesystem options for this session.
     pub filesystem: CreateSessionFilesystemOptions,
     /// State options for this session.
@@ -4158,6 +4162,7 @@ impl Default for CreateSessionOptions {
             mcp: Default::default(),
             config_directory: None,
             enable_config_discovery: None,
+            extension_sources: None,
             filesystem: Default::default(),
             state: Default::default(),
             instructions: Default::default(),
@@ -4280,6 +4285,7 @@ impl CreateSessionOptions {
             },
             config_directory: self.config_directory,
             enable_config_discovery: self.enable_config_discovery,
+            extension_sources: self.extension_sources.clone(),
             filesystem: crate::wire::SessionCreateFilesystemWire {
                 trust_working_directory: self.filesystem.trust_working_directory,
                 track_file_changes: self.filesystem.track_file_changes,
@@ -4523,6 +4529,12 @@ impl CreateSessionOptions {
         self
     }
 
+    /// Select extension sources without enabling extensions. Requires a supporting runtime.
+    pub fn with_extension_sources(mut self, sources: ExtensionSources) -> Self {
+        self.extension_sources = Some(sources);
+        self
+    }
+
     /// Update the filesystem option group.
     pub fn with_filesystem(
         mut self,
@@ -4701,6 +4713,8 @@ pub struct ResumeSessionOptions {
     /// Enables runtime discovery of supported configuration. Explicitly supplied
     /// configuration takes precedence; explicit feature roots remain independent.
     pub enable_config_discovery: Option<bool>,
+    /// Must match a loaded session's overrides; cold omission restores defaults.
+    pub extension_sources: Option<ExtensionSources>,
     /// State options for this session.
     pub state: SessionStateOptions,
     /// Instructions options for this session.
@@ -4814,6 +4828,7 @@ impl ResumeSessionOptions {
             },
             config_directory: self.config_directory,
             enable_config_discovery: self.enable_config_discovery,
+            extension_sources: self.extension_sources.clone(),
             instructions: crate::wire::SessionResumeInstructionWire {
                 organization_text: self.instructions.organization_text,
                 on_demand_discovery: self.instructions.on_demand_discovery,
@@ -4911,6 +4926,7 @@ impl ResumeSessionOptions {
             mcp: Default::default(),
             config_directory: None,
             enable_config_discovery: None,
+            extension_sources: None,
             state: Default::default(),
             instructions: Default::default(),
             hooks: Default::default(),
@@ -5100,6 +5116,12 @@ impl ResumeSessionOptions {
     /// configuration takes precedence; explicit feature roots remain independent.
     pub fn with_enable_config_discovery(mut self, enable: bool) -> Self {
         self.enable_config_discovery = Some(enable);
+        self
+    }
+
+    /// Select sources without enabling extensions. Warm resumes must match.
+    pub fn with_extension_sources(mut self, sources: ExtensionSources) -> Self {
+        self.extension_sources = Some(sources);
         self
     }
 

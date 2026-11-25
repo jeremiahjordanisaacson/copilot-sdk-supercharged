@@ -74,7 +74,13 @@ fn missing_empty_and_relative_xdg_values_fall_back_to_home() {
 #[test]
 fn home_lookup_accepts_nonempty_values_verbatim_and_ignores_xdg() {
     for apple in [false, true] {
-        for home in ["relative", "/", "/home/user", " "] {
+        for home in [
+            "relative",
+            "/",
+            "/home/user",
+            " ",
+            "/home/\u{7528}\u{6237}/../user",
+        ] {
             assert_eq!(
                 unix::directory(
                     Directory::Home,
@@ -151,20 +157,6 @@ fn macos_ignores_all_xdg_overrides_and_uses_application_support_for_config() {
             Some(PathBuf::from("home").join(suffix))
         );
     }
-}
-
-#[test]
-fn non_ascii_paths_are_preserved_without_expansion_or_normalization() {
-    let home = OsString::from("/home/\u{7528}\u{6237}/../user");
-    assert_eq!(
-        unix::directory(
-            Directory::Home,
-            false,
-            |_| panic!("home must not query XDG variables"),
-            || Some(PathBuf::from(&home)),
-        ),
-        Some(home.into())
-    );
 }
 
 #[cfg(unix)]

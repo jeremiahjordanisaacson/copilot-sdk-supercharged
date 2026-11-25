@@ -232,40 +232,26 @@ fn directory_install_guard_preserves_active_waiters() {
 }
 
 #[test]
-fn runtime_install_dir_waits_for_the_claimant_to_write_its_version() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let marker = dir.path().join(RUNTIME_VERSION_MARKER);
-    // What another installer leaves between creating the marker and writing it.
-    fs::write(&marker, b"").expect("create empty marker");
-
-    assert_eq!(
-        try_runtime_install_dir(dir.path(), "1.0.0").expect("observe unfinished claim"),
-        None
-    );
-    fs::write(&marker, "1.0.0").expect("write version");
-    assert_eq!(
-        runtime_install_dir(dir.path(), "1.0.0").expect("select directory"),
-        dir.path()
-    );
-}
-
-#[test]
-fn runtime_install_dir_claims_a_marker_its_claimant_withdrew() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let marker = dir.path().join(RUNTIME_VERSION_MARKER);
-    fs::write(&marker, b"").expect("create empty marker");
-
-    assert_eq!(
-        try_runtime_install_dir(dir.path(), "1.0.0").expect("observe unfinished claim"),
-        None
-    );
-    // The claimant removes the marker when writing its version fails.
-    fs::remove_file(&marker).expect("withdraw claim");
-    assert_eq!(
-        runtime_install_dir(dir.path(), "1.0.0").expect("select directory"),
-        dir.path()
-    );
-    assert_eq!(fs::read_to_string(&marker).expect("marker"), "1.0.0");
+fn runtime_install_dir_reuses_published_or_withdrawn_claim() {
+    for publish in [true, false] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join(RUNTIME_VERSION_MARKER);
+        fs::write(&marker, b"").expect("create empty marker");
+        assert_eq!(
+            try_runtime_install_dir(dir.path(), "1.0.0").expect("observe unfinished claim"),
+            None
+        );
+        if publish {
+            fs::write(&marker, "1.0.0").expect("write version");
+        } else {
+            fs::remove_file(&marker).expect("withdraw claim");
+        }
+        assert_eq!(
+            runtime_install_dir(dir.path(), "1.0.0").expect("select directory"),
+            dir.path()
+        );
+        assert_eq!(fs::read_to_string(&marker).expect("marker"), "1.0.0");
+    }
 }
 
 #[test]
@@ -850,37 +836,26 @@ fn runtime_repairs_corruption_across_comparison_chunks() {
 
 #[cfg(all(has_bundled_cli, unix))]
 #[test]
-fn runtime_reuse_preserves_executable_caller_selected_permissions() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = tempfile::tempdir().unwrap();
-    let fixture = runtime_fixture(&[]);
-    let wrapper = install_runtime(dir.path(), &fixture).unwrap();
-    for mode in [0o745, 0o754, 0o700, 0o500] {
-        fs::set_permissions(&wrapper, fs::Permissions::from_mode(mode)).unwrap();
-        install_runtime(dir.path(), &fixture).unwrap();
-        assert_eq!(
-            fs::metadata(&wrapper).unwrap().permissions().mode() & 0o777,
-            mode
-        );
-    }
-    assert_no_runtime_temps(dir.path());
-}
-
-#[cfg(all(has_bundled_cli, unix))]
-#[test]
-fn runtime_repairs_nonexecutable_wrapper() {
+fn runtime_preserves_executable_wrapper_modes_and_repairs_nonexecutable_ones() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempfile::tempdir().unwrap();
     let archive = runtime_fixture(&[]);
     let wrapper = install_runtime(dir.path(), &archive).unwrap();
-    for mode in [0o400, 0o600] {
+    for (mode, expected) in [
+        (0o745, 0o745),
+        (0o754, 0o754),
+        (0o700, 0o700),
+        (0o500, 0o500),
+        (0o400, 0o755),
+        (0o600, 0o755),
+    ] {
         fs::set_permissions(&wrapper, fs::Permissions::from_mode(mode)).unwrap();
         install_runtime(dir.path(), &archive).unwrap();
         assert_eq!(
             fs::metadata(&wrapper).unwrap().permissions().mode() & 0o777,
-            0o755
+            expected,
+            "mode={mode:o}"
         );
         assert_eq!(fs::read(&wrapper).unwrap(), b"wrapper");
         assert_no_runtime_temps(dir.path());

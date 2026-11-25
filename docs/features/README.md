@@ -20,6 +20,7 @@ These guides cover the capabilities you can add to your Copilot SDK application.
 | [Session limits](./session-limits.md) | Set an AI Credits budget for a session and observe budget events |
 | [Citations](./citations.md) | Link assistant responses back to their supporting sources |
 | [Image Input](./image-input.md) | Send images to sessions as attachments |
+| [AI content provenance](./content-provenance.md) | What the SDK does and does not do to mark AI-generated text, images, and files |
 | [Streaming Events](./streaming-events.md) | Subscribe to real-time session events (40+ event types) |
 | [Usage and Billing](./usage-and-billing.md) | Read token counts, context-window utilization, AI credit cost, and account quota |
 | [Client info](./client-info.md) | Declare application and integration identity for runtime telemetry attribution |

@@ -809,22 +809,25 @@ fn held_events_stay_within_the_byte_budget() {
     }
 }
 
-/// After a session detaches, its later events are held for the next
-/// registration of the same ID, since a host can rejoin the session.
 #[test]
-fn events_after_detaching_reach_a_later_registration() {
-    let router = SessionRouter::new();
-    let sink = router.event_sink();
-    let first = router.register(&session_id());
-    assert!(router.unregister_detached(&session_id(), first.token));
-    sink.route(session_event(session_id().as_str(), "after-rejoin"));
-
-    let mut second = router.register(&session_id());
-    sink.route(session_event(session_id().as_str(), "live"));
-    assert_eq!(
-        drain(&mut second.channels.notifications),
-        ["after-rejoin", "live"]
-    );
+fn only_detaching_retains_events_for_a_later_registration() {
+    for (detached, event, expected) in [
+        (true, "after-rejoin", &["after-rejoin", "live"][..]),
+        (false, "stale", &["live"][..]),
+    ] {
+        let router = SessionRouter::new();
+        let sink = router.event_sink();
+        let first = router.register(&session_id());
+        assert!(if detached {
+            router.unregister_detached(&session_id(), first.token)
+        } else {
+            router.unregister_owned(&session_id(), first.token)
+        });
+        sink.route(session_event(session_id().as_str(), event));
+        let mut second = router.register(&session_id());
+        sink.route(session_event(session_id().as_str(), "live"));
+        assert_eq!(drain(&mut second.channels.notifications), expected);
+    }
 }
 
 /// The dispatcher ends a detached registration where its reply was read.
@@ -1039,22 +1042,6 @@ fn a_detach_releases_the_held_byte_budget() {
     let mut rejoined = router.register(&SessionId::new("rejoined"));
     assert_eq!(drain(&mut other.channels.notifications), ["kept"]);
     assert_eq!(drain(&mut rejoined.channels.notifications), ["new"]);
-}
-
-/// A registration that ended without detaching leaves the runtime streaming
-/// its events; they are dropped so they cannot crowd out other held events,
-/// and a later registration of the ID receives live events again.
-#[test]
-fn events_after_ending_without_detaching_are_dropped() {
-    let router = SessionRouter::new();
-    let sink = router.event_sink();
-    let first = router.register(&session_id());
-    assert!(router.unregister_owned(&session_id(), first.token));
-    sink.route(session_event(session_id().as_str(), "stale"));
-
-    let mut second = router.register(&session_id());
-    sink.route(session_event(session_id().as_str(), "live"));
-    assert_eq!(drain(&mut second.channels.notifications), ["live"]);
 }
 
 /// A claim queued by a registration that has since ended must not release a

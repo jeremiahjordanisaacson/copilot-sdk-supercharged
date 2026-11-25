@@ -10,6 +10,7 @@ use crate::handler::{ApproveAllHandler, PermissionHandler, PermissionResult};
 use crate::permission;
 use crate::types::{
     CreateSessionOptions, PermissionDecision, PermissionRequestData, RequestId, SessionId,
+    SessionPermissionOptions,
 };
 
 fn data() -> PermissionRequestData {
@@ -49,55 +50,31 @@ async fn approve_all_standalone_produces_handler() {
 }
 
 #[tokio::test]
-async fn deny_all_is_order_independent() {
-    let a = CreateSessionOptions::default()
-        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
-        .with_permissions(|group| group.deny_all_permissions());
-    let b = CreateSessionOptions::default()
-        .with_permissions(|group| group.deny_all_permissions())
-        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)));
-    let ha = resolve_create(a).unwrap();
-    let hb = resolve_create(b).unwrap();
-    assert!(matches!(
-        dispatch(&ha).await,
-        PermissionResult::Decision {
-            decision: PermissionDecision::Reject(_),
-            ..
+async fn permission_policies_override_handlers_in_either_order() {
+    let policies: [fn(SessionPermissionOptions) -> SessionPermissionOptions; 2] =
+        [SessionPermissionOptions::deny_all_permissions, |group| {
+            group.approve_permissions_if(|d| {
+                d.extra.get("tool").and_then(|v| v.as_str()) != Some("shell")
+            })
+        }];
+    let handler =
+        |group: SessionPermissionOptions| group.with_on_request(Arc::new(ApproveAllHandler));
+    for policy in policies {
+        for options in [
+            CreateSessionOptions::default()
+                .with_permissions(handler)
+                .with_permissions(policy),
+            CreateSessionOptions::default()
+                .with_permissions(policy)
+                .with_permissions(handler),
+        ] {
+            assert!(matches!(
+                dispatch(&resolve_create(options).unwrap()).await,
+                PermissionResult::Decision {
+                    decision: PermissionDecision::Reject(_),
+                    ..
+                }
+            ));
         }
-    ));
-    assert!(matches!(
-        dispatch(&hb).await,
-        PermissionResult::Decision {
-            decision: PermissionDecision::Reject(_),
-            ..
-        }
-    ));
-}
-
-#[tokio::test]
-async fn approve_permissions_if_is_order_independent() {
-    let predicate =
-        |d: &PermissionRequestData| d.extra.get("tool").and_then(|v| v.as_str()) != Some("shell");
-    let a = CreateSessionOptions::default()
-        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)))
-        .with_permissions(|group| group.approve_permissions_if(predicate));
-    let b = CreateSessionOptions::default()
-        .with_permissions(|group| group.approve_permissions_if(predicate))
-        .with_permissions(|group| group.with_on_request(Arc::new(ApproveAllHandler)));
-    let ha = resolve_create(a).unwrap();
-    let hb = resolve_create(b).unwrap();
-    assert!(matches!(
-        dispatch(&ha).await,
-        PermissionResult::Decision {
-            decision: PermissionDecision::Reject(_),
-            ..
-        }
-    ));
-    assert!(matches!(
-        dispatch(&hb).await,
-        PermissionResult::Decision {
-            decision: PermissionDecision::Reject(_),
-            ..
-        }
-    ));
+    }
 }

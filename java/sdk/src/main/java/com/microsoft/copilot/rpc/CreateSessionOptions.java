@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import com.microsoft.copilot.generated.rpc.DiagnosticsConfiguration;
+import com.microsoft.copilot.generated.rpc.ExtensionSources;
 
 /**
  * Configuration for creating a new Copilot session.
@@ -616,6 +617,53 @@ public class CreateSessionOptions {
 
     private String configDirectory;
     private Boolean enableConfigDiscovery;
+    @JsonProperty("extensions")
+    private SessionExtensionOptions extensions = new SessionExtensionOptions();
+    private ExtensionSources extensionSources;
+
+    /**
+     * Gets existing extension activation and SDK injection choices.
+     *
+     * @return the options
+     */
+    public SessionExtensionOptions getExtensions() {
+        return extensions;
+    }
+
+    /**
+     * Sets extension activation and SDK injection. Null restores an empty group.
+     *
+     * @param value
+     *            the options
+     * @return this options instance
+     */
+    public CreateSessionOptions setExtensions(SessionExtensionOptions value) {
+        extensions = value == null ? new SessionExtensionOptions() : value;
+        return this;
+    }
+
+    /**
+     * Gets extension source overrides.
+     *
+     * @return the overrides, or null for existing source behavior
+     */
+    public ExtensionSources getExtensionSources() {
+        return extensionSources;
+    }
+
+    /**
+     * Selects sources without enabling extensions or granting trust. Warm resumes
+     * cannot change overrides. Cold omission restores defaults. Requires runtime
+     * support.
+     *
+     * @param value
+     *            the source overrides
+     * @return this options instance
+     */
+    public CreateSessionOptions setExtensionSources(ExtensionSources value) {
+        extensionSources = value;
+        return this;
+    }
 
     /**
      * Gets the configuration directory path.
@@ -730,6 +778,8 @@ public class CreateSessionOptions {
         copy.plugins = this.plugins.clone();
         copy.configDirectory = this.configDirectory;
         copy.enableConfigDiscovery = this.enableConfigDiscovery;
+        copy.extensions = this.extensions.clone();
+        copy.extensionSources = this.extensionSources;
         copy.policy = this.policy.clone();
         return copy;
     }

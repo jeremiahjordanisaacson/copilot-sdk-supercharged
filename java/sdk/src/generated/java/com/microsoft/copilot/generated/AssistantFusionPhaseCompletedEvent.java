@@ -75,6 +75,9 @@ public final class AssistantFusionPhaseCompletedEvent extends SessionEvent {
         /** True when a first pass (Cascade primary or Critique draft) ended with background work outstanding, whether or not the turn then committed it without review; absent otherwise. */
         @CopilotExperimental
         @JsonProperty("endedWithBackgroundWork") Boolean endedWithBackgroundWork,
+        /** True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise. */
+        @CopilotExperimental
+        @JsonProperty("readOnly") Boolean readOnly,
         @com.fasterxml.jackson.annotation.JsonIgnore java.util.Set<String> $explicitNulls
     ) {
 
@@ -117,6 +120,7 @@ public final class AssistantFusionPhaseCompletedEvent extends SessionEvent {
             private FusionProjectionMode projectionMode;
             private FusionStagedTerminal stagedTerminal;
             private Boolean endedWithBackgroundWork;
+            private Boolean readOnly;
 
             /**
              * Sets the {@code fusionId} property.
@@ -313,6 +317,18 @@ public final class AssistantFusionPhaseCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code readOnly} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder readOnly(Boolean value) {
+                this.readOnly = value;
+                return this;
+            }
+
+            /**
              * Builds a record after checking required property presence.
              * @return a new record
              * @throws IllegalStateException if a required property is missing
@@ -332,7 +348,7 @@ public final class AssistantFusionPhaseCompletedEvent extends SessionEvent {
                 if (usage == null) throw new IllegalStateException("Missing required property: usage");
                 java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
                 if ($presence12 && projectionMessage == null) $explicitNulls.add("projectionMessage");
-                return new AssistantFusionPhaseCompletedEventData(fusionId, phaseId, phaseKind, role, conversationScope, model, reasoningEffort, status, content, verdict, durationMs, usage, projectionMessage, projectionMode, stagedTerminal, endedWithBackgroundWork, $explicitNulls);
+                return new AssistantFusionPhaseCompletedEventData(fusionId, phaseId, phaseKind, role, conversationScope, model, reasoningEffort, status, content, verdict, durationMs, usage, projectionMessage, projectionMode, stagedTerminal, endedWithBackgroundWork, readOnly, $explicitNulls);
             }
         }
 
@@ -352,7 +368,7 @@ public final class AssistantFusionPhaseCompletedEvent extends SessionEvent {
                 if (!tree.isObject()) return context.reportInputMismatch(AssistantFusionPhaseCompletedEventData.class, "Expected a JSON object");
                 java.util.Set<String> $explicitNulls = new java.util.LinkedHashSet<>();
                 if (tree.has("projectionMessage") && tree.get("projectionMessage").isNull()) $explicitNulls.add("projectionMessage");
-                return new AssistantFusionPhaseCompletedEventData(readProperty(context, tree, "fusionId", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "phaseId", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "phaseKind", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseKind>() {}), readProperty(context, tree, "role", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "conversationScope", new com.fasterxml.jackson.core.type.TypeReference<FusionConversationScope>() {}), readProperty(context, tree, "model", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "reasoningEffort", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "status", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseStatus>() {}), readProperty(context, tree, "content", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "verdict", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "durationMs", new com.fasterxml.jackson.core.type.TypeReference<Double>() {}), readProperty(context, tree, "usage", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseUsage>() {}), readProperty(context, tree, "projectionMessage", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "projectionMode", new com.fasterxml.jackson.core.type.TypeReference<FusionProjectionMode>() {}), readProperty(context, tree, "stagedTerminal", new com.fasterxml.jackson.core.type.TypeReference<FusionStagedTerminal>() {}), readProperty(context, tree, "endedWithBackgroundWork", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), $explicitNulls);
+                return new AssistantFusionPhaseCompletedEventData(readProperty(context, tree, "fusionId", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "phaseId", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "phaseKind", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseKind>() {}), readProperty(context, tree, "role", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "conversationScope", new com.fasterxml.jackson.core.type.TypeReference<FusionConversationScope>() {}), readProperty(context, tree, "model", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "reasoningEffort", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "status", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseStatus>() {}), readProperty(context, tree, "content", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "verdict", new com.fasterxml.jackson.core.type.TypeReference<String>() {}), readProperty(context, tree, "durationMs", new com.fasterxml.jackson.core.type.TypeReference<Double>() {}), readProperty(context, tree, "usage", new com.fasterxml.jackson.core.type.TypeReference<FusionPhaseUsage>() {}), readProperty(context, tree, "projectionMessage", new com.fasterxml.jackson.core.type.TypeReference<Object>() {}), readProperty(context, tree, "projectionMode", new com.fasterxml.jackson.core.type.TypeReference<FusionProjectionMode>() {}), readProperty(context, tree, "stagedTerminal", new com.fasterxml.jackson.core.type.TypeReference<FusionStagedTerminal>() {}), readProperty(context, tree, "endedWithBackgroundWork", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), readProperty(context, tree, "readOnly", new com.fasterxml.jackson.core.type.TypeReference<Boolean>() {}), $explicitNulls);
             }
 
             private static <T> T readProperty(com.fasterxml.jackson.databind.DeserializationContext context,

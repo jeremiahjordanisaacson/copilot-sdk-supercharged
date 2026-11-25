@@ -809,58 +809,32 @@ async fn inprocess_requires_cargo_feature() {
 }
 
 #[test]
-fn build_command_typed_token_overrides_environment_removal() {
-    let opts = StartupOptions {
-        github_token: Some("secret".to_string()),
-        transport: Transport::SpawnedStdio(
-            SpawnedProcessOptions::new().with_env_remove(["COPILOT_SDK_AUTH_TOKEN"]),
+fn build_command_supplies_typed_github_token_regardless_of_environment() {
+    let key = "COPILOT_SDK_AUTH_TOKEN";
+    for (transport, token) in [
+        (
+            Transport::SpawnedStdio(SpawnedProcessOptions::new().with_env_remove([key])),
+            "secret",
         ),
-        ..StartupOptions::default()
-    };
-    let cmd = build_command(Path::new("/bin/echo"), &opts, Path::new("/tmp"));
-    let action = cmd
-        .as_std()
-        .get_envs()
-        .find(|(k, _)| *k == std::ffi::OsStr::new("COPILOT_SDK_AUTH_TOKEN"))
-        .map(|(_, v)| v);
-    assert_eq!(
-        action,
-        Some(Some(std::ffi::OsStr::new("secret"))),
-        "explicit github_token should win over env_remove"
-    );
-}
-
-#[test]
-fn build_command_typed_token_overrides_environment_value() {
-    let opts = StartupOptions {
-        github_token: Some("from-options".to_string()),
-        transport: Transport::SpawnedStdio(
-            SpawnedProcessOptions::new().with_env([("COPILOT_SDK_AUTH_TOKEN", "from-env")]),
+        (
+            Transport::SpawnedStdio(SpawnedProcessOptions::new().with_env([(key, "from-env")])),
+            "from-options",
         ),
-        ..StartupOptions::default()
-    };
-    let cmd = build_command(Path::new("/bin/echo"), &opts, Path::new("/tmp"));
-    let value = cmd
-        .as_std()
-        .get_envs()
-        .find(|(k, _)| *k == std::ffi::OsStr::new("COPILOT_SDK_AUTH_TOKEN"))
-        .and_then(|(_, v)| v);
-    assert_eq!(value, Some(std::ffi::OsStr::new("from-options")));
-}
-
-#[test]
-fn build_command_injects_github_token_by_default() {
-    let opts = StartupOptions {
-        github_token: Some("just-the-token".to_string()),
-        ..StartupOptions::default()
-    };
-    let cmd = build_command(Path::new("/bin/echo"), &opts, Path::new("/tmp"));
-    let value = cmd
-        .as_std()
-        .get_envs()
-        .find(|(k, _)| *k == std::ffi::OsStr::new("COPILOT_SDK_AUTH_TOKEN"))
-        .and_then(|(_, v)| v);
-    assert_eq!(value, Some(std::ffi::OsStr::new("just-the-token")));
+        (Default::default(), "just-the-token"),
+    ] {
+        let opts = StartupOptions {
+            github_token: Some(token.to_owned()),
+            transport,
+            ..StartupOptions::default()
+        };
+        let cmd = build_command(Path::new("/bin/echo"), &opts, Path::new("/tmp"));
+        let value = cmd
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(key))
+            .and_then(|(_, v)| v);
+        assert_eq!(value, Some(std::ffi::OsStr::new(token)));
+    }
 }
 
 #[test]
@@ -1436,19 +1410,26 @@ async fn empty_mode_requires_persistence_for_spawned_transports() {
 
 #[tokio::test]
 async fn start_rejects_empty_connection_token() {
-    let opts = ClientOptions::new(crate::ClientMode::CodingAgent).with_runtime(
+    for runtime in [
         RuntimeConnection::for_spawned_tcp(SpawnedTcpRuntimeOptions {
             process: SpawnedProcessOptions::new()
                 .with_program(CliProgram::Path(PathBuf::from("/bin/echo"))),
             port: 0,
             connection_token: Some(String::new()),
         }),
-    );
-    let err = Client::start(opts).await.unwrap_err();
-    assert!(
-        matches!(err.kind(), ErrorKind::InvalidConfig),
-        "got {err:?}"
-    );
+        RuntimeConnection::Tcp(TcpRuntimeOptions {
+            host: "127.0.0.1".to_string(),
+            port: 1,
+            connection_token: Some(String::new()),
+        }),
+    ] {
+        let opts = ClientOptions::new(crate::ClientMode::CodingAgent).with_runtime(runtime);
+        let err = Client::start(opts).await.unwrap_err();
+        assert!(
+            matches!(err.kind(), ErrorKind::InvalidConfig),
+            "got {err:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1468,62 +1449,31 @@ async fn start_rejects_invalid_tcp_endpoint_before_connecting() {
     }
 }
 
-#[tokio::test]
-async fn start_rejects_empty_external_connection_token() {
-    let opts = ClientOptions::new(crate::ClientMode::CodingAgent).with_runtime(
-        RuntimeConnection::Tcp(TcpRuntimeOptions {
-            host: "127.0.0.1".to_string(),
-            port: 1,
-            connection_token: Some(String::new()),
-        }),
-    );
-    let err = Client::start(opts).await.unwrap_err();
-    assert!(
-        matches!(err.kind(), ErrorKind::InvalidConfig),
-        "got {err:?}"
-    );
+#[test]
+fn session_idle_timeout_args_emit_only_positive_values() {
+    for (seconds, expected) in [(0, vec![]), (300, vec!["--session-idle-timeout", "300"])] {
+        let opts = StartupOptions {
+            session_idle_timeout_seconds: Some(seconds),
+            ..StartupOptions::default()
+        };
+        assert_eq!(Client::session_idle_timeout_args(&opts), expected);
+    }
 }
 
 #[test]
-fn session_idle_timeout_args_omitted_for_zero() {
-    let opts = StartupOptions {
-        session_idle_timeout_seconds: Some(0),
-        ..StartupOptions::default()
-    };
-    assert!(Client::session_idle_timeout_args(&opts).is_empty());
-}
-
-#[test]
-fn session_idle_timeout_args_emit_flag_for_positive_value() {
-    let opts = StartupOptions {
-        session_idle_timeout_seconds: Some(300),
-        ..StartupOptions::default()
-    };
-    assert_eq!(
-        Client::session_idle_timeout_args(&opts),
-        vec!["--session-idle-timeout".to_string(), "300".to_string()]
-    );
-}
-
-#[test]
-fn log_level_args_omitted_when_unset() {
-    let opts = ClientOptions::new(crate::ClientMode::CodingAgent)
-        .into_startup()
-        .unwrap();
-    assert!(opts.log_level.is_none());
-    assert!(
-        Client::log_level_args(&opts).is_empty(),
-        "with no caller-supplied log_level the SDK must not pass --log-level"
-    );
-}
-
-#[test]
-fn log_level_args_emit_flag_when_set() {
-    let opts = ClientOptions::new(crate::ClientMode::CodingAgent)
-        .with_observability(|group| group.with_log_level(LogLevel::Debug))
-        .into_startup()
-        .unwrap();
-    assert_eq!(Client::log_level_args(&opts), vec!["--log-level", "debug"]);
+fn log_level_args_emit_only_configured_levels() {
+    for (level, expected) in [
+        (None, vec![]),
+        (Some(LogLevel::Debug), vec!["--log-level", "debug"]),
+    ] {
+        let mut opts = ClientOptions::new(crate::ClientMode::CodingAgent);
+        if let Some(level) = level {
+            opts = opts.with_observability(|group| group.with_log_level(level));
+        }
+        let opts = opts.into_startup().unwrap();
+        assert_eq!(opts.log_level, level);
+        assert_eq!(Client::log_level_args(&opts), expected);
+    }
 }
 
 #[test]

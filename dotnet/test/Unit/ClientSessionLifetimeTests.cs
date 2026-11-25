@@ -3566,46 +3566,15 @@ public sealed partial class ClientSessionLifetimeTests
         });
     }
 
-    internal static async Task RunWithDownlevelSdkAsync(Type fixtureType, string methodName, object?[] arguments, [CallerFilePath] string sourceFile = "")
+    internal static async Task RunWithDownlevelSdkAsync(Type fixtureType, string methodName, object?[] arguments)
     {
-        var project = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourceFile)!, "../../src/Microsoft.Copilot.SDK.csproj"));
-        var output = Directory.CreateTempSubdirectory("copilot-downlevel-");
-        var context = new DownlevelSdkLoadContext(output.FullName);
+        var directory = Path.Combine(AppContext.BaseDirectory, "downlevel-sdk");
+        var sdkPath = Path.Combine(directory, "Microsoft.Copilot.SDK.dll");
+        Assert.True(File.Exists(sdkPath), $"Downlevel SDK fixture not found at '{sdkPath}'. Build the test project before running with --no-build.");
+        var context = new DownlevelSdkLoadContext(directory);
         try
         {
-            var startInfo = new ProcessStartInfo("dotnet")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            foreach (var argument in new[]
-            {
-                "build", project, "--framework", "netstandard2.0", "--no-restore",
-                "--output", output.FullName, "-p:CopilotSkipCliDownload=true",
-                "-p:CopyLocalLockFileAssemblies=true", "--verbosity", "quiet"
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-            using var build = Process.Start(startInfo)!;
-            var stdout = build.StandardOutput.ReadToEndAsync();
-            var stderr = build.StandardError.ReadToEndAsync();
-            try
-            {
-                await build.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
-            }
-            finally
-            {
-                if (!build.HasExited)
-                {
-                    build.Kill(entireProcessTree: true);
-                    await build.WaitForExitAsync();
-                }
-            }
-            Assert.True(build.ExitCode == 0, $"Downlevel SDK build failed:\n{await stdout}\n{await stderr}");
-
-            using var sdk = File.OpenRead(Path.Combine(output.FullName, "Microsoft.Copilot.SDK.dll"));
+            using var sdk = File.OpenRead(sdkPath);
             var sdkAssembly = context.LoadFromStream(sdk);
             Assert.Equal(".NETStandard,Version=v2.0", sdkAssembly.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName);
             var tests = context.LoadFromAssemblyPath(typeof(ClientSessionLifetimeTests).Assembly.Location);
@@ -3616,7 +3585,6 @@ public sealed partial class ClientSessionLifetimeTests
         finally
         {
             context.Unload();
-            output.Delete(recursive: true);
         }
     }
 

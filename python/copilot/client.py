@@ -2191,6 +2191,18 @@ class SessionExtensionOptions(TypedDict, total=False):
     identity: ExtensionInfo | None
 
 
+class ExtensionSources(TypedDict, total=False):
+    """Source overrides, not extension activation or trust grants.
+
+    Warm resumes cannot change overrides. Cold omission restores existing
+    discovery defaults. Requires a supporting runtime.
+    """
+
+    user: bool
+    project: bool
+    plugins: bool
+
+
 class SessionPolicyOptions(TypedDict, total=False):
     """Options for session policy."""
 
@@ -2231,6 +2243,7 @@ class CreateSessionOptions(TypedDict, total=False):
     plugins: SessionPluginOptions | None
     canvases: SessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
+    extension_sources: ExtensionSources | None
     policy: SessionPolicyOptions | None
 
 
@@ -2266,6 +2279,7 @@ class ResumeSessionOptions(TypedDict, total=False):
     plugins: SessionPluginOptions | None
     canvases: ResumeSessionCanvasOptions | None
     extensions: SessionExtensionOptions | None
+    extension_sources: ExtensionSources | None
     policy: SessionPolicyOptions | None
 
 
@@ -3426,6 +3440,7 @@ class CopilotClient:
         plugins: SessionPluginOptions | None = None,
         canvases: SessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
+        extension_sources: ExtensionSources | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -3742,6 +3757,7 @@ class CopilotClient:
         _validate_option_group("plugins", plugins, SessionPluginOptions)
         _validate_option_group("canvases", canvases, SessionCanvasOptions)
         _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("extension_sources", extension_sources, ExtensionSources)
         _validate_option_group("policy", policy, SessionPolicyOptions)
         on_permission_request = (permissions or {}).get("on_request", None)
         reasoning_effort = (inference or {}).get("reasoning_effort", None)
@@ -4080,6 +4096,8 @@ class CopilotClient:
         # Add config discovery flag if provided
         if enable_config_discovery is not None:
             payload["enableConfigDiscovery"] = enable_config_discovery
+        if extension_sources is not None:
+            payload["extensionSources"] = extension_sources
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:
@@ -4576,6 +4594,7 @@ class CopilotClient:
         plugins: SessionPluginOptions | None = None,
         canvases: ResumeSessionCanvasOptions | None = None,
         extensions: SessionExtensionOptions | None = None,
+        extension_sources: ExtensionSources | None = None,
         policy: SessionPolicyOptions | None = None,
     ) -> CopilotSession:
         """
@@ -4890,6 +4909,7 @@ class CopilotClient:
         _validate_option_group("plugins", plugins, SessionPluginOptions)
         _validate_option_group("canvases", canvases, ResumeSessionCanvasOptions)
         _validate_option_group("extensions", extensions, SessionExtensionOptions)
+        _validate_option_group("extension_sources", extension_sources, ExtensionSources)
         _validate_option_group("policy", policy, SessionPolicyOptions)
         on_permission_request = (permissions or {}).get("on_request", None)
         reasoning_effort = (inference or {}).get("reasoning_effort", None)
@@ -5163,6 +5183,8 @@ class CopilotClient:
             payload["configDir"] = config_directory
         if enable_config_discovery is not None:
             payload["enableConfigDiscovery"] = enable_config_discovery
+        if extension_sources is not None:
+            payload["extensionSources"] = extension_sources
         if skip_embedding_retrieval is not None:
             payload["skipEmbeddingRetrieval"] = skip_embedding_retrieval
         if organization_custom_instructions is not None:

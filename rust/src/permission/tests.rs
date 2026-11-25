@@ -42,30 +42,26 @@ async fn deny_all_denies() {
 }
 
 #[tokio::test]
-async fn approve_if_leaves_managed_approval_pending_when_predicate_approves() {
-    let h = approve_if(|_| true);
-    let mut request = data();
-    request.managed_approval_required = Some(true);
-    assert!(matches!(
-        h.handle(SessionId::from("s"), RequestId::new("1"), request)
-            .await,
-        PermissionResult::NoResult
-    ));
-}
-
-#[tokio::test]
-async fn approve_if_still_rejects_managed_request_when_predicate_denies() {
-    let h = approve_if(|_| false);
-    let mut request = data();
-    request.managed_approval_required = Some(true);
-    assert!(matches!(
-        h.handle(SessionId::from("s"), RequestId::new("1"), request)
-            .await,
-        PermissionResult::Decision {
-            decision: crate::types::PermissionDecision::Reject(_),
-            ..
-        }
-    ));
+async fn approve_if_leaves_managed_approval_pending_unless_denied() {
+    for approved in [true, false] {
+        let h = approve_if(move |_| approved);
+        let mut request = data();
+        request.managed_approval_required = Some(true);
+        let result = h
+            .handle(SessionId::from("s"), RequestId::new("1"), request)
+            .await;
+        assert!(matches!(
+            (approved, result),
+            (true, PermissionResult::NoResult)
+                | (
+                    false,
+                    PermissionResult::Decision {
+                        decision: crate::types::PermissionDecision::Reject(_),
+                        ..
+                    }
+                )
+        ));
+    }
 }
 
 #[tokio::test]

@@ -292,6 +292,14 @@ connection-level resolver for extension launch profiles. The client installs the
 reverse-RPC handler and registers the provider during startup before sessions can
 be created.
 
+`CreateSessionOptions.getExtensions()` and `ResumeSessionOptions.getExtensions()`
+project the runtime's existing `enabled` and `sdkPath` choices. Set `enabled` to
+`true` to request extensions with general configuration discovery off, and use
+`sdkPath` to select the SDK directory injected into extension children.
+This projection is a prerequisite for Java's `setExtensionSources(...)`: source
+filters select eligible personal, project, and plugin extensions but do not
+activate extensions or grant trust.
+
 ### Installation confirmation (experimental)
 
 `CopilotClientOptions.getInstallations().setConfirmationHandler(...)` configures the

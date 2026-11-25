@@ -4426,6 +4426,9 @@ public abstract class SessionOptionsBase
         Filesystem = (SessionFilesystemOptions)other.Filesystem.Clone();
         ConfigDirectory = other.ConfigDirectory;
         EnableConfigDiscovery = other.EnableConfigDiscovery;
+        ExtensionSources = other.ExtensionSources is { } sources
+            ? new() { User = sources.User, Project = sources.Project, Plugins = sources.Plugins }
+            : null;
         State = (SessionStateOptions)other.State.Clone();
         Instructions = (SessionInstructionOptions)other.Instructions.Clone();
         Hooks = (SessionHookOptions)other.Hooks.Clone();
@@ -4493,6 +4496,14 @@ public abstract class SessionOptionsBase
     /// </summary>
     [JsonPropertyName("enableConfigDiscovery")]
     public bool? EnableConfigDiscovery { get; set; }
+
+    /// <summary>
+    /// Selects extension sources without enabling extensions or configuration discovery.
+    /// Warm resumes cannot change overrides. Cold omission restores existing defaults.
+    /// Requires a supporting runtime.
+    /// </summary>
+    [JsonPropertyName("extensionSources")]
+    public ExtensionSources? ExtensionSources { get; set; }
 
     /// <summary>Options for state.</summary>
     [JsonPropertyName("state")]
@@ -4613,8 +4624,8 @@ public sealed class CreateSessionOptions : SessionOptionsBase
     /// Creates a shallow clone of this <see cref="CreateSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
-    /// Mutable collection properties are copied into new collection instances so that modifications
-    /// to those collections on the clone do not affect the original.
+    /// Source overrides and mutable collections are copied so modifications on the clone
+    /// do not affect the original.
     /// Other reference-type properties (for example provider configuration, system messages,
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.
@@ -4728,8 +4739,8 @@ public sealed class ResumeSessionOptions : SessionOptionsBase
     /// Creates a shallow clone of this <see cref="ResumeSessionOptions"/> instance.
     /// </summary>
     /// <remarks>
-    /// Mutable collection properties are copied into new collection instances so that modifications
-    /// to those collections on the clone do not affect the original.
+    /// Source overrides and mutable collections are copied so modifications on the clone
+    /// do not affect the original.
     /// Other reference-type properties (for example provider configuration, system messages,
     /// hooks, infinite session configuration, and delegates) are not deep-cloned; the original
     /// and the clone will share those nested objects, and changes to them may affect both.

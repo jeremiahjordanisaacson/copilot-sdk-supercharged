@@ -1380,6 +1380,7 @@ macro_rules! host_settings {
             "gitHubToken" => github.token,
             "mcpOAuthTokenStorage" => mcp.oauth_token_storage,
             "enableConfigDiscovery" => enable_config_discovery,
+            "extensionSources" => extension_sources,
             "featureFlags" => experiments.flags,
             "enableManagedSettings" => github.fetch_managed_settings,
             "excludedManagedSettings" => policy.excluded_managed_settings,

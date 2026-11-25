@@ -7,20 +7,24 @@
 use super::*;
 
 #[test]
-fn fs_error_maps_io_not_found_to_enoent() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing.txt");
-    let fs_err: FsError = io_err.into();
-    assert!(matches!(fs_err.kind(), FsErrorKind::NotFound(message) if message == "missing.txt"));
-    let wire = fs_err.into_wire();
-    assert_eq!(wire.code, SessionFsErrorCode::ENOENT);
-}
-
-#[test]
-fn fs_error_maps_other_io_to_unknown() {
-    let io_err = std::io::Error::other("disk full");
-    let fs_err: FsError = io_err.into();
-    assert!(matches!(fs_err.kind(), FsErrorKind::Other));
-    let wire = fs_err.into_wire();
-    assert_eq!(wire.code, SessionFsErrorCode::UNKNOWN);
-    assert!(wire.message.unwrap().contains("disk full"));
+fn fs_error_preserves_io_kind_and_message_on_wire() {
+    for (io_err, kind, code) in [
+        (
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing.txt"),
+            FsErrorKind::NotFound("missing.txt".into()),
+            SessionFsErrorCode::ENOENT,
+        ),
+        (
+            std::io::Error::other("disk full"),
+            FsErrorKind::Other,
+            SessionFsErrorCode::UNKNOWN,
+        ),
+    ] {
+        let message = io_err.to_string();
+        let error = FsError::from(io_err);
+        assert_eq!(error.kind(), &kind);
+        let wire = error.into_wire();
+        assert_eq!(wire.code, code);
+        assert!(wire.message.unwrap().contains(&message));
+    }
 }

@@ -22003,6 +22003,27 @@ export interface ExtensionsEnableRequest {
   id: string;
 }
 /**
+ * Session-owned extension source overrides. These do not enable extensions or activate plugins.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ExtensionSources".
+ */
+/** @experimental */
+export interface ExtensionSources {
+  /**
+   * Discover personal extensions when true; exclude them when false. Omission preserves existing discovery.
+   */
+  user?: boolean;
+  /**
+   * Discover project extensions when true; exclude them when false. Omission preserves existing discovery and trust checks.
+   */
+  project?: boolean;
+  /**
+   * Permit extensions from otherwise-active plugins, including bundles. Defaults to true; other plugin contributions are unaffected.
+   */
+  plugins?: boolean;
+}
+/**
  * Expanded external tool result payload
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema

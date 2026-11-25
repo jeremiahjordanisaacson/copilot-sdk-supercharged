@@ -29,6 +29,7 @@ import type { CopilotSession } from "./session.js";
 import type { JsonValue } from "./workflow.js";
 import type {
     ExtensionLaunchProviderHandler as GeneratedExtensionLaunchProvider,
+    ExtensionSources,
     FusionTier,
     AutopilotOptions,
     GitHubTokenAcquireRequest,
@@ -65,6 +66,7 @@ export type {
     NetworkScope,
 } from "./generated/rpc.js";
 export type { RemoteSessionMode } from "./generated/rpc.js";
+export type { ExtensionSources } from "./generated/rpc.js";
 export type { AutopilotOptions } from "./generated/rpc.js";
 export type {
     UserInputImageAttachment,
@@ -2983,6 +2985,12 @@ export interface SessionOptionsBase {
     enableConfigDiscovery?: boolean;
     canvases?: SessionCanvasOptions;
     extensions?: SessionExtensionOptions;
+    /**
+     * Selects extension discovery sources without enabling extensions or other configuration.
+     * Omission or `{}` uses existing defaults. Warm resumes cannot change overrides;
+     * cold omission restores defaults. Requires a supporting runtime.
+     */
+    extensionSources?: ExtensionSources;
     interaction?: SessionInteractionOptions;
     /**
      * System message configuration

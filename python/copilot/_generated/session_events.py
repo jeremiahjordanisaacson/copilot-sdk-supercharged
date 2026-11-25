@@ -494,6 +494,8 @@ class AssistantFusionPhaseCompletedData:
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _projection_mode: _FusionProjectionMode | None = None
     # Experimental: this field is part of an experimental API and may change or be removed.
+    read_only: bool | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
     reasoning_effort: str | None = None
     # Internal: this field is an internal SDK API and is not part of the public surface.
     _staged_terminal: _FusionStagedTerminal | None = None
@@ -515,6 +517,7 @@ class AssistantFusionPhaseCompletedData:
         ended_with_background_work = from_union([from_none, from_bool], obj.get("endedWithBackgroundWork"))
         _projection_message = obj.get("projectionMessage")
         _projection_mode = from_union([from_none, lambda x: parse_enum(_FusionProjectionMode, x)], obj.get("projectionMode"))
+        read_only = from_union([from_none, from_bool], obj.get("readOnly"))
         reasoning_effort = from_union([from_none, from_str], obj.get("reasoningEffort"))
         _staged_terminal = from_union([from_none, _FusionStagedTerminal.from_dict], obj.get("stagedTerminal"))
         return AssistantFusionPhaseCompletedData(
@@ -532,6 +535,7 @@ class AssistantFusionPhaseCompletedData:
             ended_with_background_work=ended_with_background_work,
             _projection_message=_projection_message,
             _projection_mode=_projection_mode,
+            read_only=read_only,
             reasoning_effort=reasoning_effort,
             _staged_terminal=_staged_terminal,
         )
@@ -555,6 +559,8 @@ class AssistantFusionPhaseCompletedData:
             result["projectionMessage"] = self._projection_message
         if self._projection_mode is not None:
             result["projectionMode"] = from_union([from_none, lambda x: to_enum(_FusionProjectionMode, x)], self._projection_mode)
+        if self.read_only is not None:
+            result["readOnly"] = from_union([from_none, from_bool], self.read_only)
         if self.reasoning_effort is not None:
             result["reasoningEffort"] = from_union([from_none, from_str], self.reasoning_effort)
         if self._staged_terminal is not None:
@@ -2614,6 +2620,8 @@ class SessionFusionCompletedData:
     failure_reason: str | None = None
     # Experimental: this field is part of an experimental API and may change or be removed.
     reasoning_effort: str | None = None
+    # Experimental: this field is part of an experimental API and may change or be removed.
+    review_skipped_reason: str | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> "SessionFusionCompletedData":
@@ -2640,6 +2648,7 @@ class SessionFusionCompletedData:
         error_message = from_union([from_none, from_str], obj.get("errorMessage"))
         failure_reason = from_union([from_none, from_str], obj.get("failureReason"))
         reasoning_effort = from_union([from_none, from_str], obj.get("reasoningEffort"))
+        review_skipped_reason = from_union([from_none, from_str], obj.get("reviewSkippedReason"))
         return SessionFusionCompletedData(
             cached_tokens=cached_tokens,
             commit_id=commit_id,
@@ -2663,6 +2672,7 @@ class SessionFusionCompletedData:
             error_message=error_message,
             failure_reason=failure_reason,
             reasoning_effort=reasoning_effort,
+            review_skipped_reason=review_skipped_reason,
         )
 
     def to_dict(self) -> dict:
@@ -2694,6 +2704,8 @@ class SessionFusionCompletedData:
             result["failureReason"] = from_union([from_none, from_str], self.failure_reason)
         if self.reasoning_effort is not None:
             result["reasoningEffort"] = from_union([from_none, from_str], self.reasoning_effort)
+        if self.review_skipped_reason is not None:
+            result["reviewSkippedReason"] = from_union([from_none, from_str], self.review_skipped_reason)
         return result
 
 

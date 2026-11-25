@@ -92,6 +92,26 @@ public sealed class DecisionErrorData
     public IList<DecisionViolation>? Violations { get; set; }
 }
 
+/// <summary>Session-owned extension source overrides. These do not enable extensions or activate plugins.</summary>
+[Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+public sealed class ExtensionSources
+{
+    /// <summary>Permit extensions from otherwise-active plugins, including bundles. Defaults to true; other plugin contributions are unaffected.</summary>
+    [JsonPropertyName("plugins")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Plugins { get; set; }
+
+    /// <summary>Discover project extensions when true; exclude them when false. Omission preserves existing discovery and trust checks.</summary>
+    [JsonPropertyName("project")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Project { get; set; }
+
+    /// <summary>Discover personal extensions when true; exclude them when false. Omission preserves existing discovery.</summary>
+    [JsonPropertyName("user")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? User { get; set; }
+}
+
 /// <summary>JSON-RPC error.data for application code -32004. Carries no credentials or provider error details.</summary>
 [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
 public sealed class CredentialContextErrorData
@@ -91747,6 +91767,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ExtensionLaunchProviderResolveResult))]
 [JsonSerializable(typeof(ExtensionList))]
 [JsonSerializable(typeof(ExtensionManagedPolicy))]
+[JsonSerializable(typeof(ExtensionSources))]
 [JsonSerializable(typeof(ExtensionsDisableRequest))]
 [JsonSerializable(typeof(ExtensionsEnableRequest))]
 [JsonSerializable(typeof(ExternalToolTextResultForLlmBinaryResultsForLlm))]

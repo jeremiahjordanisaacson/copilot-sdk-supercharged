@@ -10,6 +10,10 @@ import (
 	"github.com/microsoft/copilot-sdk/go/v2/rpc"
 )
 
+// ExtensionSources selects discovery sources, not activation or trust.
+// Requires a supporting runtime.
+type ExtensionSources = rpc.ExtensionSources
+
 // connectionState is the internal client connection state.
 type connectionState string
 
@@ -1992,6 +1996,9 @@ type sessionOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
+	// ExtensionSources selects extension sources without enabling extensions.
+	// Warm resumes cannot change overrides. Cold omission restores existing defaults.
+	ExtensionSources *ExtensionSources
 	// TrustWorkingDirectory trusts the working directory for this session
 	// ("session") or persistently for the user ("user"). Empty leaves trust unchanged.
 	TrustWorkingDirectory WorkingDirectoryTrust
@@ -2934,6 +2941,8 @@ type resumeOptions struct {
 	// Explicitly supplied configuration takes precedence over discovered values.
 	// Nil leaves the runtime default unchanged; use Bool(false) to explicitly disable discovery.
 	EnableConfigDiscovery *bool
+	// ExtensionSources must match a loaded session; cold omission restores defaults.
+	ExtensionSources *ExtensionSources
 	// SkipEmbeddingRetrieval, when non-nil, controls embedding-based retrieval
 	// for this session. Use in multitenant deployments to prevent cross-session
 	// information leakage through the shared embedding cache.
@@ -3727,6 +3736,7 @@ type createSessionRequest struct {
 	Agent                              string                         `json:"agent,omitempty"`
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
+	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
 	TrustWorkingDirectory              string                         `json:"trustWorkingDirectory,omitempty"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
@@ -3833,6 +3843,7 @@ type resumeSessionRequest struct {
 	AdditionalDirectories              []string                       `json:"additionalDirectories,omitzero"`
 	ConfigDir                          string                         `json:"configDir,omitempty"`
 	EnableConfigDiscovery              *bool                          `json:"enableConfigDiscovery,omitempty"`
+	ExtensionSources                   *ExtensionSources              `json:"extensionSources,omitempty"`
 	SkipEmbeddingRetrieval             *bool                          `json:"skipEmbeddingRetrieval,omitempty"`
 	EmbeddingCacheStorage              *string                        `json:"embeddingCacheStorage,omitempty"`
 	OrganizationCustomInstructions     *string                        `json:"organizationCustomInstructions,omitempty"`

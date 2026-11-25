@@ -7,16 +7,8 @@ using Xunit;
 
 namespace Microsoft.Copilot.Test.Unit;
 
-// Building the netstandard2.0 SDK keeps every core of a small CI runner busy for up to a minute and a
-// half, and tests running beside it miss their startup deadlines. xUnit runs a collection that disables
-// parallelization only after the parallel collections finish.
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class DownlevelSdkBuildCollection
-{
-    public const string Name = "Downlevel SDK build";
-}
-
-[Collection(DownlevelSdkBuildCollection.Name)]
+// Reflected runtime-wrapper methods still mutate process-wide environment and AppContext state.
+[Collection(RuntimeWrapperIsolationCollection.Name)]
 public sealed class DownlevelSdkTests
 {
     [Fact]

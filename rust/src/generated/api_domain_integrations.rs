@@ -717,6 +717,25 @@ pub struct ExtensionsEnableRequest {
 }
 crate::record_serde::wire_record!(ExtensionsEnableRequest { id: "id" });
 
+/// Session-owned extension source overrides. These do not enable extensions or activate plugins.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default)]
+pub struct ExtensionSources {
+    /// Permit extensions from otherwise-active plugins, including bundles. Defaults to true; other plugin contributions are unaffected.
+    pub plugins: Option<bool>,
+    /// Discover project extensions when true; exclude them when false. Omission preserves existing discovery and trust checks.
+    pub project: Option<bool>,
+    /// Discover personal extensions when true; exclude them when false. Omission preserves existing discovery.
+    pub user: Option<bool>,
+}
+crate::record_serde::wire_record!(ExtensionSources { plugins: "plugins" if is_none, project: "project" if is_none, user: "user" if is_none });
+
 /// The configuration-change alternative for the transportChoices entry at the same index. Only the selected alternative is applied; entries are not cumulative. The payload stays behind the runtime boundary.
 ///
 /// <div class="warning">

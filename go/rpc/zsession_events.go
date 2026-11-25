@@ -1319,6 +1319,9 @@ type AssistantFusionPhaseCompletedData struct {
 	// Projection action for the exact internal message.
 	// Internal: ProjectionMode is part of the SDK's internal API surface and is not intended for external use.
 	ProjectionMode *FusionProjectionMode `json:"projectionMode,omitempty"`
+	// True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.
+	// Experimental: ReadOnly is part of an experimental API and may change or be removed.
+	ReadOnly *bool `json:"readOnly,omitempty"`
 	// Explicit reasoning effort selected for this phase, if supplied.
 	// Experimental: ReasoningEffort is part of an experimental API and may change or be removed.
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
@@ -1411,6 +1414,9 @@ type SessionFusionCompletedData struct {
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// Total concrete model requests made by the turn.
 	RequestCount int64 `json:"requestCount"`
+	// Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.
+	// Experimental: ReviewSkippedReason is part of an experimental API and may change or be removed.
+	ReviewSkippedReason *string `json:"reviewSkippedReason,omitempty"`
 	// Synthetic HydraFusion model selected for the session.
 	SyntheticModel string `json:"syntheticModel"`
 	// Total normalized AI-unit cost reported by the turn, in nano-AIU.

@@ -4961,6 +4961,12 @@ public sealed partial class SessionFusionCompletedData
     [JsonPropertyName("requestCount")]
     public required long RequestCount { get; set; }
 
+    /// <summary>Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("reviewSkippedReason")]
+    public string? ReviewSkippedReason { get; set; }
+
     /// <summary>Synthetic HydraFusion model selected for the session.</summary>
     [JsonPropertyName("syntheticModel")]
     public required string SyntheticModel { get; set; }
@@ -5369,6 +5375,12 @@ public sealed partial class AssistantFusionPhaseCompletedData
     [JsonInclude]
     [JsonPropertyName("projectionMode")]
     internal FusionProjectionMode? ProjectionMode { get; set; }
+
+    /// <summary>True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.</summary>
+    [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("readOnly")]
+    public bool? ReadOnly { get; set; }
 
     /// <summary>Explicit reasoning effort selected for this phase, if supplied.</summary>
     [Experimental(global::Microsoft.Copilot.Diagnostics.Experimental)]

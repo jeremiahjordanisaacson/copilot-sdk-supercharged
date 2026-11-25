@@ -393,6 +393,50 @@ public final class ResumeSessionRequest {
     @JsonProperty("enableConfigDiscovery")
     private Boolean enableConfigDiscovery;
 
+    @JsonProperty("extensionSources")
+    private com.microsoft.copilot.generated.rpc.ExtensionSources extensionSources;
+
+    @JsonProperty("extensions")
+    private SessionExtensionOptions extensions;
+
+    /**
+     * Gets extension activation and SDK injection.
+     *
+     * @return the choices, or {@code null} when omitted
+     */
+    public SessionExtensionOptions getExtensions() {
+        return extensions;
+    }
+
+    /**
+     * Sets existing session extension choices.
+     *
+     * @param value
+     *            the choices, or {@code null} to omit
+     * @return this request
+     */
+    public ResumeSessionRequest setExtensions(SessionExtensionOptions value) {
+        extensions = value;
+        return this;
+    }
+
+    /** Gets extension source overrides. @return the overrides */
+    public com.microsoft.copilot.generated.rpc.ExtensionSources getExtensionSources() {
+        return extensionSources;
+    }
+
+    /**
+     * Sets extension source overrides.
+     *
+     * @param value
+     *            the overrides
+     * @return this request
+     */
+    public ResumeSessionRequest setExtensionSources(com.microsoft.copilot.generated.rpc.ExtensionSources value) {
+        extensionSources = value;
+        return this;
+    }
+
     /** Gets config configDirectory. @return the config configDirectory */
     public String getConfigDirectory() {
         return configDirectory;

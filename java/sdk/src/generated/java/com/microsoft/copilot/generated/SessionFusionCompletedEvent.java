@@ -81,6 +81,9 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
         /** True when the committed first pass ended with background work outstanding, so that work's completion notifications continue the conversation; absent otherwise. */
         @CopilotExperimental
         @JsonProperty("awaitingBackgroundWork") Boolean awaitingBackgroundWork,
+        /** Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run. */
+        @CopilotExperimental
+        @JsonProperty("reviewSkippedReason") String reviewSkippedReason,
         /** Planned reasoning effort of an ordinary Single turn, which has no phase record. */
         @CopilotExperimental
         @JsonProperty("reasoningEffort") String reasoningEffort,
@@ -135,6 +138,7 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
             private Double totalNanoAiu;
             private Double durationMs;
             private Boolean awaitingBackgroundWork;
+            private String reviewSkippedReason;
             private String reasoningEffort;
             private String failureReason;
             private String errorMessage;
@@ -371,6 +375,18 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
             }
 
             /**
+             * Sets the {@code reviewSkippedReason} property.
+             * @param value the property value
+             * @return this builder
+             * @since 2.0.0
+             */
+            @com.microsoft.copilot.CopilotExperimental
+            public Builder reviewSkippedReason(String value) {
+                this.reviewSkippedReason = value;
+                return this;
+            }
+
+            /**
              * Sets the {@code reasoningEffort} property.
              * @param value the property value
              * @return this builder
@@ -430,7 +446,7 @@ public final class SessionFusionCompletedEvent extends SessionEvent {
                 if (cachedTokens == null) throw new IllegalStateException("Missing required property: cachedTokens");
                 if (totalNanoAiu == null) throw new IllegalStateException("Missing required property: totalNanoAiu");
                 if (durationMs == null) throw new IllegalStateException("Missing required property: durationMs");
-                return new SessionFusionCompletedEventData(fusionId, commitId, turnId, syntheticModel, pattern, outcome, finalSourcePhaseId, finalSourceModel, followUpModel, degradedReason, phaseCount, requestCount, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, totalNanoAiu, durationMs, awaitingBackgroundWork, reasoningEffort, failureReason, errorMessage);
+                return new SessionFusionCompletedEventData(fusionId, commitId, turnId, syntheticModel, pattern, outcome, finalSourcePhaseId, finalSourceModel, followUpModel, degradedReason, phaseCount, requestCount, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, totalNanoAiu, durationMs, awaitingBackgroundWork, reviewSkippedReason, reasoningEffort, failureReason, errorMessage);
             }
         }
     }

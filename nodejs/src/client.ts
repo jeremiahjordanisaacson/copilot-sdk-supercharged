@@ -2742,6 +2742,7 @@ export class CopilotClient {
                     sdkPath: config.extensions?.sdkPath,
                     identity: config.extensions?.identity,
                 },
+                extensionSources: config.extensionSources,
                 interaction: {
                     commands: config.interaction?.commands?.map((cmd) => ({
                         name: cmd.name,
@@ -3308,6 +3309,7 @@ export class CopilotClient {
                     sdkPath: config.extensions?.sdkPath,
                     identity: config.extensions?.identity,
                 },
+                extensionSources: config.extensionSources,
                 interaction: {
                     commands: config.interaction?.commands?.map((cmd) => ({
                         name: cmd.name,

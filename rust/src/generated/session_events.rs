@@ -3708,6 +3708,16 @@ pub struct SessionFusionCompletedData {
     pub reasoning_effort: Option<String>,
     /// Total concrete model requests made by the turn.
     pub request_count: i64,
+    /// Why the committed first pass was not reviewed, when the turn skipped its judge or critic: user_halted, awaiting_background_work, selection_changed or read_only_first_pass; absent when the turn ran its review or had none to run.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_skipped_reason: Option<String>,
     /// Synthetic HydraFusion model selected for the session.
     pub synthetic_model: String,
     /// Total normalized AI-unit cost reported by the turn, in nano-AIU.
@@ -4011,6 +4021,15 @@ pub struct AssistantFusionPhaseCompletedData {
     /// Projection action for the exact internal message.
     #[doc(hidden)]
     pub(crate) projection_mode: Option<FusionProjectionMode>,
+    /// True when every tool a first pass (Cascade primary or Critique draft) called was read-only, whether or not the turn then committed it without review; absent otherwise.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This type is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases.
+    ///
+    /// </div>
+    pub read_only: Option<bool>,
     /// Explicit reasoning effort selected for this phase, if supplied.
     ///
     /// <div class="warning">
@@ -4032,7 +4051,7 @@ pub struct AssistantFusionPhaseCompletedData {
     /// Structured judge or critic verdict, when the phase produces one.
     pub verdict: Option<String>,
 }
-crate::record_serde::wire_record!(AssistantFusionPhaseCompletedData { content: "content", conversation_scope: "conversationScope", duration_ms: "durationMs", ended_with_background_work: "endedWithBackgroundWork" if is_none, fusion_id: "fusionId", model: "model", phase_id: "phaseId", phase_kind: "phaseKind", projection_message: "projectionMessage" if is_none, projection_mode: "projectionMode" if is_none, reasoning_effort: "reasoningEffort" if is_none, role: "role", staged_terminal: "stagedTerminal" if is_none, status: "status", usage: "usage", verdict: "verdict" });
+crate::record_serde::wire_record!(AssistantFusionPhaseCompletedData { content: "content", conversation_scope: "conversationScope", duration_ms: "durationMs", ended_with_background_work: "endedWithBackgroundWork" if is_none, fusion_id: "fusionId", model: "model", phase_id: "phaseId", phase_kind: "phaseKind", projection_message: "projectionMessage" if is_none, projection_mode: "projectionMode" if is_none, read_only: "readOnly" if is_none, reasoning_effort: "reasoningEffort" if is_none, role: "role", staged_terminal: "stagedTerminal" if is_none, status: "status", usage: "usage", verdict: "verdict" });
 
 /// Session event "assistant.fusion_phase_failed". Experimental durable typed HydraFusion phase failure and degradation transition.
 ///

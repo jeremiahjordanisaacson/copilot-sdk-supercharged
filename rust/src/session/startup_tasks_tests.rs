@@ -45,12 +45,9 @@ impl crate::handler::McpAuthHandler for PendingNestedCallback {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aborted_nested_dispatches_terminate_before_wire_fence() {
-    check_aborted_nested_dispatches(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancelled_nested_handlers_do_not_send_fallback_before_outer_abort() {
-    check_aborted_nested_dispatches(true).await;
+    for nested_first in [false, true] {
+        check_aborted_nested_dispatches(nested_first).await;
+    }
 }
 
 async fn check_aborted_nested_dispatches(nested_first: bool) {

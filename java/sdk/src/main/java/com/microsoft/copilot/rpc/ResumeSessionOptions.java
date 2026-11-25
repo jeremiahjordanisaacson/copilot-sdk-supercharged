@@ -562,6 +562,52 @@ public class ResumeSessionOptions {
 
     private String configDirectory;
     private Boolean enableConfigDiscovery;
+    @JsonProperty("extensions")
+    private SessionExtensionOptions extensions = new SessionExtensionOptions();
+    private com.microsoft.copilot.generated.rpc.ExtensionSources extensionSources;
+
+    /**
+     * Gets existing extension activation and SDK injection choices.
+     *
+     * @return the options
+     */
+    public SessionExtensionOptions getExtensions() {
+        return extensions;
+    }
+
+    /**
+     * Sets extension activation and SDK injection. Null restores an empty group.
+     *
+     * @param value
+     *            the options
+     * @return this options instance
+     */
+    public ResumeSessionOptions setExtensions(SessionExtensionOptions value) {
+        extensions = value == null ? new SessionExtensionOptions() : value;
+        return this;
+    }
+
+    /**
+     * Gets extension source overrides.
+     *
+     * @return the overrides, or null for baseline sources
+     */
+    public com.microsoft.copilot.generated.rpc.ExtensionSources getExtensionSources() {
+        return extensionSources;
+    }
+
+    /**
+     * Selects sources without enabling extensions. Warm resumes cannot change
+     * overrides; cold omission restores defaults. Requires a supporting runtime.
+     *
+     * @param value
+     *            the source overrides
+     * @return this options instance
+     */
+    public ResumeSessionOptions setExtensionSources(com.microsoft.copilot.generated.rpc.ExtensionSources value) {
+        extensionSources = value;
+        return this;
+    }
 
     /**
      * Gets the configuration directory path.
@@ -761,6 +807,8 @@ public class ResumeSessionOptions {
         copy.hooks = this.hooks.clone();
         copy.configDirectory = this.configDirectory;
         copy.enableConfigDiscovery = this.enableConfigDiscovery;
+        copy.extensions = this.extensions.clone();
+        copy.extensionSources = this.extensionSources;
         copy.state = this.state.clone();
         copy.skills = this.skills.clone();
         copy.events = this.events.clone();

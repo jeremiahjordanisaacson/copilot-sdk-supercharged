@@ -28,7 +28,7 @@ export {
 
 export type JoinSessionOptions = Omit<
     ResumeSessionOptions,
-    "extensions" | "skills" | "tools" | "permissions"
+    "extensions" | "extensionSources" | "skills" | "tools" | "permissions"
 > & {
     extensions?: Omit<SessionExtensionOptions, "sdkPath">;
     skills?: Omit<SessionSkillOptions, "provider">;

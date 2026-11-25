@@ -171,18 +171,22 @@ async fn initiation_submits_before_return_and_unpolled_drop_removes_registration
 
 #[tokio::test]
 async fn unpolled_cancellable_request_drop_notifies_the_peer() {
-    for method in [
-        "ahp.connections.attachSession",
-        "session.sendAndWait",
-        "session.featureFlags.read",
-        "session.remote.reattach",
-        "session.remote.readProjection",
-        "session.remote.sendWithAdmission",
+    for (method, params) in [
+        ("ahp.connections.attachSession", None),
+        ("session.sendAndWait", None),
+        ("session.featureFlags.read", None),
+        ("session.remote.reattach", None),
+        ("session.remote.readProjection", None),
+        ("session.remote.sendWithAdmission", None),
+        ("feedback.upload.read", None),
+        ("localModels.watch", Some(json!({"afterRevision": 1}))),
+        ("taskAnalytics.classifyTrajectory", None),
+        ("session.resume", None),
     ] {
         let peer = Peer::new(false);
         let pending = peer
             .rpc
-            .begin_request_with_inline_callback(method, None, None)
+            .begin_request_with_inline_callback(method, params, None)
             .unwrap();
         let request_id = peer.sink.frames.lock()[0]["id"].clone();
         drop(pending);
@@ -196,50 +200,6 @@ async fn unpolled_cancellable_request_drop_notifies_the_peer() {
         assert!(frames[1].get("id").is_none());
         peer.finish().await;
     }
-}
-
-#[tokio::test]
-async fn unpolled_send_and_wait_drop_cancels_only_its_completion_wait() {
-    assert_unpolled_wait_cancellation("session.sendAndWait", None).await;
-}
-
-#[tokio::test]
-async fn unpolled_feedback_read_drop_cancels_only_its_progress_wait() {
-    assert_unpolled_wait_cancellation("feedback.upload.read", None).await;
-}
-
-#[tokio::test]
-async fn unpolled_local_models_watch_drop_cancels_only_its_wait() {
-    assert_unpolled_wait_cancellation("localModels.watch", Some(json!({"afterRevision": 1}))).await;
-}
-
-#[tokio::test]
-async fn unpolled_trajectory_drop_cancels_only_its_wait() {
-    assert_unpolled_wait_cancellation("taskAnalytics.classifyTrajectory", None).await;
-}
-
-#[tokio::test]
-async fn unpolled_session_resume_drop_cancels_only_its_wait() {
-    assert_unpolled_wait_cancellation("session.resume", None).await;
-}
-
-async fn assert_unpolled_wait_cancellation(method: &str, params: Option<Value>) {
-    let peer = Peer::new(false);
-    let pending = peer
-        .rpc
-        .begin_request_with_inline_callback(method, params, None)
-        .unwrap();
-    let request_id = peer.sink.frames.lock()[0]["id"].clone();
-    drop(pending);
-
-    assert!(peer.rpc.pending_requests.read().is_empty());
-    let frames = peer.sink.frames.lock().clone();
-    assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0]["method"], method);
-    assert_eq!(frames[1]["method"], "$/cancelRequest");
-    assert_eq!(frames[1]["params"], json!({"id": request_id}));
-    assert!(frames[1].get("id").is_none());
-    peer.finish().await;
 }
 
 #[tokio::test]

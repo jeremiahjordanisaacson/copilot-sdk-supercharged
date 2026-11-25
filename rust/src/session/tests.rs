@@ -462,8 +462,6 @@ fn response_params_forward_decision_context_alongside_result() {
             },
         })
     );
-    // The context is a sibling of `result`, never nested inside it.
-    assert!(params["result"].get("decisionContext").is_none());
 }
 
 #[test]

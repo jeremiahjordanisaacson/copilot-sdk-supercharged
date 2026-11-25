@@ -598,6 +598,7 @@ export type {
     SessionToolOptions,
     SessionCanvasOptions,
     SessionExtensionOptions,
+    ExtensionSources,
     SessionInteractionOptions,
     SessionAgentOptions,
     SessionSkillOptions,
