@@ -292,6 +292,8 @@ jobs:
           elixir-version: '1.17'
           otp-version: '27'
       - run: mix deps.get
+      # Unit tests plus test/copilot/cli_e2e_test.exs, which runs the real CLI
+      # (COPILOT_CLI_PATH) against the replaying proxy in test/harness.
       - run: mix test
 
   crystal:
@@ -699,7 +701,34 @@ jobs:
         with:
           otp-version: '27'
           rebar3-version: '3'
+      # Unit tests plus test/copilot_cli_e2e_SUITE.erl, which runs the real CLI
+      # (COPILOT_CLI_PATH) against the replaying proxy in test/harness.
       - run: rebar3 ct
+      - name: Build the SDK as an application of another rebar3 project (README install)
+        run: |
+          set -euo pipefail
+          # Mirrors the README: copy src/ and rebar.config to apps/copilot_sdk of a
+          # project that also has an application at its root.
+          app="$RUNNER_TEMP/erlang_install_check"
+          rm -rf "$app"
+          mkdir -p "$app/src" "$app/apps/copilot_sdk"
+          cp -R src rebar.config "$app/apps/copilot_sdk/"
+          cat > "$app/rebar.config" <<'EOF'
+          {erl_opts, [debug_info]}.
+          EOF
+          cat > "$app/src/install_check.app.src" <<'EOF'
+          {application, install_check, [
+              {description, "Builds copilot_sdk as a project application"},
+              {vsn, "0.1.0"},
+              {applications, [kernel, stdlib, copilot_sdk]}
+          ]}.
+          EOF
+          cd "$app"
+          rebar3 compile
+          test -f _build/default/lib/copilot_sdk/ebin/copilot_sdk.app
+          test -f _build/default/lib/copilot_sdk/ebin/copilot_client.beam
+          test -f _build/default/lib/jsx/ebin/jsx.beam
+          test -f _build/default/lib/install_check/ebin/install_check.app
 
   dlang:
     name: "Test: D SDK"

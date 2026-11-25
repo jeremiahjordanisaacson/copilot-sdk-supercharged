@@ -13,6 +13,8 @@
 
 -include_lib("common_test/include/ct.hrl").
 
+-define(PENDING_PERMISSION, <<"session.permissions.handlePendingPermissionRequest">>).
+
 %% CT callbacks
 -export([
     all/0,
@@ -53,7 +55,14 @@
     test_legacy_provider_and_empty_mode/1,
     test_v3_wire_helpers/1,
     test_v3_1_wire_helpers/1,
-    test_session_elicitation_meta_passthrough/1
+    test_session_elicitation_meta_passthrough/1,
+    test_cli_launch/1,
+    test_permission_and_exit_plan_mode_wiring/1,
+    test_permission_requested_event/1,
+    test_permission_handler_outcomes/1,
+    test_jsonrpc_frame_parsing/1,
+    test_jsonrpc_stdio_roundtrip/1,
+    test_jsonrpc_cli_exit/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -95,14 +104,21 @@ groups() ->
         {client, [sequence], [
             test_client_start_link_defaults,
             test_client_state_disconnected,
-            test_user_input_request_wiring
+            test_user_input_request_wiring,
+            test_cli_launch,
+            test_permission_and_exit_plan_mode_wiring
         ]},
         {session, [sequence], [
             test_session_subscribe_unsubscribe,
-            test_session_elicitation_meta_passthrough
+            test_session_elicitation_meta_passthrough,
+            test_permission_requested_event,
+            test_permission_handler_outcomes
         ]},
         {jsonrpc, [sequence], [
-            test_jsonrpc_content_length_framing
+            test_jsonrpc_content_length_framing,
+            test_jsonrpc_frame_parsing,
+            test_jsonrpc_stdio_roundtrip,
+            test_jsonrpc_cli_exit
         ]}
     ].
 
@@ -154,10 +170,29 @@ test_tool_result_failure(_Config) ->
     ok.
 
 test_permission_result(_Config) ->
-    Approved = copilot_types:permission_result(approved),
-    <<"approved">> = maps:get(<<"kind">>, Approved),
-    Denied = copilot_types:permission_result(denied),
-    <<"denied">> = maps:get(<<"kind">>, Denied),
+    %% SDK protocol 4 result kinds; `approved` and `denied` are aliases.
+    #{<<"kind">> := <<"approve-once">>} = copilot_types:permission_result(approved),
+    #{<<"kind">> := <<"approve-once">>} = copilot_types:permission_result(approve_once),
+    #{<<"kind">> := <<"approve-for-session">>} =
+        copilot_types:permission_result(approve_for_session),
+    #{<<"kind">> := <<"reject">>} = Denied = copilot_types:permission_result(denied),
+    false = maps:is_key(<<"feedback">>, Denied),
+    #{<<"kind">> := <<"reject">>, <<"feedback">> := <<"No shell">>} =
+        copilot_types:permission_result({reject, "No shell"}),
+    #{<<"kind">> := <<"user-not-available">>} =
+        copilot_types:permission_result(user_not_available),
+    #{<<"kind">> := <<"no-result">>} = copilot_types:permission_result(no_result),
+    Context = #{<<"outcome">> => <<"auto_approved">>, <<"source">> => <<"host_policy">>,
+                <<"surface">> => <<"sdk">>},
+    #{<<"kind">> := <<"approve-once">>, <<"decisionContext">> := Context} =
+        copilot_types:permission_result(approved, Context),
+    #{<<"approved">> := false} = copilot_types:exit_plan_mode_result(false),
+    #{<<"approved">> := true, <<"selectedAction">> := <<"interactive">>,
+      <<"feedback">> := <<"ok">>} = Plan =
+        copilot_types:exit_plan_mode_result(true, #{selected_action => <<"interactive">>,
+                                                    feedback        => <<"ok">>,
+                                                    approved        => false}),
+    3 = map_size(Plan),
     ok.
 
 test_user_input_response(_Config) ->
@@ -528,6 +563,120 @@ recorded_user_input() ->
         []
     end.
 
+test_cli_launch(Config) ->
+    PrivDir = ?config(priv_dir, Config),
+    Cli = filename:join(PrivDir, "fake-copilot"),
+    ok = file:write_file(Cli, <<"#!/bin/sh\n">>),
+    %% Arguments are passed one by one and the token only through the
+    %% environment (--auth-token-env), as in the official SDKs.
+    {ok, {spawn_executable, Executable, Settings}} = copilot_client:cli_launch(Cli, #{
+        github_token => <<"gho_secret">>,
+        log_level    => <<"debug">>,
+        cwd          => <<"/work dir">>,
+        env          => #{<<"EXTRA">> => <<"1">>, "DROP_ME" => false}
+    }),
+    "fake-copilot" = filename:basename(Executable),
+    ["--headless", "--no-auto-update", "--log-level", "debug", "--stdio",
+     "--auth-token-env", "COPILOT_SDK_AUTH_TOKEN", "--no-auto-login"] =
+        proplists:get_value(args, Settings),
+    Env = proplists:get_value(env, Settings),
+    "gho_secret" = proplists:get_value("COPILOT_SDK_AUTH_TOKEN", Env),
+    "1" = proplists:get_value("EXTRA", Env),
+    false = proplists:get_value("DROP_ME", Env),
+    false = proplists:get_value("NODE_DEBUG", Env),
+    "/work dir" = proplists:get_value(cd, Settings),
+    %% Without a token the logged-in user is used; use_logged_in => false opts out.
+    {ok, {spawn_executable, _, Default}} = copilot_client:cli_launch(Cli, #{}),
+    ["--headless", "--no-auto-update", "--log-level", "info", "--stdio"] =
+        proplists:get_value(args, Default),
+    false = lists:keymember(cd, 1, Default),
+    {ok, {spawn_executable, _, NoLogin}} = copilot_client:cli_launch(Cli, #{use_logged_in => false}),
+    true = lists:member("--no-auto-login", proplists:get_value(args, NoLogin)),
+    %% JavaScript entry points run under node.
+    case os:find_executable("node") of
+        false ->
+            ok;
+        Node ->
+            Script = filename:join(PrivDir, "npm-loader.js"),
+            {ok, {spawn_executable, Node, JsSettings}} = copilot_client:cli_launch(Script, #{}),
+            [Script, "--headless" | _] = proplists:get_value(args, JsSettings)
+    end,
+    %% A missing CLI is reported by start_cli/1 without crashing the client.
+    Missing = filename:join(PrivDir, "no-such-copilot"),
+    {error, {cli_not_found, Missing}} = copilot_client:cli_launch(Missing, #{}),
+    {ok, Client} = copilot_client:start_link(#{auto_start => false, cli_path => Missing}),
+    {error, {cli_not_found, Missing}} = copilot_client:start_cli(Client),
+    disconnected = copilot_client:state(Client),
+    copilot_client:stop(Client),
+    ok.
+
+test_permission_and_exit_plan_mode_wiring(_Config) ->
+    Self = self(),
+    ExitPlanHandler = fun(Request) ->
+        Self ! {exit_plan_mode, Request},
+        copilot_types:exit_plan_mode_result(true, #{selected_action => <<"interactive">>,
+                                                    feedback        => <<"Looks good">>})
+    end,
+    %% Handlers send permissions.request and interaction.requestExitPlanMode on
+    %% create and resume.
+    lists:foreach(fun(Mode) ->
+        Flat = copilot_client:build_session_params(Mode, #{
+            on_permission_request     => fun(_Request, _Invocation) -> approve_once end,
+            on_exit_plan_mode_request => ExitPlanHandler
+        }, undefined),
+        true = maps:get(<<"requestPermission">>, Flat),
+        true = maps:get(<<"requestExitPlanMode">>, Flat),
+        #{<<"permissions">> := #{<<"request">> := true},
+          <<"interaction">> := #{<<"requestExitPlanMode">> := true}} =
+            copilot_client:group_session_params(Flat, Mode),
+        #{<<"requestPermission">> := true} = copilot_client:build_session_params(
+            Mode, #{on_permission_request => fun(_Request) -> approved end}, undefined),
+        Plain = copilot_client:build_session_params(Mode, #{}, undefined),
+        false = maps:is_key(<<"requestPermission">>, Plain),
+        false = maps:is_key(<<"requestExitPlanMode">>, Plain)
+    end, [create, resume]),
+    %% exitPlanMode.request is one client-level handler routed by sessionId;
+    %% permissions are answered from session events, not a client request.
+    Callbacks = ets:new(session_callbacks, [set]),
+    ok = copilot_client:put_session_callbacks(Callbacks, <<"session-a">>,
+                                              #{on_exit_plan_mode_request => ExitPlanHandler}),
+    ok = copilot_client:put_session_callbacks(Callbacks, <<"session-b">>, #{}),
+    Handlers = copilot_client:client_request_handlers(
+                   ets:new(token_providers, [set]), Callbacks, ets:new(shell_auth, [set]), #{}),
+    false = lists:keymember(<<"permissionRequest">>, 1, Handlers),
+    {_, ExitPlanMode} = lists:keyfind(<<"exitPlanMode.request">>, 1, Handlers),
+    Request = #{
+        <<"sessionId">>         => <<"session-a">>,
+        <<"summary">>           => <<"Add greeting.txt">>,
+        <<"planContent">>       => <<"1. Create the file">>,
+        <<"actions">>           => [<<"autopilot">>, <<"interactive">>, <<"exit_only">>],
+        <<"recommendedAction">> => <<"interactive">>,
+        <<"requestId">>         => <<"plan-1">>
+    },
+    %% The result is returned as is (not wrapped in a `result` member).
+    Reply = ExitPlanMode(Request),
+    #{<<"approved">> := true, <<"selectedAction">> := <<"interactive">>,
+      <<"feedback">> := <<"Looks good">>} = Reply,
+    false = maps:is_key(<<"result">>, Reply),
+    receive
+        {exit_plan_mode, Request} -> ok
+    after 0 ->
+        ct:fail("exit plan mode handler did not receive the request")
+    end,
+    %% A session without a handler approves; an unknown session or an invalid
+    %% payload is a JSON-RPC error.
+    #{<<"approved">> := true} = ExitPlanMode(Request#{<<"sessionId">> => <<"session-b">>}),
+    receive
+        {exit_plan_mode, _} -> ct:fail("handler of another session was called")
+    after 0 ->
+        ok
+    end,
+    {'EXIT', {{session_not_found, <<"session-c">>}, _}} =
+        (catch ExitPlanMode(Request#{<<"sessionId">> => <<"session-c">>})),
+    {'EXIT', {invalid_exit_plan_mode_request, _}} =
+        (catch ExitPlanMode(maps:remove(<<"actions">>, Request))),
+    ok.
+
 %% ---------------------------------------------------------------------------
 %% Session tests
 %% ---------------------------------------------------------------------------
@@ -591,6 +740,133 @@ test_session_elicitation_meta_passthrough(_Config) ->
     copilot_session:stop(Session),
     ok.
 
+test_permission_requested_event(_Config) ->
+    Self = self(),
+    Context = #{<<"outcome">> => <<"prompted_user">>, <<"source">> => <<"human_response">>,
+                <<"surface">> => <<"sdk">>},
+    Handler = fun(Request, Invocation) ->
+        Self ! {permission_handler, self(), Request, Invocation},
+        receive release -> ok end,
+        copilot_types:permission_result(approved, Context)
+    end,
+    %% This process stands in for the JSON-RPC client.
+    {ok, Session} = copilot_session:start_link(<<"perm-session">>, self(), <<>>,
+                                               #{on_permission_request => Handler}),
+    PermissionRequest = #{<<"kind">> => <<"shell">>, <<"toolCallId">> => <<"tc-1">>},
+    copilot_session:handle_event(Session, <<"permission.requested">>, #{
+        <<"requestId">>         => <<"perm-1">>,
+        <<"permissionRequest">> => PermissionRequest,
+        <<"promptRequest">>     => #{<<"kind">> => <<"commands">>},
+        <<"programToolCallId">> => <<"prog-1">>
+    }),
+    Worker = receive
+        {permission_handler, Pid, PermissionRequest, Invocation} ->
+            #{session_id := <<"perm-session">>, request_id := <<"perm-1">>,
+              prompt_request := #{<<"kind">> := <<"commands">>},
+              program_tool_call_id := <<"prog-1">>} = Invocation,
+            false = maps:is_key(assisted_approval_assessment, Invocation),
+            Pid
+    after 1000 ->
+        ct:fail("permission handler was not called")
+    end,
+    %% The handler runs outside the session process: a slow prompt does not
+    %% block the session.
+    <<"perm-session">> = copilot_session:session_id(Session),
+    Worker ! release,
+    receive
+        {'$gen_call', From, {request, ?PENDING_PERMISSION, Params}} ->
+            #{<<"sessionId">> := <<"perm-session">>, <<"requestId">> := <<"perm-1">>,
+              <<"result">> := Result, <<"decisionContext">> := Context} = Params,
+            #{<<"kind">> := <<"approve-once">>} = Result,
+            false = maps:is_key(<<"decisionContext">>, Result),
+            gen_server:reply(From, {ok, #{}})
+    after 1000 ->
+        ct:fail("permission request was not answered")
+    end,
+    copilot_session:stop(Session),
+    ok.
+
+test_permission_handler_outcomes(_Config) ->
+    Self = self(),
+    Event = fun(RequestId, Extra) ->
+        maps:merge(#{<<"requestId">>         => RequestId,
+                     <<"permissionRequest">> => #{<<"kind">> => <<"write">>}}, Extra)
+    end,
+    Handler = fun(#{<<"kind">> := <<"write">>}, #{request_id := RequestId}) ->
+        Self ! {handled, RequestId},
+        case RequestId of
+            <<"no-result">> -> copilot_types:permission_result(no_result);
+            <<"reject">>    -> copilot_types:permission_result({reject, <<"Not allowed">>});
+            <<"denied">>    -> denied;
+            <<"crash">>     -> error(deliberate_crash)
+        end
+    end,
+    {ok, Session} = copilot_session:start_link(<<"perm-session">>, self(), <<>>,
+                                               #{on_permission_request => Handler}),
+    Request = fun(RequestId, Extra) ->
+        copilot_session:handle_event(Session, <<"permission.requested">>, Event(RequestId, Extra))
+    end,
+    %% Already resolved by a permissionRequest hook: the handler is not called.
+    Request(<<"hooked">>, #{<<"resolvedByHook">> => true}),
+    %% no-result leaves the request to another client: nothing is sent.
+    Request(<<"no-result">>, #{}),
+    receive
+        {handled, <<"no-result">>} -> ok
+    after 1000 ->
+        ct:fail("no-result request was not handled")
+    end,
+    %% reject (with feedback) and the legacy `denied` atom send protocol 4 kinds.
+    Request(<<"reject">>, #{}),
+    #{<<"kind">> := <<"reject">>, <<"feedback">> := <<"Not allowed">>} =
+        answer_permission(<<"reject">>, {ok, #{}}),
+    Request(<<"denied">>, #{}),
+    #{<<"kind">> := <<"reject">>} = answer_permission(<<"denied">>, {ok, #{}}),
+    %% A crashing handler answers user-not-available.
+    Request(<<"crash">>, #{}),
+    #{<<"kind">> := <<"user-not-available">>} = answer_permission(<<"crash">>, {ok, #{}}),
+    %% An answer the runtime rejects is replaced by user-not-available.
+    Request(<<"reject">>, #{}),
+    #{<<"kind">> := <<"reject">>} =
+        answer_permission(<<"reject">>, {error, #{<<"code">> => -32602}}),
+    #{<<"kind">> := <<"user-not-available">>} = answer_permission(<<"reject">>, {ok, #{}}),
+    receive
+        {handled, <<"hooked">>} -> ct:fail("hook-resolved request reached the handler")
+    after 0 ->
+        ok
+    end,
+    receive
+        {'$gen_call', _, {request, ?PENDING_PERMISSION, Unexpected}} ->
+            ct:fail({unexpected_permission_answer, Unexpected})
+    after 300 ->
+        ok
+    end,
+    copilot_session:stop(Session),
+    %% A fun/1 handler receives the permission request.
+    {ok, Session1} = copilot_session:start_link(<<"perm-session">>, self(), <<>>, #{
+        on_permission_request => fun(Req) -> Self ! {fun1, Req}, approve_for_session end
+    }),
+    copilot_session:handle_event(Session1, <<"permission.requested">>, Event(<<"fun1">>, #{})),
+    #{<<"kind">> := <<"approve-for-session">>} = answer_permission(<<"fun1">>, {ok, #{}}),
+    receive
+        {fun1, #{<<"kind">> := <<"write">>}} -> ok
+    after 0 ->
+        ct:fail("fun/1 handler did not receive the permission request")
+    end,
+    copilot_session:stop(Session1),
+    ok.
+
+answer_permission(RequestId, Reply) ->
+    receive
+        {'$gen_call', From, {request, ?PENDING_PERMISSION,
+                             #{<<"sessionId">> := <<"perm-session">>,
+                               <<"requestId">> := RequestId,
+                               <<"result">>    := Result}}} ->
+            gen_server:reply(From, Reply),
+            Result
+    after 1000 ->
+        ct:fail({permission_not_answered, RequestId})
+    end.
+
 %% ---------------------------------------------------------------------------
 %% JSON-RPC framing tests
 %% ---------------------------------------------------------------------------
@@ -604,3 +880,88 @@ test_jsonrpc_content_length_framing(_Config) ->
     %% Verify the expected framing format
     {match, _} = re:run(Expected, <<"Content-Length: \\d+\\r\\n\\r\\n">>),
     ok.
+
+test_jsonrpc_frame_parsing(_Config) ->
+    Frame = fun(Body) ->
+        <<"Content-Length: ", (integer_to_binary(byte_size(Body)))/binary, "\r\n\r\n",
+          Body/binary>>
+    end,
+    One = <<"{\"jsonrpc\":\"2.0\",\"method\":\"a\"}">>,
+    Two = <<"{\"text\":\"h\\u00e9llo \", \"raw\":\"héllo ✓\"}"/utf8>>,
+    Three = <<"{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{}}">>,
+    Stream = <<(Frame(One))/binary, (Frame(Two))/binary, (Frame(Three))/binary>>,
+    %% Several frames in one chunk; Content-Length counts bytes, not characters.
+    {[One, Two, Three], <<>>} = copilot_jsonrpc:parse_frames(Stream),
+    %% Split anywhere (inside a header or a body), the frames are the same.
+    lists:foreach(fun(Split) ->
+        <<Head:Split/binary, Tail/binary>> = Stream,
+        {First, Rest} = copilot_jsonrpc:parse_frames(Head),
+        {Second, <<>>} = copilot_jsonrpc:parse_frames(<<Rest/binary, Tail/binary>>),
+        [One, Two, Three] = First ++ Second
+    end, lists:seq(0, byte_size(Stream))),
+    %% Other headers and any header name case are accepted (vscode-jsonrpc).
+    Headers = <<"content-length: ", (integer_to_binary(byte_size(One)))/binary,
+                "\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n",
+                One/binary>>,
+    {[One], <<>>} = copilot_jsonrpc:parse_frames(Headers),
+    %% A header block without a usable Content-Length is dropped.
+    {[One], <<>>} = copilot_jsonrpc:parse_frames(<<"X-Junk: 1\r\n\r\n", (Frame(One))/binary>>),
+    {[One], <<>>} = copilot_jsonrpc:parse_frames(
+                        <<"Content-Length: abc\r\n\r\n", (Frame(One))/binary>>),
+    %% A partial body waits for more data.
+    Partial = <<"Content-Length: 5\r\n\r\nab">>,
+    {[], Partial} = copilot_jsonrpc:parse_frames(Partial),
+    ok.
+
+%% The JSON-RPC process owns a real port in stream mode: `cat` echoes every
+%% frame back, so a request comes back as a server request, its response
+%% (written by this client) comes back and answers the pending request.
+test_jsonrpc_stdio_roundtrip(_Config) ->
+    case os:find_executable("cat") of
+        false ->
+            {skip, "cat is not available"};
+        Cat ->
+            {ok, Rpc} = copilot_jsonrpc:start_link({spawn_executable, Cat, []}, self()),
+            ok = copilot_jsonrpc:set_request_handler(Rpc, <<"echo.request">>,
+                                                     fun(Params) -> Params end),
+            %% 256 KiB of params arrive in many port reads.
+            Params = #{<<"text">> => <<"héllo ✓"/utf8>>,
+                       <<"big">>  => binary:copy(<<"0123456789abcdef">>, 16384)},
+            {ok, Params} = copilot_jsonrpc:request(Rpc, <<"echo.request">>, Params),
+            {error, #{<<"code">> := -32601}} =
+                copilot_jsonrpc:request(Rpc, <<"no.such.method">>, #{}),
+            ok = copilot_jsonrpc:notify(Rpc, <<"note.sent">>, #{<<"n">> => 1}),
+            receive
+                {copilot_jsonrpc, notification, <<"note.sent">>, #{<<"n">> := 1}} -> ok
+            after 5000 ->
+                ct:fail("notification was not delivered to the owner")
+            end,
+            ok = copilot_jsonrpc:stop(Rpc)
+    end.
+
+%% When the CLI exits, pending requests fail and the owner is told.
+test_jsonrpc_cli_exit(_Config) ->
+    case os:find_executable("sh") of
+        false ->
+            {skip, "sh is not available"};
+        Sh ->
+            %% Reads the first header line of the request, then exits with 4.
+            {ok, Rpc} = copilot_jsonrpc:start_link(
+                            {spawn_executable, Sh, [{args, ["-c", "read line; exit 4"]}]},
+                            self()),
+            Ref = monitor(process, Rpc),
+            {error, {connection_closed, {exit_status, 4}}} =
+                copilot_jsonrpc:request(Rpc, <<"ping">>, #{}),
+            receive
+                {copilot_jsonrpc, port_closed} -> ok
+            after 5000 ->
+                ct:fail("port_closed was not sent to the owner")
+            end,
+            receive
+                {'DOWN', Ref, process, Rpc, normal} -> ok
+            after 5000 ->
+                ct:fail("JSON-RPC process did not stop")
+            end,
+            {error, {connection_closed, _}} = copilot_jsonrpc:request(Rpc, <<"ping">>, #{}),
+            ok
+    end.

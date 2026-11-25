@@ -51,6 +51,7 @@
 ]).
 
 -define(DEFAULT_WAIT_TIMEOUT, 60000).
+-define(PENDING_PERMISSION, <<"session.permissions.handlePendingPermissionRequest">>).
 
 -record(state, {
     session_id      :: binary(),
@@ -339,6 +340,8 @@ handle_cast({event, EventType, EventData}, State) ->
     maybe_handle_command(EventType, EventData, State),
     %% Handle elicitation.requested events
     maybe_handle_elicitation(EventType, EventData, State),
+    %% Handle permission.requested events (SDK protocol 4)
+    maybe_handle_permission(EventType, EventData, State),
     {noreply, State#state{
         waiting = NewWaiting,
         last_assistant_event = NewLastEvent
@@ -478,4 +481,95 @@ maybe_handle_elicitation(<<"elicitation.requested">>, Data,
     end,
     ok;
 maybe_handle_elicitation(_EventType, _Data, _State) ->
+    ok.
+
+%% SDK protocol 4 permission flow, as in the Node and Python SDKs: the runtime
+%% broadcasts a `permission.requested` event ({requestId, permissionRequest,
+%% promptRequest?, assistedApprovalAssessment?, resolvedByHook?,
+%% programToolCallId?}); a request already resolved by a permissionRequest hook
+%% is skipped; otherwise the `on_permission_request` handler runs in its own
+%% process (a slow prompt never blocks the session) and its decision is sent
+%% with session.permissions.handlePendingPermissionRequest {sessionId,
+%% requestId, result, decisionContext?}. A `no-result` decision sends nothing,
+%% and a failing handler (or a rejected answer) sends `user-not-available`.
+maybe_handle_permission(<<"permission.requested">>, Data,
+                        #state{rpc = Rpc, session_id = SessionId, config = Config}) ->
+    Handler = maps:get(on_permission_request, Config, undefined),
+    RequestId = maps:get(<<"requestId">>, Data, undefined),
+    Request = maps:get(<<"permissionRequest">>, Data, undefined),
+    Pending = is_permission_handler(Handler) andalso is_binary(RequestId) andalso
+              is_map(Request) andalso maps:get(<<"resolvedByHook">>, Data, false) =/= true,
+    case Pending of
+        true ->
+            Invocation = permission_invocation(SessionId, RequestId, Data),
+            _ = spawn(fun() ->
+                answer_permission(Rpc, SessionId, RequestId, Handler, Request, Invocation)
+            end),
+            ok;
+        false ->
+            ok
+    end;
+maybe_handle_permission(_EventType, _Data, _State) ->
+    ok.
+
+is_permission_handler(Handler) ->
+    is_function(Handler, 1) orelse is_function(Handler, 2).
+
+%% The second argument of a fun/2 handler: #{session_id, request_id} plus
+%% prompt_request, assisted_approval_assessment and program_tool_call_id when
+%% the runtime sends them.
+permission_invocation(SessionId, RequestId, Data) ->
+    Optional = [
+        {prompt_request,               <<"promptRequest">>},
+        {assisted_approval_assessment, <<"assistedApprovalAssessment">>},
+        {program_tool_call_id,         <<"programToolCallId">>}
+    ],
+    lists:foldl(fun({Key, JsonKey}, Acc) ->
+        case maps:get(JsonKey, Data, null) of
+            null  -> Acc;
+            Value -> Acc#{Key => Value}
+        end
+    end, #{session_id => SessionId, request_id => RequestId}, Optional).
+
+answer_permission(Rpc, SessionId, RequestId, Handler, Request, Invocation) ->
+    Base = #{<<"sessionId">> => SessionId, <<"requestId">> => RequestId},
+    try permission_decision(call_permission_handler(Handler, Request, Invocation)) of
+        no_result ->
+            ok;
+        {Result, DecisionContext} ->
+            Params = with_decision_context(DecisionContext, Base#{<<"result">> => Result}),
+            case copilot_jsonrpc:request(Rpc, ?PENDING_PERMISSION, Params) of
+                {ok, _} -> ok;
+                _       -> permission_user_not_available(Rpc, Base)
+            end
+    catch
+        _:_ ->
+            permission_user_not_available(Rpc, Base)
+    end.
+
+call_permission_handler(Handler, Request, Invocation) when is_function(Handler, 2) ->
+    Handler(Request, Invocation);
+call_permission_handler(Handler, Request, _Invocation) ->
+    Handler(Request).
+
+%% A handler answers with copilot_types:permission_result/1,2 (or one of its
+%% atoms), or with any PermissionDecision wire map. A `decisionContext` in the
+%% answer is sent next to the result, not inside it.
+permission_decision(Kind) when is_atom(Kind); is_tuple(Kind) ->
+    permission_decision(copilot_types:permission_result(Kind));
+permission_decision(#{<<"kind">> := <<"no-result">>}) ->
+    no_result;
+permission_decision(#{<<"kind">> := Kind} = Answer) when is_binary(Kind) ->
+    case maps:take(<<"decisionContext">>, Answer) of
+        {DecisionContext, Result} -> {Result, DecisionContext};
+        error                     -> {Answer, undefined}
+    end.
+
+with_decision_context(undefined, Params)       -> Params;
+with_decision_context(null, Params)            -> Params;
+with_decision_context(DecisionContext, Params) -> Params#{<<"decisionContext">> => DecisionContext}.
+
+permission_user_not_available(Rpc, Base) ->
+    Params = Base#{<<"result">> => #{<<"kind">> => <<"user-not-available">>}},
+    _ = (catch copilot_jsonrpc:request(Rpc, ?PENDING_PERMISSION, Params)),
     ok.

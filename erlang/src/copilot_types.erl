@@ -15,6 +15,8 @@
     tool_result/3,
     permission_result/1,
     permission_result/2,
+    exit_plan_mode_result/1,
+    exit_plan_mode_result/2,
     user_input_response/2,
     user_input_response/3,
     image_options/1,
@@ -115,6 +117,7 @@
     streaming            :: boolean() | undefined,
     on_permission_request :: fun() | undefined,
     on_user_input_request :: fun() | undefined,
+    on_exit_plan_mode_request :: fun() | undefined,
     hooks                :: map() | undefined,
     provider             :: map() | undefined,
     mcp_servers          :: map() | undefined,
@@ -225,7 +228,7 @@
 }).
 
 -record(permission_request_result, {
-    kind :: approved | denied
+    kind :: permission_kind()
 }).
 
 -record(user_input_response, {
@@ -254,6 +257,7 @@
     image_options/0,
     connection_state/0,
     session_event_type/0,
+    permission_kind/0,
     session_fs_config/0,
     command_definition/0,
     command_context/0,
@@ -277,6 +281,8 @@
 -type elicitation_result()       :: #elicitation_result{}.
 -type connection_state()         :: disconnected | connecting | connected | error.
 -type session_event_type()       :: binary().
+-type permission_kind()          :: approve_once | approve_for_session | reject
+                                  | user_not_available | no_result | approved | denied.
 
 %% ---------------------------------------------------------------------------
 %% Connection state constants
@@ -354,16 +360,56 @@ tool_result(Text, Type, Error) ->
         _         -> Base#{<<"error">> => Error}
     end.
 
--spec permission_result(approved | denied) -> map().
-permission_result(Kind) ->
-    #{<<"kind">> => atom_to_binary(Kind, utf8)}.
+%% @doc Permission decision for an `on_permission_request` handler, using the
+%% SDK protocol 4 result kinds of the Node and Python SDKs:
+%% `approve_once` (<<"approve-once">>), `approve_for_session`
+%% (<<"approve-for-session">>), `reject`, `{reject, Feedback}` (the feedback is
+%% shown to the agent), `user_not_available`, and `no_result` (nothing is sent,
+%% so another client can answer the pending request). `approved` and `denied`
+%% remain as aliases of `approve_once` and `reject`. A handler may also return
+%% any other PermissionDecision wire map unchanged (for example
+%% <<"approve-for-location">> with its `approval` and `locationKey`).
+-spec permission_result(permission_kind() | {reject, binary() | string()}) -> map().
+permission_result(approve_once)        -> #{<<"kind">> => <<"approve-once">>};
+permission_result(approved)            -> permission_result(approve_once);
+permission_result(approve_for_session) -> #{<<"kind">> => <<"approve-for-session">>};
+permission_result(reject)              -> #{<<"kind">> => <<"reject">>};
+permission_result(denied)              -> permission_result(reject);
+permission_result({reject, Feedback})  -> #{<<"kind">> => <<"reject">>,
+                                            <<"feedback">> => to_binary(Feedback)};
+permission_result(user_not_available)  -> #{<<"kind">> => <<"user-not-available">>};
+permission_result(no_result)           -> #{<<"kind">> => <<"no-result">>}.
 
-%% @doc Permission reply including an opaque decision context surfaced to the CLI.
--spec permission_result(approved | denied, map() | undefined) -> map().
+%% @doc Permission decision with a decision context (who decided and how: a
+%% PermissionDecisionContext wire map such as #{<<"outcome">> =>
+%% <<"prompted_user">>, <<"source">> => <<"human_response">>, <<"surface">> =>
+%% <<"sdk">>}). The context is sent as the `decisionContext` next to the
+%% result; `undefined` sends none.
+-spec permission_result(permission_kind() | {reject, binary() | string()}, map() | undefined) ->
+    map().
 permission_result(Kind, undefined) ->
     permission_result(Kind);
 permission_result(Kind, DecisionContext) ->
     (permission_result(Kind))#{<<"decisionContext">> => DecisionContext}.
+
+%% @doc Answer for an `on_exit_plan_mode_request` handler: whether the user
+%% approved leaving plan mode.
+-spec exit_plan_mode_result(boolean()) -> map().
+exit_plan_mode_result(Approved) when is_boolean(Approved) ->
+    #{<<"approved">> => Approved}.
+
+%% @doc Exit plan mode answer with optional #{selected_action, feedback,
+%% decision_context}: the action the user chose (one of the request's
+%% <<"actions">>, for example <<"interactive">>), feedback for the agent, and
+%% a PermissionDecisionContext wire map describing who answered.
+-spec exit_plan_mode_result(boolean(), map()) -> map().
+exit_plan_mode_result(Approved, Opts) when is_boolean(Approved), is_map(Opts) ->
+    Wire = to_wire(maps:without([approved, <<"approved">>], Opts), [
+        {selected_action,  <<"selectedAction">>},
+        {feedback,         <<"feedback">>},
+        {decision_context, <<"decisionContext">>}
+    ]),
+    Wire#{<<"approved">> => Approved}.
 
 -spec user_input_response(binary(), boolean()) -> map().
 user_input_response(Answer, WasFreeform) ->

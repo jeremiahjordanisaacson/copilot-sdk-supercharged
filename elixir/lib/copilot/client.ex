@@ -51,8 +51,8 @@ defmodule Copilot.Client do
     @moduledoc false
     @type t :: %__MODULE__{
             options: CopilotClientOptions.t(),
-            port: port() | nil,
             rpc: pid() | nil,
+            rpc_monitor: reference() | nil,
             sessions: %{String.t() => pid()},
             connection_state: :disconnected | :connecting | :connected | :error,
             models_cache: [ModelInfo.t()] | nil,
@@ -62,8 +62,9 @@ defmodule Copilot.Client do
             shell_auth_requests: :ets.tid() | nil
           }
     defstruct options: %CopilotClientOptions{},
-              port: nil,
+              # JSON-RPC client; it owns the CLI port
               rpc: nil,
+              rpc_monitor: nil,
               sessions: %{},
               connection_state: :disconnected,
               models_cache: nil,
@@ -707,6 +708,13 @@ defmodule Copilot.Client do
     {:noreply, state}
   end
 
+  # The JSON-RPC client stopped because the CLI exited or its port closed. A
+  # later call starts the CLI again when auto_start is set.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %State{rpc_monitor: ref} = state) do
+    {:noreply,
+     %{state | rpc: nil, rpc_monitor: nil, connection_state: :disconnected, models_cache: nil}}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -721,8 +729,71 @@ defmodule Copilot.Client do
 
   defp do_start(state) do
     state = %{state | connection_state: :connecting}
+
+    case cli_launch(state.options) do
+      {:ok, {:spawn_executable, executable, _port_settings} = launch} ->
+        # The JSON-RPC client opens and owns the CLI port, so it receives
+        # everything the CLI writes to stdout.
+        case JsonRpcClient.start_link(launch) do
+          {:ok, rpc} ->
+            connect(rpc, state)
+
+          {:error, reason} ->
+            {:error, "Failed to start the Copilot CLI (#{executable}): #{inspect(reason)}"}
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp connect(rpc, state) do
     opts = state.options
 
+    new_state = %{
+      state
+      | rpc: rpc,
+        rpc_monitor: Process.monitor(rpc),
+        connection_state: :connected
+    }
+
+    # Register all server-to-client request handlers
+    register_rpc_handlers(rpc, new_state)
+
+    # Route notifications through this GenServer so they are dispatched with
+    # the current sessions map (events raised while session.create is in
+    # flight are delivered once the session is registered).
+    client_pid = self()
+
+    JsonRpcClient.set_notification_handler(rpc, fn method, params ->
+      send(client_pid, {:copilot_notification, method, params})
+      :ok
+    end)
+
+    # Optional connect handshake (clientInfo), protocol check, then network callbacks
+    result =
+      try do
+        with :ok <- send_client_info(rpc, opts.client_info),
+             :ok <- verify_protocol_version(rpc),
+             do: register_network_provider(rpc, opts.network)
+      rescue
+        e -> {:error, Exception.message(e)}
+      end
+
+    case result do
+      :ok ->
+        {:ok, new_state}
+
+      {:error, reason} ->
+        do_stop(new_state)
+        {:error, reason}
+    end
+  end
+
+  # How the CLI is started: {:spawn_executable, executable, port_settings} for
+  # JsonRpcClient.start_link/2. Arguments are passed one by one, so paths with
+  # spaces work.
+  defp cli_launch(opts) do
     cli_path = opts.cli_path || find_cli_path()
     cwd = opts.cwd || File.cwd!()
     log_level = opts.log_level || "info"
@@ -769,47 +840,15 @@ defmodule Copilot.Client do
         {cli_path, args}
       end
 
-    port_opts = [
-      :binary,
-      :exit_status,
-      :use_stdio,
+    port_settings = [
       {:args, launch_args},
       {:cd, String.to_charlist(cwd)},
       {:env, Enum.map(env, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)}
     ]
 
-    try do
-      port = Port.open({:spawn_executable, String.to_charlist(executable)}, port_opts)
-      {:ok, rpc} = JsonRpcClient.start_link(port)
-
-      new_state = %{state | port: port, rpc: rpc, connection_state: :connected}
-
-      # Register all server-to-client request handlers
-      register_rpc_handlers(rpc, new_state)
-
-      # Route notifications through this GenServer so they are dispatched with
-      # the current sessions map (events raised while session.create is in
-      # flight are delivered once the session is registered).
-      client_pid = self()
-
-      JsonRpcClient.set_notification_handler(rpc, fn method, params ->
-        send(client_pid, {:copilot_notification, method, params})
-        :ok
-      end)
-
-      # Optional connect handshake (clientInfo), protocol check, then network callbacks
-      with :ok <- send_client_info(rpc, opts.client_info),
-           :ok <- verify_protocol_version(rpc),
-           :ok <- register_network_provider(rpc, opts.network) do
-        {:ok, new_state}
-      else
-        {:error, reason} ->
-          do_stop(new_state)
-          {:error, reason}
-      end
-    rescue
-      e -> {:error, Exception.message(e)}
-    end
+    {:ok, {:spawn_executable, String.to_charlist(executable), port_settings}}
+  rescue
+    e -> {:error, Exception.message(e)}
   end
 
   defp do_stop(state) do
@@ -822,30 +861,24 @@ defmodule Copilot.Client do
       end
     end
 
-    # Stop RPC client
-    if state.rpc do
-      try do
-        JsonRpcClient.stop(state.rpc)
-      rescue
-        _ -> :ok
-      end
-    end
+    if state.rpc_monitor, do: Process.demonitor(state.rpc_monitor, [:flush])
 
-    # Close port
-    if state.port do
-      try do
-        Port.close(state.port)
-      rescue
-        _ -> :ok
-      end
-    end
+    # Stopping the JSON-RPC client closes the CLI port.
+    if state.rpc, do: JsonRpcClient.stop(state.rpc)
 
     # Drop GitHub token provider registrations and pending shell prompts
     for table <- [state.token_providers, state.shell_auth_requests], table != nil do
       :ets.delete_all_objects(table)
     end
 
-    %{state | port: nil, rpc: nil, sessions: %{}, connection_state: :disconnected, models_cache: nil}
+    %{
+      state
+      | rpc: nil,
+        rpc_monitor: nil,
+        sessions: %{},
+        connection_state: :disconnected,
+        models_cache: nil
+    }
   end
 
   defp maybe_auto_start(%State{connection_state: :connected} = state), do: state

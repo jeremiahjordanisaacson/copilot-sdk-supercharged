@@ -7,25 +7,25 @@ An Erlang/OTP SDK for interacting with the GitHub Copilot CLI server. Communicat
 - Erlang/OTP 25+
 - [rebar3](https://rebar3.org/) build tool
 - [jsx](https://hex.pm/packages/jsx) for JSON encoding/decoding
-- The `copilot` CLI installed and available on `PATH` (or specify the path via `cli_path`)
+- Copilot CLI 1.0.113 or newer: `copilot` on `PATH`, the `COPILOT_CLI_PATH` environment variable, or the `cli_path` client option
 
 ## Installation
 
-### Via Hex
+The Erlang SDK is not published to Hex (the `copilot_sdk_supercharged` package on Hex is the Elixir SDK), and it cannot be a rebar3 `git_subdir` dependency: rebar3 requires that subdirectory to be named after the application (`copilot_sdk`), while the SDK lives in `erlang/`. Add it to your rebar3 project as an application instead.
 
-Add to your `rebar.config` deps:
+### rebar3 project application
 
-```erlang
-{deps, [
-    {copilot_sdk, "2.0.0"}
-]}.
-```
-
-Then run:
+Copy `src/` and `rebar.config` from the `erlang/` directory of a release tag to `apps/copilot_sdk` in your project. rebar3 builds every application under `apps/` (next to a single application at the project root, too), and the directory must be named `copilot_sdk`:
 
 ```bash
+git clone --depth 1 --branch v3.1.1 https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git copilot-sdk-src
+mkdir -p apps/copilot_sdk
+cp -R copilot-sdk-src/erlang/src copilot-sdk-src/erlang/rebar.config apps/copilot_sdk/
+rm -rf copilot-sdk-src
 rebar3 compile
 ```
+
+The OTP application is `copilot_sdk`: list it in the `applications` of your `.app.src`. Its only dependency, `jsx`, is declared in `apps/copilot_sdk/rebar.config` and fetched from Hex.
 
 ### Manual
 
@@ -56,6 +56,15 @@ copilot_session:unsubscribe(Session, Ref),
 copilot_session:stop(Session),
 copilot_client:stop(Client).
 ```
+
+## What's New in v3.1.1
+
+Fixes for the CLI connection, permission requests, and plan approvals. Earlier 3.x releases could not exchange messages with a real CLI.
+
+* **Working stdio connection**: `copilot_jsonrpc` now opens and owns the CLI port, so the CLI's replies reach it. The port runs in stream mode with the Content-Length framing of vscode-jsonrpc (a frame split across reads, or several frames in one read, are both handled), and the CLI's stderr stays out of the JSON-RPC stream (it goes to the VM's stderr). The CLI is started with `spawn_executable` and one argument per item, so paths with spaces work. As in the official SDKs, `github_token` reaches the CLI through the `COPILOT_SDK_AUTH_TOKEN` environment variable (`--auth-token-env`), never the command line, and `--no-auto-login` is passed unless `use_logged_in` is true. New client options: `env` (environment for the CLI process) and `cwd` (its working directory). A request on a closed connection returns `{error, {connection_closed, Reason}}`, and a timeout returns `{error, timeout}`.
+* **Permissions (SDK protocol 4)**: an `on_permission_request` handler now sends `permissions.request` and answers the `permission.requested` session events with `session.permissions.handlePendingPermissionRequest`, in its own process. `copilot_types:permission_result/1,2` returns the protocol 4 kinds (`approve_once`, `approve_for_session`, `reject`, `{reject, Feedback}`, `user_not_available`, `no_result`); `approved` and `denied` remain as aliases of `approve_once` and `reject` (`denied` used to send the rejected kind `"denied"`). See [Permission Handling](#permission-handling).
+* **Exit plan mode**: the new `on_exit_plan_mode_request` session option sends `interaction.requestExitPlanMode` and answers `exitPlanMode.request` for its own session only. Before this release the request crashed the handler. See [Exit Plan Mode](#exit-plan-mode).
+* **Real CLI tests**: `test/copilot_cli_e2e_SUITE.erl` drives the real CLI against the shared replaying proxy in CI (see [Running Tests](#running-tests)).
 
 ## What's New in v3.1.0
 
@@ -260,17 +269,20 @@ The SDK follows OTP principles with gen_server behaviours:
 ```
 copilot_client (gen_server)
     |
-    |-- spawns CLI process with --headless --no-auto-update --stdio
-    |-- manages copilot_jsonrpc for communication
-    |-- dispatches incoming server requests to sessions
+    |-- starts copilot_jsonrpc and answers client-level server requests
+    |   (tool.call, hooks.invoke, userInput.request, exitPlanMode.request, ...)
+    |   routed by sessionId
+    |-- dispatches session.event notifications to sessions
+    |
+    +-- copilot_jsonrpc (gen_server)
+    |       |-- spawns the CLI with --headless --no-auto-update --stdio and owns its port
+    |       |-- reads stdout in stream mode (Content-Length framing); stderr is not read
     |
     +-- copilot_session (gen_server)
             |-- event subscriptions (subscribe / unsubscribe)
             |-- send / send_and_wait
-            |-- tool handlers
-            |-- permission handler
-            |-- user input handler
-            |-- hooks (pre/post tool use, session start/end, etc.)
+            |-- permission handler (permission.requested events)
+            |-- elicitation and command events
 ```
 
 Communication uses **JSON-RPC 2.0** with **Content-Length header framing**:
@@ -287,7 +299,7 @@ Content-Length: 123\r\n
 |--------|-------------|
 | `copilot_client` | Client gen_server - manages CLI process and sessions |
 | `copilot_session` | Session gen_server - conversation with event handling |
-| `copilot_jsonrpc` | JSON-RPC 2.0 gen_server over stdio transport |
+| `copilot_jsonrpc` | JSON-RPC 2.0 gen_server that owns the CLI port (stdio transport) |
 | `copilot_types` | Type specs, records, and constant helpers |
 | `copilot_tools` | Tool definition helpers with result normalization |
 
@@ -330,16 +342,60 @@ If the handler throws, a failure `ToolResult` is returned automatically.
 
 ## Permission Handling
 
-Register a handler to approve or deny tool permission requests:
+Register a handler to approve or deny tool permission requests. With a handler, `create_session/2` and `resume_session/3` send `permissions.request`; the runtime then emits a `permission.requested` session event for each request, and the session runs the handler in its own process (a slow prompt never blocks the session) and sends the decision with `session.permissions.handlePendingPermissionRequest`. Requests already resolved by a `permissionRequest` hook are skipped. The runtime only asks about operations that its rules and the session's permission mode do not already allow: read-only shell commands such as `echo`, for example, can run without a request.
 
 ```erlang
 {ok, Session} = copilot_client:create_session(Client, #{
     on_permission_request => fun(Request) ->
         io:format("Permission requested: ~p~n", [maps:get(<<"kind">>, Request)]),
-        copilot_types:permission_result(approved)
+        copilot_types:permission_result(approve_once)
     end
 }).
 ```
+
+A `fun/1` handler receives the permission request map (binary keys such as `<<"kind">>`: `<<"shell">>`, `<<"write">>`, `<<"read">>`, `<<"mcp">>`, `<<"url">>`, and `<<"toolCallId">>`). A `fun/2` handler also receives an invocation map `#{session_id, request_id}` with `prompt_request`, `assisted_approval_assessment`, and `program_tool_call_id` when the runtime sends them:
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    on_permission_request => fun
+        (#{<<"kind">> := <<"shell">>}, _Invocation) ->
+            copilot_types:permission_result({reject, <<"Shell commands are not allowed.">>});
+        (_Request, #{request_id := _RequestId}) ->
+            copilot_types:permission_result(approve_for_session)
+    end
+}).
+```
+
+`copilot_types:permission_result/1` builds the protocol 4 decisions used by the Node and Python SDKs:
+
+| Argument | Wire `kind` | Meaning |
+|---|---|---|
+| `approve_once` (alias `approved`) | `approve-once` | Allow this request |
+| `approve_for_session` | `approve-for-session` | Allow it and remember the approval for the session |
+| `reject` (alias `denied`), `{reject, Feedback}` | `reject` | Deny it; the optional feedback is shown to the agent |
+| `user_not_available` | `user-not-available` | Deny it because no user can confirm it |
+| `no_result` | `no-result` | Send nothing, so another client can answer the pending request |
+
+A handler may also return one of these atoms directly, or any other `PermissionDecision` wire map (for example `#{<<"kind">> => <<"approve-for-location">>, <<"approval">> => Approval, <<"locationKey">> => Key}`). `copilot_types:permission_result/2` adds a decision context, sent as `decisionContext` next to the result. If the handler crashes or returns an invalid decision, or the runtime rejects the answer, the request is answered with `user-not-available`.
+
+## Exit Plan Mode
+
+Register `on_exit_plan_mode_request` to review a plan before the agent leaves plan mode. The handler makes `create_session/2` and `resume_session/3` send `interaction.requestExitPlanMode`. Each `exitPlanMode.request` is routed by `sessionId`, so a session's handler only answers its own requests; a session without a handler approves, as in the Node SDK.
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    on_exit_plan_mode_request => fun(Request) ->
+        io:format("Plan: ~s~n", [maps:get(<<"summary">>, Request)]),
+        %% <<"actions">> lists the choices; <<"recommendedAction">> is the runtime's pick
+        copilot_types:exit_plan_mode_result(true, #{
+            selected_action => maps:get(<<"recommendedAction">>, Request),
+            feedback        => <<"Approved by the reviewer">>
+        })
+    end
+}).
+```
+
+The handler receives the request map unchanged (`<<"summary">>`, `<<"planContent">>` when available, `<<"actions">>`, `<<"recommendedAction">>`, and `<<"requestId">>` on newer runtimes). It returns a boolean, `copilot_types:exit_plan_mode_result/1,2` (`#{selected_action, feedback, decision_context}`, each optional), or a wire map with `<<"approved">>`.
 
 ## User Input Handling
 
@@ -390,16 +446,24 @@ Hooks = #{
 
 ```erlang
 {ok, Client} = copilot_client:start_link(#{
-    cli_path     => <<"/usr/local/bin/copilot">>,
-    cwd          => <<"/path/to/project">>,
-    log_level    => <<"debug">>,
-    github_token => <<"ghp_...">>,
-    use_logged_in => true,
-    auto_start   => true,
-    auto_restart => true,
-    session_idle_timeout_seconds => 300
+    cli_path      => <<"/usr/local/bin/copilot">>,
+    cwd           => <<"/path/to/project">>,
+    env           => #{<<"HTTPS_PROXY">> => <<"http://proxy.example:8080">>},
+    log_level     => <<"debug">>,
+    github_token  => <<"ghp_...">>,
+    use_logged_in => false,
+    auto_start    => true
 }).
 ```
+
+The client spawns the CLI with `--headless --no-auto-update --log-level Level --stdio` and talks JSON-RPC over its stdin and stdout; the CLI's stderr goes to the VM's stderr.
+
+* `cli_path`: the CLI to run (default: `COPILOT_CLI_PATH`, then `copilot` on `PATH`). A path ending in `.js` runs under `node`; any other path, such as `node_modules/.bin/copilot`, runs directly.
+* `cwd`: the CLI's working directory (default: the VM's).
+* `env`: a map or list of `{Name, Value}` merged into the VM environment for the CLI; `false` removes a variable.
+* `github_token`: passed as the `COPILOT_SDK_AUTH_TOKEN` environment variable with `--auth-token-env`, never on the command line.
+* `use_logged_in`: whether the CLI may use the stored login; `false` adds `--no-auto-login`. Defaults to `true` without `github_token` and `false` with it.
+* `auto_start`: start the CLI right after `start_link/1` (default `true`); otherwise call `copilot_client:start_cli/1`, which returns the startup error, if any.
 
 ## Session Configuration
 
@@ -413,8 +477,9 @@ Hooks = #{
     excluded_tools      => [<<"Bash">>],
     working_directory   => <<"/path/to/project">>,
     streaming           => true,
-    on_permission_request => fun(_) -> copilot_types:permission_result(approved) end,
+    on_permission_request => fun(_) -> copilot_types:permission_result(approve_once) end,
     on_user_input_request => fun(_) -> copilot_types:user_input_response(<<"ok">>, true) end,
+    on_exit_plan_mode_request => fun(_) -> copilot_types:exit_plan_mode_result(true) end,
     hooks               => #{},
     provider            => #{
         <<"type">>    => <<"openai">>,
@@ -653,7 +718,11 @@ Params = copilot_types:client_options_params(#{
 Permission decision context and wire-constant helpers:
 
 ```erlang
-Reply = copilot_types:permission_result(approved, #{<<"source">> => <<"policy">>}),
+Reply = copilot_types:permission_result(approve_once, #{
+    <<"outcome">> => <<"auto_approved">>,
+    <<"source">>  => <<"host_policy">>,
+    <<"surface">> => <<"sdk">>
+}),
 copilot_types:tool_defer(auto),                  %% <<"auto">>
 copilot_types:system_message_section(preamble),  %% <<"preamble">>
 copilot_types:github_attachment(github_commit).  %% <<"GitHubCommit">>
@@ -705,6 +774,8 @@ The client verifies protocol compatibility on startup via the `ping` response. A
 cd erlang
 rebar3 ct
 ```
+
+`test/copilot_cli_e2e_SUITE.erl` runs the real Copilot CLI through `copilot_client` against the shared replaying CAPI proxy (`test/harness/server.ts`) and the snapshots in `test/snapshots/`: it pings (SDK protocol 4), creates a session, sends a message, and waits for the reply and `session.idle`; it also approves a file creation through the permission flow. It needs Node.js and `npm install` in `nodejs/` and `test/harness/`; set `COPILOT_CLI_PATH` to use another CLI build. Without these prerequisites the suite is skipped locally, and it fails on GitHub Actions.
 
 ## API Reference
 
