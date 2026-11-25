@@ -26,16 +26,19 @@ jobs:
       - name: Update changelog in wiki
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          DATE=$(date +%Y-%m-%d)
+          # Release dates in CHANGELOG.md use the maintainer's local (Pacific) date.
+          DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
 
-          # Update the Changelog page with the new version header
-          if ! grep -q "## v${VERSION}" wiki/Changelog.md 2>/dev/null; then
-            # Prepend new version section after the title
-            sed -i "/^# Changelog/a\\
-            \\
-            ## v${VERSION} (${DATE})\\
-            \\
-            See [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF_NAME}) for full details." wiki/Changelog.md
+          # Add a version header right after the "# Changelog" title, unless the
+          # entry already exists (for example when the wiki was updated by hand first).
+          if ! grep -qF "## v${VERSION} (" wiki/Changelog.md 2>/dev/null; then
+            {
+              head -n 1 wiki/Changelog.md
+              printf '\n## v%s (%s)\n\nSee [GitHub Release](https://github.com/%s/releases/tag/%s) for full details.\n' \
+                "$VERSION" "$DATE" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
+              tail -n +2 wiki/Changelog.md
+            } > "$RUNNER_TEMP/Changelog.md"
+            mv "$RUNNER_TEMP/Changelog.md" wiki/Changelog.md
             echo "Added v${VERSION} to changelog"
           else
             echo "v${VERSION} already in changelog"

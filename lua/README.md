@@ -16,7 +16,7 @@ A Lua SDK for interacting with the GitHub Copilot CLI server. Communicates via J
 luarocks install copilot-sdk-supercharged
 ```
 
-LuaRocks currently serves version 2.5.3 (SDK protocol 3). For version 3.1.1, which this README documents, install the rock from a clone of this repository instead:
+To build the current rock from a clone of this repository instead:
 
 ```bash
 git clone https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git
