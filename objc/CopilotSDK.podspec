@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = "CopilotObjCSDK"
-  s.version      = "0.1.0"
+  s.version      = "3.1.1"
   s.summary      = "Objective-C SDK for the GitHub Copilot CLI"
   s.description  = <<-DESC
     The Copilot Objective-C SDK provides a native Objective-C interface

@@ -4,7 +4,7 @@
 module copilot
 
 // sdk_version is the version of this V SDK.
-pub const sdk_version = '0.1.0'
+pub const sdk_version = '3.1.1'
 
 // protocol_version is the SDK protocol version this SDK speaks. The server must
 // report exactly this version (Copilot CLI 1.0.113 or newer).

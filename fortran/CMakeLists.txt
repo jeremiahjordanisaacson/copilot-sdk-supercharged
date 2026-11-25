@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(copilot_sdk_fortran
-  VERSION 2.0.2
+  VERSION 3.1.1
   LANGUAGES Fortran
 )
 

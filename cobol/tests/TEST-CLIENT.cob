@@ -92,11 +92,11 @@
                 AND WS-PROTO-MIN = 4
                 AND WS-PROTO-MAX = 4
                 AND WS-SDK-NAME = "copilot-sdk-cobol"
-                AND WS-SDK-VERSION = "1.0.0"
+                AND WS-SDK-VERSION = "3.1.1"
                 AND WS-PROTO-STRING = "4"
                    PERFORM RECORD-PASS
                WHEN OTHER
-                   MOVE "4, copilot-sdk-cobol, 1.0.0"
+                   MOVE "4, copilot-sdk-cobol, 3.1.1"
                        TO WS-EXPECTED
                    STRING WS-PROTO-MAJOR ", "
                        FUNCTION TRIM(WS-SDK-NAME) ", "

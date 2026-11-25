@@ -89,8 +89,8 @@ procedure Test_Client is
    procedure Test_Version is
    begin
       Put_Line ("[Test_Version]");
-      Assert (Copilot.Version.SDK_Version = "2.0.2",
-              "SDK_Version is 2.0.2");
+      Assert (Copilot.Version.SDK_Version = "3.1.1",
+              "SDK_Version is 3.1.1");
       Assert (Copilot.Version.Protocol_Version = 4,
               "Protocol_Version is 4");
       Assert (Copilot.Version.Min_Protocol = 4

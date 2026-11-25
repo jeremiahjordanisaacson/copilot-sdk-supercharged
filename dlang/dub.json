@@ -1,7 +1,7 @@
 {
     "name": "copilot-sdk",
     "description": "D language SDK for the GitHub Copilot CLI",
-    "version": "0.1.0",
+    "version": "3.1.1",
     "authors": ["Jeremiah Isaacson"],
     "license": "MIT",
 

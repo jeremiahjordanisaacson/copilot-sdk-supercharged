@@ -22,7 +22,7 @@ use GitHub::Copilot::SdkProtocolVersion qw(get_sdk_protocol_version);
 use GitHub::Copilot::SessionParams qw(group_session_params apply_empty_mode_defaults);
 use GitHub::Copilot::Types;
 
-our $VERSION = '0.01';
+our $VERSION = '3.1.1';
 
 =head1 NAME
 

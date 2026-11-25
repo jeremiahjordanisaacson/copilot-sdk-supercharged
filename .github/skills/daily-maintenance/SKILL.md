@@ -401,14 +401,23 @@ NEW=$(node -p "const v='$CURRENT'.split('.'); v[2]=parseInt(v[2])+1; v.join('.')
 echo "New version: $NEW"
 ```
 
-Update version across all SDKs using the version sync script pattern, then commit:
+Bump every SDK with `scripts/bump-version.mjs`. It uses only the Node standard library, so it runs the same on macOS, Linux, and Windows. It edits the package manifests, the source-level version constants (and the tests that assert them), and the README install pins, with one line-anchored regex and an expected match count per edit. **Always dry-run first:**
 ```bash
-# Update canonical source
-sed -i '' "s/version = \"$CURRENT\"/version = \"$NEW\"/" python/pyproject.toml
-# Run version sync to update all other SDKs
-# ... then verify
+# 1. Dry run: validates every edit and prints each file with its match count. Writes nothing.
+node scripts/bump-version.mjs "$CURRENT" "$NEW" --dry-run
+
+# 2. Bump. --dart-note adds a "## $NEW" entry to the top of dart/CHANGELOG.md (pub.dev requires one).
+node scripts/bump-version.mjs "$CURRENT" "$NEW" --dart-note "- Fix release: <summary>. No Dart API changes."
+
+# 3. Verify: every manifest and version constant must report $NEW.
 bash scripts/verify-version-sync.sh
 ```
+- The script validates all edits before it writes anything. If a file doesn't match, it prints a `FAIL` line for every failing edit and exits 1 with nothing written. Fix the file (or the edit list in the script) and dry-run again.
+- It renames the Lua rockspec with `git mv`, so run it from a git checkout. Edited files keep their line endings and BOM.
+- For a multi-line `--dart-note`, pass `$'- line one\n  line two'` in bash or a string with `` `n `` in PowerShell. Follow the CHANGELOG's style: `- ` bullets wrapped at about 80 columns, continuation lines indented two spaces, no blank lines between entries.
+- It doesn't write release notes: add the root `CHANGELOG.md` and `README.md` "What's New" entries yourself, then commit.
+- On Windows, plain `bash` may be the WSL stub. Run the check with Git Bash (`& "C:\Program Files\Git\bin\bash.exe" scripts/verify-version-sync.sh`) with a `python3` on its `PATH`.
+- When a new manifest, version constant, or install pin appears, add an edit to `scripts/bump-version.mjs` and a check to `scripts/verify-version-sync.sh`.
 
 ### Step 6c: Create GitHub Release
 ```bash
@@ -645,7 +654,7 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 - **Porting agents can all fail at once** ("Failed to get response from the AI model" after about 2 hours). Give each agent at most 3 SDKs, have it finish one SDK completely (code, tests, README) before starting the next, and point it at an already-ported SDK's `git diff` as the reference. Check `verify-sdk-coverage.mjs` every 10 to 15 minutes; finish stragglers directly.
 - **Prove core README examples compile.** Extract each new snippet from the README and check it: Node via a temporary `nodejs/src/*.ts` plus `npx tsc --noEmit` (never `npm test`), Python by running it against `ServerRpc` with a fake `request()`, Go via a temporary `_test.go` plus `go vet .`, and .NET via a temporary file in `dotnet/test` plus `dotnet build --no-restore`. Delete the temporary files afterwards.
 - **Agents on Windows write CRLF.** `.gitattributes` (`* text=auto eol=lf`) normalizes on `git add`, so "CRLF will be replaced by LF" warnings are harmless.
-- **Version bump:** script it with one line-anchored regex per file, an expected match count, and a dry-run mode, following the file list of the previous release commit; `java/pom.xml` and `nodejs/package-lock.json` contain other `X.Y.Z` strings, so plain search and replace is unsafe.
+- **Version bump:** use `scripts/bump-version.mjs` (Step 6b), which has one line-anchored regex per edit, an expected match count, and a dry-run mode. `java/pom.xml` and `nodejs/package-lock.json` contain other `X.Y.Z` strings, so plain search and replace is unsafe.
 
 ### Type Mapping: PingResponse.timestamp
 - **CANONICAL TYPE**: `string` (ISO 8601 format like `"2025-01-01T00:00:00Z"`)
@@ -698,6 +707,7 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 ### Version Sync
 - **ALL SDK versions must match** — run `bash scripts/verify-version-sync.sh` before every release
 - The canonical version is in `python/pyproject.toml`
+- Bump with `node scripts/bump-version.mjs <old> <new>` (Step 6b). It updates every version this check verifies, plus the README install pins.
 - Registries to verify after release: PyPI, npm, RubyGems, crates.io, NuGet, Hex.pm, LuaRocks, CPAN, Packagist, Maven Central, Clojars, pub.dev
 
 ### CI Environment
