@@ -5,7 +5,7 @@
         "url": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git"
     },
     "version": "3.1.1",
-    "copilotCliVersion": "1.0.113",
+    "copilotCliVersion": "1.0.116",
     "description": "GitHub Copilot SDK Supercharged - TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC. Supports 40 languages.",
     "main": "./dist/cjs/index.js",
     "types": "./dist/index.d.ts",
@@ -58,17 +58,17 @@
         "zod": "4.6.7"
     },
     "optionalDependencies": {
-        "@microsoft/copilot-sdk-darwin-arm64": "2.0.0",
-        "@microsoft/copilot-sdk-darwin-x64": "2.0.0",
-        "@microsoft/copilot-sdk-linux-arm64": "2.0.0",
-        "@microsoft/copilot-sdk-linux-x64": "2.0.0",
-        "@microsoft/copilot-sdk-linuxmusl-arm64": "2.0.0",
-        "@microsoft/copilot-sdk-linuxmusl-x64": "2.0.0",
-        "@microsoft/copilot-sdk-win32-arm64": "2.0.0",
-        "@microsoft/copilot-sdk-win32-x64": "2.0.0"
+        "@microsoft/copilot-sdk-darwin-arm64": "2.0.3",
+        "@microsoft/copilot-sdk-darwin-x64": "2.0.3",
+        "@microsoft/copilot-sdk-linux-arm64": "2.0.3",
+        "@microsoft/copilot-sdk-linux-x64": "2.0.3",
+        "@microsoft/copilot-sdk-linuxmusl-arm64": "2.0.3",
+        "@microsoft/copilot-sdk-linuxmusl-x64": "2.0.3",
+        "@microsoft/copilot-sdk-win32-arm64": "2.0.3",
+        "@microsoft/copilot-sdk-win32-x64": "2.0.3"
     },
     "devDependencies": {
-        "@github/copilot": "1.0.113",
+        "@github/copilot": "1.0.116",
         "@types/node": "^25.6.0",
         "esbuild": "^0.28.1",
         "tsx": "^4.20.6",
