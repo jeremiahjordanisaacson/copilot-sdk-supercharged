@@ -345,7 +345,7 @@ If the handler throws, a failure `ToolResult` is returned automatically.
 
 ## Permission Handling
 
-Register a handler to approve or deny tool permission requests. With a handler, `create_session/2` and `resume_session/3` send `permissions.request`; the runtime then emits a `permission.requested` session event for each request, and the session runs the handler in its own process (a slow prompt never blocks the session) and sends the decision with `session.permissions.handlePendingPermissionRequest`. Requests already resolved by a `permissionRequest` hook are skipped.
+Register a handler to approve or deny tool permission requests. With a handler, `create_session/2` and `resume_session/3` send `permissions.request`; the runtime then emits a `permission.requested` session event for each request, and the session runs the handler in its own process (a slow prompt never blocks the session) and sends the decision with `session.permissions.handlePendingPermissionRequest`. Requests already resolved by a `permissionRequest` hook are skipped. The runtime only asks about operations that its rules and the session's permission mode do not already allow: read-only shell commands such as `echo`, for example, can run without a request.
 
 ```erlang
 {ok, Session} = copilot_client:create_session(Client, #{
@@ -778,7 +778,7 @@ cd erlang
 rebar3 ct
 ```
 
-`test/copilot_cli_e2e_SUITE.erl` runs the real Copilot CLI through `copilot_client` against the shared replaying CAPI proxy (`test/harness/server.ts`) and the snapshots in `test/snapshots/`: it pings (SDK protocol 4), creates a session, sends a message, waits for the reply and `session.idle`, and approves a shell command through the permission flow. It needs Node.js and `npm install` in `nodejs/` and `test/harness/`; set `COPILOT_CLI_PATH` to use another CLI build. Without these prerequisites the suite is skipped locally, and it fails on GitHub Actions.
+`test/copilot_cli_e2e_SUITE.erl` runs the real Copilot CLI through `copilot_client` against the shared replaying CAPI proxy (`test/harness/server.ts`) and the snapshots in `test/snapshots/`: it pings (SDK protocol 4), creates a session, sends a message, and waits for the reply and `session.idle`; it also approves a file edit and refuses a shell command through the permission flow. It needs Node.js and `npm install` in `nodejs/` and `test/harness/`; set `COPILOT_CLI_PATH` to use another CLI build. Without these prerequisites the suite is skipped locally, and it fails on GitHub Actions.
 
 ## API Reference
 

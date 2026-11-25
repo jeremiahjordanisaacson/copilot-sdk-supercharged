@@ -33,8 +33,8 @@
 
 -export([
     real_cli_send_message/1,
-    real_cli_permission_request/1,
-    diag_permissions_with_connect/1
+    real_cli_permission_approve/1,
+    real_cli_permission_deny/1
 ]).
 
 -define(TOKEN, <<"fake-token-for-e2e-tests">>).
@@ -46,7 +46,7 @@ suite() ->
     [{timetrap, {minutes, 10}}].
 
 all() ->
-    [real_cli_send_message, real_cli_permission_request, diag_permissions_with_connect].
+    [real_cli_send_message, real_cli_permission_approve, real_cli_permission_deny].
 
 %% ---------------------------------------------------------------------------
 %% Setup
@@ -90,10 +90,14 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(_TestCase, _Config) ->
     ok.
 
+%% Snapshots whose tool calls need approval: read-only shell commands such as
+%% `echo` are approved by the runtime itself, so they never reach a handler.
 snapshot(real_cli_send_message) ->
     {"session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"};
-snapshot(_PermissionTest) ->
-    {"permissions", "should_receive_toolcallid_in_permission_requests"}.
+snapshot(real_cli_permission_approve) ->
+    {"permissions", "should_invoke_permission_handler_for_write_operations"};
+snapshot(real_cli_permission_deny) ->
+    {"permissions", "should_deny_tool_operations_when_handler_explicitly_denies"}.
 
 %% ---------------------------------------------------------------------------
 %% Tests
@@ -115,7 +119,7 @@ real_cli_send_message(Config) ->
         true = is_binary(SessionId),
         _ = copilot_session:subscribe(Session, self()),
         {ok, _MessageId} = copilot_session:send(Session, #{prompt => <<"What is 2+2?">>}),
-        Content = await_reply(SessionId),
+        {Content, _Events} = await_turn(SessionId),
         ct:pal("Assistant reply: ~ts", [Content]),
         true = binary:match(Content, <<"4">>) =/= nomatch,
         ok
@@ -123,28 +127,15 @@ real_cli_send_message(Config) ->
         stop_client(Client)
     end.
 
-%% The runtime asks for permission to run a shell command through a
-%% permission.requested event; the handler approves it through
-%% session.permissions.handlePendingPermissionRequest, so the command runs and
-%% the turn completes.
-real_cli_permission_request(Config) ->
-    diag_permissions(Config, false).
-
-diag_permissions_with_connect(Config) ->
-    diag_permissions(Config, true).
-
-diag_permissions(Config, Connect) ->
+%% A file edit needs approval: the runtime emits permission.requested (kind
+%% write), the fun/2 handler approves it through
+%% session.permissions.handlePendingPermissionRequest, and the edit is applied.
+real_cli_permission_approve(Config) ->
     Self = self(),
+    File = filename:join(?config(work, Config), "test.txt"),
+    ok = file:write_file(File, <<"original content">>),
     Client = start_client(Config),
     try
-        ClientRpc = element(5, sys:get_state(Client)),
-        case Connect of
-            true ->
-                ct:pal("DIAG connect: ~tp", [copilot_jsonrpc:request(ClientRpc, <<"connect">>,
-                    #{<<"supportedTaskKinds">> => [<<"agent">>, <<"client">>, <<"shell">>]})]);
-            false ->
-                ok
-        end,
         Handler = fun(Request, Invocation) ->
             Self ! {permission_request, Request, Invocation},
             copilot_types:permission_result(approve_once)
@@ -154,27 +145,60 @@ diag_permissions(Config, Connect) ->
             on_permission_request => Handler
         }),
         SessionId = copilot_session:session_id(Session),
-        lists:foreach(fun(Method) ->
-            ct:pal("DIAG ~ts: ~tp", [Method, copilot_jsonrpc:request(ClientRpc, Method,
-                                                                     #{<<"sessionId">> => SessionId})])
-        end, [<<"session.permissions.getMode">>, <<"session.permissions.getAllowAll">>,
-              <<"session.permissions.getRequired">>, <<"session.permissions.getCapabilities">>]),
         _ = copilot_session:subscribe(Session, self()),
-        {ok, _MessageId} = copilot_session:send(Session, #{prompt => <<"Run 'echo test'">>}),
-        Content = await_reply(SessionId),
+        {ok, _MessageId} = copilot_session:send(Session, #{
+            prompt => <<"Edit test.txt and replace 'original' with 'modified'">>
+        }),
+        {Content, _Events} = await_turn(SessionId),
         ct:pal("Assistant reply: ~ts", [Content]),
         Requests = permission_requests(),
-        ct:pal("Permission requests: ~p", [Requests]),
-        [{ShellRequest, Invocation} | _] =
-            [Entry || {#{<<"kind">> := <<"shell">>}, _} = Entry <- Requests],
-        true = is_binary(maps:get(<<"toolCallId">>, ShellRequest)),
+        [{WriteRequest, Invocation} | _] =
+            [Entry || {#{<<"kind">> := <<"write">>}, _} = Entry <- Requests],
+        true = is_binary(maps:get(<<"toolCallId">>, WriteRequest)),
         #{session_id := SessionId, request_id := RequestId} = Invocation,
         true = is_binary(RequestId),
-        true = binary:match(Content, <<"test">>) =/= nomatch,
+        {ok, <<"modified content">>} = file:read_file(File),
         ok
     after
         stop_client(Client)
     end.
+
+%% A shell command that needs approval is refused: the fun/1 handler answers
+%% user_not_available, so the tool call fails with a permission error and the
+%% turn still completes.
+real_cli_permission_deny(Config) ->
+    Self = self(),
+    Client = start_client(Config),
+    try
+        Handler = fun(Request) ->
+            Self ! {permission_request, Request, undefined},
+            copilot_types:permission_result(user_not_available)
+        end,
+        {ok, Session} = copilot_client:create_session(Client, #{
+            model                 => ?MODEL,
+            on_permission_request => Handler
+        }),
+        SessionId = copilot_session:session_id(Session),
+        _ = copilot_session:subscribe(Session, self()),
+        {ok, _MessageId} = copilot_session:send(Session, #{prompt => <<"Run 'node --version'">>}),
+        {Content, Events} = await_turn(SessionId),
+        ct:pal("Assistant reply: ~ts", [Content]),
+        [ShellRequest | _] =
+            [Request || {#{<<"kind">> := <<"shell">>} = Request, _} <- permission_requests()],
+        ToolCallId = maps:get(<<"toolCallId">>, ShellRequest),
+        [Failure | _] = [Data || {<<"tool.execution_complete">>,
+                                  #{<<"toolCallId">> := Id, <<"success">> := false} = Data} <- Events,
+                                 Id =:= ToolCallId],
+        Message = error_message(maps:get(<<"error">>, Failure, undefined)),
+        true = binary:match(Message, <<"Permission denied">>) =/= nomatch,
+        ok
+    after
+        stop_client(Client)
+    end.
+
+error_message(#{<<"message">> := Message}) when is_binary(Message) -> Message;
+error_message(Message) when is_binary(Message)                    -> Message;
+error_message(_)                                                  -> <<>>.
 
 %% ---------------------------------------------------------------------------
 %% Client helpers
@@ -237,31 +261,39 @@ cli_env(Config) ->
         {"MCP_APPS", "true"}
     ].
 
-%% Wait for the turn to end: the last assistant.message content, returned
-%% when session.idle follows it.
-await_reply(SessionId) ->
-    await_reply(SessionId, erlang:monotonic_time(millisecond) + ?REPLY_TIMEOUT, undefined).
+%% Wait for the turn to end: returns the last assistant.message content, once
+%% session.idle follows it, and the {Type, Data} of every event received.
+await_turn(SessionId) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?REPLY_TIMEOUT,
+    await_turn(SessionId, Deadline, undefined, []).
 
-await_reply(SessionId, Deadline, Content) ->
+await_turn(SessionId, Deadline, Content, Events) ->
     Remaining = max(0, Deadline - erlang:monotonic_time(millisecond)),
     receive
-        {copilot_session_event, SessionId, #{type := <<"assistant.message">>, data := Data}} ->
-            await_reply(SessionId, Deadline, maps:get(<<"content">>, Data, <<>>));
-        {copilot_session_event, SessionId, #{type := <<"session.idle">>}}
-          when Content =/= undefined ->
-            Content;
-        {copilot_session_event, SessionId, #{type := <<"session.error">>, data := Data}} ->
-            ct:fail({session_error, Data});
         {copilot_session_event, SessionId, #{type := Type, data := Data}} ->
-            case binary:match(Type, [<<"permission">>, <<"tool.">>, <<"sandbox">>,
-                                     <<"session.start">>, <<"managed_settings">>]) of
-                nomatch -> ct:pal("Session event ~ts", [Type]);
-                _       -> ct:pal("Session event ~ts: ~tp", [Type, Data])
-            end,
-            await_reply(SessionId, Deadline, Content)
+            log_event(Type, Data),
+            Seen = [{Type, Data} | Events],
+            case Type of
+                <<"assistant.message">> ->
+                    await_turn(SessionId, Deadline, maps:get(<<"content">>, Data, <<>>), Seen);
+                <<"session.idle">> when Content =/= undefined ->
+                    {Content, lists:reverse(Seen)};
+                <<"session.error">> ->
+                    ct:fail({session_error, Data});
+                _ ->
+                    await_turn(SessionId, Deadline, Content, Seen)
+            end
     after Remaining ->
-        ct:fail({no_reply_before_timeout, Content})
+        ct:fail({no_reply_before_timeout, Content, lists:reverse(Events)})
     end.
+
+log_event(<<"permission.", _/binary>> = Type, Data) ->
+    ct:pal("Session event ~ts: ~tp", [Type, Data]);
+log_event(<<"tool.execution_complete">> = Type, Data) ->
+    ct:pal("Session event ~ts: ~tp success=~tp",
+           [Type, maps:get(<<"toolCallId">>, Data, undefined), maps:get(<<"success">>, Data, undefined)]);
+log_event(Type, _Data) ->
+    ct:log("Session event ~ts", [Type]).
 
 permission_requests() ->
     receive
